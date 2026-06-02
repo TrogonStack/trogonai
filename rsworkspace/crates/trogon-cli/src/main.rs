@@ -2,11 +2,11 @@ use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
-use trogon_cli::{
-    connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession, CrossRunnerSwitcher,
-    NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
-};
 use trogon_cli::Session as _;
+use trogon_cli::{
+    CrossRunnerSwitcher, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
+    SessionInit, connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession,
+};
 
 #[derive(Subcommand)]
 enum Command {
@@ -36,8 +36,9 @@ struct Args {
     #[arg(short = 'p', long, num_args = 0..=1, default_missing_value = "-")]
     print: Option<String>,
 
-    /// Output format for non-interactive mode: "text" (default) or "json".
-    /// json emits a single line: {"text":"...","stop_reason":"..."}
+    /// Output format for non-interactive mode: "text" (default), "json", or
+    /// "stream-json". json emits a single line {"text":...,"stop_reason":...};
+    /// stream-json emits one JSON event per line (NDJSON), ending with a result.
     #[arg(long, default_value = "text")]
     output_format: String,
 
@@ -48,6 +49,30 @@ struct Args {
     /// Set bypassPermissions before the prompt (skips permission gates — use with care)
     #[arg(long)]
     dangerously_skip_permissions: bool,
+
+    /// Start the interactive session in plan mode (writes are denied; plan first)
+    #[arg(long, conflicts_with = "dangerously_skip_permissions")]
+    plan: bool,
+
+    /// Enable verbose (debug-level) logging for the CLI. Respects an explicit RUST_LOG.
+    #[arg(short = 'v', long)]
+    verbose: bool,
+
+    /// Override the agent's built-in system prompt entirely (replaces the default identity)
+    #[arg(long)]
+    system_prompt: Option<String>,
+
+    /// Append extra text to the agent's system prompt (kept alongside the default)
+    #[arg(long)]
+    append_system_prompt: Option<String>,
+
+    /// Grant the agent an additional working directory (repeatable)
+    #[arg(long, value_name = "PATH")]
+    add_dir: Vec<PathBuf>,
+
+    /// Give the interactive session a human-readable name (shown in /status, recorded in the index)
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
 
     /// Model id for --print (resolved via aliases; uses --prefix runner)
     #[arg(long)]
@@ -84,6 +109,69 @@ fn trogon_dev_script() -> anyhow::Result<PathBuf> {
         .map_err(|_| anyhow::anyhow!("trogon dev script not found at {}", script.display()))
 }
 
+/// Initialize the CLI tracing subscriber.
+///
+/// Without `--verbose` the CLI stays quiet unless the user opts in via `RUST_LOG`
+/// (default filter: `warn`). With `--verbose` the default filter is raised to
+/// `debug`, while an explicit `RUST_LOG` always wins so power users keep full
+/// control. Logs go to stderr so they never pollute `--print` stdout output.
+fn init_tracing(verbose: bool) {
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    let default_level = if verbose { "debug" } else { "warn" };
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
+
+    // `try_init` so a double-init (e.g. in tests) is a no-op rather than a panic.
+    let _ = fmt().with_env_filter(filter).with_writer(std::io::stderr).try_init();
+}
+
+/// Build the per-session init metadata from the CLI flags.
+///
+/// `--add-dir` paths are canonicalised to absolute form; entries that do not
+/// resolve to an existing directory are warned about and skipped (matching the
+/// CLI's warn-and-continue style elsewhere) so a typo never aborts startup.
+fn build_session_init(
+    system_prompt: Option<String>,
+    append_system_prompt: Option<String>,
+    add_dir: &[PathBuf],
+    settings: &trogon_cli::Settings,
+) -> SessionInit {
+    let mut additional_roots = Vec::new();
+    for dir in add_dir {
+        match dir.canonicalize() {
+            Ok(p) if p.is_dir() => additional_roots.push(p.to_string_lossy().into_owned()),
+            Ok(p) => eprintln!("warning: --add-dir {} is not a directory — skipping", p.display()),
+            Err(e) => eprintln!(
+                "warning: --add-dir {} could not be resolved ({e}) — skipping",
+                dir.display()
+            ),
+        }
+    }
+    // Tool-event hooks (PreToolUse/PostToolUse) forwarded to the runner; CLI-side
+    // events (Stop/UserPromptSubmit/Notification) run in the REPL, not here.
+    let tool_hooks = if settings.hooks.pre_tool_use.is_empty()
+        && settings.hooks.post_tool_use.is_empty()
+    {
+        None
+    } else {
+        Some(trogon_runner_tools::HooksConfig {
+            pre_tool_use: settings.hooks.pre_tool_use.clone(),
+            post_tool_use: settings.hooks.post_tool_use.clone(),
+            ..Default::default()
+        })
+    };
+    SessionInit {
+        system_prompt_override: system_prompt,
+        append_system_prompt,
+        additional_roots,
+        // permissions.additionalDirectories from settings.json.
+        additional_read_dirs: settings.permissions.additional_directories.clone(),
+        // permissions.allow/deny translated to trogon rule-text.
+        permission_rules: settings.permission_rules_text(),
+        tool_hooks,
+    }
+}
+
 fn run_dev_stack() -> anyhow::Result<()> {
     let script = trogon_dev_script()?;
     let status = std::process::Command::new("bash").arg(script).status()?;
@@ -98,6 +186,8 @@ async fn main() -> anyhow::Result<()> {
     trogon_cli::env_local::load_env_local();
     let args = Args::parse();
 
+    init_tracing(args.verbose);
+
     if matches!(args.command, Some(Command::Dev)) {
         return run_dev_stack();
     }
@@ -107,6 +197,38 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cwd = std::env::current_dir()?;
+
+    // Layered settings.json (user → project → project-local).
+    let settings = trogon_cli::Settings::load(&RealFs, &cwd);
+
+    // permissions.defaultMode seeds the startup mode when not overridden by an
+    // explicit flag or TROGON_MODE. (Startup-only; set before any threads spawn.)
+    if std::env::var_os("TROGON_MODE").is_none()
+        && let Some(mode) = settings.permissions.default_mode.as_deref()
+    {
+        // SAFETY: called once at startup before any worker threads are spawned.
+        unsafe { std::env::set_var("TROGON_MODE", mode) };
+    }
+
+    // cleanupPeriodDays: prune stale sessions from the index on startup.
+    if let Some(days) = settings.cleanup_period_days {
+        let mut index = SessionIndex::load(&RealFs);
+        let removed = index.prune_older_than(days);
+        if removed > 0 {
+            if let Err(e) = index.save(&RealFs) {
+                eprintln!("warning: could not save pruned session index: {e}");
+            } else {
+                eprintln!("cleaned up {removed} session(s) older than {days} days");
+            }
+        }
+    }
+
+    let session_init = build_session_init(
+        args.system_prompt.clone(),
+        args.append_system_prompt.clone(),
+        &args.add_dir,
+        &settings,
+    );
 
     // MED-40: keep `nats_server` in a named binding (not `_child`) so Drop is
     // visible and we can call `drop()` explicitly before `process::exit`.
@@ -127,8 +249,14 @@ async fn main() -> anyhow::Result<()> {
             drop(nats_server);
             std::process::exit(1);
         }
-        let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
-        let options = PrintOptions { print_tools: args.print_tools };
+        let format = match args.output_format.as_str() {
+            "json" => OutputFormat::Json,
+            "stream-json" => OutputFormat::StreamJson,
+            _ => OutputFormat::Text,
+        };
+        let options = PrintOptions {
+            print_tools: args.print_tools,
+        };
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
@@ -136,14 +264,12 @@ async fn main() -> anyhow::Result<()> {
         let target_prefix = if let Some(model) = &args.model {
             let model_id = resolve_model_alias(model);
             let js = async_nats::jetstream::new(nats.clone());
-            let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+            let reg_store = trogon_registry::ReprovisioningStore::new(js)
+                .await
                 .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
             let registry = trogon_registry::Registry::new(reg_store);
             match registry.find_by_model(&model_id).await {
-                Ok(Some(cap)) => cap.metadata["acp_prefix"]
-                    .as_str()
-                    .unwrap_or(&args.prefix)
-                    .to_string(),
+                Ok(Some(cap)) => cap.metadata["acp_prefix"].as_str().unwrap_or(&args.prefix).to_string(),
                 _ => args.prefix.clone(),
             }
         } else {
@@ -151,7 +277,8 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let nats_for_perm = nats.clone();
-        let session = TrogonSession::new(nats, &target_prefix, cwd, vec![]).await?;
+        let session =
+            TrogonSession::new_with_init(nats, &target_prefix, cwd, vec![], &session_init).await?;
         // Permission handling in non-interactive mode: `--dangerously-skip-permissions`
         // sets `bypassPermissions` (auto-allow, no prompts). Otherwise — since there is
         // no human to answer a prompt — start an auto-DENY responder so approval-gated
@@ -190,15 +317,15 @@ async fn main() -> anyhow::Result<()> {
         drop(nats_server);
         std::process::exit(code as i32);
     } else {
-        let acp_prefix = AcpPrefix::new(&args.prefix)
-            .map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
+        let acp_prefix = AcpPrefix::new(&args.prefix).map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
         let nats_config = NatsConfig::new(vec![args.nats_url.clone()], NatsAuth::None);
         let acp_config = Config::new(acp_prefix, nats_config);
         let js = async_nats::jetstream::new(nats.clone());
         // MED-36: use a store that re-provisions the (in-memory) AGENT_REGISTRY
         // bucket on failure, so /model and /status keep working after a NATS server
         // restart instead of erroring until the CLI is restarted.
-        let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+        let reg_store = trogon_registry::ReprovisioningStore::new(js)
+            .await
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let registry_for_repl = registry.clone();
@@ -223,6 +350,7 @@ async fn main() -> anyhow::Result<()> {
                 session_id: id.clone(),
                 model: String::new(),
                 updated_at: String::new(),
+                name: None,
             })
         } else {
             None
@@ -245,6 +373,9 @@ async fn main() -> anyhow::Result<()> {
             args.stream,
             resume,
             args.dangerously_skip_permissions,
+            args.plan,
+            session_init,
+            args.name,
         )
         .await?;
     }
@@ -252,3 +383,42 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::build_session_init;
+    use std::path::PathBuf;
+    use trogon_cli::Settings;
+
+    #[test]
+    fn prompts_flow_into_init_without_add_dir() {
+        let init = build_session_init(Some("over".into()), Some("app".into()), &[], &Settings::default());
+        assert_eq!(init.system_prompt_override.as_deref(), Some("over"));
+        assert_eq!(init.append_system_prompt.as_deref(), Some("app"));
+        assert!(init.additional_roots.is_empty());
+    }
+
+    #[test]
+    fn existing_dir_is_canonicalised_into_roots() {
+        // The current directory always exists and is a directory.
+        let cwd = std::env::current_dir().unwrap();
+        let init = build_session_init(None, None, &[cwd.clone()], &Settings::default());
+        let expected = cwd.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(init.additional_roots, vec![expected]);
+    }
+
+    #[test]
+    fn missing_dir_is_skipped_not_fatal() {
+        let init = build_session_init(None, None, &[PathBuf::from("/no/such/dir/xyzzy")], &Settings::default());
+        assert!(init.additional_roots.is_empty());
+    }
+
+    #[test]
+    fn settings_permissions_flow_into_init() {
+        let mut settings = Settings::default();
+        settings.permissions.additional_directories = vec!["/shared".into()];
+        settings.permissions.allow = vec!["Bash(cargo test:*)".into()];
+        let init = build_session_init(None, None, &[], &settings);
+        assert_eq!(init.additional_read_dirs, vec!["/shared".to_string()]);
+        assert!(init.permission_rules.unwrap().contains("allow_commands: cargo test"));
+    }
+}

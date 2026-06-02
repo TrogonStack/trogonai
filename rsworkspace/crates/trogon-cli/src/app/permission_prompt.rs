@@ -10,13 +10,7 @@ pub struct PermissionDisplay {
 }
 
 pub fn permission_from_request(req: &RequestPermissionRequest) -> PermissionDisplay {
-    let tool_name = req
-        .tool_call
-        .fields
-        .title
-        .as_deref()
-        .unwrap_or("tool")
-        .to_string();
+    let tool_name = req.tool_call.fields.title.as_deref().unwrap_or("tool").to_string();
     let detail = req
         .tool_call
         .fields
@@ -64,10 +58,7 @@ fn truncate_line(s: &str, max: usize) -> String {
 
 pub fn print_permission_prompt(display: &PermissionDisplay) {
     eprintln!();
-    eprintln!(
-        "\x1b[1;33m▸ permission\x1b[0m  \x1b[1m{}\x1b[0m",
-        display.tool_name
-    );
+    eprintln!("\x1b[1;33m▸ permission\x1b[0m  \x1b[1m{}\x1b[0m", display.tool_name);
     if !display.detail.is_empty() {
         for line in display.detail.lines() {
             eprintln!("\x1b[90m  {line}\x1b[0m");
@@ -86,11 +77,7 @@ mod tests {
         let mut fields = ToolCallUpdateFields::new();
         fields.title = Some(title.into());
         fields.raw_input = Some(raw);
-        RequestPermissionRequest::new(
-            "sess-1",
-            ToolCallUpdate::new(ToolCallId::new("tc-1"), fields),
-            vec![],
-        )
+        RequestPermissionRequest::new("sess-1", ToolCallUpdate::new(ToolCallId::new("tc-1"), fields), vec![])
     }
 
     #[test]

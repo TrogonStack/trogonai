@@ -98,9 +98,24 @@ pub struct SessionState {
     /// Optional system prompt set at session creation via `_meta.systemPrompt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// Full override of the built-in identity, set at session creation via
+    /// `_meta.systemPromptOverride` (`--system-prompt`). When set it replaces the
+    /// default "You are Trogon" identity; TROGON.md and the appended system prompt
+    /// are still applied on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt_override: Option<String>,
     /// Additional root directories supplied via `_meta.additionalRoots` at session creation.
     #[serde(default)]
     pub additional_roots: Vec<String>,
+    /// Read-only allow-listed directories outside cwd, from
+    /// `_meta.permissions.additionalDirectories`. Reads here are auto-approved even
+    /// though they are outside the working directory.
+    #[serde(default)]
+    pub additional_read_dirs: Vec<String>,
+    /// Lifecycle hooks for tool events (PreToolUse/PostToolUse), sent from the CLI
+    /// via `_meta.toolHooks`. Run by the runner around tool dispatch.
+    #[serde(default, skip_serializing_if = "crate::hooks::HooksConfig::is_empty")]
+    pub tool_hooks: crate::hooks::HooksConfig,
     /// If true, all built-in agent tools are disabled for this session.
     /// Set via `_meta.disableBuiltInTools` at session creation.
     #[serde(default)]
@@ -182,7 +197,10 @@ impl Default for SessionState {
             title: String::new(),
             mcp_servers: Vec::new(),
             system_prompt: None,
+            system_prompt_override: None,
             additional_roots: Vec::new(),
+            additional_read_dirs: Vec::new(),
+            tool_hooks: crate::hooks::HooksConfig::default(),
             disable_builtin_tools: false,
             allowed_tools: Vec::new(),
             parent_session_id: None,

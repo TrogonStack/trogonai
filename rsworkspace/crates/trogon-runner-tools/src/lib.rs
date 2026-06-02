@@ -3,12 +3,15 @@
 pub mod compaction;
 pub mod egress;
 pub mod elicitation;
+pub mod hooks;
 pub mod mcp;
 pub mod nats_todo_tool;
 pub mod permission;
 pub mod permission_bridge;
 pub mod permission_rules;
 pub mod portable_session;
+pub mod safety_classifier;
+pub mod subagents;
 pub mod trogon_md;
 pub mod session_store;
 pub mod spawn_agent_tool;
@@ -28,8 +31,12 @@ pub use elicitation::{
 pub use mcp::{build_session_mcp, convert_mcp_servers};
 pub use permission::{
     build_mode_permission_checker, check_tool_permission, ChannelPermissionChecker,
-    ModePermissionChecker, PermissionReq, PermissionTx, RulesPermissionChecker,
+    ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
+    RulesPermissionChecker, SafetyClassifier,
 };
+pub use hooks::{run_event_hooks, HookMatcher, HookOutcome, HooksConfig};
+pub use safety_classifier::LlmSafetyClassifier;
+pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{
     export_json_from_wire, message_to_v2, messages_need_v2, messages_to_export_v2,
@@ -48,3 +55,11 @@ pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogo
 /// file path. Without it, a model asked to "see <url>" or "check example.com"
 /// reaches for file/search tools and comes back empty.
 pub const URL_FETCH_GUIDANCE: &str = "When the user gives or refers to a URL or web link (for example \"see https://example.com\", \"check example.com\", or \"open this page\"), call the fetch_url tool to retrieve its contents. Never treat a URL as a local file path or search the filesystem for it.";
+
+/// Guidance appended to the system prompt while the session is in `plan` mode.
+/// The permission layer already denies write tools and write-bash in plan mode,
+/// but denial alone makes the model flail (it attempts an edit, gets rejected,
+/// and reacts). This steers the model to behave like a planner: research
+/// read-only, then present a plan and stop until the user approves leaving plan
+/// mode. Mirrors Claude Code's plan mode behaviour.
+pub const PLAN_MODE_GUIDANCE: &str = "You are currently in PLAN MODE. Do NOT make any changes yet: do not edit, create, or delete files, and do not run commands that modify state (these are blocked and will be rejected). First investigate the codebase using read-only tools (read_file, list_dir, glob, search_files, read-only git/bash) until you fully understand the task. Then, when you have a complete plan, call the ExitPlanMode tool with your plan to ask the user to approve leaving plan mode. Do not begin implementing until that approval is granted.";

@@ -16,8 +16,8 @@
 
 use std::io::Write;
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Ctrl+G — the next submitted line jumps to the front of the queue.
 const PRIORITY_KEY: u8 = 0x07;
@@ -62,7 +62,10 @@ pub(crate) struct LineEditor {
 
 impl LineEditor {
     pub(crate) fn new() -> Self {
-        Self { buf: Vec::new(), priority_mode: false }
+        Self {
+            buf: Vec::new(),
+            priority_mode: false,
+        }
     }
 
     /// Returns `true` if `byte` is a printable character that was appended (so
@@ -203,7 +206,15 @@ impl StreamInputReader {
             }
         });
 
-        Some((Self { stop, handle: Some(handle), tty, original }, rx))
+        Some((
+            Self {
+                stop,
+                handle: Some(handle),
+                tty,
+                original,
+            },
+            rx,
+        ))
     }
 }
 
@@ -222,7 +233,11 @@ impl Drop for StreamInputReader {
 }
 
 fn poll_readable(fd: i32, timeout_ms: i32) -> bool {
-    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
     let ready = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
     ready > 0 && pfd.revents & libc::POLLIN != 0
 }
@@ -230,11 +245,7 @@ fn poll_readable(fd: i32, timeout_ms: i32) -> bool {
 fn read_byte(fd: i32) -> Option<u8> {
     let mut buf = [0u8; 1];
     let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 1) };
-    if n == 1 {
-        Some(buf[0])
-    } else {
-        None
-    }
+    if n == 1 { Some(buf[0]) } else { None }
 }
 
 /// Discard the remainder of an ESC-introduced sequence (CSI / arrow / paste).

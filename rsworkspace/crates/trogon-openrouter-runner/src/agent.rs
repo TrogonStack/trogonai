@@ -1745,6 +1745,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             None => (cwd.clone(), 0, default_session_mode()),
                         }
                     };
+                    // Optional named custom subagent (.claude/agents/) → its system
+                    // prompt + model for the sub-session (best-effort).
+                    let subagent = tool_input["agent"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .and_then(|n| {
+                            trogon_runner_tools::load_subagent(std::path::Path::new(&parent_cwd), n)
+                        });
                     const MAX_SPAWN_DEPTH: u32 = 3;
                     if depth >= MAX_SPAWN_DEPTH {
                         "spawn_agent: max nesting depth reached".to_string()
@@ -1772,7 +1780,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             notif_tx,
                         );
                         match trogon_runner_tools::spawn_session::create_sub_session(
-                            &bridge, &sub_cwd, &parent_mode, None,
+                            &bridge,
+                            &sub_cwd,
+                            &parent_mode,
+                            None,
+                            subagent.as_ref().map(|d| d.system_prompt.as_str()),
+                            subagent.as_ref().and_then(|d| d.model.as_deref()),
                         )
                         .await
                         {

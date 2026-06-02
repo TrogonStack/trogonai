@@ -1,9 +1,9 @@
+use crate::RunnerSwitcher;
 use crate::app::{TurnMetrics, TurnRenderer, TurnStop, print_startup_banner, print_user_line};
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
 use crate::session_store::{SessionIndex, new_session_entry};
-use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -32,7 +32,9 @@ struct FileAtHelper {
 
 impl Default for FileAtHelper {
     fn default() -> Self {
-        Self { cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")) }
+        Self {
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        }
     }
 }
 
@@ -41,12 +43,7 @@ impl Helper for FileAtHelper {}
 impl Completer for FileAtHelper {
     type Candidate = Pair;
 
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        _ctx: &Context<'_>,
-    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+    fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
         let before = &line[..pos];
         let Some(at_pos) = before.rfind('@') else {
             return Ok((pos, vec![]));
@@ -68,7 +65,10 @@ impl Completer for FileAtHelper {
                 if name.starts_with(prefix) {
                     let suffix = if entry.path().is_dir() { "/" } else { "" };
                     let replacement = format!("{dir_prefix}{name}{suffix}");
-                    pairs.push(Pair { display: format!("{name}{suffix}"), replacement });
+                    pairs.push(Pair {
+                        display: format!("{name}{suffix}"),
+                        replacement,
+                    });
                 }
             }
         }
@@ -145,9 +145,7 @@ fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
                         }
                         Err(e) => {
                             // LOW-20: distinguish "is a directory" from other read errors.
-                            let msg = if e.kind() == std::io::ErrorKind::IsADirectory
-                                || full_path.is_dir()
-                            {
+                            let msg = if e.kind() == std::io::ErrorKind::IsADirectory || full_path.is_dir() {
                                 "is a directory"
                             } else {
                                 "file not found or not readable"
@@ -192,44 +190,50 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
+    plan: bool,
+    session_init: crate::session::SessionInit,
+    name: Option<String>,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
     let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
 
     let mut mcp_manager = McpManager::load(&fs);
+    // HTTP client used to fetch MCP prompts on demand for `/mcp__server__prompt`.
+    let mcp_http = reqwest::Client::new();
+    // Lifecycle hooks from settings.json (CLI-side events wired below).
+    let hooks_config = crate::settings::Settings::load(&fs, &project_dir).hooks;
+    // Session name: prefer the `--name` flag; otherwise inherit a name from the
+    // resumed session entry. Updatable at runtime via `/rename`.
+    let mut session_name = name.or_else(|| resume.as_ref().and_then(|e| e.name.clone()));
     let resumed = resume.is_some();
     let mut session = if let Some(entry) = resume {
         prefix = entry.prefix.clone();
-        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd).await {
+        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd, &fs).await {
             Ok(s) => {
-                eprintln!(
-                    "resumed session {} on {prefix}",
-                    s.session_id()
-                );
+                eprintln!("resumed session {} on {prefix}", s.session_id());
                 s
             }
             Err(e) => {
-                eprintln!(
-                    "warning: could not resume {}: {e} — starting fresh",
-                    entry.session_id
-                );
-                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
+                eprintln!("warning: could not resume {}: {e} — starting fresh", entry.session_id);
+                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await?
             }
         }
     } else {
-        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
+        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await?
     };
-    if skip_permissions
-        && let Err(e) = session.set_mode("bypassPermissions").await
+    // `--dangerously-skip-permissions` / `--plan` select a startup mode up front
+    // (clap enforces they are mutually exclusive). `TROGON_MODE` is applied by the
+    // runner itself, so only the flag-driven overrides need an explicit set_mode.
+    let startup_mode = crate::runtime::startup_mode(skip_permissions, plan);
+    if (skip_permissions || plan)
+        && let Err(e) = session.set_mode(&startup_mode).await
     {
-        eprintln!("warning: could not set bypassPermissions: {e}");
+        eprintln!("warning: could not set startup mode {startup_mode}: {e}");
     }
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
-        if resumed
-            && let Err(e) = sup.rebind(&prefix, session.session_id()).await
-        {
+        if resumed && let Err(e) = sup.rebind(&prefix, session.session_id()).await {
             eprintln!("warning: permission client rebind failed: {e}");
         }
     }
@@ -249,11 +253,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // None means "default" (compaction uses the session model). Reset on /clear and
     // cross-runner /model switches, which start a fresh session.
     let mut compactor_model_sel: Option<String> = None;
-    let mut session_mode = if skip_permissions {
-        "bypassPermissions".to_string()
-    } else {
-        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
-    };
+    let mut session_mode = startup_mode.clone();
     print_startup_banner(session.session_id(), &prefix, &session_mode);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
@@ -274,17 +274,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
-        let (read, from_queue): (rustyline::Result<String>, bool) =
-            match queued_prompts.pop_front() {
-                Some(q) => (Ok(q), true),
-                None => {
-                    let r = match pending_input.take() {
-                        Some(text) => rl.readline_with_initial("> ", (&text, "")),
-                        None => rl.readline("> "),
-                    };
-                    (r, false)
-                }
-            };
+        let (read, from_queue): (rustyline::Result<String>, bool) = match queued_prompts.pop_front() {
+            Some(q) => (Ok(q), true),
+            None => {
+                let r = match pending_input.take() {
+                    Some(text) => rl.readline_with_initial("> ", (&text, "")),
+                    None => rl.readline("> "),
+                };
+                (r, false)
+            }
+        };
         match read {
             Ok(raw_line) => {
                 let line = join_continuation(&raw_line).trim().to_string();
@@ -308,6 +307,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         &project_dir,
                         &prefix,
                         &session.current_model(),
+                        session_name.as_deref(),
                         arg,
                     )
                     .await
@@ -317,6 +317,27 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     }
                     continue;
                 }
+
+                // MCP prompt slash command: `/mcp__<server>__<prompt> [k=v...]`.
+                // Fetch the prompt from the server and submit its text as a normal
+                // prompt. Non-matching lines fall through to slash-command handling.
+                let line = match crate::mcp_prompts::parse_mcp_prompt_command(&line) {
+                    Some(inv) => match fetch_mcp_prompt(&inv, &mcp_manager, session.session_id(), &mcp_http).await {
+                        Ok(text) if !text.trim().is_empty() => text,
+                        Ok(_) => {
+                            eprintln!(
+                                "warning: MCP prompt `{}__{}` returned no content",
+                                inv.server, inv.prompt
+                            );
+                            continue;
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            continue;
+                        }
+                    },
+                    None => line,
+                };
 
                 if line.starts_with('/') {
                     let mut parts = line.splitn(2, ' ');
@@ -330,6 +351,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             &project_dir,
                             &prefix,
                             &session.current_model(),
+                            session_name.as_deref(),
                             arg,
                         )
                         .await
@@ -341,7 +363,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/clear" {
                         mcp_manager.shutdown_session(session.session_id()).await;
                         session.close().await;
-                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await
+                        {
                             Ok(s) => {
                                 session = s;
                                 session_used_tokens = 0;
@@ -353,8 +376,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     }
                                     session_mode = "bypassPermissions".to_string();
                                 } else {
-                                    session_mode = std::env::var("TROGON_MODE")
-                                        .unwrap_or_else(|_| "default".into());
+                                    session_mode = std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
                                 }
                                 // (falls through to persist + print below)
                                 if let Some(ref sup) = client_supervisor {
@@ -366,10 +388,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     &prefix,
                                     session.session_id(),
                                     &session.current_model(),
+                                    session_name.as_deref(),
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
-                            Err(e) => eprintln!("error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."),
+                            Err(e) => eprintln!(
+                                "error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."
+                            ),
                         }
                     } else if cmd == "/resume" {
                         if arg.is_empty() {
@@ -381,7 +406,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             // MCP servers that only allow one instance (e.g. port-binding
                             // servers) do not fail to start for the resumed session.
                             mcp_manager.shutdown_session(&old_session_id).await;
-                            match activate_session(&factory, &mut mcp_manager, &prefix, target, &cwd).await {
+                            match activate_session(&factory, &mut mcp_manager, &prefix, target, &cwd, &fs).await {
                                 Ok(s) => {
                                     session.close().await;
                                     session = s;
@@ -397,6 +422,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         &prefix,
                                         session.session_id(),
                                         &session.current_model(),
+                                        session_name.as_deref(),
                                     );
                                     eprintln!("resumed session {}", session.session_id());
                                 }
@@ -406,12 +432,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // remain on the old session, restore its bridges so MCP
                                     // tools keep working instead of silently failing.
                                     eprintln!("error resuming session: {e}");
-                                    if let Err(re) =
-                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
-                                    {
-                                        eprintln!(
-                                            "warning: could not restore MCP bridges for current session: {re}"
-                                        );
+                                    if let Err(re) = respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await {
+                                        eprintln!("warning: could not restore MCP bridges for current session: {re}");
                                     }
                                 }
                             }
@@ -423,10 +445,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             }
                             Ok(list) => {
                                 let index = SessionIndex::load(&fs);
-                                println!(
-                                    "{:<36}  {:<20}  cwd",
-                                    "session_id", "updated"
-                                );
+                                println!("{:<36}  {:<20}  cwd", "session_id", "updated");
                                 for s in list {
                                     let updated = s.updated_at.as_deref().unwrap_or("-");
                                     let model = index
@@ -434,27 +453,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         .filter(|e| e.session_id == s.session_id)
                                         .map(|e| e.model.as_str())
                                         .unwrap_or("-");
-                                    let label = s
-                                        .title
-                                        .as_deref()
-                                        .filter(|t| !t.is_empty())
-                                        .unwrap_or(&s.cwd);
-                                    println!(
-                                        "{:<36}  {:<20}  {}  [model: {model}]",
-                                        s.session_id, updated, label
-                                    );
+                                    let label = s.title.as_deref().filter(|t| !t.is_empty()).unwrap_or(&s.cwd);
+                                    println!("{:<36}  {:<20}  {}  [model: {model}]", s.session_id, updated, label);
                                 }
                             }
                             Err(e) => eprintln!("error listing sessions: {e}"),
                         }
                     } else if cmd == "/model" && arg.is_empty() {
-                        match format_model_catalog(
-                            &registry,
-                            &prefix,
-                            &session.current_model(),
-                            session.session_id(),
-                        )
-                        .await
+                        match format_model_catalog(&registry, &prefix, &session.current_model(), session.session_id())
+                            .await
                         {
                             Ok(text) => println!("{text}"),
                             Err(e) => eprintln!("error listing models: {e}"),
@@ -466,7 +473,29 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             helper.cwd = cwd.clone();
                         }
                         println!("{}", cwd.display());
+                    } else if cmd == "/rename" {
+                        let new_name = arg.trim();
+                        if new_name.is_empty() {
+                            match &session_name {
+                                Some(n) => println!("current session name: {n}"),
+                                None => println!("session has no name — usage: /rename <name>"),
+                            }
+                        } else {
+                            session_name = Some(new_name.to_string());
+                            persist_session_index(
+                                &fs,
+                                &project_dir,
+                                &prefix,
+                                session.session_id(),
+                                &session.current_model(),
+                                session_name.as_deref(),
+                            );
+                            println!("session renamed to {new_name}");
+                        }
                     } else if cmd == "/status" {
+                        if let Some(n) = &session_name {
+                            println!("name: {n}");
+                        }
                         let text = format_status(
                             &registry,
                             &prefix,
@@ -494,14 +523,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             .unwrap_or_else(|_| cwd.clone())
                             .to_string_lossy()
                             .into_owned();
-                        match apply_model_switch(
-                            &mut switcher,
-                            &prefix,
-                            session.session_id(),
-                            &model_id,
-                            &cwd_str,
-                        )
-                        .await
+                        match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, &cwd_str)
+                            .await
                         {
                             Ok(outcome) => {
                                 if outcome.same_runner {
@@ -514,6 +537,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 &prefix,
                                                 session.session_id(),
                                                 &model_id,
+                                                session_name.as_deref(),
                                             );
                                         }
                                         Err(e) => eprintln!("Error setting model: {e}"),
@@ -525,8 +549,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     let old_session_id = session.session_id().to_string();
                                     mcp_manager.shutdown_session(&old_session_id).await;
                                     session.close().await;
-                                    session =
-                                        factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
+                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
                                     prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
@@ -535,9 +558,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // mcp_servers, so MCP tools would be missing. Rebind MCP
                                     // for the new session (shutdown + spawn_pending +
                                     // commit_pending + load_session) so its tools are available.
-                                    if let Err(e) =
-                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
-                                    {
+                                    if let Err(e) = respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await {
                                         eprintln!("warning: could not bind MCP for new session: {e}");
                                     }
                                     // MED-5: the new runner starts a session with mode
@@ -549,13 +570,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         }
                                         session_mode = "bypassPermissions".to_string();
                                     } else {
-                                        session_mode = std::env::var("TROGON_MODE")
-                                            .unwrap_or_else(|_| "default".into());
+                                        session_mode =
+                                            std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
                                     }
                                     if let Some(ref sup) = client_supervisor
-                                        && let Err(e) = sup
-                                            .rebind(&outcome.new_prefix, session.session_id())
-                                            .await
+                                        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
                                     {
                                         eprintln!("error rebinding permission client: {e}");
                                     }
@@ -568,6 +587,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 &prefix,
                                                 session.session_id(),
                                                 &model_id,
+                                                session_name.as_deref(),
                                             );
                                         }
                                         Err(e) => eprintln!("Error setting model on new runner: {e}"),
@@ -585,12 +605,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 ("default", "auto-allow reads; prompt for edits, bash, MCP"),
                                 ("acceptEdits", "default, plus auto-allow file edits"),
                                 ("plan", "read-only exploration; deny writes & bash"),
+                                ("auto", "auto-allow reads; LLM safety classifier decides the rest"),
                                 ("dontAsk", "auto-allow everything (still audited)"),
                                 ("bypassPermissions", "no permission checks at all"),
                             ];
-                            let mut out = format!(
-                                "current mode: {m}{session_mode}{r}\n\nchange with {m}/mode <name>{r}:\n"
-                            );
+                            let mut out =
+                                format!("current mode: {m}{session_mode}{r}\n\nchange with {m}/mode <name>{r}:\n");
                             for (name, desc) in modes {
                                 let marker = if name == session_mode { "▸" } else { " " };
                                 out.push_str(&format!("  {marker} {name:<18}{dim}{desc}{r}\n"));
@@ -608,7 +628,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if cmd == "/compact" {
                         match session.compact().await {
-                            Ok(CompactResult { compacted: true, tokens_before, tokens_after }) => {
+                            Ok(CompactResult {
+                                compacted: true,
+                                tokens_before,
+                                tokens_after,
+                            }) => {
                                 println!(
                                     "compacted: {} → {} tokens",
                                     fmt_tokens(tokens_before as u64),
@@ -619,12 +643,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 // stale pre-compaction count. The context window is unchanged.
                                 session_used_tokens = tokens_after as u64;
                             }
-                            Ok(CompactResult { compacted: false, tokens_before, .. }) => {
+                            Ok(CompactResult {
+                                compacted: false,
+                                tokens_before,
+                                ..
+                            }) => {
                                 if tokens_before > 0 {
-                                    println!(
-                                        "no compaction needed ({} tokens)",
-                                        fmt_tokens(tokens_before as u64),
-                                    );
+                                    println!("no compaction needed ({} tokens)", fmt_tokens(tokens_before as u64),);
                                 } else {
                                     println!("no messages to compact");
                                 }
@@ -637,13 +662,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             // Show the current compaction model plus only the models
                             // advertised by THIS runner (same provider) — those are the
                             // only valid choices, with the same ids as /model.
-                            match format_compactor_models(
-                                &registry,
-                                &prefix,
-                                compactor_model_sel.as_deref(),
-                            )
-                            .await
-                            {
+                            match format_compactor_models(&registry, &prefix, compactor_model_sel.as_deref()).await {
                                 Ok(text) => println!("{text}"),
                                 Err(e) => eprintln!("error listing models: {e}"),
                             }
@@ -659,26 +678,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             match do_compact_model(&session, &resolved).await {
                                 Ok(msg) => {
                                     println!("{msg}");
-                                    compactor_model_sel = if resolved == "default" {
-                                        None
-                                    } else {
-                                        Some(resolved)
-                                    };
+                                    compactor_model_sel = if resolved == "default" { None } else { Some(resolved) };
                                 }
                                 Err(e) => eprintln!("error: {e}"),
                             }
                         }
                     } else if cmd == "/mcp" {
-                        handle_mcp_command(
-                            arg,
-                            &mut mcp_manager,
-                            &fs,
-                            &session,
-                            &cwd,
-                        )
-                        .await;
+                        handle_mcp_command(arg, &mut mcp_manager, &fs, &session, &cwd, &mcp_http).await;
                     } else if cmd == "/memory" {
                         handle_memory_command(arg, &cwd, &fs).await;
+                    } else if cmd == "/agents" {
+                        handle_agents_command(arg, &cwd);
+                    } else if cmd == "/tasks" {
+                        // Subagents spawned via the spawn_agent tool run synchronously
+                        // (inline, in an isolated worktree) and return their result as
+                        // the tool output — there is no background task queue to list.
+                        println!("no background tasks — spawned subagents run inline and return immediately");
                     } else if cmd == "/init" {
                         let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -725,21 +740,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             if let Some(err) = runner_error {
                                                 eprintln!("error: {err}");
                                             } else {
-                                            let trogon_content = strip_code_fence(&content);
-                                            if trogon_content.is_empty() {
-                                                // Model may have written the file directly via write_file tool.
-                                                // If it has content, keep it; otherwise report failure.
-                                                if fs.read_to_string(&dest).map(|s| !s.is_empty()).unwrap_or(false) {
-                                                    println!("created {}", dest.display());
+                                                let trogon_content = strip_code_fence(&content);
+                                                if trogon_content.is_empty() {
+                                                    // Model may have written the file directly via write_file tool.
+                                                    // If it has content, keep it; otherwise report failure.
+                                                    if fs.read_to_string(&dest).map(|s| !s.is_empty()).unwrap_or(false)
+                                                    {
+                                                        println!("created {}", dest.display());
+                                                    } else {
+                                                        eprintln!("error: model produced no content — try again");
+                                                    }
                                                 } else {
-                                                    eprintln!("error: model produced no content — try again");
+                                                    match fs.write(&dest, trogon_content.as_bytes()) {
+                                                        Ok(()) => println!("created {}", dest.display()),
+                                                        Err(e) => eprintln!("error writing TROGON.md: {e}"),
+                                                    }
                                                 }
-                                            } else {
-                                                match fs.write(&dest, trogon_content.as_bytes()) {
-                                                    Ok(()) => println!("created {}", dest.display()),
-                                                    Err(e) => eprintln!("error writing TROGON.md: {e}"),
-                                                }
-                                            }
                                             } // close runner_error else
                                         }
                                     }
@@ -765,12 +781,39 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
                 let _ = rl.add_history_entry(&raw_line);
 
-                let expanded = expand_mentions(&line, &cwd, &fs);
+                let mut expanded = expand_mentions(&line, &cwd, &fs);
+
+                // UserPromptSubmit hooks: may block the prompt or inject context.
+                if !hooks_config.user_prompt_submit.is_empty() {
+                    let payload = serde_json::json!({
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": line,
+                        "cwd": cwd.to_string_lossy(),
+                    });
+                    match trogon_runner_tools::run_event_hooks(
+                        &hooks_config.user_prompt_submit,
+                        None,
+                        &payload,
+                    )
+                    .await
+                    {
+                        trogon_runner_tools::HookOutcome::Block { reason } => {
+                            eprintln!("\x1b[33mprompt blocked by hook: {reason}\x1b[0m");
+                            continue;
+                        }
+                        trogon_runner_tools::HookOutcome::Continue { context: Some(ctx) } => {
+                            expanded.push_str("\n\n");
+                            expanded.push_str(&ctx);
+                        }
+                        trogon_runner_tools::HookOutcome::Continue { context: None } => {}
+                    }
+                }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
                 let prompt_result = match session.prompt(&expanded).await {
                     Err(e) if e.to_string().contains("not found") => {
                         eprintln!("\x1b[33mwarning: session lost (runner restarted?) — reconnecting...\x1b[0m");
-                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await
+                        {
                             Ok(s) => {
                                 session = s;
                                 session.prompt(&expanded).await
@@ -875,6 +918,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 &prefix,
                                 session.session_id(),
                                 &session.current_model(),
+                                session_name.as_deref(),
                             );
                             sync_repl_cwd_from_session(&session, &mut cwd).await;
                             if let Some(helper) = rl.helper_mut() {
@@ -892,6 +936,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             queued_prompts.extend(queued);
                         }
                     }
+                }
+
+                // Post-turn lifecycle hooks (CLI-side, fire-and-forget). Stop fires
+                // when the agent finishes; Notification when it's idle awaiting input.
+                if !hooks_config.stop.is_empty() {
+                    let payload = serde_json::json!({"hook_event_name": "Stop", "cwd": cwd.to_string_lossy()});
+                    let _ = trogon_runner_tools::run_event_hooks(&hooks_config.stop, None, &payload).await;
+                }
+                if !hooks_config.notification.is_empty() {
+                    let payload = serde_json::json!({"hook_event_name": "Notification", "cwd": cwd.to_string_lossy()});
+                    let _ =
+                        trogon_runner_tools::run_event_hooks(&hooks_config.notification, None, &payload).await;
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -934,26 +990,46 @@ async fn next_stream_input(
     }
 }
 
-async fn start_session<SF: SessionFactory>(
+async fn start_session<SF: SessionFactory, F: Fs>(
     factory: &SF,
     mcp: &mut McpManager,
     prefix: &str,
     cwd: PathBuf,
+    init: &crate::session::SessionInit,
+    fs: &F,
 ) -> anyhow::Result<SF::Sess> {
-    let mcp_servers = mcp.spawn_pending().await;
-    let session = factory.create_session(prefix, cwd, mcp_servers).await?;
+    let mcp_servers = mcp.spawn_pending(fs).await;
+    let session = factory.create_session_with_init(prefix, cwd, mcp_servers, init).await?;
     mcp.commit_pending(session.session_id());
     Ok(session)
 }
 
-async fn activate_session<SF: SessionFactory>(
+/// Resolve an MCP prompt invocation to its rendered text by connecting to the
+/// owning server (`prompts/get`). Returns a user-facing error string on failure.
+async fn fetch_mcp_prompt(
+    inv: &crate::mcp_prompts::McpPromptInvocation,
+    mcp: &McpManager,
+    session_id: &str,
+    http: &reqwest::Client,
+) -> Result<String, String> {
+    let conns = mcp.active_connections(session_id);
+    let Some((_, url, headers)) = conns.into_iter().find(|(n, _, _)| n == &inv.server) else {
+        return Err(format!("no active MCP server named `{}` (see /mcp list)", inv.server));
+    };
+    let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+    client.initialize().await?;
+    client.get_prompt(&inv.prompt, &inv.arguments).await
+}
+
+async fn activate_session<SF: SessionFactory, F: Fs>(
     factory: &SF,
     mcp: &mut McpManager,
     prefix: &str,
     session_id: &str,
     cwd: &Path,
+    fs: &F,
 ) -> anyhow::Result<SF::Sess> {
-    let mcp_servers = mcp.spawn_pending().await;
+    let mcp_servers = mcp.spawn_pending(fs).await;
     let session = factory.attach_session(prefix, session_id.to_string());
     session.load_session(session_id, cwd, mcp_servers).await?;
     mcp.commit_pending(session_id);
@@ -966,6 +1042,7 @@ async fn handle_mcp_command<F: Fs, S: Session>(
     fs: &F,
     session: &S,
     cwd: &Path,
+    http: &reqwest::Client,
 ) {
     let mut parts = arg.splitn(2, ' ');
     let sub = parts.next().unwrap_or("list").trim();
@@ -978,7 +1055,19 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 println!("  (none)");
             } else {
                 for s in mcp.configured_servers() {
-                    println!("  {} — {} {}", s.name, s.command, s.args.join(" "));
+                    match s.transport {
+                        crate::mcp::McpTransport::Stdio => {
+                            println!("  {} — stdio: {} {}", s.name, s.command, s.args.join(" "))
+                        }
+                        crate::mcp::McpTransport::Http => {
+                            let auth = if s.oauth { " (oauth)" } else { "" };
+                            println!("  {} — http: {}{}", s.name, s.url, auth)
+                        }
+                        crate::mcp::McpTransport::Sse => {
+                            let auth = if s.oauth { " (oauth)" } else { "" };
+                            println!("  {} — sse: {}{}", s.name, s.url, auth)
+                        }
+                    }
                 }
             }
             let active = mcp.active_for_session(session.session_id());
@@ -991,23 +1080,39 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 }
             }
         }
-        "add" => {
-            let mut add_parts = rest.splitn(2, ' ');
-            let name = add_parts.next().unwrap_or("").trim();
-            let cmd_rest = add_parts.next().unwrap_or("").trim();
-            match McpManager::parse_add_args(name, cmd_rest) {
-                Err(e) => eprintln!("{e}"),
-                Ok(cfg) => {
-                    mcp.add_server(cfg);
-                    if let Err(e) = mcp.save(fs) {
-                        eprintln!("error saving MCP config: {e}");
-                    } else {
-                        println!("added MCP server `{name}`");
-                        if let Err(e) = respawn_session_mcp(session, mcp, cwd).await {
-                            eprintln!("warning: could not refresh session MCP: {e}");
-                        }
+        "add" => match McpManager::parse_add_args(rest) {
+            Err(e) => eprintln!("{e}"),
+            Ok(cfg) => {
+                let name = cfg.name.clone();
+                let oauth = cfg.oauth;
+                let url = cfg.url.clone();
+                mcp.add_server(cfg);
+                if let Err(e) = mcp.save(fs) {
+                    eprintln!("error saving MCP config: {e}");
+                } else {
+                    println!("added MCP server `{name}`");
+                    if oauth {
+                        run_mcp_login(&name, &url, mcp, fs, http).await;
+                    }
+                    if let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await {
+                        eprintln!("warning: could not refresh session MCP: {e}");
                     }
                 }
+            }
+        },
+        "login" => {
+            let name = rest.trim();
+            if name.is_empty() {
+                eprintln!("usage: /mcp login <name>");
+                return;
+            }
+            let Some(url) = mcp.http_server_url(name) else {
+                eprintln!("no HTTP MCP server named `{name}` — add one with /mcp add --transport http {name} <url>");
+                return;
+            };
+            run_mcp_login(name, &url, mcp, fs, http).await;
+            if let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await {
+                eprintln!("warning: could not refresh session MCP: {e}");
             }
         }
         "remove" => {
@@ -1019,7 +1124,7 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 } else {
                     mcp.shutdown_session(session.session_id()).await;
                     println!("removed MCP server `{rest}`");
-                    if let Err(e) = respawn_session_mcp(session, mcp, cwd).await {
+                    if let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await {
                         eprintln!("warning: could not refresh session MCP: {e}");
                     }
                 }
@@ -1027,17 +1132,128 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 eprintln!("no MCP server named `{rest}`");
             }
         }
-        other => eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove"),
+        "prompts" => {
+            let conns = mcp.active_connections(session.session_id());
+            if conns.is_empty() {
+                println!("no active MCP servers");
+                return;
+            }
+            println!("available MCP prompts (call as /mcp__<server>__<prompt> [k=v...]):");
+            let mut any = false;
+            for (name, url, headers) in conns {
+                let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+                if client.initialize().await.is_err() {
+                    continue;
+                }
+                match client.list_prompts().await {
+                    Ok(prompts) => {
+                        for p in prompts {
+                            any = true;
+                            let args = p
+                                .arguments
+                                .iter()
+                                .map(|a| {
+                                    if a.required {
+                                        format!("{}=…", a.name)
+                                    } else {
+                                        format!("[{}=…]", a.name)
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            println!("  /mcp__{name}__{} {args}", p.name);
+                            if !p.description.is_empty() {
+                                println!("      {}", p.description);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("  {name}: {e}"),
+                }
+            }
+            if !any {
+                println!("  (none advertised)");
+            }
+        }
+        "import" => {
+            let path = if rest.is_empty() {
+                match crate::mcp::default_claude_desktop_config_path() {
+                    Some(p) => p,
+                    None => {
+                        eprintln!(
+                            "could not determine the Claude Desktop config path — pass one explicitly: /mcp import <path>"
+                        );
+                        return;
+                    }
+                }
+            } else {
+                crate::mcp::expand_tilde(rest)
+            };
+            match mcp.import_claude_desktop(fs, &path) {
+                Err(e) => eprintln!("{e}"),
+                Ok(summary) => {
+                    if let Err(e) = mcp.save(fs) {
+                        eprintln!("error saving MCP config: {e}");
+                        return;
+                    }
+                    if summary.imported.is_empty() {
+                        println!("no MCP servers found in {}", path.display());
+                    } else {
+                        println!(
+                            "imported {} MCP server(s) from {}: {}",
+                            summary.imported.len(),
+                            path.display(),
+                            summary.imported.join(", ")
+                        );
+                    }
+                    if !summary.skipped.is_empty() {
+                        println!(
+                            "skipped {} entry(ies) with no command or url: {}",
+                            summary.skipped.len(),
+                            summary.skipped.join(", ")
+                        );
+                    }
+                    if !summary.imported.is_empty()
+                        && let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await
+                    {
+                        eprintln!("warning: could not refresh session MCP: {e}");
+                    }
+                }
+            }
+        }
+        other => {
+            eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove, login, import, prompts")
+        }
     }
 }
 
-async fn respawn_session_mcp<S: Session>(
+/// Run the interactive OAuth login for an HTTP MCP server and persist the token.
+async fn run_mcp_login<F: Fs>(name: &str, url: &str, mcp: &mut McpManager, fs: &F, http: &reqwest::Client) {
+    match crate::mcp_oauth::login(http, url).await {
+        Ok(token) => {
+            mcp.set_oauth_token(name, token); // also marks the server config oauth=true
+            if let Err(e) = mcp.save_oauth(fs) {
+                eprintln!("error saving OAuth token: {e}");
+                return;
+            }
+            // Persist the oauth=true marker on the server config.
+            if let Err(e) = mcp.save(fs) {
+                eprintln!("error saving MCP config: {e}");
+                return;
+            }
+            println!("authorized MCP server `{name}`");
+        }
+        Err(e) => eprintln!("OAuth failed for `{name}`: {e}"),
+    }
+}
+
+async fn respawn_session_mcp<S: Session, F: Fs>(
     session: &S,
     mcp: &mut McpManager,
     cwd: &Path,
+    fs: &F,
 ) -> anyhow::Result<()> {
     mcp.shutdown_session(session.session_id()).await;
-    let servers = mcp.spawn_pending().await;
+    let servers = mcp.spawn_pending(fs).await;
     mcp.commit_pending(session.session_id());
     session.load_session(session.session_id(), cwd, servers).await
 }
@@ -1055,8 +1271,7 @@ async fn sync_repl_cwd_from_session<S: Session>(session: &S, cwd: &mut PathBuf) 
 
 fn sync_cwd_from_tool(name: &str, output: &str, cwd: &mut PathBuf) -> bool {
     let prefix = "Working directory is now ";
-    let is_cd = name == "change_directory"
-        || (name == "bash" && output.starts_with(prefix));
+    let is_cd = name == "change_directory" || (name == "bash" && output.starts_with(prefix));
     if !is_cd {
         return false;
     }
@@ -1071,6 +1286,7 @@ fn sync_cwd_from_tool(name: &str, output: &str, cwd: &mut PathBuf) -> bool {
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_repl_cd<S: Session, F: Fs>(
     session: &S,
     fs: &F,
@@ -1078,6 +1294,7 @@ async fn apply_repl_cd<S: Session, F: Fs>(
     project_dir: &Path,
     prefix: &str,
     model: &str,
+    name: Option<&str>,
     arg: &str,
 ) -> bool {
     match resolve_directory_target(&cwd.to_string_lossy(), arg) {
@@ -1085,7 +1302,7 @@ async fn apply_repl_cd<S: Session, F: Fs>(
             *cwd = resolved.clone();
             match session.set_cwd(&resolved).await {
                 Ok(()) => {
-                    persist_session_index(fs, project_dir, prefix, session.session_id(), model);
+                    persist_session_index(fs, project_dir, prefix, session.session_id(), model, name);
                     reset_display();
                     eprintln!("{}", resolved.display());
                 }
@@ -1110,9 +1327,12 @@ fn persist_session_index<F: Fs>(
     prefix: &str,
     session_id: &str,
     model: &str,
+    name: Option<&str>,
 ) {
     let mut index = SessionIndex::load(fs);
-    index.record(project, new_session_entry(prefix, session_id, model));
+    let mut entry = new_session_entry(prefix, session_id, model);
+    entry.name = name.map(String::from);
+    index.record(project, entry);
     if let Err(e) = index.save(fs) {
         eprintln!("warning: could not save session index: {e}");
     }
@@ -1134,8 +1354,9 @@ pub fn resolve_model_alias(input: &str) -> String {
         "opus" => "claude-opus-4-7".into(),
         "grok" => "grok-3".into(),
         "grok-mini" => "grok-3-mini".into(),
-        "openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        "openrouter" => {
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4".into())
+        }
         // Short aliases for the OpenRouter models. These must match the IDs the
         // openrouter runner registers (OPENROUTER_MODELS); update both together.
         "op-claude" => "anthropic/claude-sonnet-4".into(),
@@ -1155,8 +1376,9 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     model_id: &str,
     cwd: &str,
 ) -> Result<ModelSwitchOutcome, String> {
-    let (new_prefix, new_session_id) =
-        switcher.switch_model(current_prefix, current_session_id, model_id, cwd).await?;
+    let (new_prefix, new_session_id) = switcher
+        .switch_model(current_prefix, current_session_id, model_id, cwd)
+        .await?;
     Ok(ModelSwitchOutcome {
         same_runner: new_prefix == current_prefix,
         new_prefix,
@@ -1169,17 +1391,12 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
 /// - No argument   → show current compaction model override (if any)
 /// - `default`     → clear the override; compaction uses the session model
 /// - `<model_id>`  → set the compaction model (must be same provider as current runner)
-pub(crate) async fn do_compact_model<S: Session>(
-    session: &S,
-    arg: &str,
-) -> Result<String, String> {
+pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Result<String, String> {
     if arg.is_empty() {
-        return Ok(
-            "compaction model: default (same as session model)\n\
+        return Ok("compaction model: default (same as session model)\n\
              change with: /compact-model <model-id>\n\
              reset with:  /compact-model default"
-                .to_string(),
-        );
+            .to_string());
     }
     let value = if arg == "default" { "" } else { arg };
     session
@@ -1215,13 +1432,19 @@ Commands:
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
-  {m}/mcp{r} list|add|remove  manage MCP server bridges
+  {m}/mcp{r} list|add|remove|login|import|prompts  manage MCP servers (add: {m}--transport http|sse <name> <url> [--header \"K: V\"] [--oauth]{r})
+  {m}/mcp import{r} [path]  import servers from a Claude Desktop config (default path if omitted)
+  {m}/mcp login{r} <name>   authorize an HTTP MCP server via OAuth (browser)
+  {m}/mcp__<server>__<prompt>{r}  run an MCP prompt as a command (see {m}/mcp prompts{r})
   {m}/compact{r}            force context compaction now
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
+  {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
+  {m}/agents{r}             list subagent definitions (.claude/agents/)  |  {m}/agents{r} <name> details
+  {m}/tasks{r}              list background tasks
   {m}/init{r}               analyze project with AI and generate TROGON.md
   {m}/init --force{r}       overwrite existing TROGON.md
   {m}cd{r} [path]           change working directory (same as {m}/cd{r})
@@ -1269,18 +1492,59 @@ Ctrl+D    quit")
 
         "/status" => "use /status in the REPL for live session status".to_string(),
 
-        "/memory" => {
-            "use /memory in the REPL to list or show TROGON.md hierarchy".to_string()
-        }
+        "/memory" => "use /memory in the REPL to list or show TROGON.md hierarchy".to_string(),
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
+    }
+}
+
+/// `/agents` — list custom subagent definitions; `/agents <name>` shows one.
+fn handle_agents_command(arg: &str, cwd: &Path) {
+    let defs = trogon_runner_tools::load_subagents(cwd);
+    let arg = arg.trim();
+    if defs.is_empty() {
+        println!("no subagents defined — add markdown files to .claude/agents/");
+        return;
+    }
+    if arg.is_empty() {
+        println!("subagents (.claude/agents/ + ~/.config/trogon/agents/):");
+        for d in &defs {
+            let desc = if d.description.is_empty() { "" } else { &d.description };
+            println!("  {:<20} {desc}", d.name);
+        }
+        println!("\nuse /agents <name> to see details");
+        return;
+    }
+    match defs.iter().find(|d| d.name == arg) {
+        Some(d) => {
+            println!("name:        {}", d.name);
+            if !d.description.is_empty() {
+                println!("description: {}", d.description);
+            }
+            println!("model:       {}", d.model.as_deref().unwrap_or("(default)"));
+            println!(
+                "tools:       {}",
+                if d.tools.is_empty() {
+                    "(all)".to_string()
+                } else {
+                    d.tools.join(", ")
+                }
+            );
+            println!("source:      {}", d.source.display());
+            if !d.system_prompt.is_empty() {
+                println!("\nsystem prompt:\n{}", d.system_prompt);
+            }
+        }
+        None => eprintln!("no subagent named `{arg}` — run /agents to list"),
     }
 }
 
 async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
     let arg = arg.trim();
     let layers = trogon_runner_tools::list_trogon_md_hierarchy(
-        &cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()).to_string_lossy(),
+        &cwd.canonicalize()
+            .unwrap_or_else(|_| cwd.to_path_buf())
+            .to_string_lossy(),
     )
     .await;
 
@@ -1318,7 +1582,9 @@ async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
             let mut norm = std::path::PathBuf::new();
             for comp in raw.components() {
                 match comp {
-                    std::path::Component::ParentDir => { norm.pop(); }
+                    std::path::Component::ParentDir => {
+                        norm.pop();
+                    }
                     std::path::Component::CurDir => {}
                     c => norm.push(c),
                 }
@@ -1327,7 +1593,9 @@ async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
             let mut norm2 = std::path::PathBuf::new();
             for comp in resolved.components() {
                 match comp {
-                    std::path::Component::ParentDir => { norm2.pop(); }
+                    std::path::Component::ParentDir => {
+                        norm2.pop();
+                    }
                     std::path::Component::CurDir => {}
                     c => norm2.push(c),
                 }
@@ -1444,8 +1712,7 @@ pub(crate) async fn format_model_catalog<RS: RegistryStore>(
     session_id: &str,
 ) -> Result<String, String> {
     let all = registry.list_all().await.map_err(|e| e.to_string())?;
-    let mut by_prefix: std::collections::BTreeMap<String, Vec<(String, String)>> =
-        std::collections::BTreeMap::new();
+    let mut by_prefix: std::collections::BTreeMap<String, Vec<(String, String)>> = std::collections::BTreeMap::new();
 
     for cap in all {
         let prefix = cap
@@ -1510,7 +1777,10 @@ pub(crate) async fn format_status<RS: RegistryStore>(
         .unwrap_or_else(|_| "unknown".into());
 
     let tokens = if context_size == 0 {
-        format!("{used} tokens used (context size unknown)", used = fmt_tokens(used_tokens))
+        format!(
+            "{used} tokens used (context size unknown)",
+            used = fmt_tokens(used_tokens)
+        )
     } else {
         let pct = used_tokens * 100 / context_size;
         format!(
@@ -1521,9 +1791,7 @@ pub(crate) async fn format_status<RS: RegistryStore>(
         )
     };
 
-    format!(
-        "prefix: {prefix}\nmodel:   {model}\nsession: {session_id}\n{tokens}\nrunners: {runners}"
-    )
+    format!("prefix: {prefix}\nmodel:   {model}\nsession: {session_id}\n{tokens}\nrunners: {runners}")
 }
 
 // ── /config ───────────────────────────────────────────────────────────────────
@@ -1543,10 +1811,12 @@ fn read_config<F: Fs>(fs: &F) -> serde_json::Value {
 fn write_config<F: Fs>(config: &serde_json::Value, fs: &F) -> Result<(), String> {
     let path = config_path();
     if let Some(dir) = path.parent() {
-        fs.create_dir_all(dir).map_err(|e| format!("cannot create config dir: {e}"))?;
+        fs.create_dir_all(dir)
+            .map_err(|e| format!("cannot create config dir: {e}"))?;
     }
     let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs.write(&path, content.as_bytes()).map_err(|e| format!("cannot write config: {e}"))
+    fs.write(&path, content.as_bytes())
+        .map_err(|e| format!("cannot write config: {e}"))
 }
 
 fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
@@ -1761,8 +2031,8 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::mock::MockFs;
     use crate::fs::RealFs;
+    use crate::fs::mock::MockFs;
 
     // ── expand_mentions with MockFs ───────────────────────────────────────────
 
@@ -1865,7 +2135,9 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_no_at_returns_empty() {
-        let helper = FileAtHelper { cwd: std::env::temp_dir() };
+        let helper = FileAtHelper {
+            cwd: std::env::temp_dir(),
+        };
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("hello world", 5, &ctx).unwrap();
@@ -1874,7 +2146,9 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_at_with_space_returns_empty() {
-        let helper = FileAtHelper { cwd: std::env::temp_dir() };
+        let helper = FileAtHelper {
+            cwd: std::env::temp_dir(),
+        };
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@ hello", 7, &ctx).unwrap();
@@ -2023,7 +2297,15 @@ mod tests {
     #[test]
     fn slash_cost_shows_percentage_and_estimated_cost() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 50_000, 200_000, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command(
+            "/cost",
+            "",
+            50_000,
+            200_000,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
@@ -2079,7 +2361,10 @@ mod tests {
     fn config_set_and_get_roundtrip() {
         let fs = MockFs::new();
         let set_out = handle_config_cmd("set mykey myvalue", &fs);
-        assert!(set_out.contains("mykey") && set_out.contains("myvalue"), "got: {set_out}");
+        assert!(
+            set_out.contains("mykey") && set_out.contains("myvalue"),
+            "got: {set_out}"
+        );
         let get_out = handle_config_cmd("get mykey", &fs);
         assert!(get_out.contains("myvalue"), "got: {get_out}");
     }
@@ -2123,7 +2408,10 @@ mod tests {
         let out = handle_config_cmd("set model claude-opus-4-7", &fs);
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         let get = handle_config_cmd("get model", &fs);
-        assert!(get.contains("claude-opus-4-7") && !get.contains("claude-sonnet-4-6"), "got: {get}");
+        assert!(
+            get.contains("claude-opus-4-7") && !get.contains("claude-sonnet-4-6"),
+            "got: {get}"
+        );
     }
 
     #[test]
@@ -2177,7 +2465,15 @@ mod tests {
     #[test]
     fn slash_model_with_arg_saves_and_confirms() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command(
+            "/model",
+            "claude-opus-4-7",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         assert!(out.contains("cost estimates updated"), "got: {out}");
     }
@@ -2185,8 +2481,24 @@ mod tests {
     #[test]
     fn slash_model_updates_cost_estimates() {
         let fs = MockFs::new();
-        handle_slash_command("/model", "claude-haiku-4-5", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
-        let cost_out = handle_slash_command("/cost", "", 1_000_000, 2_000_000, "claude-haiku-4-5", Path::new("/tmp"), &fs);
+        handle_slash_command(
+            "/model",
+            "claude-haiku-4-5",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
+        let cost_out = handle_slash_command(
+            "/cost",
+            "",
+            1_000_000,
+            2_000_000,
+            "claude-haiku-4-5",
+            Path::new("/tmp"),
+            &fs,
+        );
         // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
         assert!(cost_out.contains("1.60") || cost_out.contains("1.6"), "got: {cost_out}");
     }
@@ -2194,7 +2506,15 @@ mod tests {
     #[test]
     fn slash_cost_at_full_context_shows_100_percent() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 200_000, 200_000, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command(
+            "/cost",
+            "",
+            200_000,
+            200_000,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
         assert!(out.contains("100%"), "got: {out}");
     }
 
@@ -2352,7 +2672,10 @@ mod tests {
         fs.add_file(readme_path.to_str().unwrap(), "My special readme content.");
 
         let prompt = build_init_prompt(&dir, &fs);
-        assert!(prompt.contains("My special readme content."), "readme not included: {prompt}");
+        assert!(
+            prompt.contains("My special readme content."),
+            "readme not included: {prompt}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

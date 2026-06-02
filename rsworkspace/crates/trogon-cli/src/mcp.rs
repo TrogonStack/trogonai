@@ -1,22 +1,61 @@
 //! MCP server config and stdio bridge lifecycle for the Trogon REPL.
 
 use crate::fs::Fs;
+use crate::mcp_oauth::{OAuthStore, StoredToken};
 use crate::stdio_mcp_bridge::StdioMcpBridge;
-use agent_client_protocol::{McpServer, McpServerHttp};
+use agent_client_protocol::{HttpHeader, McpServer, McpServerHttp, McpServerSse};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const MCP_CONFIG_PATH: &str = "~/.config/trogon/mcp.json";
+
+/// An active MCP connection: `(name, url, headers)`. Headers are empty for stdio
+/// servers (the local bridge needs no auth) and carry auth for HTTP servers.
+pub type McpConnection = (String, String, Vec<(String, String)>);
+
+/// Transport used to reach an MCP server. Defaults to `Stdio` so existing
+/// `mcp.json` files (which predate this field) keep working.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    Http,
+    Sse,
+}
+
+impl McpTransport {
+    /// True for transports reached over a URL (HTTP and SSE) — these carry
+    /// headers, support OAuth, and have no local bridge process.
+    pub fn is_remote(self) -> bool {
+        matches!(self, McpTransport::Http | McpTransport::Sse)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
     pub name: String,
+    #[serde(default)]
+    pub transport: McpTransport,
+    // ── stdio transport ──
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub command: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    // ── http transport ──
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    /// HTTP headers (e.g. `Authorization: Bearer …`) sent to an HTTP MCP server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<(String, String)>,
+    /// When true, an OAuth access token (from the auth store, refreshed as needed)
+    /// is injected as an `Authorization: Bearer` header at connect time. The token
+    /// itself lives in `mcp-auth.json`, never here.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oauth: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,12 +67,18 @@ pub struct McpConfig {
 struct ActiveBridge {
     name: String,
     url: String,
-    bridge: StdioMcpBridge,
+    /// `Some` for stdio servers (the local stdio→HTTP bridge process); `None` for
+    /// direct HTTP servers, which have no local process to tear down.
+    bridge: Option<StdioMcpBridge>,
 }
 pub struct McpManager {
     config: McpConfig,
     active: HashMap<String, Vec<ActiveBridge>>,
     pending: Vec<ActiveBridge>,
+    /// OAuth tokens for servers marked `oauth: true`, persisted separately.
+    oauth: OAuthStore,
+    /// HTTP client used for OAuth token refresh at connect time.
+    oauth_http: reqwest::Client,
 }
 
 impl McpManager {
@@ -46,7 +91,36 @@ impl McpManager {
             Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).unwrap_or_default(),
             _ => McpConfig::default(),
         };
-        Self { config, active: HashMap::new(), pending: Vec::new() }
+        Self {
+            config,
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::load(fs),
+            oauth_http: reqwest::Client::new(),
+        }
+    }
+
+    /// Persist the OAuth token store (`mcp-auth.json`).
+    pub fn save_oauth<F: Fs>(&self, fs: &F) -> std::io::Result<()> {
+        self.oauth.save(fs)
+    }
+
+    /// Store/replace the OAuth token for `name` and mark its server `oauth: true`.
+    pub fn set_oauth_token(&mut self, name: &str, token: StoredToken) {
+        self.oauth.set(name, token);
+        if let Some(s) = self.config.servers.iter_mut().find(|s| s.name == name) {
+            s.oauth = true;
+        }
+    }
+
+    /// URL of the configured remote (HTTP or SSE) server `name`, if any. Used by
+    /// `/mcp login` to locate the server to authorize.
+    pub fn http_server_url(&self, name: &str) -> Option<String> {
+        self.config
+            .servers
+            .iter()
+            .find(|s| s.name == name && s.transport.is_remote())
+            .map(|s| s.url.clone())
     }
 
     pub fn save<F: Fs>(&self, fs: &F) -> std::io::Result<()> {
@@ -69,10 +143,12 @@ impl McpManager {
             .unwrap_or_default()
     }
 
-    /// Spawn configured stdio MCP bridges; call [`Self::commit_pending`] after session.new.
-    pub async fn spawn_pending(&mut self) -> Vec<McpServer> {
+    /// Spawn configured MCP servers (stdio bridges + direct HTTP); call
+    /// [`Self::commit_pending`] after session.new. `fs` is used to persist any
+    /// OAuth tokens refreshed during connection.
+    pub async fn spawn_pending<F: Fs>(&mut self, fs: &F) -> Vec<McpServer> {
         self.pending.clear();
-        let (servers, bridges) = self.spawn_bridges().await;
+        let (servers, bridges) = self.spawn_bridges(fs).await;
         self.pending = bridges;
         servers
     }
@@ -81,36 +157,109 @@ impl McpManager {
         if self.pending.is_empty() {
             return;
         }
-        self.active.insert(session_id.to_string(), std::mem::take(&mut self.pending));
+        self.active
+            .insert(session_id.to_string(), std::mem::take(&mut self.pending));
     }
 
-    async fn spawn_bridges(&self) -> (Vec<McpServer>, Vec<ActiveBridge>) {
+    async fn spawn_bridges<F: Fs>(&mut self, fs: &F) -> (Vec<McpServer>, Vec<ActiveBridge>) {
         let mut bridges = Vec::new();
         let mut acp_servers = Vec::new();
 
-        for cfg in &self.config.servers {
-            let env: Vec<(String, String)> = cfg.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-            match StdioMcpBridge::spawn(&cfg.command, &cfg.args, &env).await {
-                Ok(bridge) => {
-                    let url = bridge.url.clone();
-                    acp_servers.push(McpServer::Http(McpServerHttp::new(cfg.name.clone(), url.clone())));
+        // Clone configs so we can borrow `self.oauth` mutably for token refresh
+        // while iterating.
+        let configs = self.config.servers.clone();
+        for cfg in &configs {
+            match cfg.transport {
+                McpTransport::Stdio => {
+                    let env: Vec<(String, String)> = cfg.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                    match StdioMcpBridge::spawn(&cfg.command, &cfg.args, &env).await {
+                        Ok(bridge) => {
+                            let url = bridge.url.clone();
+                            acp_servers.push(McpServer::Http(McpServerHttp::new(cfg.name.clone(), url.clone())));
+                            bridges.push(ActiveBridge {
+                                name: cfg.name.clone(),
+                                url,
+                                bridge: Some(bridge),
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("warning: MCP server `{}` failed to start: {e}", cfg.name)
+                        }
+                    }
+                }
+                McpTransport::Http | McpTransport::Sse => {
+                    // Direct remote server: no local bridge, pass the URL (and any
+                    // auth headers) straight to the runner.
+                    let mut headers = cfg.headers.clone();
+                    if cfg.oauth {
+                        match crate::mcp_oauth::ensure_token(&cfg.name, &mut self.oauth, fs, &self.oauth_http).await {
+                            Ok(token) => headers.push(("Authorization".into(), format!("Bearer {token}"))),
+                            Err(e) => {
+                                eprintln!("warning: MCP server `{}` OAuth: {e}", cfg.name);
+                                continue;
+                            }
+                        }
+                    }
+                    let acp_headers: Vec<HttpHeader> = headers
+                        .iter()
+                        .map(|(k, v)| HttpHeader::new(k.clone(), v.clone()))
+                        .collect();
+                    let server = if cfg.transport == McpTransport::Sse {
+                        let mut sse = McpServerSse::new(cfg.name.clone(), cfg.url.clone());
+                        if !acp_headers.is_empty() {
+                            sse = sse.headers(acp_headers);
+                        }
+                        McpServer::Sse(sse)
+                    } else {
+                        let mut http = McpServerHttp::new(cfg.name.clone(), cfg.url.clone());
+                        if !acp_headers.is_empty() {
+                            http = http.headers(acp_headers);
+                        }
+                        McpServer::Http(http)
+                    };
+                    acp_servers.push(server);
                     bridges.push(ActiveBridge {
                         name: cfg.name.clone(),
-                        url,
-                        bridge,
+                        url: cfg.url.clone(),
+                        bridge: None,
                     });
                 }
-                Err(e) => eprintln!("warning: MCP server `{}` failed to start: {e}", cfg.name),
             }
         }
 
         (acp_servers, bridges)
     }
 
+    /// Active MCP connections for a session as `(name, url, headers)`. Stdio
+    /// servers carry no headers (the local bridge needs no auth); HTTP servers
+    /// carry their configured headers. Used to fetch MCP prompts on demand.
+    pub fn active_connections(&self, session_id: &str) -> Vec<McpConnection> {
+        self.active
+            .get(session_id)
+            .map(|bridges| {
+                bridges
+                    .iter()
+                    .map(|b| {
+                        let headers = self
+                            .config
+                            .servers
+                            .iter()
+                            .find(|c| c.name == b.name && c.transport.is_remote())
+                            .map(|c| c.headers.clone())
+                            .unwrap_or_default();
+                        (b.name.clone(), b.url.clone(), headers)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub async fn shutdown_session(&mut self, session_id: &str) {
         if let Some(bridges) = self.active.remove(session_id) {
             for b in bridges {
-                b.bridge.shutdown().await;
+                if let Some(bridge) = b.bridge {
+                    bridge.shutdown().await;
+                }
             }
         }
     }
@@ -121,7 +270,9 @@ impl McpManager {
             self.shutdown_session(&id).await;
         }
         for b in std::mem::take(&mut self.pending) {
-            b.bridge.shutdown().await;
+            if let Some(bridge) = b.bridge {
+                bridge.shutdown().await;
+            }
         }
     }
 
@@ -136,21 +287,219 @@ impl McpManager {
         before != self.config.servers.len()
     }
 
-    /// Parse `/mcp add <name> <command...>` tail into a config entry.
-    pub fn parse_add_args(name: &str, rest: &str) -> Result<McpServerConfig, String> {
-        if name.is_empty() {
-            return Err("usage: /mcp add <name> <command> [args...]".into());
+    /// Parse the tail of `/mcp add …` into a config entry. Supports:
+    ///   /mcp add <name> <command> [args...]
+    ///   /mcp add --transport http <name> <url> [--header "Name: Value"]...
+    /// `--transport stdio` is the default; `--header`/`-H` may be repeated and is
+    /// only meaningful for HTTP transport.
+    pub fn parse_add_args(tail: &str) -> Result<McpServerConfig, String> {
+        const STDIO_USAGE: &str = "usage: /mcp add <name> <command> [args...]";
+        const HTTP_USAGE: &str = "usage: /mcp add --transport http|sse <name> <url> [--header \"Name: Value\"]";
+
+        let tokens = shlex::split(tail.trim()).ok_or("could not parse arguments (unbalanced quotes?)")?;
+        let mut transport = McpTransport::Stdio;
+        let mut headers: Vec<(String, String)> = Vec::new();
+        let mut positional: Vec<String> = Vec::new();
+        let mut oauth = false;
+
+        let mut i = 0;
+        while i < tokens.len() {
+            match tokens[i].as_str() {
+                "--oauth" => {
+                    oauth = true;
+                    i += 1;
+                }
+                "--transport" => {
+                    let v = tokens.get(i + 1).ok_or("--transport requires a value (stdio|http)")?;
+                    transport = match v.as_str() {
+                        "stdio" => McpTransport::Stdio,
+                        "http" => McpTransport::Http,
+                        "sse" => McpTransport::Sse,
+                        other => {
+                            return Err(format!("unknown transport `{other}` (expected stdio, http, or sse)"));
+                        }
+                    };
+                    i += 2;
+                }
+                "--header" | "-H" => {
+                    let v = tokens
+                        .get(i + 1)
+                        .ok_or("--header requires a value like \"Name: Value\"")?;
+                    let (k, val) = v
+                        .split_once(':')
+                        .ok_or("--header must be in the form \"Name: Value\"")?;
+                    headers.push((k.trim().to_string(), val.trim().to_string()));
+                    i += 2;
+                }
+                _ => {
+                    positional.push(tokens[i].clone());
+                    i += 1;
+                }
+            }
         }
-        let parts: Vec<&str> = rest.split_whitespace().collect();
-        if parts.is_empty() {
-            return Err("usage: /mcp add <name> <command> [args...]".into());
+
+        match transport {
+            McpTransport::Stdio => {
+                if oauth {
+                    return Err("--oauth is only valid with --transport http or sse".into());
+                }
+                if positional.len() < 2 {
+                    return Err(STDIO_USAGE.into());
+                }
+                Ok(McpServerConfig {
+                    name: positional[0].clone(),
+                    transport,
+                    command: positional[1].clone(),
+                    args: positional[2..].to_vec(),
+                    env: HashMap::new(),
+                    url: String::new(),
+                    headers: Vec::new(),
+                    oauth: false,
+                })
+            }
+            McpTransport::Http | McpTransport::Sse => {
+                if positional.len() != 2 {
+                    return Err(HTTP_USAGE.into());
+                }
+                Ok(McpServerConfig {
+                    name: positional[0].clone(),
+                    transport,
+                    command: String::new(),
+                    args: Vec::new(),
+                    env: HashMap::new(),
+                    url: positional[1].clone(),
+                    headers,
+                    oauth,
+                })
+            }
         }
-        Ok(McpServerConfig {
-            name: name.to_string(),
-            command: parts[0].to_string(),
-            args: parts[1..].iter().map(|s| (*s).to_string()).collect(),
-            env: HashMap::new(),
-        })
+    }
+
+    /// Import MCP servers from a Claude Desktop `claude_desktop_config.json`.
+    ///
+    /// Each entry under `mcpServers` is converted to a trogon server config:
+    /// stdio (`command`/`args`/`env`) and remote (`url`, optional `type: "sse"`)
+    /// entries are supported. Existing servers with the same name are replaced.
+    /// Entries with neither a command nor a URL are reported as skipped. The
+    /// caller is responsible for persisting via [`Self::save`].
+    pub fn import_claude_desktop<F: Fs>(&mut self, fs: &F, path: &Path) -> Result<ImportSummary, String> {
+        let raw = fs
+            .read_to_string(path)
+            .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        let parsed: ClaudeDesktopConfig =
+            serde_json::from_str(&raw).map_err(|e| format!("invalid Claude Desktop config: {e}"))?;
+
+        let mut imported = Vec::new();
+        let mut skipped = Vec::new();
+        for (name, server) in parsed.mcp_servers {
+            match server.into_config(&name) {
+                Some(cfg) => {
+                    self.add_server(cfg);
+                    imported.push(name);
+                }
+                None => skipped.push(name),
+            }
+        }
+        imported.sort();
+        skipped.sort();
+        Ok(ImportSummary { imported, skipped })
+    }
+}
+
+/// Outcome of [`McpManager::import_claude_desktop`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportSummary {
+    /// Names of servers added or replaced.
+    pub imported: Vec<String>,
+    /// Names skipped because the entry had neither a command nor a URL.
+    pub skipped: Vec<String>,
+}
+
+/// Default Claude Desktop config path for the current platform, if the relevant
+/// environment variable (`HOME`, or `APPDATA` on Windows) is set.
+pub fn default_claude_desktop_config_path() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").ok()?;
+        Some(PathBuf::from(appdata).join("Claude/claude_desktop_config.json"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = PathBuf::from(std::env::var("HOME").ok()?);
+        #[cfg(target_os = "macos")]
+        let rel = "Library/Application Support/Claude/claude_desktop_config.json";
+        #[cfg(not(target_os = "macos"))]
+        let rel = ".config/Claude/claude_desktop_config.json";
+        Some(home.join(rel))
+    }
+}
+
+/// Wire shape of a Claude Desktop `claude_desktop_config.json` (only the
+/// `mcpServers` map is read; all other keys are ignored).
+#[derive(Debug, Deserialize)]
+struct ClaudeDesktopConfig {
+    #[serde(default, rename = "mcpServers")]
+    mcp_servers: HashMap<String, ClaudeDesktopServer>,
+}
+
+/// Wire shape of a single Claude Desktop server entry. Both stdio and remote
+/// forms are accepted; absent fields default to empty.
+#[derive(Debug, Deserialize)]
+struct ClaudeDesktopServer {
+    #[serde(default)]
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+    #[serde(default)]
+    url: String,
+    /// Optional explicit transport hint (`"stdio"`, `"http"`, `"sse"`). When a
+    /// URL is present and this is `"sse"`, the server is imported as SSE.
+    #[serde(default, rename = "type")]
+    transport_type: String,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+}
+
+impl ClaudeDesktopServer {
+    /// Convert to a trogon [`McpServerConfig`], or `None` if the entry has
+    /// neither a command (stdio) nor a URL (remote).
+    fn into_config(self, name: &str) -> Option<McpServerConfig> {
+        if !self.url.is_empty() {
+            let transport = if self.transport_type.eq_ignore_ascii_case("sse") {
+                McpTransport::Sse
+            } else {
+                McpTransport::Http
+            };
+            let mut headers: Vec<(String, String)> = self.headers.into_iter().collect();
+            // HashMap iteration order is unspecified — sort so imports are
+            // deterministic (round-trips, tests, diffs).
+            headers.sort();
+            return Some(McpServerConfig {
+                name: name.to_string(),
+                transport,
+                command: String::new(),
+                args: Vec::new(),
+                env: HashMap::new(),
+                url: self.url,
+                headers,
+                oauth: false,
+            });
+        }
+        if !self.command.is_empty() {
+            return Some(McpServerConfig {
+                name: name.to_string(),
+                transport: McpTransport::Stdio,
+                command: self.command,
+                args: self.args,
+                env: self.env,
+                url: String::new(),
+                headers: Vec::new(),
+                oauth: false,
+            });
+        }
+        None
     }
 }
 
@@ -170,10 +519,191 @@ mod tests {
 
     #[test]
     fn parse_add_args_splits_command_and_args() {
-        let cfg = McpManager::parse_add_args("github", "npx -y @modelcontextprotocol/server-github").unwrap();
+        let cfg = McpManager::parse_add_args("github npx -y @modelcontextprotocol/server-github").unwrap();
         assert_eq!(cfg.name, "github");
+        assert_eq!(cfg.transport, McpTransport::Stdio);
         assert_eq!(cfg.command, "npx");
         assert_eq!(cfg.args, vec!["-y", "@modelcontextprotocol/server-github"]);
+    }
+
+    #[test]
+    fn parse_add_args_http_transport_with_url() {
+        let cfg = McpManager::parse_add_args("--transport http linear https://mcp.linear.app/sse").unwrap();
+        assert_eq!(cfg.name, "linear");
+        assert_eq!(cfg.transport, McpTransport::Http);
+        assert_eq!(cfg.url, "https://mcp.linear.app/sse");
+        assert!(cfg.command.is_empty());
+        assert!(cfg.headers.is_empty());
+    }
+
+    #[test]
+    fn parse_add_args_http_with_auth_header() {
+        let cfg = McpManager::parse_add_args(
+            "--transport http api https://api.example.com/mcp --header \"Authorization: Bearer tok123\"",
+        )
+        .unwrap();
+        assert_eq!(cfg.transport, McpTransport::Http);
+        assert_eq!(cfg.url, "https://api.example.com/mcp");
+        assert_eq!(
+            cfg.headers,
+            vec![("Authorization".to_string(), "Bearer tok123".to_string())]
+        );
+    }
+
+    #[test]
+    fn parse_add_args_http_missing_url_errors() {
+        assert!(McpManager::parse_add_args("--transport http onlyname").is_err());
+    }
+
+    #[test]
+    fn parse_add_args_unknown_transport_errors() {
+        assert!(McpManager::parse_add_args("--transport carrier-pigeon x y").is_err());
+    }
+
+    #[test]
+    fn parse_add_args_http_oauth_flag() {
+        let cfg = McpManager::parse_add_args("--transport http linear https://mcp.linear.app/sse --oauth").unwrap();
+        assert!(cfg.oauth);
+        assert_eq!(cfg.transport, McpTransport::Http);
+        assert!(cfg.headers.is_empty());
+    }
+
+    #[test]
+    fn parse_add_args_oauth_with_stdio_errors() {
+        assert!(McpManager::parse_add_args("--oauth name echo").is_err());
+    }
+
+    #[test]
+    fn http_config_round_trips_and_legacy_stdio_loads() {
+        // Legacy stdio JSON (no `transport` field) must still deserialize as Stdio.
+        let legacy: McpServerConfig = serde_json::from_str(r#"{"name":"old","command":"echo","args":[]}"#).unwrap();
+        assert_eq!(legacy.transport, McpTransport::Stdio);
+        assert_eq!(legacy.command, "echo");
+
+        // HTTP config round-trips with headers.
+        let http = McpServerConfig {
+            name: "api".into(),
+            transport: McpTransport::Http,
+            command: String::new(),
+            args: vec![],
+            env: HashMap::new(),
+            url: "https://api.example.com/mcp".into(),
+            headers: vec![("Authorization".into(), "Bearer t".into())],
+            oauth: false,
+        };
+        let json = serde_json::to_string(&http).unwrap();
+        let back: McpServerConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, http);
+    }
+
+    #[test]
+    fn parse_add_args_sse_transport_with_url() {
+        let cfg = McpManager::parse_add_args("--transport sse linear https://mcp.linear.app/sse").unwrap();
+        assert_eq!(cfg.name, "linear");
+        assert_eq!(cfg.transport, McpTransport::Sse);
+        assert_eq!(cfg.url, "https://mcp.linear.app/sse");
+        assert!(cfg.command.is_empty());
+    }
+
+    #[test]
+    fn parse_add_args_sse_with_header_and_oauth() {
+        let cfg =
+            McpManager::parse_add_args("--transport sse api https://api.example.com/sse --oauth -H \"X-Env: prod\"")
+                .unwrap();
+        assert_eq!(cfg.transport, McpTransport::Sse);
+        assert!(cfg.oauth);
+        assert_eq!(cfg.headers, vec![("X-Env".to_string(), "prod".to_string())]);
+    }
+
+    #[test]
+    fn sse_is_remote_and_login_url_resolves() {
+        let fs = MockFs::new();
+        let mut mgr = McpManager::load(&fs);
+        mgr.add_server(McpServerConfig {
+            name: "linear".into(),
+            transport: McpTransport::Sse,
+            command: String::new(),
+            args: vec![],
+            env: HashMap::new(),
+            url: "https://mcp.linear.app/sse".into(),
+            headers: vec![],
+            oauth: false,
+        });
+        assert!(McpTransport::Sse.is_remote());
+        assert_eq!(
+            mgr.http_server_url("linear").as_deref(),
+            Some("https://mcp.linear.app/sse")
+        );
+    }
+
+    #[test]
+    fn import_claude_desktop_stdio_http_and_sse() {
+        let fs = MockFs::new();
+        let path = PathBuf::from("/tmp/claude_desktop_config.json");
+        fs.write(
+            &path,
+            br#"{
+                "mcpServers": {
+                    "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"TOKEN": "x"}},
+                    "linear": {"type": "sse", "url": "https://mcp.linear.app/sse"},
+                    "api": {"url": "https://api.example.com/mcp", "headers": {"Authorization": "Bearer t"}},
+                    "broken": {}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut mgr = McpManager::load(&fs);
+        let summary = mgr.import_claude_desktop(&fs, &path).unwrap();
+        assert_eq!(summary.imported, vec!["api", "github", "linear"]);
+        assert_eq!(summary.skipped, vec!["broken"]);
+
+        let by_name = |n: &str| mgr.configured_servers().iter().find(|s| s.name == n).cloned().unwrap();
+        let gh = by_name("github");
+        assert_eq!(gh.transport, McpTransport::Stdio);
+        assert_eq!(gh.command, "npx");
+        assert_eq!(gh.env.get("TOKEN").map(String::as_str), Some("x"));
+
+        let linear = by_name("linear");
+        assert_eq!(linear.transport, McpTransport::Sse);
+        assert_eq!(linear.url, "https://mcp.linear.app/sse");
+
+        let api = by_name("api");
+        assert_eq!(api.transport, McpTransport::Http);
+        assert_eq!(api.headers, vec![("Authorization".to_string(), "Bearer t".to_string())]);
+    }
+
+    #[test]
+    fn import_claude_desktop_missing_file_errors() {
+        let fs = MockFs::new();
+        let mut mgr = McpManager::load(&fs);
+        assert!(
+            mgr.import_claude_desktop(&fs, &PathBuf::from("/tmp/nope.json"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn import_claude_desktop_replaces_same_name() {
+        let fs = MockFs::new();
+        let mut mgr = McpManager::load(&fs);
+        mgr.add_server(McpServerConfig {
+            name: "github".into(),
+            transport: McpTransport::Stdio,
+            command: "old".into(),
+            args: vec![],
+            env: HashMap::new(),
+            url: String::new(),
+            headers: vec![],
+            oauth: false,
+        });
+        let path = PathBuf::from("/tmp/cdc.json");
+        fs.write(&path, br#"{"mcpServers": {"github": {"command": "new"}}}"#)
+            .unwrap();
+        mgr.import_claude_desktop(&fs, &path).unwrap();
+        let servers: Vec<_> = mgr.configured_servers().iter().filter(|s| s.name == "github").collect();
+        assert_eq!(servers.len(), 1, "same-name import must replace, not duplicate");
+        assert_eq!(servers[0].command, "new");
     }
 
     #[test]
@@ -182,9 +712,13 @@ mod tests {
         let mut mgr = McpManager::load(&fs);
         mgr.add_server(McpServerConfig {
             name: "test".into(),
+            transport: McpTransport::Stdio,
             command: "echo".into(),
             args: vec![],
             env: HashMap::new(),
+            url: String::new(),
+            headers: vec![],
+            oauth: false,
         });
         mgr.save(&fs).unwrap();
         let loaded = McpManager::load(&fs);
