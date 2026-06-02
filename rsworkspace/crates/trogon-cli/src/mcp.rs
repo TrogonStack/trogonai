@@ -56,6 +56,11 @@ pub struct McpServerConfig {
     /// itself lives in `mcp-auth.json`, never here.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub oauth: bool,
+    /// Optional per-request timeout in seconds for remote (HTTP/SSE) servers.
+    /// Forwarded to the runner via the ACP `_meta` field; the runner bounds every
+    /// MCP call to this duration. `None` uses the runner's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,18 +209,28 @@ impl McpManager {
                         .iter()
                         .map(|(k, v)| HttpHeader::new(k.clone(), v.clone()))
                         .collect();
+                    // Forward a per-server timeout to the runner via `_meta`; the
+                    // runner reads it back with `timeout_from_meta`.
+                    let timeout_meta = cfg.timeout_secs.map(|secs| {
+                        let mut m = serde_json::Map::new();
+                        m.insert(
+                            trogon_runner_tools::mcp::TIMEOUT_META_KEY.to_string(),
+                            serde_json::json!(secs),
+                        );
+                        m
+                    });
                     let server = if cfg.transport == McpTransport::Sse {
                         let mut sse = McpServerSse::new(cfg.name.clone(), cfg.url.clone());
                         if !acp_headers.is_empty() {
                             sse = sse.headers(acp_headers);
                         }
-                        McpServer::Sse(sse)
+                        McpServer::Sse(sse.meta(timeout_meta))
                     } else {
                         let mut http = McpServerHttp::new(cfg.name.clone(), cfg.url.clone());
                         if !acp_headers.is_empty() {
                             http = http.headers(acp_headers);
                         }
-                        McpServer::Http(http)
+                        McpServer::Http(http.meta(timeout_meta))
                     };
                     acp_servers.push(server);
                     bridges.push(ActiveBridge {
@@ -294,13 +309,15 @@ impl McpManager {
     /// only meaningful for HTTP transport.
     pub fn parse_add_args(tail: &str) -> Result<McpServerConfig, String> {
         const STDIO_USAGE: &str = "usage: /mcp add <name> <command> [args...]";
-        const HTTP_USAGE: &str = "usage: /mcp add --transport http|sse <name> <url> [--header \"Name: Value\"]";
+        const HTTP_USAGE: &str =
+            "usage: /mcp add --transport http|sse <name> <url> [--header \"Name: Value\"] [--timeout <secs>]";
 
         let tokens = shlex::split(tail.trim()).ok_or("could not parse arguments (unbalanced quotes?)")?;
         let mut transport = McpTransport::Stdio;
         let mut headers: Vec<(String, String)> = Vec::new();
         let mut positional: Vec<String> = Vec::new();
         let mut oauth = false;
+        let mut timeout_secs: Option<u64> = None;
 
         let mut i = 0;
         while i < tokens.len() {
@@ -308,6 +325,17 @@ impl McpManager {
                 "--oauth" => {
                     oauth = true;
                     i += 1;
+                }
+                "--timeout" => {
+                    let v = tokens.get(i + 1).ok_or("--timeout requires a value in seconds")?;
+                    let secs: u64 = v
+                        .parse()
+                        .map_err(|_| format!("--timeout must be a positive integer, got `{v}`"))?;
+                    if secs == 0 {
+                        return Err("--timeout must be greater than 0".into());
+                    }
+                    timeout_secs = Some(secs);
+                    i += 2;
                 }
                 "--transport" => {
                     let v = tokens.get(i + 1).ok_or("--transport requires a value (stdio|http)")?;
@@ -343,6 +371,9 @@ impl McpManager {
                 if oauth {
                     return Err("--oauth is only valid with --transport http or sse".into());
                 }
+                if timeout_secs.is_some() {
+                    return Err("--timeout is only valid with --transport http or sse".into());
+                }
                 if positional.len() < 2 {
                     return Err(STDIO_USAGE.into());
                 }
@@ -355,6 +386,7 @@ impl McpManager {
                     url: String::new(),
                     headers: Vec::new(),
                     oauth: false,
+                    timeout_secs: None,
                 })
             }
             McpTransport::Http | McpTransport::Sse => {
@@ -370,6 +402,7 @@ impl McpManager {
                     url: positional[1].clone(),
                     headers,
                     oauth,
+                    timeout_secs,
                 })
             }
         }
@@ -485,6 +518,7 @@ impl ClaudeDesktopServer {
                 url: self.url,
                 headers,
                 oauth: false,
+                timeout_secs: None,
             });
         }
         if !self.command.is_empty() {
@@ -497,6 +531,7 @@ impl ClaudeDesktopServer {
                 url: String::new(),
                 headers: Vec::new(),
                 oauth: false,
+                timeout_secs: None,
             });
         }
         None
@@ -590,10 +625,32 @@ mod tests {
             url: "https://api.example.com/mcp".into(),
             headers: vec![("Authorization".into(), "Bearer t".into())],
             oauth: false,
+            timeout_secs: None,
         };
         let json = serde_json::to_string(&http).unwrap();
         let back: McpServerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, http);
+    }
+
+    #[test]
+    fn parse_add_args_http_with_timeout() {
+        let cfg = McpManager::parse_add_args("--transport http api https://api.example.com/mcp --timeout 30").unwrap();
+        assert_eq!(cfg.timeout_secs, Some(30));
+    }
+
+    #[test]
+    fn parse_add_args_timeout_with_stdio_errors() {
+        assert!(McpManager::parse_add_args("--timeout 10 name echo").is_err());
+    }
+
+    #[test]
+    fn parse_add_args_timeout_zero_errors() {
+        assert!(McpManager::parse_add_args("--transport http api https://x/mcp --timeout 0").is_err());
+    }
+
+    #[test]
+    fn parse_add_args_timeout_non_numeric_errors() {
+        assert!(McpManager::parse_add_args("--transport http api https://x/mcp --timeout abc").is_err());
     }
 
     #[test]
@@ -628,6 +685,7 @@ mod tests {
             url: "https://mcp.linear.app/sse".into(),
             headers: vec![],
             oauth: false,
+            timeout_secs: None,
         });
         assert!(McpTransport::Sse.is_remote());
         assert_eq!(
@@ -696,6 +754,7 @@ mod tests {
             url: String::new(),
             headers: vec![],
             oauth: false,
+            timeout_secs: None,
         });
         let path = PathBuf::from("/tmp/cdc.json");
         fs.write(&path, br#"{"mcpServers": {"github": {"command": "new"}}}"#)
@@ -719,6 +778,7 @@ mod tests {
             url: String::new(),
             headers: vec![],
             oauth: false,
+            timeout_secs: None,
         });
         mgr.save(&fs).unwrap();
         let loaded = McpManager::load(&fs);
