@@ -122,13 +122,9 @@ impl AnthropicHttpClient for reqwest::Client {
             };
 
             if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
-                let retry_after = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(30)
-                    .min(30);
+                let retry_after = capped_retry_after(
+                    resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+                );
                 warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                 tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                 attempt += 1;
@@ -188,6 +184,23 @@ impl From<reqwest::Error> for AgentError {
     fn from(e: reqwest::Error) -> Self {
         Self::Http(HttpError(e.to_string()))
     }
+}
+
+/// Cap (seconds) on a single 429 `Retry-After` wait. Bounded so the total retry
+/// time (`MAX_RETRIES` × this) stays well under the CLI's prompt timeout (180s);
+/// otherwise the CLI gives up before the runner returns the rate-limit error and
+/// appears to hang. Honoring an unbounded server `Retry-After` across several
+/// retries is wrong for an interactive client — better to error promptly so the
+/// user can retry or switch model.
+const MAX_RETRY_WAIT_SECS: u64 = 20;
+
+/// Parse a `Retry-After` header value (seconds) and clamp it to
+/// [`MAX_RETRY_WAIT_SECS`]; missing/unparseable → the cap.
+fn capped_retry_after(header: Option<&str>) -> u64 {
+    header
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(MAX_RETRY_WAIT_SECS)
+        .min(MAX_RETRY_WAIT_SECS)
 }
 
 // ── AgentEvent ────────────────────────────────────────────────────────────────
@@ -293,12 +306,9 @@ impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
                         Ok(r) => r,
                     };
                     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
-                        let retry_after = resp
-                            .headers()
-                            .get("retry-after")
-                            .and_then(|v| v.to_str().ok())
-                            .and_then(|s| s.parse::<u64>().ok())
-                            .unwrap_or(60);
+                        let retry_after = capped_retry_after(
+                            resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+                        );
                         warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                         tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                         attempt += 1;
@@ -1229,6 +1239,21 @@ mod sse_parser_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capped_retry_after_clamps_and_defaults() {
+        // Honors a small server value.
+        assert_eq!(capped_retry_after(Some("5")), 5);
+        // Clamps a large server value to the cap (avoids exceeding the CLI timeout).
+        assert_eq!(capped_retry_after(Some("600")), MAX_RETRY_WAIT_SECS);
+        assert_eq!(capped_retry_after(Some("60")), MAX_RETRY_WAIT_SECS);
+        // Missing / unparseable → the cap.
+        assert_eq!(capped_retry_after(None), MAX_RETRY_WAIT_SECS);
+        assert_eq!(capped_retry_after(Some("soon")), MAX_RETRY_WAIT_SECS);
+        // Worst-case total retry budget stays under the CLI's 180s prompt timeout.
+        const MAX_RETRIES: u64 = 4;
+        assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180);
+    }
 
     // ── MockAnthropicClient ───────────────────────────────────────────────────
 
