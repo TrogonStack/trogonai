@@ -25,6 +25,8 @@ pub struct Settings {
     pub model: Option<String>,
     /// Extra environment variables (loaded for completeness; not auto-applied).
     pub env: HashMap<String, String>,
+    /// Lifecycle hooks (PreToolUse/PostToolUse/Stop/Notification/UserPromptSubmit).
+    pub hooks: crate::hooks::HooksConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -94,6 +96,7 @@ impl Settings {
             self.model = other.model;
         }
         self.env.extend(other.env);
+        self.hooks.merge(other.hooks);
     }
 
     /// Translate `permissions.allow`/`deny` into trogon rule-text (the format
