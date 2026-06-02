@@ -147,6 +147,19 @@ fn build_session_init(
             ),
         }
     }
+    // Tool-event hooks (PreToolUse/PostToolUse) forwarded to the runner; CLI-side
+    // events (Stop/UserPromptSubmit/Notification) run in the REPL, not here.
+    let tool_hooks = if settings.hooks.pre_tool_use.is_empty()
+        && settings.hooks.post_tool_use.is_empty()
+    {
+        None
+    } else {
+        Some(trogon_runner_tools::HooksConfig {
+            pre_tool_use: settings.hooks.pre_tool_use.clone(),
+            post_tool_use: settings.hooks.post_tool_use.clone(),
+            ..Default::default()
+        })
+    };
     SessionInit {
         system_prompt_override: system_prompt,
         append_system_prompt,
@@ -155,6 +168,7 @@ fn build_session_init(
         additional_read_dirs: settings.permissions.additional_directories.clone(),
         // permissions.allow/deny translated to trogon rule-text.
         permission_rules: settings.permission_rules_text(),
+        tool_hooks,
     }
 }
 

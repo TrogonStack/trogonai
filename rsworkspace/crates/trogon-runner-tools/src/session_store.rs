@@ -112,6 +112,10 @@ pub struct SessionState {
     /// though they are outside the working directory.
     #[serde(default)]
     pub additional_read_dirs: Vec<String>,
+    /// Lifecycle hooks for tool events (PreToolUse/PostToolUse), sent from the CLI
+    /// via `_meta.toolHooks`. Run by the runner around tool dispatch.
+    #[serde(default, skip_serializing_if = "crate::hooks::HooksConfig::is_empty")]
+    pub tool_hooks: crate::hooks::HooksConfig,
     /// If true, all built-in agent tools are disabled for this session.
     /// Set via `_meta.disableBuiltInTools` at session creation.
     #[serde(default)]
@@ -196,6 +200,7 @@ impl Default for SessionState {
             system_prompt_override: None,
             additional_roots: Vec::new(),
             additional_read_dirs: Vec::new(),
+            tool_hooks: crate::hooks::HooksConfig::default(),
             disable_builtin_tools: false,
             allowed_tools: Vec::new(),
             parent_session_id: None,

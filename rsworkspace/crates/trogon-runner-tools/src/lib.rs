@@ -3,6 +3,7 @@
 pub mod compaction;
 pub mod egress;
 pub mod elicitation;
+pub mod hooks;
 pub mod mcp;
 pub mod nats_todo_tool;
 pub mod permission;
@@ -33,6 +34,7 @@ pub use permission::{
     ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
     RulesPermissionChecker, SafetyClassifier,
 };
+pub use hooks::{run_event_hooks, HookMatcher, HookOutcome, HooksConfig};
 pub use safety_classifier::LlmSafetyClassifier;
 pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;

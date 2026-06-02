@@ -453,6 +453,8 @@ pub struct PermissionExtras {
     pub additional_read_dirs: Vec<String>,
     /// `auto`-mode classifier. `None` makes `auto` prompt for side-effecting tools.
     pub classifier: Option<Arc<dyn SafetyClassifier>>,
+    /// PreToolUse hook matchers run before each tool (a blocking hook denies it).
+    pub pre_tool_use: Vec<crate::hooks::HookMatcher>,
 }
 
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
@@ -483,6 +485,8 @@ pub struct ModePermissionChecker {
     pub read_dirs: Vec<String>,
     /// `auto`-mode safety classifier.
     pub classifier: Option<Arc<dyn SafetyClassifier>>,
+    /// PreToolUse hook matchers; a blocking hook denies the tool.
+    pub pre_tool_use: Vec<crate::hooks::HookMatcher>,
 }
 
 impl ModePermissionChecker {
@@ -530,48 +534,66 @@ impl PermissionChecker for ModePermissionChecker {
             return Box::pin(async move { false });
         }
 
-        // Protected paths (.env*, .git/, keys, …) are NEVER auto-approved: force the
-        // interactive prompt, skipping both mode auto-allow and rule auto-allow.
-        if touches_protected_path(tool_name, tool_input) {
-            return self.inner.inner.check(tool_call_id, tool_name, tool_input);
-        }
-
-        match self.mode.as_str() {
-            "dontAsk" => {
-                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                Box::pin(async move { true })
-            }
-            // Read-only tools auto-allow in every non-bypass mode that isn't a pure
-            // deny: `default`, `acceptEdits`, `plan`, and `auto` — but only within the
-            // allowed read roots (cwd + additional_read_dirs); reads elsewhere prompt.
-            "default" | "acceptEdits" | "plan" | "auto" if is_read_only_tool(tool_name) => {
-                if self.read_allowed(tool_input) {
-                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                    Box::pin(async move { true })
-                } else {
-                    self.inner.inner.check(tool_call_id, tool_name, tool_input)
+        // Everything else runs in one async block so PreToolUse hooks can run
+        // (and potentially block) before the mode decision.
+        Box::pin(async move {
+            // PreToolUse hooks: a blocking hook denies the tool before it runs.
+            if !self.pre_tool_use.is_empty() {
+                let payload = serde_json::json!({
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                });
+                if let crate::hooks::HookOutcome::Block { reason } =
+                    crate::hooks::run_event_hooks(&self.pre_tool_use, Some(tool_name), &payload).await
+                {
+                    eprintln!("PreToolUse hook blocked `{tool_name}`: {reason}");
+                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                    return false;
                 }
             }
-            "default" | "acceptEdits" | "plan" | "auto"
-                if normalize_tool_name(tool_name) == "bash" && is_read_only_bash_command(tool_input) =>
-            {
-                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                Box::pin(async move { true })
+
+            // Protected paths (.env*, .git/, keys, …) are NEVER auto-approved: force
+            // the interactive prompt, skipping mode + rule auto-allow.
+            if touches_protected_path(tool_name, tool_input) {
+                return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
             }
-            "acceptEdits" if is_edit_tool(tool_name) => {
-                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                Box::pin(async move { true })
-            }
-            // Write/side-effect tools (and write-bash) are denied in plan mode.
-            "plan" if is_plan_denied_tool(tool_name) => {
-                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
-                Box::pin(async move { false })
-            }
-            // `auto`: a side-effecting (non-read, non-protected) tool — let the LLM
-            // safety classifier decide. No classifier configured → fall back to the
-            // interactive prompt (fail safe).
-            "auto" => Box::pin(async move {
-                match &self.classifier {
+
+            match self.mode.as_str() {
+                "dontAsk" => {
+                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                    true
+                }
+                // Read-only tools auto-allow in default/acceptEdits/plan/auto, but only
+                // within the allowed read roots (cwd + additional_read_dirs); reads
+                // elsewhere prompt.
+                "default" | "acceptEdits" | "plan" | "auto" if is_read_only_tool(tool_name) => {
+                    if self.read_allowed(tool_input) {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                        true
+                    } else {
+                        self.inner.inner.check(tool_call_id, tool_name, tool_input).await
+                    }
+                }
+                "default" | "acceptEdits" | "plan" | "auto"
+                    if normalize_tool_name(tool_name) == "bash"
+                        && is_read_only_bash_command(tool_input) =>
+                {
+                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                    true
+                }
+                "acceptEdits" if is_edit_tool(tool_name) => {
+                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                    true
+                }
+                // Write/side-effect tools (and write-bash) are denied in plan mode.
+                "plan" if is_plan_denied_tool(tool_name) => {
+                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                    false
+                }
+                // `auto`: side-effecting tool — let the LLM safety classifier decide.
+                // No classifier → fall back to the interactive prompt (fail safe).
+                "auto" => match &self.classifier {
                     Some(classifier) => match classifier.classify(tool_name, tool_input).await {
                         ClassifierVerdict::Allow => {
                             push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -586,10 +608,10 @@ impl PermissionChecker for ModePermissionChecker {
                         }
                     },
                     None => self.inner.check(tool_call_id, tool_name, tool_input).await,
-                }
-            }),
-            _ => self.inner.check(tool_call_id, tool_name, tool_input),
-        }
+                },
+                _ => self.inner.check(tool_call_id, tool_name, tool_input).await,
+            }
+        })
     }
 }
 
@@ -627,6 +649,7 @@ pub fn build_mode_permission_checker(
         cwd: extras.cwd,
         read_dirs: extras.additional_read_dirs,
         classifier: extras.classifier,
+        pre_tool_use: extras.pre_tool_use,
     }))
 }
 
@@ -848,6 +871,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -866,6 +890,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -887,6 +912,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -910,6 +936,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -928,6 +955,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -954,6 +982,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -972,6 +1001,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -989,6 +1019,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             !checker
@@ -1006,6 +1037,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             !checker
@@ -1027,6 +1059,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -1045,6 +1078,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             checker
@@ -1063,6 +1097,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             !checker
@@ -1082,6 +1117,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             !checker
@@ -1102,6 +1138,7 @@ mod tests {
             cwd: None,
             read_dirs: vec![],
             classifier: None,
+            pre_tool_use: vec![],
         };
         assert!(
             !checker
@@ -1581,6 +1618,7 @@ mod tests {
             cwd: cwd.map(String::from),
             read_dirs,
             classifier,
+            pre_tool_use: vec![],
         }
     }
 
