@@ -359,31 +359,24 @@ async fn main() -> anyhow::Result<()> {
                                     biased;
                                     msg = notif_sub.next() => {
                                         let Some(msg) = msg else { break; };
-                                        if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
-                                            if let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
-                                                if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
-                                                    text_clone.lock().await.push_str(&t.text);
-                                                }
-                                            }
+                                        if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload)
+                                            && let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update
+                                            && let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content
+                                        {
+                                            text_clone.lock().await.push_str(&t.text);
                                         }
                                     }
                                     _ = &mut stop_rx => {
                                         // Drain remaining buffered messages with a short timeout.
-                                        loop {
-                                            match tokio::time::timeout(
-                                                std::time::Duration::from_millis(50),
-                                                notif_sub.next(),
-                                            ).await {
-                                                Ok(Some(msg)) => {
-                                                    if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
-                                                        if let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
-                                                            if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
-                                                                text_clone.lock().await.push_str(&t.text);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                _ => break,
+                                        while let Ok(Some(msg)) = tokio::time::timeout(
+                                            std::time::Duration::from_millis(50),
+                                            notif_sub.next(),
+                                        ).await {
+                                            if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload)
+                                                && let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update
+                                                && let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content
+                                            {
+                                                text_clone.lock().await.push_str(&t.text);
                                             }
                                         }
                                         break;

@@ -36,6 +36,7 @@ use trogon_runner_tools::build_mode_permission_checker;
 use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::CompactError;
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -181,16 +182,23 @@ fn build_compact_payload(
     })
 }
 
+/// Requests compaction from `trogon-compactor`.
+///
+/// Returns `Ok(Some(messages))` when the compactor compacted, `Ok(None)` when it
+/// declined (nothing to compact), and `Err` when the compactor was unavailable or
+/// returned an invalid response. Distinguishing these three outcomes lets each
+/// caller pick its policy: the manual `/compact` handler propagates the `Err` so
+/// the user sees the compactor-down failure, while the auto-path degrades and
+/// continues uncompacted in the background.
 async fn compact_messages(
     nats: &async_nats::Client,
-    messages: Vec<Message>,
+    messages: &[Message],
     session_id: &str,
     model: &str,
     compactor_model: Option<&str>,
-) -> Vec<Message> {
-    let Ok(payload) = build_compact_payload(&messages, model, compactor_model) else {
-        return messages;
-    };
+) -> Result<Option<Vec<Message>>, CompactError> {
+    let payload = build_compact_payload(messages, model, compactor_model)
+        .map_err(|e| CompactError::Serialize(e.to_string()))?;
 
     let reply = match tokio::time::timeout(
         std::time::Duration::from_secs(25),
@@ -199,32 +207,27 @@ async fn compact_messages(
     .await
     {
         Ok(Ok(r)) => r,
-        Ok(Err(e)) => {
-            warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
-            return messages;
-        }
+        Ok(Err(e)) => return Err(CompactError::Request(e.to_string())),
         Err(_elapsed) => {
-            warn!(session_id, "compactor did not respond within 25 s — skipping compaction");
-            return messages;
+            return Err(CompactError::InvalidResponse(
+                "compactor did not respond within 25 s".into(),
+            ));
         }
     };
 
-    match serde_json::from_slice::<CompactResp>(&reply.payload) {
-        Ok(resp) => {
-            if resp.compacted {
-                info!(
-                    session_id,
-                    tokens_before = resp.tokens_before,
-                    tokens_after = resp.tokens_after,
-                    "context compacted"
-                );
-            }
-            resp.messages
-        }
-        Err(e) => {
-            warn!(session_id, error = %e, "compactor returned invalid response — skipping");
-            messages
-        }
+    let resp: CompactResp = serde_json::from_slice(&reply.payload)
+        .map_err(|e| CompactError::InvalidResponse(e.to_string()))?;
+
+    if resp.compacted {
+        info!(
+            session_id,
+            tokens_before = resp.tokens_before,
+            tokens_after = resp.tokens_after,
+            "context compacted"
+        );
+        Ok(Some(resp.messages))
+    } else {
+        Ok(None)
     }
 }
 
@@ -468,9 +471,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 .unwrap_or(&self.default_model)
                 .to_string();
             let compactor_model = state.compactor_model.clone();
-            let msgs = std::mem::take(&mut state.messages);
-            state.messages =
-                compact_messages(nats, msgs, &session_id, &model, compactor_model.as_deref()).await;
+            match compact_messages(nats, &state.messages, &session_id, &model, compactor_model.as_deref())
+                .await
+            {
+                Ok(Some(new_msgs)) => state.messages = new_msgs,
+                Ok(None) => {}
+                Err(e) => {
+                    warn!(session_id, error = %e, "auto-compaction failed — continuing uncompacted");
+                }
+            }
         }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
@@ -1404,21 +1413,29 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             let (compacted, tokens_after) = if let Some(ref nats) = self.compactor_nats {
                 let model = state.model.clone().unwrap_or_else(|| self.default_model.clone());
                 let compactor_model = state.compactor_model.clone();
-                let msgs = std::mem::take(&mut state.messages);
-                let new_msgs =
-                    compact_messages(nats, msgs, session_id, &model, compactor_model.as_deref())
-                        .await;
-                let after = estimate_token_count(&new_msgs);
-                state.messages = new_msgs;
-                if after < tokens_before {
-                    state.updated_at = now_iso8601();
-                    self.store
-                        .save(session_id, &state)
+                // Manual /compact propagates a compactor-down failure as an error so
+                // the user sees it, rather than reporting a misleading "no compaction
+                // needed". Distinct from the auto-path, which degrades silently.
+                let compacted_msgs =
+                    compact_messages(nats, &state.messages, session_id, &model, compactor_model.as_deref())
                         .await
                         .map_err(|e| internal_error(e.to_string()))?;
-                    (true, after)
-                } else {
-                    (false, tokens_before)
+                match compacted_msgs {
+                    Some(new_msgs) => {
+                        let after = estimate_token_count(&new_msgs);
+                        state.messages = new_msgs;
+                        if after < tokens_before {
+                            state.updated_at = now_iso8601();
+                            self.store
+                                .save(session_id, &state)
+                                .await
+                                .map_err(|e| internal_error(e.to_string()))?;
+                            (true, after)
+                        } else {
+                            (false, tokens_before)
+                        }
+                    }
+                    None => (false, tokens_before),
                 }
             } else {
                 (false, tokens_before)
@@ -1921,6 +1938,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_config_option_compactor_model_persists_to_store() {
+        use agent_client_protocol::Agent as _;
         use trogon_runner_tools::session_store::mock::MemorySessionStore;
 
         let store = MemorySessionStore::new();

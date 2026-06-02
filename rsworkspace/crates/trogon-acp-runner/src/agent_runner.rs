@@ -221,7 +221,7 @@ mod tests {
 
 // ── Mock (test-helpers feature) ───────────────────────────────────────────────
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod mock {
     use super::*;
     use std::sync::Mutex;
@@ -394,11 +394,14 @@ pub mod mock {
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
             // If configured, invoke the captured permission checker with a fake tool
-            // call to exercise the audit recording path.
-            if let Some((tool, input)) = self.invoke_checker_for_tool.lock().unwrap().clone() {
-                if let Some(checker) = self.captured_permission_checker.lock().unwrap().clone() {
-                    let _ = checker.check("mock-tc-1", &tool, &input).await;
-                }
+            // call to exercise the audit recording path. Clone out of the mutexes into
+            // locals first so no `MutexGuard` is held across the `.await` below.
+            let invoke_checker_for_tool = self.invoke_checker_for_tool.lock().unwrap().clone();
+            let captured_permission_checker = self.captured_permission_checker.lock().unwrap().clone();
+            if let Some((tool, input)) = invoke_checker_for_tool
+                && let Some(checker) = captured_permission_checker
+            {
+                let _ = checker.check("mock-tc-1", &tool, &input).await;
             }
 
             *self.captured_system_prompt.lock().unwrap() = system_prompt.map(str::to_string);

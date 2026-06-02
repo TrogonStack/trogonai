@@ -28,10 +28,10 @@ async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client) {
 fn spawn_responder(nats: async_nats::Client, subject: String, reply_body: &'static str) {
     tokio::spawn(async move {
         let mut sub = nats.subscribe(subject).await.unwrap();
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                nats.publish(reply, reply_body.into()).await.unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            nats.publish(reply, reply_body.into()).await.unwrap();
         }
     });
 }
