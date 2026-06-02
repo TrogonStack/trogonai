@@ -43,6 +43,21 @@ async fn ext_method<N: NatsClient>(
     .map_err(|_| anyhow::anyhow!("timed out waiting for ext method `{method}`"))?
     .map_err(|e| anyhow::anyhow!("NATS error on ext method `{method}`: {e}"))?;
 
+    // New discriminated envelope: {"result": <body>} | {"error": {code,message,...}}
+    if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        if let Some(err) = env.get("error") {
+            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("ext method error");
+            return Err(anyhow::anyhow!("{msg}"));
+        }
+        if let Some(result) = env.get("result") {
+            return Ok(result.clone());
+        }
+    }
+    // Compat: OLD bare format from un-upgraded runners.
+    // A bare Error {code,message} must NOT be masked — detect it before ExtResponse.
+    if let Ok(err) = serde_json::from_slice::<agent_client_protocol::Error>(&bytes) {
+        return Err(anyhow::anyhow!("{}", err.message));
+    }
     if let Ok(resp) = serde_json::from_slice::<ExtResponse>(&bytes) {
         return serde_json::from_str(resp.0.get())
             .map_err(|e| anyhow::anyhow!("invalid ext response body: {e}"));
@@ -1562,12 +1577,8 @@ mod tests {
     // ── TrogonSession::compact via MockNatsClient ─────────────────────────────
 
     fn ext_response(body: &str) -> Bytes {
-        let resp = ExtResponse::new(
-            serde_json::value::RawValue::from_string(body.to_string())
-                .unwrap()
-                .into(),
-        );
-        Bytes::from(serde_json::to_vec(&resp).unwrap())
+        let parsed: serde_json::Value = serde_json::from_str(body).unwrap();
+        Bytes::from(serde_json::to_vec(&serde_json::json!({"result": parsed})).unwrap())
     }
 
     #[tokio::test]
@@ -1613,6 +1624,26 @@ mod tests {
                 tokens_before: 0,
                 tokens_after: 0,
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_surfaces_runner_error_message() {
+        let nats = MockNatsClient::new();
+        queue_new_session_setup(&nats, "s1").await;
+        let session =
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+
+        // Runner replies with a discriminated error envelope.
+        let error_reply = serde_json::json!({
+            "error": {"code": -32603, "message": "compactor unavailable"}
+        });
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&error_reply).unwrap()));
+
+        let err = session.compact().await.unwrap_err();
+        assert!(
+            err.to_string().contains("compactor unavailable"),
+            "expected 'compactor unavailable' in error, got: {err}"
         );
     }
 

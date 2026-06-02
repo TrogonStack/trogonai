@@ -284,7 +284,14 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
             if msg.reply.is_some() {
                 handle_request(msg, nats, |mut req: ExtRequest| {
                     req.method = method;
-                    agent.ext_method(req)
+                    let fut = agent.ext_method(req);
+                    async move {
+                        let envelope = match fut.await {
+                            Ok(resp) => serde_json::json!({ "result": resp }),
+                            Err(e) => serde_json::json!({ "error": e }),
+                        };
+                        Ok::<_, agent_client_protocol::Error>(envelope)
+                    }
                 })
                 .await
             } else {
@@ -884,7 +891,67 @@ mod tests {
         .await;
         assert_eq!(nats.published_messages(), vec!["_INBOX.ext"]);
         let value: serde_json::Value = published_response(&nats);
-        assert!(value.is_null());
+        // Reply must be discriminated: {"result": <ext response body>}
+        assert!(value.is_object(), "ext reply must be a JSON object");
+        assert!(value.get("result").is_some(), "ext success reply must have a 'result' key");
+        assert!(value.get("error").is_none(), "ext success reply must not have an 'error' key");
+    }
+
+    #[tokio::test]
+    async fn dispatch_ext_error_reply_is_discriminated() {
+        // authenticate always returns MethodNotFound from MockAgent, but we need ext to
+        // return an error.  The default ext_method returns Ok(null), so we test by
+        // checking that the on-error path produces {"error": ...} using
+        // dispatch_authenticate (which does return Err) as a proxy for the shape,
+        // and separately verify the {"error": ...} shape from an auth call.
+        //
+        // For the ext error path specifically, we rely on the structural test: send a
+        // valid ext request and confirm the success envelope; the Err branch is covered
+        // by the code path inspection.  To give a real Err-path test we dispatch to a
+        // non-existent ext subject that the default impl returns Ok(null) for — the
+        // only way to exercise the Err arm at this level is to use a mock that returns
+        // Err from ext_method.  We do that with a dedicated inline mock below.
+        struct ErrAgent;
+        #[async_trait::async_trait(?Send)]
+        impl Agent for ErrAgent {
+            async fn initialize(&self, _: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
+                Err(AcpError::internal_error())
+            }
+            async fn authenticate(&self, _: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+                Err(AcpError::internal_error())
+            }
+            async fn logout(&self, _: LogoutRequest) -> agent_client_protocol::Result<agent_client_protocol::LogoutResponse> {
+                Err(AcpError::internal_error())
+            }
+            async fn new_session(&self, _: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+                Err(AcpError::internal_error())
+            }
+            async fn prompt(&self, _: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
+                Err(AcpError::internal_error())
+            }
+            async fn cancel(&self, _: CancelNotification) -> agent_client_protocol::Result<()> {
+                Err(AcpError::internal_error())
+            }
+            async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<agent_client_protocol::ExtResponse> {
+                Err(AcpError::method_not_found())
+            }
+        }
+
+        let nats = MockNatsClient::new();
+        let agent = ErrAgent;
+        let payload = serialize(&agent_client_protocol::ExtRequest::new("my_tool", raw_value("{}")));
+        let msg = make_nats_message("acp.agent.ext.my_tool", &payload, Some("_INBOX.ext_err"));
+        dispatch_message(msg, &agent, &nats).await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.ext_err"]);
+        let value: serde_json::Value = published_response(&nats);
+        // Reply must be discriminated: {"error": {...}}
+        assert!(value.is_object(), "ext error reply must be a JSON object");
+        assert!(value.get("error").is_some(), "ext error reply must have an 'error' key");
+        assert!(value.get("result").is_none(), "ext error reply must not have a 'result' key");
+        let error_obj = &value["error"];
+        assert!(error_obj.get("code").is_some(), "error object must have 'code'");
+        assert!(error_obj.get("message").is_some(), "error object must have 'message'");
     }
 
     #[tokio::test]
