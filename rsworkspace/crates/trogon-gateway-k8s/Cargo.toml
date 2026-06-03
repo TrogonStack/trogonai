@@ -2,6 +2,7 @@
 name = "trogon-gateway-k8s"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "Kubernetes controller projecting Gateway API and Trogon CRDs into MCP gateway NATS KV"
 publish = false
 

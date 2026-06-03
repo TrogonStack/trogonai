@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "xDS interop bridge projecting Trogon gateway KV config to Envoy v3 resources"
 license = "MIT"
+publish.workspace = true
 repository = "https://github.com/TrogonStack/trogonai"
 
 [[bin]]
