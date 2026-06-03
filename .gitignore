@@ -56,3 +56,9 @@ tmp
 
 # Python
 __pycache__
+
+# Readiness audit / verification artifacts (local analysis, not for the repo)
+docs/trogon-vs-claude-code-readiness.md
+docs/readiness-verification.md
+docs/readiness-all-findings.md
+docs/_readiness/
