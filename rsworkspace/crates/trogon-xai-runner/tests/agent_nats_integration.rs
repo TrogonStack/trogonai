@@ -1221,6 +1221,154 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
         .await;
 }
 
+/// END-TO-END CHARACTERIZATION of the double-path compaction bug.
+///
+/// Runs a real prompt turn on a `grok-4-fast` session (2M-token window) whose
+/// history is ~187k tokens — i.e. ABOVE the model-blind env gate (200k×85% =
+/// 170k) but FAR BELOW the model-aware gate (2M×85% = 1.7M, only ~9% used).
+///
+/// A stand-in compactor on `trogon.compactor.compact` captures every request
+/// payload. The two paths are distinguishable on the wire: the env path
+/// (`maybe_compact`) sends a `CompactReq` WITHOUT `context_window`; the
+/// model-aware path (`compaction::compact`) sends one WITH it.
+///
+/// Proves the runtime manifestation: the env path compacts a 2M-window model at
+/// ~187k (premature, model-blind), while the model-aware path correctly stays
+/// silent. This is NOT desired behavior — delete/update when the env path is
+/// removed in favor of the model-aware one.
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn characterize_env_path_compacts_grok4fast_prematurely_e2e() {
+    use std::time::Duration;
+    use trogon_xai_runner::Message;
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // Stand-in compactor: CAPTURES each request payload, then replies with a
+    // 3-message compacted history so the runner applies it.
+    let captured = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let cap = captured.clone();
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let v: serde_json::Value =
+                serde_json::from_slice(&msg.payload).unwrap_or(serde_json::Value::Null);
+            cap.lock().unwrap().push(v);
+            if let Some(reply) = msg.reply {
+                let body = serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "<context-summary>\nsummary\n</context-summary>"}]},
+                        {"role": "assistant", "content": [{"type": "text", "text": "ack"}]},
+                        {"role": "user", "content": [{"type": "text", "text": "recent"}]}
+                    ],
+                    "compacted": true,
+                    "tokens_before": 999_999,
+                    "tokens_after": 100,
+                    "kept_count": 1
+                });
+                responder
+                    .publish(reply, serde_json::to_vec(&body).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Default model grok-4-fast-reasoning → context_window_tokens = 2_000_000.
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4-fast-reasoning", "test-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store))
+        .with_compactor(nats.clone());
+
+    // ~187k-token history: 25 × 30 KB ≈ 750 KB / 4 ≈ 187k tokens. Over the env
+    // gate (170k), far under the 2M model-aware gate (1.7M).
+    let big = "x".repeat(30_000);
+    let mut history = Vec::new();
+    for i in 0..25 {
+        if i % 2 == 0 {
+            history.push(Message::user(format!("{big}{i}")));
+        } else {
+            history.push(Message::assistant_text(format!("{big}{i}")));
+        }
+    }
+    agent
+        .test_insert_session_with_history("s-fast", "/tmp", history)
+        .await;
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            agent
+                .prompt(PromptRequest::new(
+                    SessionId::from("s-fast"),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // (1) Inspect the captured compactor requests to identify which path(s)
+            //     fired. Env path → no `context_window`; model-aware → has it.
+            let (with_window, without_window) = {
+                let reqs = captured.lock().unwrap();
+                assert!(!reqs.is_empty(), "the compactor must have been called");
+                let with_window = reqs
+                    .iter()
+                    .filter(|v| v.get("context_window").is_some())
+                    .count();
+                let without_window = reqs
+                    .iter()
+                    .filter(|v| v.get("context_window").is_none())
+                    .count();
+                eprintln!(
+                    "CAPTURED compactor requests: total={}, with_window={with_window}, without_window={without_window}",
+                    reqs.len()
+                );
+                for (i, r) in reqs.iter().enumerate() {
+                    eprintln!("  req[{i}] context_window = {:?}", r.get("context_window"));
+                }
+                (with_window, without_window)
+            };
+
+            // The ENV (model-blind) path fired: a CompactReq with NO context_window
+            // compacted a 2M-window model at ~187k (≈9% of its window). Premature.
+            assert!(
+                without_window >= 1,
+                "env path (no context_window) compacted a 2M model at 187k — model-blind & premature"
+            );
+            // The model-aware path correctly stayed silent (187k < its 1.7M gate),
+            // so the ONLY compaction was the wrong, model-blind one.
+            assert_eq!(
+                with_window, 0,
+                "model-aware path (with context_window) must NOT fire at 187k on a 2M model"
+            );
+
+            // (2) And the history was actually compacted — the 25-message history is
+            //     gone, replaced by the summary checkpoint (+ the new turn's messages).
+            let hist = agent.test_session_history("s-fast").await;
+            assert!(
+                hist.len() < 25,
+                "the 25-message history must have been compacted (now {})",
+                hist.len()
+            );
+            assert!(
+                hist.iter()
+                    .any(|m| m.content.as_deref().unwrap_or("").contains("context-summary")),
+                "compacted history must contain the summary checkpoint"
+            );
+        })
+        .await;
+}
+
 // ── Permission emit e2e: xai emits request_permission on Ask and gates on the reply ──
 
 /// Notifier that records every notification so the test can assert the deny update.

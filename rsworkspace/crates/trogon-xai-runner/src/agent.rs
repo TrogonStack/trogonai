@@ -3344,6 +3344,40 @@ mod tests {
     use crate::http_client::mock::MockXaiHttpClient;
     use crate::session_notifier::MockSessionNotifier;
 
+    // ── CHARACTERIZATION: env vs model-aware compaction threshold divergence ─────
+    // Documents the CURRENT double-path behavior (the env path runs alongside the
+    // model-aware path each turn). This is NOT desired behavior — when the env
+    // path is removed in favor of the model-aware one, update/delete this test.
+    #[test]
+    fn characterize_env_threshold_is_model_blind_vs_per_model_windows() {
+        // Env path (compact_or_trim_xai_history → maybe_compact) uses a FIXED 200k
+        // budget at 85% = 170k for EVERY model, ignoring the real context window.
+        const ENV_THRESHOLD: u64 = 200_000 * 85 / 100;
+        assert_eq!(ENV_THRESHOLD, 170_000);
+
+        // Model-aware path (compaction::should_compact) derives the window per model:
+        assert_eq!(context_window_tokens("grok-4-fast-reasoning"), 2_000_000);
+        assert_eq!(context_window_tokens("grok-4-0709"), 256_000);
+        assert_eq!(context_window_tokens("grok-3-mini"), 131_072);
+
+        let aware = |w: u64| w * 85 / 100;
+
+        // grok-4-fast (2M): the model-aware gate fires at 1.7M, which is EXACTLY 10×
+        // the env threshold (170k). The env path therefore compacts ~10× too early
+        // on a 2M-window model.
+        assert_eq!(aware(2_000_000), 1_700_000);
+        assert_eq!(aware(2_000_000), 10 * ENV_THRESHOLD);
+
+        // grok-3 (131k): its WHOLE window is below the env threshold (170k), so the
+        // env token-gate can never fire (the request hits the 131k limit first);
+        // only the model-aware gate (~111k) protects grok-3.
+        assert!(
+            131_072 < ENV_THRESHOLD,
+            "grok-3 window 131k < env threshold 170k → env token-gate never fires for grok-3"
+        );
+        assert!(aware(131_072) < 131_072);
+    }
+
     type TestAgent = XaiAgent<Arc<MockXaiHttpClient>, Arc<MockSessionNotifier>>;
 
     /// Mock TROGON.md loader that returns a fixed string (or None) without

@@ -2724,6 +2724,27 @@ mod tests {
     use crate::http_client::mock::MockOpenRouterHttpClient;
     use crate::session_notifier::MockSessionNotifier;
 
+    // ── CHARACTERIZATION: unknown OpenRouter models disable model-aware compaction ──
+    // Proves that removing the env path is UNSAFE until context_window_tokens returns
+    // a sane default for unknown models (today it returns None → model-aware skips them).
+    #[test]
+    fn characterize_unknown_model_disables_model_aware_compaction() {
+        // Known models map to a real window → model-aware compaction works:
+        assert_eq!(context_window_tokens("anthropic/claude-3.5-sonnet"), Some(200_000));
+        assert_eq!(context_window_tokens("openai/gpt-4"), Some(8_192));
+
+        // Unknown models → None → the model-aware gate can NEVER fire, regardless of
+        // history size (should_compact returns false for a None window). Only the env
+        // (200k) path would compact them, so deleting the env path would leave unknown
+        // OpenRouter models with NO compaction at all.
+        assert_eq!(context_window_tokens("acme/brand-new-model-v9"), None);
+        let huge = vec![crate::client::Message::user("x".repeat(1_000_000))];
+        assert!(
+            !crate::compaction::should_compact(&huge, None),
+            "unknown model → None window → model-aware never compacts (only env path would)"
+        );
+    }
+
     // Serialise all tests that mutate environment variables so they don't race
     // each other in the default multi-threaded cargo test harness.
     static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
