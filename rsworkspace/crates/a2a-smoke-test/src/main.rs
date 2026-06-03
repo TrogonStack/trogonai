@@ -322,6 +322,13 @@ async fn run_smoke_jwt_path(ctx: &SmokeContext) -> Result<(), String> {
     };
     info!(%task_id, "message/send completed");
 
+    let audit_subject = format!("{}.audit.ok.tasks.get", ctx.prefix.as_str());
+    let mut audit_sub = ctx
+        .nats
+        .subscribe(async_nats::Subject::from(audit_subject.as_str()))
+        .await
+        .map_err(|e| e.to_string())?;
+
     let get_req = GetTaskRequest {
         id: task_id.clone(),
         ..Default::default()
@@ -334,13 +341,6 @@ async fn run_smoke_jwt_path(ctx: &SmokeContext) -> Result<(), String> {
         return Err(format!("tasks/get task not completed: {:?}", task.status));
     }
     info!(%task_id, "tasks/get completed");
-
-    let audit_subject = format!("{}.audit.ok.tasks.get", ctx.prefix.as_str());
-    let mut audit_sub = ctx
-        .nats
-        .subscribe(async_nats::Subject::from(audit_subject.as_str()))
-        .await
-        .map_err(|e| e.to_string())?;
 
     let audit = tokio::time::timeout(Duration::from_secs(15), audit_sub.next())
         .await
