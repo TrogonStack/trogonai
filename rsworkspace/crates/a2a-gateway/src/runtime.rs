@@ -1377,7 +1377,8 @@ mod gateway_dispatch_tests {
     use async_nats::HeaderMap;
     use trogon_std::env::InMemoryEnv;
 
-    use super::{config_from_args, tier1_declarative_context_from_ingress, Args, Config};
+    use super::{config_from_args, tier1_declarative_context_from_ingress, unary_deadline_for_method, Args, Config};
+    use std::time::Duration;
     use crate::policy::tier1_declarative::{
         RealTier1DeclarativeGate, Tier1DeclarativeBundle, Tier1DeclarativeDecision, Tier1DeclarativeGate,
         tier1_declarative_audit_rule_fired,
@@ -1678,6 +1679,39 @@ pattern = "planner"
         assert_eq!(
             tier1_declarative_audit_rule_fired(&decision),
             "gateway.tier1.declarative.allowed.allow-planner"
+        );
+    }
+
+    #[test]
+    fn unary_deadline_defaults_to_30s_for_message_send() {
+        let env = InMemoryEnv::new();
+        assert_eq!(
+            unary_deadline_for_method(&env, "message.send"),
+            Some(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn unary_deadline_returns_none_for_non_message_send_methods() {
+        let env = InMemoryEnv::new();
+        assert_eq!(unary_deadline_for_method(&env, "tasks.send"), None);
+        assert_eq!(unary_deadline_for_method(&env, "agent.card"), None);
+    }
+
+    #[test]
+    fn unary_deadline_honours_env_override_and_floors_to_one_second() {
+        let env = InMemoryEnv::new();
+        env.set("A2A_GATEWAY_UNARY_DEADLINE_SECS", "5");
+        assert_eq!(
+            unary_deadline_for_method(&env, "message.send"),
+            Some(Duration::from_secs(5)),
+        );
+
+        let env = InMemoryEnv::new();
+        env.set("A2A_GATEWAY_UNARY_DEADLINE_SECS", "0");
+        assert_eq!(
+            unary_deadline_for_method(&env, "message.send"),
+            Some(Duration::from_secs(1)),
         );
     }
 }
