@@ -153,4 +153,4 @@ challenge parsing, the exchange, and the verifier accepting the resulting
 - Spec: `draft-hardt-aauth-protocol-02`, `draft-hardt-aauth-bootstrap-01`.
 - Posta walkthrough: https://blog.christianposta.com/aauth-full-demo/.
 - Design decisions (locked): [aauth-design.md](./aauth-design.md).
-- Plan / status: [AAUTH_PLAN.md](../../AAUTH_PLAN.md).
+- Post-v0 backlog: [`docs/roadmap/agentgateway-v0.2.md` §AAuth post-v0](../roadmap/agentgateway-v0.2.md#aauth-post-v0).
