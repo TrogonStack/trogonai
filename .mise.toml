@@ -18,7 +18,7 @@ depends = ["build:rust", "build:docs"]
 
 [tasks."build:docs"]
 dir = "docs"
-run = "pnpm docs:build"
+run = "pnpm install --frozen-lockfile && pnpm docs:build"
 
 [tasks."build:rust"]
 dir = "rsworkspace"

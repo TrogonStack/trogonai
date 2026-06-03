@@ -51,6 +51,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push canary image
+        id: build_image
         uses: docker/build-push-action@v7
         with:
           context: ${{ steps.service_config.outputs.context }}
@@ -61,3 +62,38 @@ jobs:
             ${{ steps.image.outputs.name }}:sha-${{ steps.image.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          image-ref: ${{ steps.image.outputs.name }}:canary
+          scanners: vuln
+          format: table
+          output: trivy-results.txt
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0.20.6
+        with:
+          image: ${{ steps.image.outputs.name }}:canary
+          artifact-name: sbom-${{ matrix.service }}-spdx
+          format: spdx-json
+
+      - name: Document image security audit
+        shell: bash
+        run: |
+          {
+            echo "## Image security audit: \`${{ matrix.service }}\`"
+            echo ""
+            echo "- Image: \`${{ steps.image.outputs.name }}:canary\`"
+            echo "- Runtime base: \`debian:bookworm-20260518-slim\`"
+            echo "- SBOM artifact: \`sbom-${{ matrix.service }}-spdx\` (SPDX JSON)"
+            echo ""
+            echo "### Vulnerability scan (Trivy, image packages)"
+            echo '```text'
+            cat trivy-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

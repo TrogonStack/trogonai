@@ -1,5 +1,5 @@
 # ── Stage 1: chef — generate dependency recipe ──────────────────────────────
-FROM rust:1.96.0-slim AS chef
+FROM rust:1.96.0-slim-bookworm AS chef
 
 RUN cargo install cargo-chef --locked
 
