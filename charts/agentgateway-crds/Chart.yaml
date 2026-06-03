@@ -1,0 +1,21 @@
+apiVersion: v2
+name: agentgateway-crds
+description: |
+  CRDs for the Trogon agentgateway: Gateway-API + Trogon-specific
+  Gateway / Route / Policy resources. Installed separately from the
+  main `agentgateway` chart so the CRD lifecycle is decoupled from
+  workload upgrades.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/TrogonStack/trogonai
+sources:
+  - https://github.com/TrogonStack/trogonai
+maintainers:
+  - name: Trogon
+    url: https://github.com/TrogonStack
+keywords:
+  - mcp
+  - a2a
+  - crd
+  - gateway-api

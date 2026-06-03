@@ -1,0 +1,10 @@
+# Overlay: deploy `a2a-auth-callout` (NATS $SYS.REQ.USER.AUTH subscriber).
+image:
+  bin: a2a-auth-callout
+
+env:
+  NATS_URL: "nats://nats:4222"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "a2a-auth-callout"
+
+# existingSecret: trogon-account-signing-key

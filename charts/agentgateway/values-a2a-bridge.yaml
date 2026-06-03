@@ -1,0 +1,13 @@
+# Overlay: deploy `a2a-bridge` (HTTPS → NATS bridge, v0.1 0.0.0-skeleton).
+image:
+  bin: a2a-bridge
+
+env:
+  A2A_BRIDGE_LISTEN_ADDR: "0.0.0.0:8443"
+  NATS_URL: "nats://nats:4222"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "a2a-bridge"
+
+service:
+  type: ClusterIP
+  port: 8443

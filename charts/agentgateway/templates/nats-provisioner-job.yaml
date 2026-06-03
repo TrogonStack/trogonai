@@ -1,0 +1,76 @@
+{{- if .Values.natsProvisioner.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agentgateway.fullname" . }}-nats-assets
+  labels: {{- include "agentgateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  apply.sh: |
+    #!/bin/sh
+    set -eu
+    cd /assets
+    for f in streams/*.json; do
+      nats stream add --config "$f" || nats stream update --config "$f"
+    done
+    for f in kv/*.json; do
+      nats kv add --config "$f" || true
+    done
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "agentgateway.fullname" . }}-nats-provisioner
+  labels: {{- include "agentgateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels: {{- include "agentgateway.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "agentgateway.serviceAccountName" . }}
+      containers:
+        - name: provisioner
+          image: {{ .Values.natsProvisioner.image }}
+          command: ["/bin/sh", "/scripts/apply.sh"]
+          env:
+            - name: NATS_URL
+              value: {{ .Values.natsProvisioner.natsUrl | quote }}
+            {{- if .Values.natsProvisioner.credsSecret }}
+            - name: NATS_CREDS
+              value: "/creds/user.creds"
+            {{- end }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: assets
+              mountPath: /assets
+            {{- if .Values.natsProvisioner.credsSecret }}
+            - name: creds
+              mountPath: /creds
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "agentgateway.fullname" . }}-nats-assets
+            defaultMode: 0755
+        - name: assets
+          # Operator-supplied PVC or projected volume that contains the
+          # devops/nats/{streams,kv}/ tree. The chart cannot bundle JSON
+          # files dynamically; mount them or bake them into the image.
+          emptyDir: {}
+        {{- if .Values.natsProvisioner.credsSecret }}
+        - name: creds
+          secret:
+            secretName: {{ .Values.natsProvisioner.credsSecret }}
+        {{- end }}
+{{- end }}

@@ -1,0 +1,8 @@
+# Overlay: deploy `acp-nats-server`.
+image:
+  bin: acp-nats-server
+
+env:
+  NATS_URL: "nats://nats:4222"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "acp-nats-server"

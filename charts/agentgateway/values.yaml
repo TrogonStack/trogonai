@@ -116,3 +116,42 @@ extraEnv: []
 # Extra volumes/mounts (e.g. read-only JWKS bundle).
 extraVolumes: []
 extraVolumeMounts: []
+
+# Opt-in NetworkPolicy. When enabled, the policy restricts ingress to the
+# probe port from the namespaces / pod selectors listed below and allows
+# egress only to NATS, SpiceDB, OTel, and DNS. Adjust before enabling.
+networkPolicy:
+  enabled: false
+  # Pod selectors allowed to reach the probe port. Empty list allows none.
+  allowedIngressPodSelectors: []
+  # Namespace selectors allowed to reach the probe port.
+  allowedIngressNamespaceSelectors: []
+  # Egress destinations (NATS, SpiceDB, OTel collector).
+  egress:
+    natsPort: 4222
+    spicedbPort: 50051
+    otelPort: 4317
+
+# Opt-in PodDisruptionBudget.
+pdb:
+  enabled: false
+  # Either minAvailable OR maxUnavailable, not both.
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Pre-install hook that provisions NATS streams + KV from
+# devops/nats/{streams,kv}/. Disabled by default — operators usually
+# manage substrate provisioning out-of-band.
+natsProvisioner:
+  enabled: false
+  # Image with `nats` CLI baked in. Override to pin a digest.
+  image: natsio/nats-box:0.18.0
+  # Server the job connects to.
+  natsUrl: "nats://nats:4222"
+  # Optional credentials secret with `.creds` key (NSC user creds).
+  credsSecret: ""
+
+# helm test job. Probes /readyz to confirm the gateway came up.
+tests:
+  enabled: true
+  image: curlimages/curl:8.16.0
