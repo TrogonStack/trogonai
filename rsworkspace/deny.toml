@@ -9,7 +9,30 @@ feature-depth = 1
 db-path = "$CARGO_HOME/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = []
+# Each entry must point at a tracked follow-up. See
+# `docs/roadmap/agentgateway-v0.2.md` §"Open GitHub items" and
+# §"Advisory ignore list".
+ignore = [
+    # rand 0.8.5 unsound when paired with a custom logger calling `rand::rng()`.
+    # PR #190 (dependabot) bumps to 0.8.6; we do not invoke `rand::rng()` from a
+    # custom logger anywhere in the workspace. Resolved on PR #190 auto-merge.
+    "RUSTSEC-2026-0097",
+    # rustls-webpki 0.101.7 — transitive through `aws-config -> legacy-rustls 0.21`
+    # in trogon-jwks-publisher only. Direct workspace pin is on 0.103.13 (patched).
+    # Tracked for v0.2 dep-graph cleanup (aws-config bump).
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    # rsa 0.9.x Marvin Attack timing side-channel — transitive; we do not perform
+    # PKCS#1 v1.5 decryption with attacker-controlled ciphertexts in any mesh
+    # cert path. Tracked for v0.2.
+    "RUSTSEC-2023-0071",
+    # Unmaintained transitive crates pulled via async-nats / aws-config /
+    # twilight; no first-party usage. Replacement awaits upstream releases.
+    "RUSTSEC-2024-0384",  # instant
+    "RUSTSEC-2024-0436",  # paste
+    "RUSTSEC-2025-0134",  # rustls-pemfile (transitive)
+]
 
 [licenses]
 allow = [
@@ -19,6 +42,7 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "CC0-1.0",
+    "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     "MIT-0",
@@ -38,6 +62,9 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Path deps inside the workspace are inherently versionless; without this
+# flag cargo-deny flags every `{ workspace = true }` line as a wildcard.
+allow-wildcard-paths = true
 highlight = "all"
 deny = []
 skip = []
