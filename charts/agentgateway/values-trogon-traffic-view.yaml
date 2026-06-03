@@ -1,0 +1,13 @@
+# Overlay: deploy `trogon-traffic-view` (read-only audit projector + UI).
+image:
+  bin: trogon-traffic-view
+
+env:
+  NATS_URL: "nats://nats:4222"
+  TROGON_TRAFFIC_VIEW_AUDIT_STREAM: "MCP_AUDIT"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "trogon-traffic-view"
+
+service:
+  type: ClusterIP
+  port: 8080

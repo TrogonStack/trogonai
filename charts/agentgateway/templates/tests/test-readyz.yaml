@@ -1,0 +1,21 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "agentgateway.fullname" . }}-test-readyz
+  labels: {{- include "agentgateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: {{ .Values.tests.image }}
+      command:
+        - sh
+        - -c
+        - >
+          curl --fail --silent --show-error
+          http://{{ include "agentgateway.fullname" . }}:{{ .Values.service.port }}/readyz
+{{- end }}
