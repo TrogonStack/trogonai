@@ -23,14 +23,14 @@ use bytes::Bytes;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info, warn};
 use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBlock, ImageSource, Message};
-use trogon_agent_core::tools::{ToolDef, all_tool_defs};
+use trogon_agent_core::tools::{ToolDef, all_tool_defs, exit_plan_mode_tool_def};
 
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
 use trogon_runner_tools::egress::EgressPolicy;
 use trogon_runner_tools::permission_rules::PermissionRules;
 use crate::prompt_converter::PromptEventConverter;
-use crate::session_notifier::{PromptEventClient, SessionNotifier};
+use crate::session_notifier::{AccumulatingPromptClient, PromptEventClient, SessionNotifier};
 use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
 use trogon_runner_tools::build_mode_permission_checker;
 use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601};
@@ -253,6 +253,35 @@ pub struct TrogonAgent<
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     /// NATS client forwarded to `WasmRuntimeBashTool` when an execution backend is available.
     execution_nats: Option<async_nats::Client>,
+    /// `auto`-mode LLM safety classifier. `None` makes `auto` prompt for
+    /// side-effecting tools instead of classifying them.
+    classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
+}
+
+// Manual `Clone` so the spawn handler can hold a cheap, shared handle to the
+// agent and run sub-agents in-process. Every field is `Arc`-backed or otherwise
+// cheap to clone; `A` lives behind `Arc`, so no `A: Clone` bound is required.
+// `session_locks` is shared, so sub-session prompt serialization stays coherent.
+impl<S: Clone, A, N: Clone, M: Clone> Clone for TrogonAgent<S, A, N, M> {
+    fn clone(&self) -> Self {
+        Self {
+            notifier: self.notifier.clone(),
+            store: self.store.clone(),
+            agent: self.agent.clone(),
+            md_loader: self.md_loader.clone(),
+            prefix: self.prefix.clone(),
+            default_model: self.default_model.clone(),
+            permission_tx: self.permission_tx.clone(),
+            elicitation_tx: self.elicitation_tx.clone(),
+            gateway_config: self.gateway_config.clone(),
+            session_locks: self.session_locks.clone(),
+            compactor_nats: self.compactor_nats.clone(),
+            http: self.http.clone(),
+            registry: self.registry.clone(),
+            execution_nats: self.execution_nats.clone(),
+            classifier: self.classifier.clone(),
+        }
+    }
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
@@ -284,6 +313,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
             http: reqwest::Client::new(),
             registry: None,
             execution_nats: None,
+            classifier: None,
         }
     }
 }
@@ -307,7 +337,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             http: self.http,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            classifier: self.classifier,
         }
+    }
+
+    /// Set the `auto`-mode LLM safety classifier.
+    pub fn with_safety_classifier(
+        mut self,
+        classifier: Arc<dyn trogon_runner_tools::SafetyClassifier>,
+    ) -> Self {
+        self.classifier = Some(classifier);
+        self
     }
 
     /// Enable context compaction via `trogon-compactor`.
@@ -402,6 +442,133 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .clone()
     }
 
+    /// Run a sub-agent fully **in-process** and return its assistant text.
+    ///
+    /// This is the responder behind the `spawn_agent` tool. It must NOT route the
+    /// sub-agent's prompt back through NATS into this same runner: the parent
+    /// prompt is still in-flight here (blocked awaiting the `spawn_agent` tool
+    /// result), so a NATS round-trip into our own session loop deadlocks — the
+    /// sub-session is created but its prompt never gets driven to completion.
+    /// Instead we drive the full tool-use loop directly via [`Self::run_prompt`],
+    /// capturing the assistant text through an [`AccumulatingPromptClient`].
+    ///
+    /// The sub-agent runs in an isolated git worktree, in an ephemeral session
+    /// that inherits the parent's mode, permission rules, egress policy and model,
+    /// with the recursion guard (`spawn_depth`) incremented. The worktree and the
+    /// ephemeral session are cleaned up on every exit path, including the error /
+    /// timeout path.
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn spawn_subagent(
+        &self,
+        parent_session_id: &str,
+        prompt: &str,
+        agent_name: &str,
+    ) -> Result<String, String> {
+        use trogon_runner_tools::session_store::SessionState;
+
+        let parent_state = self
+            .store
+            .load(parent_session_id)
+            .await
+            .map_err(|_| "spawn_agent: session not found".to_string())?;
+
+        const MAX_SPAWN_DEPTH: u32 = 3;
+        if parent_state.spawn_depth >= MAX_SPAWN_DEPTH {
+            return Err("spawn_agent: max nesting depth reached".to_string());
+        }
+
+        // Resolve a named custom subagent (.claude/agents/) from the parent
+        // project dir → its system prompt + optional model override. An empty
+        // name means the default agent (no override). A named-but-missing agent
+        // is an error, matching the inline spawn handler's contract.
+        let subagent = if agent_name.is_empty() {
+            None
+        } else {
+            match trogon_runner_tools::load_subagent(
+                std::path::Path::new(&parent_state.cwd),
+                agent_name,
+            ) {
+                Some(def) => Some(def),
+                None => {
+                    return Err(format!(
+                        "spawn_agent: no subagent named `{agent_name}` in .claude/agents/"
+                    ));
+                }
+            }
+        };
+
+        // Isolated worktree (best-effort: falls back to the parent cwd if the
+        // project is not a git repo). Cleaned up explicitly on every path below.
+        let worktree = trogon_runner_tools::worktree::create_worktree(&parent_state.cwd).await;
+        let sub_cwd = worktree
+            .as_ref()
+            .map(|w| w.path.clone())
+            .unwrap_or_else(|| parent_state.cwd.clone());
+
+        // Ephemeral sub-session inheriting the parent's execution context.
+        let sub_sid = uuid::Uuid::new_v4().to_string();
+        let now = now_iso8601();
+        let sub_state = SessionState {
+            cwd: sub_cwd,
+            mode: parent_state.mode.clone(),
+            // A named subagent may override the model; otherwise inherit the parent's.
+            model: subagent
+                .as_ref()
+                .and_then(|d| d.model.clone())
+                .or_else(|| parent_state.model.clone()),
+            // A named subagent's prompt replaces the default identity for the sub-session.
+            system_prompt_override: subagent.as_ref().map(|d| d.system_prompt.clone()),
+            permission_rules_text: parent_state.permission_rules_text.clone(),
+            egress_policy: parent_state.egress_policy.clone(),
+            parent_session_id: Some(parent_session_id.to_string()),
+            spawn_depth: parent_state.spawn_depth + 1,
+            created_at: now.clone(),
+            updated_at: now,
+            ..Default::default()
+        };
+        if let Err(e) = self.store.save(&sub_sid, &sub_state).await {
+            if let Some(w) = worktree {
+                w.cleanup().await;
+            }
+            return Err(format!("spawn_agent error: failed to create sub-session: {e}"));
+        }
+
+        // Drive the full tool-use loop in-process, accumulating assistant text.
+        let collected = Arc::new(std::sync::Mutex::new(String::new()));
+        let client = AccumulatingPromptClient::new(collected.clone());
+        let req = PromptRequest::new(
+            SessionId::new(sub_sid.clone()),
+            vec![ContentBlock::from(prompt)],
+        );
+
+        const SPAWN_SAFETY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
+        let run = tokio::time::timeout(
+            SPAWN_SAFETY_TIMEOUT,
+            self.run_prompt(&req, &client, None, None),
+        )
+        .await;
+
+        // Cleanup on every path: drop the ephemeral session and the worktree.
+        let _ = self.store.delete(&sub_sid).await;
+        if let Some(w) = worktree {
+            w.cleanup().await;
+        }
+
+        let text = collected.lock().map(|g| g.clone()).unwrap_or_default();
+        match run {
+            Err(_elapsed) => Err(format!(
+                "spawn_agent error: safety-net timeout after {}s",
+                SPAWN_SAFETY_TIMEOUT.as_secs()
+            )),
+            Ok(Err(e)) => Err(format!("spawn_agent error: {e}")),
+            Ok(Ok(_)) => Ok(if text.is_empty() {
+                "Sub-agent completed.".to_string()
+            } else {
+                text
+            }),
+        }
+    }
+
     /// Core prompt execution. Streams events via `prompt_client` and returns the final response.
     #[cfg_attr(coverage, coverage(off))]
     async fn run_prompt(
@@ -464,13 +631,23 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
-        let tools: Vec<ToolDef> = all_tool_defs();
+        let mut tools: Vec<ToolDef> = all_tool_defs();
+        // In plan mode, offer ExitPlanMode so the model can signal it has finished
+        // planning and request approval to leave plan mode.
+        if state.mode == "plan" {
+            tools.push(exit_plan_mode_tool_def());
+        }
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
         let needs_elic = self.elicitation_tx.is_some();
 
         let audit_buf: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<AuditEntry>::new()));
+        // Shared cell: the permission bridge writes the chosen follow-up mode here
+        // when the user approves an ExitPlanMode request; read after the tool call
+        // finishes to update the in-memory session mode.
+        let exit_plan_mode_cell: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
 
         let agent: Arc<A> = {
             let needs_clone = state.model.is_some()
@@ -519,7 +696,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 }
                 // Offer the spawn_agent tool so the model can delegate subtasks to an
                 // isolated sub-agent (full tool-use loop in a temp worktree). The
-                // responder lives in main.rs; routed via {prefix}.agent.spawn.
+                // responder lives in main.rs; routed via {prefix}.spawn (off the
+                // `agent.` namespace to avoid the global-wildcard collision).
                 if let Some(ref nats) = self.execution_nats {
                     let spawn = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::new(
                         nats.clone(),
@@ -527,8 +705,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         session_id.clone(),
                     );
                     let (name, orig, client) = spawn.into_dispatch();
+                    // List available custom subagents (.claude/agents/) in the tool
+                    // description so the model knows which `agent` names it can use.
+                    let agent_names: Vec<String> =
+                        trogon_runner_tools::load_subagents(std::path::Path::new(&state.cwd))
+                            .into_iter()
+                            .map(|d| d.name)
+                            .collect();
                     a.add_mcp_tools(
-                        vec![trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def()],
+                        vec![trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def_with_agents(&agent_names)],
                         vec![(name, orig, client)],
                     );
                 }
@@ -545,6 +730,19 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     if let Some(ref extra) = state.permission_rules_text {
                         rules.merge(PermissionRules::parse(extra));
                     }
+                    // Read containment: scope read-only auto-allow to cwd plus the
+                    // session's additional working dirs (--add-dir) and configured
+                    // permissions.additionalDirectories. Protected paths are always
+                    // prompted (handled inside the checker). The classifier (when
+                    // configured) decides side-effecting tools in `auto` mode.
+                    let mut read_dirs = state.additional_roots.clone();
+                    read_dirs.extend(state.additional_read_dirs.clone());
+                    let extras = trogon_runner_tools::PermissionExtras {
+                        cwd: Some(state.cwd.clone()),
+                        additional_read_dirs: read_dirs,
+                        classifier: self.classifier.clone(),
+                        pre_tool_use: state.tool_hooks.pre_tool_use.clone(),
+                    };
                     if let Some(checker) = build_mode_permission_checker(
                         &state.mode,
                         &session_id,
@@ -553,6 +751,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         Arc::new(rules),
                         state.tool_policies.clone(),
                         audit_buf.clone(),
+                        exit_plan_mode_cell.clone(),
+                        extras,
                     ) {
                         a.set_permission_checker(checker);
                     }
@@ -580,12 +780,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             "You are Trogon, an AI coding assistant.\n\n{}",
             trogon_runner_tools::URL_FETCH_GUIDANCE
         );
-        let system_prompt = match (trogon_md, state.system_prompt.clone()) {
-            (Some(tmd), Some(sp)) => Some(format!("{identity}\n\n{tmd}\n\n{sp}")),
-            (Some(tmd), None) => Some(format!("{identity}\n\n{tmd}")),
-            (None, Some(sp)) => Some(format!("{identity}\n\n{sp}")),
-            (None, None) => Some(identity.to_string()),
-        };
+        // `--system-prompt` (systemPromptOverride) replaces the built-in identity;
+        // TROGON.md and `--append-system-prompt` (system_prompt) still apply on top.
+        let base = state.system_prompt_override.clone().unwrap_or(identity);
+        let mut assembled = base;
+        if let Some(tmd) = trogon_md {
+            assembled = format!("{assembled}\n\n{tmd}");
+        }
+        if let Some(sp) = state.system_prompt.clone() {
+            assembled = format!("{assembled}\n\n{sp}");
+        }
+        let system_prompt = Some(assembled);
 
         let system_prompt = if !state.additional_roots.is_empty() {
             let roots_info = state
@@ -598,6 +803,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             match system_prompt {
                 Some(s) => Some(format!("{s}\n\n{roots_section}")),
                 None => Some(roots_section),
+            }
+        } else {
+            system_prompt
+        };
+
+        // Plan mode: steer the model to research read-only and present a plan
+        // instead of reacting to write-denials. The permission layer already
+        // blocks writes in plan mode; this makes the model behave like a planner.
+        let system_prompt = if state.mode == "plan" {
+            match system_prompt {
+                Some(s) => Some(format!("{s}\n\n{}", trogon_runner_tools::PLAN_MODE_GUIDANCE)),
+                None => Some(trogon_runner_tools::PLAN_MODE_GUIDANCE.to_string()),
             }
         } else {
             system_prompt
@@ -618,6 +835,21 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let mut converter = PromptEventConverter::new(session_id.clone());
         let mut final_messages: Option<Vec<Message>> = None;
         let mut cancelled = false;
+        // Cancel-commit: accumulate the assistant's streamed output so an
+        // interrupted turn is persisted (user prompt + partial reply) instead of
+        // being discarded. We capture text, tool_use blocks, and the results of
+        // tools that finished before the interrupt. On cancel, every captured
+        // tool_use is paired with a tool_result (its real output, or a synthesized
+        // "interrupted" marker for tools still in flight) — the Anthropic API
+        // rejects a tool_use with no matching tool_result, so this pairing is
+        // mandatory for the transcript to be resumable. Thinking blocks are
+        // intentionally NOT captured: streamed thinking has no signature and would
+        // be rejected on resume.
+        let mut partial_text = String::new();
+        // tool_use blocks in the order the model emitted them.
+        let mut partial_tool_uses: Vec<AgentContentBlock> = Vec::new();
+        // tool_use id → finished output, for tools that completed pre-cancel.
+        let mut partial_results: HashMap<String, String> = HashMap::new();
         let mut last_input_tokens: u32 = 0;
         let mut last_output_tokens: u32 = 0;
         let mut last_cache_creation_tokens: u32 = 0;
@@ -638,17 +870,31 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     match maybe_event {
                         Some(event) => {
                             let prompt_event = match event {
-                                AgentEvent::TextDelta { text } => PromptEvent::TextDelta { text },
+                                AgentEvent::TextDelta { text } => {
+                                    partial_text.push_str(&text);
+                                    PromptEvent::TextDelta { text }
+                                }
                                 AgentEvent::ThinkingDelta { text } => PromptEvent::ThinkingDelta { text },
                                 AgentEvent::ToolCallStarted { id, name, input, parent_tool_use_id } => {
                                     tool_name_by_id.insert(id.clone(), name.clone());
+                                    partial_tool_uses.push(AgentContentBlock::ToolUse {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        input: input.clone(),
+                                        parent_tool_use_id: parent_tool_use_id.clone(),
+                                    });
                                     PromptEvent::ToolCallStarted { id, name, input, parent_tool_use_id }
                                 }
                                 AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                                    partial_results.insert(id.clone(), output.clone());
                                     let tool_name = tool_name_by_id.get(&id).cloned();
                                     let is_enter_plan = tool_name
                                         .as_deref()
                                         .map(|n| n == "EnterPlanMode")
+                                        .unwrap_or(false);
+                                    let is_exit_plan = tool_name
+                                        .as_deref()
+                                        .map(|n| n == "ExitPlanMode")
                                         .unwrap_or(false);
                                     let is_cd = tool_name
                                         .as_deref()
@@ -664,6 +910,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                         state.terminal_cwd = None;
                                     }
 
+                                    // Keep the output for the PostToolUse hook before it moves into the event.
+                                    let post_output = if state.tool_hooks.post_tool_use.is_empty() {
+                                        None
+                                    } else {
+                                        Some(output.clone())
+                                    };
                                     let finished = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
                                     publish_via_converter(prompt_client, &mut converter, finished).await;
                                     if is_enter_plan {
@@ -675,6 +927,48 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                                 mode: "plan".to_string(),
                                                 model: current_model.clone(),
                                             },
+                                        )
+                                        .await;
+                                    }
+                                    // ExitPlanMode was approved: the bridge recorded the chosen
+                                    // follow-up mode in the shared cell. Apply it to the in-memory
+                                    // session so it persists at turn end and gates the next turn.
+                                    // (The new mode takes effect on the next turn; the current
+                                    // turn's permission checker was built with plan mode.)
+                                    // Take the value out before the await so the
+                                    // MutexGuard is dropped (clippy::await_holding_lock).
+                                    // Only drain the cell for ExitPlanMode, preserving
+                                    // the original short-circuit semantics.
+                                    let exit_mode = if is_exit_plan {
+                                        exit_plan_mode_cell.lock().unwrap().take()
+                                    } else {
+                                        None
+                                    };
+                                    if let Some(new_mode) = exit_mode {
+                                        state.mode = new_mode.clone();
+                                        publish_via_converter(
+                                            prompt_client,
+                                            &mut converter,
+                                            PromptEvent::ModeChanged {
+                                                mode: new_mode,
+                                                model: current_model.clone(),
+                                            },
+                                        )
+                                        .await;
+                                    }
+                                    // PostToolUse hooks: react to the tool result (fire-and-forget).
+                                    if let Some(out) = post_output
+                                        && let Some(ref tn) = tool_name
+                                    {
+                                        let payload = serde_json::json!({
+                                            "hook_event_name": "PostToolUse",
+                                            "tool_name": tn,
+                                            "tool_response": out,
+                                        });
+                                        let _ = trogon_runner_tools::run_event_hooks(
+                                            &state.tool_hooks.post_tool_use,
+                                            Some(tn),
+                                            &payload,
                                         )
                                         .await;
                                     }
@@ -756,13 +1050,70 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     info!(session_id, "agent: cancel received");
                     cancelled = true;
                     agent_fut.abort();
+                    // Drain events already buffered between the model emitting them
+                    // and the cancel firing, so the persisted partial turn is as
+                    // complete as possible (text, tool_use blocks, finished results).
+                    while let Ok(event) = event_rx.try_recv() {
+                        match event {
+                            AgentEvent::TextDelta { text } => partial_text.push_str(&text),
+                            AgentEvent::ToolCallStarted { id, name, input, parent_tool_use_id } => {
+                                tool_name_by_id.insert(id.clone(), name.clone());
+                                partial_tool_uses.push(AgentContentBlock::ToolUse {
+                                    id, name, input, parent_tool_use_id,
+                                });
+                            }
+                            AgentEvent::ToolCallFinished { id, output, .. } => {
+                                partial_results.insert(id, output);
+                            }
+                            _ => {}
+                        }
+                    }
                     break;
                 }
             }
         }
 
+        // Cancel-commit: persist the user prompt plus whatever the assistant
+        // produced before the interrupt, so a cancelled turn is remembered on the
+        // next prompt instead of vanishing. `state.messages` already holds the user
+        // message (it was never moved into the streaming task). We append:
+        //   1. an assistant message: streamed text (if any) followed by the
+        //      tool_use blocks the model emitted, and
+        //   2. a user message of tool_results — one per tool_use, using the real
+        //      output when the tool finished or a synthesized "interrupted" marker
+        //      otherwise, so every tool_use is paired (the API requires this).
+        // A transcript ending in user(tool_results) is fine: the next prompt's user
+        // message is combined with it by the API. If nothing was produced, history
+        // is left untouched (avoids a dangling user turn).
         if cancelled {
-            return Ok(PromptResponse::new(StopReason::Cancelled));
+            let mut assistant_content: Vec<AgentContentBlock> = Vec::new();
+            if !partial_text.is_empty() {
+                assistant_content
+                    .push(AgentContentBlock::Text { text: std::mem::take(&mut partial_text) });
+            }
+            // Pair every tool_use with a result before moving the blocks out.
+            let tool_results: Vec<AgentContentBlock> = partial_tool_uses
+                .iter()
+                .filter_map(|b| match b {
+                    AgentContentBlock::ToolUse { id, .. } => Some(AgentContentBlock::ToolResult {
+                        tool_use_id: id.clone(),
+                        content: partial_results.get(id).cloned().unwrap_or_else(|| {
+                            "Tool call interrupted by the user before it completed.".to_string()
+                        }),
+                    }),
+                    _ => None,
+                })
+                .collect();
+            assistant_content.append(&mut partial_tool_uses);
+
+            if !assistant_content.is_empty() {
+                let mut updated = state.messages.clone();
+                updated.push(Message::assistant(assistant_content));
+                if !tool_results.is_empty() {
+                    updated.push(Message { role: "user".to_string(), content: tool_results });
+                }
+                final_messages = Some(updated);
+            }
         }
 
         if let Some(updated) = final_messages {
@@ -810,7 +1161,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
         }
 
-        Ok(PromptResponse::new(StopReason::EndTurn))
+        Ok(PromptResponse::new(if cancelled {
+            StopReason::Cancelled
+        } else {
+            StopReason::EndTurn
+        }))
     }
 }
 
@@ -883,6 +1238,40 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|m| m.get("systemPrompt"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        let system_prompt_override = meta
+            .and_then(|m| m.get("systemPromptOverride"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let additional_roots = meta
+            .and_then(|m| m.get("additionalRoots"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        // permissions.additionalDirectories — read-only allow-list outside cwd.
+        let additional_read_dirs = meta
+            .and_then(|m| m.get("permissions"))
+            .and_then(|p| p.get("additionalDirectories"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        // permissions.allow/deny, translated CLI-side to trogon rule-text.
+        let permission_rules_text = meta
+            .and_then(|m| m.get("permissionRules"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        // PreToolUse/PostToolUse hooks (from settings.json `hooks`).
+        let tool_hooks = meta
+            .and_then(|m| m.get("toolHooks"))
+            .and_then(|v| serde_json::from_value::<trogon_runner_tools::HooksConfig>(v.clone()).ok())
+            .unwrap_or_default();
         let mode = meta
             .and_then(|m| m.get("mode"))
             .and_then(|v| v.as_str())
@@ -895,6 +1284,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             cwd: req.cwd.to_string_lossy().to_string(),
             mode,
             system_prompt,
+            system_prompt_override,
+            additional_roots,
+            additional_read_dirs,
+            permission_rules_text,
+            tool_hooks,
             mcp_servers,
             created_at: now.clone(),
             updated_at: now,
@@ -1592,6 +1986,192 @@ mod tests {
         assert_eq!(portable[1].text, "world");
     }
 
+    // ── cancel-commit (Tier 1) ────────────────────────────────────────────────
+
+    /// A cancelled turn must persist the user prompt plus whatever assistant text
+    /// streamed before the interrupt, so the partial reply survives into the next
+    /// prompt instead of being discarded.
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn cancel_commits_partial_assistant_text() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        // run_prompt errors if the session can't be loaded — create it first.
+        store_clone.save("cancel-1", &SessionState::default()).await.unwrap();
+
+        // The runner emits one text delta, then blocks on the steer wait. With the
+        // steer sender kept alive (never sending), the only way out of the prompt
+        // loop is the cancel signal — making the cancel path deterministic.
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_events(vec![AgentEvent::TextDelta { text: "partial answer".into() }])
+            .with_steer_wait()
+            .with_started_notify(started.clone());
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_steer_tx, steer_rx) = tokio::sync::mpsc::channel::<String>(1);
+
+        let req = PromptRequest::new("cancel-1", vec![]);
+        let prompt_client = agent.notifier.make_prompt_client(
+            AcpSessionId::new("cancel-1").unwrap(),
+            AcpPrefix::new("test-prefix").unwrap(),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let canceller = async {
+                    // The runner has now emitted its text and is blocked on steer,
+                    // so the partial text is guaranteed buffered before we cancel.
+                    started.notified().await;
+                    let _ = cancel_tx.send(());
+                };
+                let (resp, ()) = tokio::join!(
+                    agent.run_prompt(&req, &*prompt_client, Some(cancel_rx), Some(steer_rx)),
+                    canceller,
+                );
+                let resp = resp.expect("run_prompt must return Ok on cancel");
+                assert!(
+                    matches!(resp.stop_reason, StopReason::Cancelled),
+                    "cancelled turn must report StopReason::Cancelled, got {:?}",
+                    resp.stop_reason
+                );
+            })
+            .await;
+
+        let state = store_clone.load("cancel-1").await.unwrap();
+        assert_eq!(
+            state.messages.len(),
+            2,
+            "user prompt + partial assistant reply must be persisted on cancel"
+        );
+        assert_eq!(state.messages[0].role, "user");
+        assert_eq!(state.messages[1].role, "assistant");
+        match &state.messages[1].content[0] {
+            AgentContentBlock::Text { text } => assert_eq!(text, "partial answer"),
+            other => panic!("expected assistant Text block, got {other:?}"),
+        }
+    }
+
+    /// A turn cancelled mid-tool-cycle must persist the tool_use blocks paired
+    /// with tool_results: the real output for tools that finished before the
+    /// interrupt, and a synthesized "interrupted" marker for tools still in flight
+    /// (the API rejects a tool_use with no matching tool_result).
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn cancel_commits_tool_uses_with_paired_results() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("cancel-2", &SessionState::default()).await.unwrap();
+
+        // t1 finishes (real output); t2 starts but never finishes (interrupted).
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_events(vec![
+                AgentEvent::TextDelta { text: "let me check".into() },
+                AgentEvent::ToolCallStarted {
+                    id: "t1".into(),
+                    name: "bash".into(),
+                    input: serde_json::json!({"command": "ls"}),
+                    parent_tool_use_id: None,
+                },
+                AgentEvent::ToolCallFinished {
+                    id: "t1".into(),
+                    output: "result-1".into(),
+                    exit_code: Some(0),
+                    signal: None,
+                },
+                AgentEvent::ToolCallStarted {
+                    id: "t2".into(),
+                    name: "read_file".into(),
+                    input: serde_json::json!({"path": "/tmp/x"}),
+                    parent_tool_use_id: None,
+                },
+            ])
+            .with_steer_wait()
+            .with_started_notify(started.clone());
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_steer_tx, steer_rx) = tokio::sync::mpsc::channel::<String>(1);
+        let req = PromptRequest::new("cancel-2", vec![]);
+        let prompt_client = agent.notifier.make_prompt_client(
+            AcpSessionId::new("cancel-2").unwrap(),
+            AcpPrefix::new("test-prefix").unwrap(),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let canceller = async {
+                    started.notified().await;
+                    let _ = cancel_tx.send(());
+                };
+                let (resp, ()) = tokio::join!(
+                    agent.run_prompt(&req, &*prompt_client, Some(cancel_rx), Some(steer_rx)),
+                    canceller,
+                );
+                assert!(matches!(
+                    resp.unwrap().stop_reason,
+                    StopReason::Cancelled
+                ));
+            })
+            .await;
+
+        let state = store_clone.load("cancel-2").await.unwrap();
+        // [user(""), assistant(text + 2 tool_use), user(2 tool_result)]
+        assert_eq!(state.messages.len(), 3);
+
+        let assistant = &state.messages[1];
+        assert_eq!(assistant.role, "assistant");
+        assert!(matches!(&assistant.content[0],
+            AgentContentBlock::Text { text } if text == "let me check"));
+        assert!(matches!(&assistant.content[1],
+            AgentContentBlock::ToolUse { id, name, .. } if id == "t1" && name == "bash"));
+        assert!(matches!(&assistant.content[2],
+            AgentContentBlock::ToolUse { id, name, .. } if id == "t2" && name == "read_file"));
+
+        let results = &state.messages[2];
+        assert_eq!(results.role, "user");
+        assert!(matches!(&results.content[0],
+            AgentContentBlock::ToolResult { tool_use_id, content }
+            if tool_use_id == "t1" && content == "result-1"),
+            "finished tool keeps its real output, got {:?}", results.content[0]);
+        match &results.content[1] {
+            AgentContentBlock::ToolResult { tool_use_id, content } => {
+                assert_eq!(tool_use_id, "t2");
+                assert!(content.contains("interrupted"),
+                    "in-flight tool gets a synthesized interrupt result, got {content:?}");
+            }
+            other => panic!("expected ToolResult for t2, got {other:?}"),
+        }
+    }
+
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
     async fn set_session_config_option_compactor_model_persists_to_store() {
@@ -1840,9 +2420,15 @@ mod tests {
         );
     }
 
+    // These tests exercise the V2 export format: any message carrying a richer
+    // block (ToolResult / ToolUse / Thinking) is exported as a versioned V2 object
+    // that PRESERVES the block, not the legacy text-only V1 array. The V1 path is
+    // still covered by `ext_method_export_returns_portable_messages` (plain text).
+
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_includes_tool_result_content() {
+    async fn ext_method_export_v2_preserves_tool_result_content() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -1876,17 +2462,26 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].role, "user");
-        assert_eq!(portable[0].text, "tool output here");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert_eq!(exp.messages[0].role, "user");
+                assert!(
+                    matches!(&exp.messages[0].blocks[0],
+                        PortableBlock::ToolResult { id, output_summary }
+                        if id == "call-1" && output_summary == "tool output here"),
+                    "tool_result content must be preserved in V2, got {:?}",
+                    exp.messages[0].blocks[0]
+                );
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_mixed_text_and_tool_result() {
+    async fn ext_method_export_v2_mixed_text_and_tool_result() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -1923,16 +2518,23 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "before\nresult");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                let blocks = &exp.messages[0].blocks;
+                assert_eq!(blocks.len(), 2, "both blocks preserved in order");
+                assert!(matches!(&blocks[0], PortableBlock::Text { text } if text == "before"));
+                assert!(matches!(&blocks[1],
+                    PortableBlock::ToolResult { output_summary, .. } if output_summary == "result"));
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_drops_tool_use_blocks() {
+    async fn ext_method_export_v2_preserves_tool_use_blocks() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -1968,16 +2570,25 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "", "ToolUse block must be dropped (empty text)");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert!(
+                    matches!(&exp.messages[0].blocks[0],
+                        PortableBlock::ToolUse { id, name, .. }
+                        if id == "call-x" && name == "read_file"),
+                    "tool_use id/name must be preserved in V2, got {:?}",
+                    exp.messages[0].blocks[0]
+                );
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_drops_thinking_blocks() {
+    async fn ext_method_export_v2_preserves_thinking_blocks() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -2010,11 +2621,18 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "", "Thinking block must be dropped (empty text)");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert!(
+                    matches!(&exp.messages[0].blocks[0],
+                        PortableBlock::Thinking { text } if text == "internal reasoning"),
+                    "thinking text must be preserved in V2, got {:?}",
+                    exp.messages[0].blocks[0]
+                );
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]

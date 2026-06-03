@@ -55,6 +55,7 @@ fn make_req(tool_name: &str) -> (PermissionReq, oneshot::Receiver<bool>) {
         response_tx: tx,
         started_tx,
         always_allowed: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        exit_plan_mode: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     (req, rx)
 }
@@ -201,6 +202,7 @@ async fn request_payload_contains_tool_name_and_input() {
         response_tx: tx,
         started_tx,
         always_allowed: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        exit_plan_mode: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     handle_permission_request_nats(req, nats, AcpPrefix::new(PREFIX).unwrap(), &store).await;
 

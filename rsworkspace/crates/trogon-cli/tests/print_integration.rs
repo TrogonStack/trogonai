@@ -15,9 +15,9 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
+use trogon_cli::OutputFormat;
 use trogon_cli::print::{PrintExitCode, PrintOptions};
 use trogon_cli::session::TrogonSession;
-use trogon_cli::OutputFormat;
 
 const REQ_ID_HEADER: &str = "X-Req-Id";
 
@@ -72,7 +72,9 @@ async fn spawn_fake_runner(
         let prompt_subj = format!("{PREFIX}.session.{sid}.agent.prompt");
         let mut sub_prompt = nats2.subscribe(prompt_subj).await.unwrap();
         if let Some(msg) = sub_prompt.next().await {
-            let req_id = msg.headers.as_ref()
+            let req_id = msg
+                .headers
+                .as_ref()
                 .and_then(|h| h.get(REQ_ID_HEADER))
                 .map(|v| v.as_str().to_string())
                 .unwrap_or_default();
@@ -157,10 +159,11 @@ async fn print_run_prompt_routed_to_session_subject() {
         let prompt_subj = format!("{PREFIX}.session.{sid}.agent.prompt");
         let mut sub_p = nats2.subscribe(prompt_subj).await.unwrap();
         if let Some(msg) = sub_p.next().await {
-            let payload: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             tx.send(payload.clone()).await.ok();
-            let req_id = msg.headers.as_ref()
+            let req_id = msg
+                .headers
+                .as_ref()
                 .and_then(|h| h.get(REQ_ID_HEADER))
                 .map(|v| v.as_str().to_string())
                 .unwrap_or_default();
@@ -174,7 +177,13 @@ async fn print_run_prompt_routed_to_session_subject() {
     });
 
     let session = TrogonSession::new(nats, PREFIX, cwd(), vec![]).await.unwrap();
-    let _ = trogon_cli::print::run(session, "unique-sentinel-prompt", OutputFormat::Text, PrintOptions::default()).await;
+    let _ = trogon_cli::print::run(
+        session,
+        "unique-sentinel-prompt",
+        OutputFormat::Text,
+        PrintOptions::default(),
+    )
+    .await;
 
     let payload = tokio::time::timeout(TIMEOUT, rx.recv())
         .await
@@ -197,7 +206,11 @@ async fn print_run_max_tokens_is_not_an_error() {
     let session = TrogonSession::new(nats, PREFIX, cwd(), vec![]).await.unwrap();
     let result = trogon_cli::print::run(session, "write a lot", OutputFormat::Text, PrintOptions::default()).await;
 
-    assert_eq!(result, PrintExitCode::Success, "max_tokens should not be an error: {result:?}");
+    assert_eq!(
+        result,
+        PrintExitCode::Success,
+        "max_tokens should not be an error: {result:?}"
+    );
 }
 
 /// Session isolation: two consecutive print::run calls get distinct session IDs.
@@ -224,7 +237,9 @@ async fn print_run_two_calls_get_distinct_session_ids() {
                     let ps = format!("{PREFIX}.session.{sid}.agent.prompt");
                     let mut sp = nats2.subscribe(ps).await.unwrap();
                     if let Some(pm) = sp.next().await {
-                        let req_id = pm.headers.as_ref()
+                        let req_id = pm
+                            .headers
+                            .as_ref()
                             .and_then(|h| h.get(REQ_ID_HEADER))
                             .map(|v| v.as_str().to_string())
                             .unwrap_or_default();
@@ -254,18 +269,16 @@ async fn print_run_json_format_returns_ok_on_success() {
     let (_c, port) = start_nats().await;
     let nats = connect(port).await;
 
-    spawn_fake_runner(
-        nats.clone(),
-        "sess-json-ok",
-        vec!["hello ", "world"],
-        "end_turn",
-    )
-    .await;
+    spawn_fake_runner(nats.clone(), "sess-json-ok", vec!["hello ", "world"], "end_turn").await;
 
     let session = TrogonSession::new(nats, PREFIX, cwd(), vec![]).await.unwrap();
     let result = trogon_cli::print::run(session, "say hello", OutputFormat::Json, PrintOptions::default()).await;
 
-    assert_eq!(result, PrintExitCode::Success, "expected Success in json mode, got: {result:?}");
+    assert_eq!(
+        result,
+        PrintExitCode::Success,
+        "expected Success in json mode, got: {result:?}"
+    );
 }
 
 /// JSON mode also returns Err when the runner signals stop_reason "error".
@@ -279,7 +292,11 @@ async fn print_run_json_format_error_stop_reason_returns_err() {
     let session = TrogonSession::new(nats, PREFIX, cwd(), vec![]).await.unwrap();
     let result = trogon_cli::print::run(session, "trigger error", OutputFormat::Json, PrintOptions::default()).await;
 
-    assert_eq!(result, PrintExitCode::Error, "expected Error in json mode for stop_reason=error");
+    assert_eq!(
+        result,
+        PrintExitCode::Error,
+        "expected Error in json mode for stop_reason=error"
+    );
 }
 
 /// JSON mode: max_tokens is not an error.
@@ -288,16 +305,14 @@ async fn print_run_json_format_max_tokens_is_not_an_error() {
     let (_c, port) = start_nats().await;
     let nats = connect(port).await;
 
-    spawn_fake_runner(
-        nats.clone(),
-        "sess-json-maxtok",
-        vec!["partial text"],
-        "max_tokens",
-    )
-    .await;
+    spawn_fake_runner(nats.clone(), "sess-json-maxtok", vec!["partial text"], "max_tokens").await;
 
     let session = TrogonSession::new(nats, PREFIX, cwd(), vec![]).await.unwrap();
     let result = trogon_cli::print::run(session, "write a lot", OutputFormat::Json, PrintOptions::default()).await;
 
-    assert_eq!(result, PrintExitCode::Success, "max_tokens should not be an error in json mode: {result:?}");
+    assert_eq!(
+        result,
+        PrintExitCode::Success,
+        "max_tokens should not be an error in json mode: {result:?}"
+    );
 }

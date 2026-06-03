@@ -2,7 +2,7 @@
 //!
 //! See `docs/permission-ui-design.md` §9.
 
-use acp_nats::{agent::Bridge, client, AcpPrefix, Config, NatsAuth, NatsConfig, StdJsonSerialize};
+use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig, StdJsonSerialize, agent::Bridge, client};
 use agent_client_protocol::SessionNotification;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -59,8 +59,7 @@ impl AcpClientSupervisor {
             task.abort();
         }
 
-        let acp_prefix = AcpPrefix::new(prefix)
-            .map_err(|e| anyhow::anyhow!("invalid ACP prefix {prefix}: {e}"))?;
+        let acp_prefix = AcpPrefix::new(prefix).map_err(|e| anyhow::anyhow!("invalid ACP prefix {prefix}: {e}"))?;
         let nats_config = NatsConfig::new(vec![inner.nats_url.clone()], NatsAuth::None);
         let config = Config::new(acp_prefix, nats_config);
         let meter = opentelemetry::global::meter("trogon-cli");
@@ -112,9 +111,6 @@ mod tests {
         let state = Arc::new(Mutex::new(ActiveClientState::default()));
         let sup_state = state.clone();
         sup_state.lock().unwrap().session_id = Some("abc".to_string());
-        assert_eq!(
-            state.lock().unwrap().session_id.as_deref(),
-            Some("abc")
-        );
+        assert_eq!(state.lock().unwrap().session_id.as_deref(), Some("abc"));
     }
 }

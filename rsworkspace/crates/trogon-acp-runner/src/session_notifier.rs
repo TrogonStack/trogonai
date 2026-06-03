@@ -162,6 +162,44 @@ impl PromptEventClient for NatsPromptEventClient {
     }
 }
 
+// ── In-process accumulating client (spawn_agent) ──────────────────────────────
+
+/// `PromptEventClient` that accumulates assistant message text in-process.
+///
+/// Used by `TrogonAgent::spawn_subagent` to drive a sub-agent's full tool-use
+/// loop without a NATS round-trip back into this runner (which deadlocks, since
+/// the parent prompt is still in-flight on the same runner). Instead of
+/// forwarding notifications to an ACP client, it captures every
+/// `AgentMessageChunk` text block so the parent can return it as the
+/// `spawn_agent` tool result.
+pub struct AccumulatingPromptClient {
+    text: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl AccumulatingPromptClient {
+    /// Build a client that appends captured assistant text into `text`.
+    pub fn new(text: std::sync::Arc<std::sync::Mutex<String>>) -> Self {
+        Self { text }
+    }
+}
+
+#[async_trait(?Send)]
+impl PromptEventClient for AccumulatingPromptClient {
+    async fn session_notification(
+        &self,
+        notif: SessionNotification,
+    ) -> agent_client_protocol::Result<()> {
+        use agent_client_protocol::{ContentBlock, SessionUpdate};
+        if let SessionUpdate::AgentMessageChunk(chunk) = notif.update
+            && let ContentBlock::Text(t) = chunk.content
+            && let Ok(mut guard) = self.text.lock()
+        {
+            guard.push_str(&t.text);
+        }
+        Ok(())
+    }
+}
+
 // ── Mock (test-helpers feature) ───────────────────────────────────────────────
 
 #[cfg(feature = "test-helpers")]

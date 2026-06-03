@@ -45,7 +45,7 @@ async fn spawn_agent_tool_returns_responder_output() {
 
     spawn_responder(
         nats.clone(),
-        format!("{prefix}.agent.spawn"),
+        format!("{prefix}.spawn"),
         "Explore agent output: found 3 files",
     );
 
@@ -74,7 +74,7 @@ async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
     let nats_clone = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_clone
-            .subscribe(format!("{prefix}.agent.spawn"))
+            .subscribe(format!("{prefix}.spawn"))
             .await
             .unwrap();
         if let Some(msg) = sub.next().await {

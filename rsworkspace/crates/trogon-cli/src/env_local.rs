@@ -73,10 +73,7 @@ fn apply_line(line: &str) {
     if key.is_empty() {
         return;
     }
-    if std::env::var(key)
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
-    {
+    if std::env::var(key).map(|v| !v.trim().is_empty()).unwrap_or(false) {
         return;
     }
     let value = strip_quotes(value.trim());
