@@ -932,7 +932,7 @@ impl JetStreamKvKeys for MockJetStreamKvStore {
         match result {
             Ok(keys) => {
                 let items: Vec<Result<String, kv::WatcherError>> = keys.into_iter().map(Ok).collect();
-                Ok(futures::stream::iter(items.into_iter()))
+                Ok(futures::stream::iter(items))
             }
             Err(kind) => Err(kv::HistoryError::new(kind)),
         }
