@@ -8773,12 +8773,12 @@ mod tests {
             matches!(
                 item,
                 InputItem::FunctionCallOutput { output, .. }
-                    if output.contains("no execution backend configured")
+                    if output.contains("no execution backend or runner_config")
             )
         });
         assert!(
             no_backend_output,
-            "spawn_agent without execution_nats must return 'no execution backend configured'"
+            "spawn_agent without execution_nats must return a 'not available' error to the LLM"
         );
     }
 }

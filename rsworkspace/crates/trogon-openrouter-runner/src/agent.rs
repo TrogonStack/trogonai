@@ -6868,11 +6868,12 @@ mod tests {
 
             let calls = agent.client.calls.lock().unwrap();
             let no_config_in_messages = calls[1].messages.iter().any(|m| {
-                m.tool_call_id.is_some() && m.content.contains("runner not configured for spawn")
+                m.tool_call_id.is_some()
+                    && m.content.contains("no execution backend or runner_config")
             });
             assert!(
                 no_config_in_messages,
-                "spawn_agent without runner_config must return 'runner not configured for spawn'"
+                "spawn_agent without runner_config must return a 'not available' error to the LLM"
             );
         }).await;
     }
