@@ -53,7 +53,10 @@ async fn nats_server_not_in_path_returns_error() {
     let err = result.expect_err("should fail when nats-server is not in PATH");
     let msg = err.to_string();
     assert!(msg.contains("nats-server is not in PATH"), "unexpected error: {msg}");
-    assert!(msg.contains("https://docs.nats.io"), "should include install URL: {msg}");
+    assert!(
+        msg.contains("https://docs.nats.io"),
+        "should include install URL: {msg}"
+    );
 }
 
 /// When a fake nats-server binary is in PATH but never accepts connections,
@@ -78,10 +81,7 @@ async fn fake_nats_server_that_never_listens_returns_timeout_error() {
 
     let err = result.expect_err("should time out");
     let msg = err.to_string();
-    assert!(
-        msg.contains("not accepting connections"),
-        "unexpected error: {msg}"
-    );
+    assert!(msg.contains("not accepting connections"), "unexpected error: {msg}");
 }
 
 // ── Helpers that override PATH ────────────────────────────────────────────────

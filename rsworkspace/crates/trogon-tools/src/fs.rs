@@ -182,12 +182,45 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
         .map(|l| (start + l).min(lines.len()))
         .unwrap_or(lines.len());
 
-    lines[start..end]
+    let mut result = lines[start..end]
         .iter()
         .enumerate()
         .map(|(i, line)| format!("{:>6}\t{line}", start + i + 1))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+
+    // On-demand TROGON.md: surface a subdirectory's rules when a file there is
+    // read. The session-start loader walks UP from cwd, so cwd + ancestors are
+    // already in the system prompt; subdirectories are not — this fills that gap.
+    if let Some(extra) = subdir_trogon_md(&ctx.cwd, &full_path).await {
+        result.push_str("\n\n");
+        result.push_str(&extra);
+    }
+    result
+}
+
+/// When `file_path` lives in a directory *strictly below* `cwd`, return that
+/// directory's `TROGON.md` content (if any), formatted for injection into the
+/// read_file result. Files directly in `cwd` (or its ancestors) return `None`
+/// because their TROGON.md is already loaded into the system prompt at session
+/// start. Not deduplicated across calls: reading several files in the same
+/// subdirectory re-surfaces its TROGON.md each time.
+async fn subdir_trogon_md(cwd: &str, file_path: &std::path::Path) -> Option<String> {
+    let cwd_canon = std::path::Path::new(cwd).canonicalize().ok()?;
+    let dir_canon = file_path.parent()?.canonicalize().ok()?;
+    if dir_canon == cwd_canon || !dir_canon.starts_with(&cwd_canon) {
+        return None;
+    }
+    let md_path = dir_canon.join("TROGON.md");
+    let content = tokio::fs::read_to_string(&md_path).await.ok()?;
+    let content = content.trim();
+    if content.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "─── Directory rules: {}/TROGON.md ───\n{content}",
+        dir_canon.display()
+    ))
 }
 
 pub async fn write_file(ctx: &ToolContext, input: &Value) -> String {
@@ -606,6 +639,36 @@ mod tests {
         assert!(result.contains("1\tline1"));
         assert!(result.contains("2\tline2"));
         assert!(result.contains("3\tline3"));
+    }
+
+    #[tokio::test]
+    async fn read_file_in_subdir_surfaces_directory_trogon_md() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("src");
+        tokio::fs::create_dir_all(&sub).await.unwrap();
+        tokio::fs::write(sub.join("main.rs"), "fn main() {}").await.unwrap();
+        tokio::fs::write(sub.join("TROGON.md"), "Subdir rule: prefer iterators.")
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = read_file(&ctx, &json!({"path": "src/main.rs"})).await;
+        assert!(result.contains("fn main()"), "file content missing: {result}");
+        assert!(result.contains("Directory rules"), "subdir TROGON.md not surfaced: {result}");
+        assert!(result.contains("prefer iterators"), "subdir rule body missing: {result}");
+    }
+
+    #[tokio::test]
+    async fn read_file_in_cwd_does_not_resurface_cwd_trogon_md() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("TROGON.md"), "cwd rule").await.unwrap();
+        tokio::fs::write(dir.path().join("a.txt"), "hello").await.unwrap();
+        let ctx = ctx(&dir);
+        let result = read_file(&ctx, &json!({"path": "a.txt"})).await;
+        assert!(result.contains("hello"));
+        assert!(
+            !result.contains("Directory rules"),
+            "cwd TROGON.md must not be re-injected (already in system prompt): {result}"
+        );
     }
 
     #[tokio::test]

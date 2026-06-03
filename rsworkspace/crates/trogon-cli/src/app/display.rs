@@ -18,6 +18,13 @@ pub fn print_user_line(line: &str) {
     eprintln!("\x1b[1mYou\x1b[0m  {line}");
 }
 
+/// Dimmed echo of a REPL command (`cd`, `!…`, `/…`). Unlike [`print_user_line`],
+/// this is deliberately not styled as a message to the model — it just shows
+/// what command ran above its output.
+pub fn print_command_echo(line: &str) {
+    eprintln!("\x1b[90m{line}\x1b[0m");
+}
+
 /// Bold assistant prefix, printed once before an assistant text run.
 pub fn print_assistant_prefix() {
     eprint!("\n\x1b[1mTrogon\x1b[0m  ");

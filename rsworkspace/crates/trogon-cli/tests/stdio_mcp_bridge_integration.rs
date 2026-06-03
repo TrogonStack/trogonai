@@ -119,8 +119,7 @@ async fn bridge_proxies_json_rpc_request_to_child_and_returns_response() {
 /// `spawn` returns `Err` when the command path does not exist.
 #[tokio::test]
 async fn bridge_spawn_fails_for_nonexistent_command() {
-    let result =
-        StdioMcpBridge::spawn("/nonexistent/binary/that/does/not/exist", &[], &[]).await;
+    let result = StdioMcpBridge::spawn("/nonexistent/binary/that/does/not/exist", &[], &[]).await;
     assert!(result.is_err(), "spawn must fail for a nonexistent command");
 }
 

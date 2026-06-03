@@ -512,6 +512,7 @@ where
                         .iter()
                         .map(|hv| (hv.name.clone(), hv.value.clone()))
                         .collect(),
+                    timeout_secs: trogon_runner_tools::mcp::timeout_from_meta(h.meta.as_ref()),
                 }),
                 McpServer::Sse(s) => Some(StoredMcpServer {
                     name: s.name.clone(),
@@ -521,6 +522,7 @@ where
                         .iter()
                         .map(|hv| (hv.name.clone(), hv.value.clone()))
                         .collect(),
+                    timeout_secs: trogon_runner_tools::mcp::timeout_from_meta(s.meta.as_ref()),
                 }),
                 _ => None, // Stdio not supported in NATS model
             })
@@ -557,6 +559,7 @@ where
                             name: stdio.name.clone(),
                             url: bridge.url.clone(),
                             headers: vec![],
+                            timeout_secs: None,
                         });
                         bridges.push(bridge);
                     }
@@ -1162,7 +1165,9 @@ where
             title: src_state.title.clone(),
             mcp_servers,
             system_prompt,
+            system_prompt_override: src_state.system_prompt_override.clone(),
             additional_roots,
+            additional_read_dirs: src_state.additional_read_dirs.clone(),
             disable_builtin_tools,
             allowed_tools: src_state.allowed_tools.clone(),
             parent_session_id: Some(src_id.clone()),
@@ -1177,6 +1182,7 @@ where
             permission_rules_text: src_state.permission_rules_text.clone(),
             compactor_model: src_state.compactor_model.clone(),
             spawn_depth: src_state.spawn_depth,
+            tool_hooks: src_state.tool_hooks.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);

@@ -57,11 +57,16 @@ pub mod mock {
 
     impl MockFs {
         pub fn new() -> Self {
-            Self { files: Mutex::new(HashMap::new()) }
+            Self {
+                files: Mutex::new(HashMap::new()),
+            }
         }
 
         pub fn add_file(&self, path: impl Into<PathBuf>, content: impl AsRef<[u8]>) {
-            self.files.lock().unwrap().insert(path.into(), content.as_ref().to_vec());
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.into(), content.as_ref().to_vec());
         }
 
         pub fn read_bytes(&self, path: &Path) -> Option<Vec<u8>> {

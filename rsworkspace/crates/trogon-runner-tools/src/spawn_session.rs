@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use agent_client_protocol::{
     CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest, SessionId,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
 };
 use acp_nats::{
     Bridge, FlushClient, JetStreamGetStream, JetStreamPublisher, PublishClient, RequestClient,
@@ -23,11 +23,14 @@ pub use crate::worktree::create_worktree;
 /// `set_session_config_option("permissions", text)` after creation (best-effort).
 ///
 /// Returns the new session id on success, or an error string on failure.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_sub_session<N, C, J>(
     bridge: &Bridge<N, C, J>,
     cwd: &str,
     mode: &str,
     permission_rules_text: Option<&str>,
+    system_prompt: Option<&str>,
+    model: Option<&str>,
 ) -> Result<String, String>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
@@ -38,6 +41,14 @@ where
     let mut meta = serde_json::Map::new();
     if mode == "bypassPermissions" {
         meta.insert("bypassPermissions".to_string(), serde_json::json!(true));
+    }
+    // Custom subagent system prompt overrides the default identity for this
+    // sub-session (e.g. "You are a code reviewer …").
+    if let Some(sp) = system_prompt.filter(|s| !s.is_empty()) {
+        meta.insert(
+            "systemPromptOverride".to_string(),
+            serde_json::Value::String(sp.to_string()),
+        );
     }
 
     let req = NewSessionRequest::new(PathBuf::from(cwd)).meta(meta);
@@ -66,6 +77,16 @@ where
         agent_client_protocol::Agent::set_session_config_option(
             bridge,
             SetSessionConfigOptionRequest::new(session_id.clone(), "permissions", text),
+        )
+        .await
+        .ok();
+    }
+
+    // Apply the subagent's model override if provided (best-effort).
+    if let Some(m) = model.filter(|s| !s.is_empty()) {
+        agent_client_protocol::Agent::set_session_model(
+            bridge,
+            SetSessionModelRequest::new(session_id.clone(), m.to_owned()),
         )
         .await
         .ok();

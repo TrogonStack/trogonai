@@ -50,11 +50,7 @@ fn tool_name_from_update(update: &ToolCallUpdate) -> String {
     {
         return name.to_string();
     }
-    update
-        .fields
-        .title
-        .clone()
-        .unwrap_or_else(|| "tool".to_string())
+    update.fields.title.clone().unwrap_or_else(|| "tool".to_string())
 }
 
 fn extract_output(raw: Option<&Value>, _content: Option<&[ToolCallContent]>) -> String {
@@ -73,11 +69,7 @@ fn extract_output(raw: Option<&Value>, _content: Option<&[ToolCallContent]>) -> 
     String::new()
 }
 
-fn extract_exit_code(
-    update: &ToolCallUpdate,
-    raw_output: &str,
-    status: ToolCallStatus,
-) -> Option<i32> {
+fn extract_exit_code(update: &ToolCallUpdate, raw_output: &str, status: ToolCallStatus) -> Option<i32> {
     if let Some(meta) = update.meta.as_ref()
         && let Some(exit) = meta.get("terminal_exit")
         && let Some(code) = exit.get("exit_code").and_then(|v| v.as_i64())
@@ -147,15 +139,8 @@ mod tests {
     #[test]
     fn terminal_output_only_update_is_skipped() {
         let mut meta = serde_json::Map::new();
-        meta.insert(
-            "terminal_output".to_string(),
-            serde_json::json!({"terminal_id": "t1"}),
-        );
-        let update = ToolCallUpdate::new(
-            ToolCallId::new("tc1"),
-            ToolCallUpdateFields::new(),
-        )
-        .meta(meta);
+        meta.insert("terminal_output".to_string(), serde_json::json!({"terminal_id": "t1"}));
+        let update = ToolCallUpdate::new(ToolCallId::new("tc1"), ToolCallUpdateFields::new()).meta(meta);
         assert!(map_tool_call_update(&update).is_none());
     }
 
@@ -185,9 +170,7 @@ mod tests {
             ToolCallUpdateFields::new()
                 .status(ToolCallStatus::Completed)
                 .title("bash".to_string())
-                .raw_output(serde_json::Value::String(
-                    "hello\n__EXIT_1__\n".to_string(),
-                )),
+                .raw_output(serde_json::Value::String("hello\n__EXIT_1__\n".to_string())),
         );
         let ev = map_tool_call_update(&update).unwrap();
         assert_eq!(ev.exit_code, Some(1));
