@@ -1,0 +1,13 @@
+# Overlay: deploy `trogon-sts` (Security Token Service).
+image:
+  bin: trogon-sts
+
+env:
+  TROGON_STS_PROBE_LISTEN_ADDR: "0.0.0.0:8080"
+  NATS_URL: "nats://nats:4222"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "trogon-sts"
+
+# STS needs the Account signing key — wire via Secret (see
+# devops/nsc/README.md for the Secret shape).
+# existingSecret: trogon-account-signing-key

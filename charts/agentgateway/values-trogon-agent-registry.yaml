@@ -1,0 +1,9 @@
+# Overlay: deploy `trogon-agent-registry`.
+image:
+  bin: trogon-agent-registry
+
+env:
+  NATS_URL: "nats://nats:4222"
+  TROGON_AGENT_REGISTRY_KV_BUCKET: "agent-registry"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "trogon-agent-registry"
