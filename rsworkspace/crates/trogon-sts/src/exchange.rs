@@ -126,9 +126,7 @@ where
             }
             Err(err) => {
                 let (offending_index, offending_agent_id) = match &err {
-                    StsError::ActChainEntryRevoked { index, agent_id } => {
-                        (Some(*index), Some(agent_id.clone()))
-                    }
+                    StsError::ActChainEntryRevoked { index, agent_id } => (Some(*index), Some(agent_id.clone())),
                     _ => (None, None),
                 };
                 let outcome = err.audit_outcome();
@@ -177,9 +175,7 @@ where
 
         self.spicedb.authorize_exchange().await?;
 
-        self.chain_resolver
-            .verify_inbound_chain(&subject.act_chain)
-            .await?;
+        self.chain_resolver.verify_inbound_chain(&subject.act_chain).await?;
 
         let presented = PresentedCreds {
             actor_token: request.actor_token.clone(),
@@ -299,10 +295,7 @@ fn assert_bootstrap_purpose_required(
 }
 
 pub fn parse_require_purpose_flag(raw: &str) -> bool {
-    !matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "0" | "false" | "no" | "off"
-    )
+    !matches!(raw.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off")
 }
 
 pub fn require_purpose_from_env() -> bool {

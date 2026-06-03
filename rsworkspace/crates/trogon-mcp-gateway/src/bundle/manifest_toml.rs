@@ -16,8 +16,7 @@ pub fn parse_toml(bytes: &[u8]) -> Result<Value, BundleLoadError> {
 }
 
 pub fn emit_toml(manifest: &BundleManifest) -> Result<String, BundleLoadError> {
-    let value = serde_json::to_value(manifest)
-        .map_err(|error| BundleLoadError::ManifestParse(error.to_string()))?;
+    let value = serde_json::to_value(manifest).map_err(|error| BundleLoadError::ManifestParse(error.to_string()))?;
     let document = TomlDocument::from_json(value)?;
     Ok(document.to_string())
 }
@@ -41,26 +40,18 @@ impl TomlDocument {
                 "capabilities" | "signing" => {
                     let table = child
                         .as_object()
-                        .ok_or_else(|| {
-                            BundleLoadError::ManifestParse(format!("`{key}` must be a table"))
-                        })?
+                        .ok_or_else(|| BundleLoadError::ManifestParse(format!("`{key}` must be a table")))?
                         .clone();
                     document.tables.push((key, table));
                 }
                 "programs" | "components" | "schemas" => {
                     let items = child
                         .as_array()
-                        .ok_or_else(|| {
-                            BundleLoadError::ManifestParse(format!("`{key}` must be an array"))
-                        })?;
+                        .ok_or_else(|| BundleLoadError::ManifestParse(format!("`{key}` must be an array")))?;
                     for item in items {
                         let table = item
                             .as_object()
-                            .ok_or_else(|| {
-                                BundleLoadError::ManifestParse(format!(
-                                    "`{key}` entries must be tables"
-                                ))
-                            })?
+                            .ok_or_else(|| BundleLoadError::ManifestParse(format!("`{key}` entries must be tables")))?
                             .clone();
                         document.array_tables.push((key.to_string(), table));
                     }
@@ -79,8 +70,7 @@ impl TomlDocument {
             root.insert(name, Value::Object(table));
         }
         for (name, table) in self.array_tables {
-            root
-                .entry(name)
+            root.entry(name)
                 .or_insert_with(|| Value::Array(Vec::new()))
                 .as_array_mut()
                 .expect("array table bucket")
@@ -206,10 +196,7 @@ fn parse_document(text: &str) -> Result<TomlDocument, BundleLoadError> {
                 current_table = TableTarget::LastArray;
             }
             TableTarget::LastArray => {
-                let (_, table) = document
-                    .array_tables
-                    .last_mut()
-                    .expect("active array table");
+                let (_, table) = document.array_tables.last_mut().expect("active array table");
                 table.insert(key, value);
             }
         }
@@ -337,9 +324,7 @@ fn parse_array_table_header(line: &str) -> Result<String, String> {
 }
 
 fn parse_assignment(line: &str) -> Result<(String, &str), String> {
-    let (key, value) = line
-        .split_once('=')
-        .ok_or_else(|| "expected key = value".to_string())?;
+    let (key, value) = line.split_once('=').ok_or_else(|| "expected key = value".to_string())?;
     Ok((key.trim().to_string(), value.trim()))
 }
 

@@ -86,33 +86,17 @@ pub struct SpicedbBinding {
 
 /// Host import surface the gateway implements for guests (`interface host`).
 pub trait HostImports {
-    fn spicedb_check(
-        &mut self,
-        subject: &str,
-        permission: &str,
-        object_id: &str,
-    ) -> Result<bool, HostFailure>;
+    fn spicedb_check(&mut self, subject: &str, permission: &str, object_id: &str) -> Result<bool, HostFailure>;
 
     fn cache_get(&mut self, key: &str) -> Option<Vec<u8>>;
 
-    fn cache_set(
-        &mut self,
-        key: &str,
-        value: &[u8],
-        ttl_secs: u32,
-    ) -> Result<(), HostFailure>;
+    fn cache_set(&mut self, key: &str, value: &[u8], ttl_secs: u32) -> Result<(), HostFailure>;
 
     fn audit_emit(&mut self, category: &str, fields_json: &str) -> Result<(), HostFailure>;
 
     fn time_now(&mut self) -> u64;
 
-    fn rate_acquire(
-        &mut self,
-        scope: &str,
-        key: &str,
-        budget: u32,
-        window_secs: u32,
-    ) -> Result<bool, HostFailure>;
+    fn rate_acquire(&mut self, scope: &str, key: &str, budget: u32, window_secs: u32) -> Result<bool, HostFailure>;
 
     fn jsonpath_read(&mut self, document_json: &str, path: &str) -> Result<String, HostFailure>;
 
@@ -133,10 +117,7 @@ pub trait PolicyGuest {
 
     fn evaluate(&mut self, input: &RequestCtx) -> PolicyDecision;
 
-    fn materialize_bindings(
-        &mut self,
-        input: &RequestCtx,
-    ) -> Result<Vec<SpicedbBinding>, HostFailure>;
+    fn materialize_bindings(&mut self, input: &RequestCtx) -> Result<Vec<SpicedbBinding>, HostFailure>;
 }
 
 /// Linker metadata for bundle manifest validation and Wasmtime setup (item 2).
@@ -164,12 +145,7 @@ pub const fn contract_identity() -> ContractIdentity {
 pub struct UnlinkedHost;
 
 impl HostImports for UnlinkedHost {
-    fn spicedb_check(
-        &mut self,
-        _subject: &str,
-        _permission: &str,
-        _object_id: &str,
-    ) -> Result<bool, HostFailure> {
+    fn spicedb_check(&mut self, _subject: &str, _permission: &str, _object_id: &str) -> Result<bool, HostFailure> {
         Err(HostFailure {
             code: "host_unlinked".into(),
             message: "wasm runtime not wired".into(),
@@ -180,12 +156,7 @@ impl HostImports for UnlinkedHost {
         None
     }
 
-    fn cache_set(
-        &mut self,
-        _key: &str,
-        _value: &[u8],
-        _ttl_secs: u32,
-    ) -> Result<(), HostFailure> {
+    fn cache_set(&mut self, _key: &str, _value: &[u8], _ttl_secs: u32) -> Result<(), HostFailure> {
         Err(HostFailure {
             code: "host_unlinked".into(),
             message: "wasm runtime not wired".into(),
@@ -203,24 +174,14 @@ impl HostImports for UnlinkedHost {
         0
     }
 
-    fn rate_acquire(
-        &mut self,
-        _scope: &str,
-        _key: &str,
-        _budget: u32,
-        _window_secs: u32,
-    ) -> Result<bool, HostFailure> {
+    fn rate_acquire(&mut self, _scope: &str, _key: &str, _budget: u32, _window_secs: u32) -> Result<bool, HostFailure> {
         Err(HostFailure {
             code: "host_unlinked".into(),
             message: "wasm runtime not wired".into(),
         })
     }
 
-    fn jsonpath_read(
-        &mut self,
-        _document_json: &str,
-        _path: &str,
-    ) -> Result<String, HostFailure> {
+    fn jsonpath_read(&mut self, _document_json: &str, _path: &str) -> Result<String, HostFailure> {
         Err(HostFailure {
             code: "host_unlinked".into(),
             message: "wasm runtime not wired".into(),

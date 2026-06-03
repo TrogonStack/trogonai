@@ -17,12 +17,7 @@ pub struct WasmStoreState {
 }
 
 impl WasmStoreState {
-    pub fn new(
-        host: HostEvalContext,
-        config: PoolConfig,
-        component_id: Arc<str>,
-        instance_id: u64,
-    ) -> Self {
+    pub fn new(host: HostEvalContext, config: PoolConfig, component_id: Arc<str>, instance_id: u64) -> Self {
         Self {
             host,
             import_calls: 0,
@@ -68,12 +63,7 @@ mod tests {
             max_host_imports: 2,
             ..PoolConfig::for_tests()
         };
-        let mut state = WasmStoreState::new(
-            HostEvalContext::for_tests(),
-            config,
-            Arc::from("demo"),
-            1,
-        );
+        let mut state = WasmStoreState::new(HostEvalContext::for_tests(), config, Arc::from("demo"), 1);
         state.with_host(|_| ()).expect("first");
         state.with_host(|_| ()).expect("second");
         let err = state.with_host(|_| ()).expect_err("third");

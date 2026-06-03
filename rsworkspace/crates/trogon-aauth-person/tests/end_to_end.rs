@@ -6,16 +6,14 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk, JwkSet,
-    PublicKeyUse,
+    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
+    JwkSet, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, EncodingKey};
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
-use trogon_aauth_person::{
-    AllowConfiguredScopes, BootstrapRequest, InMemoryStore, PersonCore, TokenRequest,
-};
+use trogon_aauth_person::{AllowConfiguredScopes, BootstrapRequest, InMemoryStore, PersonCore, TokenRequest};
 use trogon_aauth_verify::{StaticJwks, TokenVerifier, time_source::TimeSource};
 
 #[derive(Clone)]
@@ -56,16 +54,26 @@ async fn bootstrap_then_exchange_succeeds() {
     let ps_signing = SigningKey::random(&mut OsRng);
     let ps_verifying = ps_signing.verifying_key();
     let (ps_jwk, _) = p256_to_jwk(ps_verifying, "ps-key-1");
-    let ps_set = JwkSet { keys: vec![ps_jwk.clone()] };
-    let ps_pem = ps_signing.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap().to_string();
+    let ps_set = JwkSet {
+        keys: vec![ps_jwk.clone()],
+    };
+    let ps_pem = ps_signing
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
     let ps_enc = EncodingKey::from_ec_pem(ps_pem.as_bytes()).unwrap();
 
     // Resource signing key (mints aa-resource+jwt).
     let res_signing = SigningKey::random(&mut OsRng);
     let res_verifying = res_signing.verifying_key();
     let (res_jwk, _) = p256_to_jwk(res_verifying, "res-key-1");
-    let res_set = JwkSet { keys: vec![res_jwk.clone()] };
-    let res_pem = res_signing.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap().to_string();
+    let res_set = JwkSet {
+        keys: vec![res_jwk.clone()],
+    };
+    let res_pem = res_signing
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
     let res_enc = EncodingKey::from_ec_pem(res_pem.as_bytes()).unwrap();
 
     // Agent keypair — its public JWK goes into cnf.jwk during bootstrap.

@@ -147,9 +147,7 @@ pub mod envoy {
             pub mod network {
                 pub mod http_connection_manager {
                     pub mod v3 {
-                        tonic::include_proto!(
-                            "envoy.extensions.filters.network.http_connection_manager.v3"
-                        );
+                        tonic::include_proto!("envoy.extensions.filters.network.http_connection_manager.v3");
                     }
                 }
             }

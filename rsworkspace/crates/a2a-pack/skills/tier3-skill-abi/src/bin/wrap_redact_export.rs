@@ -2,10 +2,8 @@ use std::env;
 use std::path::PathBuf;
 use std::process;
 
-use walrus::{
-    ExportItem, FunctionBuilder, FunctionId, Module, ModuleConfig, ValType,
-};
 use walrus::ir::LoadKind;
+use walrus::{ExportItem, FunctionBuilder, FunctionId, Module, ModuleConfig, ValType};
 
 fn main() {
     let Some(input) = env::args().nth(1) else {
@@ -61,7 +59,11 @@ fn build_shim(module: &mut Module, core_id: FunctionId) -> Result<FunctionId, St
     let in_ptr = module.locals.add(ValType::I32);
     let in_len = module.locals.add(ValType::I32);
     let meta = module.locals.add(ValType::I32);
-    let mut builder = FunctionBuilder::new(&mut module.types, &[ValType::I32, ValType::I32], &[ValType::I32, ValType::I32]);
+    let mut builder = FunctionBuilder::new(
+        &mut module.types,
+        &[ValType::I32, ValType::I32],
+        &[ValType::I32, ValType::I32],
+    );
     builder
         .func_body()
         .i32_const(0)

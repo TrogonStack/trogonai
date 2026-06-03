@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::errors::BundleLoadError;
-use super::manifest::{max_archive_bytes, normalize_member_path, MANIFEST_DEPRECATED_FILENAME, MANIFEST_FILENAME};
+use super::manifest::{MANIFEST_DEPRECATED_FILENAME, MANIFEST_FILENAME, max_archive_bytes, normalize_member_path};
 
 const TAR_BLOCK: usize = 512;
 
@@ -55,7 +55,7 @@ pub fn build_tar(archive: &BundleArchive) -> Vec<u8> {
 }
 
 fn extract_tar(bytes: &[u8]) -> Result<BundleArchive, BundleLoadError> {
-    if bytes.len() % TAR_BLOCK != 0 {
+    if !bytes.len().is_multiple_of(TAR_BLOCK) {
         return Err(BundleLoadError::Archive(format!(
             "tar archive size {} is not a multiple of {TAR_BLOCK}",
             bytes.len()
@@ -108,8 +108,7 @@ fn parse_tar_size(header: &[u8]) -> Result<usize, BundleLoadError> {
     let field = read_tar_field(&header[124..136])?;
     let size = u64::from_str_radix(field.trim(), 8)
         .map_err(|error| BundleLoadError::Archive(format!("tar size parse: {error}")))?;
-    usize::try_from(size)
-        .map_err(|_| BundleLoadError::Archive(format!("tar entry size {size} does not fit in usize")))
+    usize::try_from(size).map_err(|_| BundleLoadError::Archive(format!("tar entry size {size} does not fit in usize")))
 }
 
 fn read_tar_field(bytes: &[u8]) -> Result<String, BundleLoadError> {
@@ -165,16 +164,10 @@ mod tests {
     fn tar_round_trip_preserves_files() {
         let mut archive = BundleArchive::default();
         archive.insert("manifest.toml", b"name = \"acme/demo\"".to_vec());
-        archive.insert(
-            "policies/rule.cel",
-            b"mcp.method == \"tools/call\"".to_vec(),
-        );
+        archive.insert("policies/rule.cel", b"mcp.method == \"tools/call\"".to_vec());
         let tar = build_tar(&archive);
         let extracted = extract_tar(&tar).expect("extract");
-        assert_eq!(
-            extracted.get("manifest.toml"),
-            Some(b"name = \"acme/demo\"".as_slice())
-        );
+        assert_eq!(extracted.get("manifest.toml"), Some(b"name = \"acme/demo\"".as_slice()));
         assert_eq!(
             extracted.get("policies/rule.cel"),
             Some(b"mcp.method == \"tools/call\"".as_slice())

@@ -79,10 +79,7 @@ impl KmsSigner {
         let der = output
             .public_key()
             .ok_or_else(|| KeyError::Kms("GetPublicKey returned empty key material".into()))?;
-        let aws_kid = output
-            .key_id()
-            .map(str::to_owned)
-            .unwrap_or_else(|| key_id.to_owned());
+        let aws_kid = output.key_id().map(str::to_owned).unwrap_or_else(|| key_id.to_owned());
         let jwk = spki_der_to_jwk(der.as_ref(), Some(aws_kid.clone()))?;
         Ok((aws_kid, jwk))
     }

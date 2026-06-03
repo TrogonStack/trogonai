@@ -3,16 +3,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use jsonwebtoken::{
-    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
-};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode};
 use rand::rngs::OsRng;
-use rsa::pkcs8::EncodePrivateKey;
 use rsa::RsaPrivateKey;
+use rsa::pkcs8::EncodePrivateKey;
 use tempfile::tempdir;
 use trogon_jwks_publisher::JwksState;
 use trogon_jwks_publisher::jwks::Jwks;
-use trogon_jwks_publisher::keys::file::{load_jwks_from_dir, FileKeySource};
+use trogon_jwks_publisher::keys::file::{FileKeySource, load_jwks_from_dir};
 use trogon_jwks_publisher::publishers::kv::{kid_kv_key, serialize_jwks};
 use trogon_jwks_publisher::publishers::reqrep::{ReqRepState, current_jwks_json, set_jwks};
 use trogon_jwks_publisher::signer::file::FileMeshSigner;
@@ -119,7 +117,9 @@ async fn rotation_overlap_publishes_to_all_channels_and_verifies_retired_kid() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let mut retired_overlap = overlap.clone();
-    retired_overlap.keys.retain(|key| key.common.key_id.as_deref() == Some(retired_kid.as_str()));
+    retired_overlap
+        .keys
+        .retain(|key| key.common.key_id.as_deref() == Some(retired_kid.as_str()));
     assert_eq!(retired_overlap.keys.len(), 1);
 
     state.update(retired_overlap.clone());
@@ -141,11 +141,7 @@ async fn rotation_overlap_publishes_to_all_channels_and_verifies_retired_kid() {
     let active_set = active_only.to_jwk_set();
     assert!(active_set.find(&retired_kid).is_none());
     let header = decode_header(&retired_token).expect("header");
-    assert!(
-        active_set
-            .find(header.kid.as_deref().unwrap_or_default())
-            .is_none()
-    );
+    assert!(active_set.find(header.kid.as_deref().unwrap_or_default()).is_none());
 
     const _: () = assert!(MIN_ROTATION_OVERLAP_SECS >= MAX_MESH_TOKEN_TTL_SECS + DEFAULT_JWT_LEEWAY_SECS);
 }

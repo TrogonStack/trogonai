@@ -147,7 +147,11 @@ mod tests {
 
         let event = map_kv_entry(entry).expect("valid put should map");
         match event {
-            AgentCardWatchEvent::Put { agent_id, card, revision } => {
+            AgentCardWatchEvent::Put {
+                agent_id,
+                card,
+                revision,
+            } => {
                 assert_eq!(agent_id.as_str(), "bot");
                 assert_eq!(card.name, "bot");
                 assert_eq!(revision, 7);

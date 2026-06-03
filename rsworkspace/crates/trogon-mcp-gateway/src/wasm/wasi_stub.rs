@@ -15,10 +15,7 @@ impl host::Host for WasmStoreState {}
 impl policy_types::Host for WasmStoreState {}
 
 /// Adds trogon `host` imports and traps for any remaining component imports (WASI).
-pub fn prepare_linker(
-    linker: &mut Linker<WasmStoreState>,
-    component: &Component,
-) -> wasmtime::Result<()> {
+pub fn prepare_linker(linker: &mut Linker<WasmStoreState>, component: &Component) -> wasmtime::Result<()> {
     host::add_to_linker::<WasmStoreState, StoreHost>(linker, |state| state)?;
     policy_types::add_to_linker::<WasmStoreState, StoreHost>(linker, |state| state)?;
     linker.define_unknown_imports_as_traps(component)

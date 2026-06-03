@@ -3,8 +3,8 @@ use std::fmt;
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use clap::ValueEnum;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 
 use crate::manifest::{ManifestSignature, SIGNATURE_ALGORITHM};
 

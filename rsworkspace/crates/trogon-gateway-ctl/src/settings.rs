@@ -100,9 +100,7 @@ impl CtlSettings {
             .or_else(|| env::var(ENV_MCP_GATEWAY_SPICEDB_ENDPOINT).ok())
             .filter(|value| !value.trim().is_empty());
 
-        let spicedb_insecure = overlay
-            .get("spicedb_insecure")
-            .is_some_and(|value| is_truthy(value))
+        let spicedb_insecure = overlay.get("spicedb_insecure").is_some_and(|value| is_truthy(value))
             || truthy_env(ENV_MCP_GATEWAY_SPICEDB_INSECURE);
 
         let spicedb_token_set = overlay
@@ -149,10 +147,9 @@ impl CtlSettings {
 }
 
 fn load_config_overlay(path: &Path) -> Result<HashMap<String, String>, String> {
-    let raw = fs::read_to_string(path)
-        .map_err(|error| format!("read config {}: {error}", path.display()))?;
-    let table: toml::Table = toml::from_str(&raw)
-        .map_err(|error| format!("parse config {}: {error}", path.display()))?;
+    let raw = fs::read_to_string(path).map_err(|error| format!("read config {}: {error}", path.display()))?;
+    let table: toml::Table =
+        toml::from_str(&raw).map_err(|error| format!("parse config {}: {error}", path.display()))?;
 
     let mut overlay = HashMap::new();
     for (key, value) in table {
@@ -166,9 +163,7 @@ fn load_config_overlay(path: &Path) -> Result<HashMap<String, String>, String> {
 }
 
 fn truthy_env(key: &str) -> bool {
-    env::var(key)
-        .ok()
-        .is_some_and(|value| is_truthy(&value))
+    env::var(key).ok().is_some_and(|value| is_truthy(&value))
 }
 
 fn is_truthy(value: &str) -> bool {

@@ -26,8 +26,7 @@ impl TryFrom<&str> for IdempotencyKeyHeader {
     type Error = IdempotencyKeyHeaderError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let name =
-            HeaderName::from_str(value.trim()).map_err(|_| IdempotencyKeyHeaderError::InvalidToken)?;
+        let name = HeaderName::from_str(value.trim()).map_err(|_| IdempotencyKeyHeaderError::InvalidToken)?;
         Ok(Self(name))
     }
 }

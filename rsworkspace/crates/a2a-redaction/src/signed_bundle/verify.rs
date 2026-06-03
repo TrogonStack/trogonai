@@ -2,7 +2,7 @@ use ed25519_dalek::Verifier;
 
 use super::digest::Sha256Digest;
 use super::error::SignatureVerificationError;
-use super::manifest::{SignedBundleManifest, SIGNED_BUNDLE_VERSION};
+use super::manifest::{SIGNED_BUNDLE_VERSION, SignedBundleManifest};
 use super::public_key::Ed25519PublicKey;
 use crate::skill_id::SkillId;
 
@@ -44,9 +44,12 @@ pub fn verify_signed_bundle(
         });
     }
 
-    let verifying_key = pubkey.verifying_key().map_err(|_| SignatureVerificationError::SignatureVerificationFailed {
-        skill_id: skill_id.to_string(),
-    })?;
+    let verifying_key =
+        pubkey
+            .verifying_key()
+            .map_err(|_| SignatureVerificationError::SignatureVerificationFailed {
+                skill_id: skill_id.to_string(),
+            })?;
     let signature = envelope.signature_bytes(&skill_id)?;
     let message = sign_bundle_digest(expected_manifest, expected_wasm);
 
@@ -61,16 +64,13 @@ pub fn verify_signed_bundle(
 mod tests {
     use ed25519_dalek::{Signer, SigningKey};
 
-    use crate::signed_bundle::Ed25519Signature;
     use super::*;
+    use crate::signed_bundle::Ed25519Signature;
 
     fn fixture_keypair() -> (Ed25519PublicKey, SigningKey) {
         let signing_key = SigningKey::from_bytes(&[7u8; 32]);
         let verifying_key = signing_key.verifying_key();
-        (
-            Ed25519PublicKey::from_bytes(*verifying_key.as_bytes()),
-            signing_key,
-        )
+        (Ed25519PublicKey::from_bytes(*verifying_key.as_bytes()), signing_key)
     }
 
     fn signed_envelope(

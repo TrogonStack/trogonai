@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use cel_interpreter::Value;
 use crate::authz::{AuthzContext, AuthzError, PermissionChecker};
+use cel_interpreter::Value;
 
 use super::errors::{CelBuiltinsError, HostFailure};
 use super::value::expect_string;
@@ -46,9 +46,7 @@ impl PermissionCheckerSpicedbBackend {
 }
 
 fn parse_tool_resource(resource: &str) -> Result<(&str, &str), HostFailure> {
-    let rest = resource
-        .strip_prefix("tool:")
-        .ok_or(HostFailure::Permanent)?;
+    let rest = resource.strip_prefix("tool:").ok_or(HostFailure::Permanent)?;
     let (server_id, tool_name) = rest.split_once('|').ok_or(HostFailure::Permanent)?;
     if server_id.is_empty() || tool_name.is_empty() {
         return Err(HostFailure::Permanent);
@@ -65,40 +63,34 @@ impl SpicedbHostBackend for PermissionCheckerSpicedbBackend {
             } else {
                 server_id
             };
-            let result = futures::executor::block_on(self.checker.authorize_mcp_request(
-                AuthzContext {
-                    tenant: self.tenant.as_deref(),
-                    caller_sub: self.caller_sub.as_deref(),
-                    identity_source: crate::authz::IdentitySource::Jwt,
-                    server_id,
-                    session_id: self.session_id.as_deref(),
-                    jsonrpc_method: "tools/call",
-                    tool_name: Some(tool_name),
-                    resource_uri: None,
-                },
-            ));
+            let result = futures::executor::block_on(self.checker.authorize_mcp_request(AuthzContext {
+                tenant: self.tenant.as_deref(),
+                caller_sub: self.caller_sub.as_deref(),
+                identity_source: crate::authz::IdentitySource::Jwt,
+                server_id,
+                session_id: self.session_id.as_deref(),
+                jsonrpc_method: "tools/call",
+                tool_name: Some(tool_name),
+                resource_uri: None,
+            }));
             return map_authz_result(result);
         }
 
         if permission == "read" {
-            let uri = resource
-                .strip_prefix("resource:")
-                .unwrap_or(resource);
+            let uri = resource.strip_prefix("resource:").unwrap_or(resource);
             if uri.is_empty() {
                 return Err(HostFailure::Permanent);
             }
-            let result = futures::executor::block_on(self.checker.authorize_mcp_request(
-                AuthzContext {
-                    tenant: self.tenant.as_deref(),
-                    caller_sub: self.caller_sub.as_deref(),
-                    identity_source: crate::authz::IdentitySource::Jwt,
-                    server_id: self.server_id.as_str(),
-                    session_id: self.session_id.as_deref(),
-                    jsonrpc_method: "resources/read",
-                    tool_name: None,
-                    resource_uri: Some(uri),
-                },
-            ));
+            let result = futures::executor::block_on(self.checker.authorize_mcp_request(AuthzContext {
+                tenant: self.tenant.as_deref(),
+                caller_sub: self.caller_sub.as_deref(),
+                identity_source: crate::authz::IdentitySource::Jwt,
+                server_id: self.server_id.as_str(),
+                session_id: self.session_id.as_deref(),
+                jsonrpc_method: "resources/read",
+                tool_name: None,
+                resource_uri: Some(uri),
+            }));
             return map_authz_result(result);
         }
 
@@ -129,14 +121,14 @@ pub fn check(subject: Value, permission: Value, resource: Value) -> Result<Value
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use cel_interpreter::Value;
 
     use super::{BUILTIN_NAME, PermissionCheckerSpicedbBackend, SpicedbHostBackend, check};
     use crate::authz::{AllowAllPermissionChecker, AuthzContext, AuthzError, PermissionChecker};
-    use crate::cel_builtins::context::{with_host_eval, HostEvalContext};
+    use crate::cel_builtins::context::{HostEvalContext, with_host_eval};
     use crate::cel_builtins::errors::HostFailure;
 
     fn s(v: &str) -> Value {
@@ -178,15 +170,9 @@ mod tests {
 
     #[test]
     fn check_allows_when_backend_allows() {
-        let host = host_with_backend(Arc::new(MockBackend {
-            outcome: Ok(true),
-        }));
+        let host = host_with_backend(Arc::new(MockBackend { outcome: Ok(true) }));
         let result = with_host_eval(&host, || {
-            check(
-                s("user:alice"),
-                s("invoke"),
-                s("tool:github|create_issue"),
-            )
+            check(s("user:alice"), s("invoke"), s("tool:github|create_issue"))
         })
         .unwrap();
         assert_eq!(result, Value::Bool(true));
@@ -194,15 +180,9 @@ mod tests {
 
     #[test]
     fn check_returns_false_on_deny_not_error() {
-        let host = host_with_backend(Arc::new(MockBackend {
-            outcome: Ok(false),
-        }));
+        let host = host_with_backend(Arc::new(MockBackend { outcome: Ok(false) }));
         let result = with_host_eval(&host, || {
-            check(
-                s("user:alice"),
-                s("invoke"),
-                s("tool:github|create_issue"),
-            )
+            check(s("user:alice"), s("invoke"), s("tool:github|create_issue"))
         })
         .unwrap();
         assert_eq!(result, Value::Bool(false));
@@ -214,11 +194,7 @@ mod tests {
             outcome: Err(HostFailure::Transient),
         }));
         let err = with_host_eval(&host, || {
-            check(
-                s("user:alice"),
-                s("invoke"),
-                s("tool:github|create_issue"),
-            )
+            check(s("user:alice"), s("invoke"), s("tool:github|create_issue"))
         })
         .unwrap_err();
         assert_eq!(err.host_failure(), Some(HostFailure::Transient));
@@ -244,13 +220,7 @@ mod tests {
 
     #[test]
     fn permission_checker_backend_maps_transport_error_to_transient() {
-        let backend = PermissionCheckerSpicedbBackend::new(
-            Arc::new(FailChecker),
-            None,
-            None,
-            None,
-            "github".into(),
-        );
+        let backend = PermissionCheckerSpicedbBackend::new(Arc::new(FailChecker), None, None, None, "github".into());
         assert_eq!(
             backend.check("user:alice", "invoke", "tool:github|create_issue"),
             Err(HostFailure::Transient)

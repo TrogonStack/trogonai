@@ -78,11 +78,7 @@ async fn store_tool_annotations<C: SchemaCache + ?Sized>(
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     cache
-        .put_tool_annotations(
-            server_id,
-            tool_name,
-            ToolAnnotations { sensitive },
-        )
+        .put_tool_annotations(server_id, tool_name, ToolAnnotations { sensitive })
         .await
 }
 

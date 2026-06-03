@@ -7,5 +7,5 @@ mod limiter;
 
 pub use caller_budget::CallerKey;
 pub use context::{ContextThrottler, ThrottleConfig, ThrottleKey};
-pub use limiter::{InflightGuard, RateLimitConfig, RateLimitDeny, RateLimitScope, RateLimiter};
 pub use inflight::TENANT_INFLIGHT_RETRY_AFTER_MS;
+pub use limiter::{InflightGuard, RateLimitConfig, RateLimitDeny, RateLimitScope, RateLimiter};

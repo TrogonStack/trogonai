@@ -33,9 +33,9 @@ pub use idempotency_key_header::{IdempotencyKeyHeader, IdempotencyKeyHeaderError
 pub use nats_push_subject::{NatsPushSubject, NatsPushSubjectError};
 pub use push_delivery_semantics_registry::PushDeliverySemanticsRegistry;
 pub use push_idempotency_key::PushIdempotencyKey;
-pub use status_transition_id::StatusTransitionId;
 pub use push_notification_config::PushNotificationConfig;
 pub use push_notification_config_id::{PushNotificationConfigId, PushNotificationConfigIdError};
 pub use push_notification_target::{PushNotificationTarget, PushNotificationTargetError};
+pub use status_transition_id::StatusTransitionId;
 pub use target::{WebhookUrl, WebhookUrlError};
 pub use terminal_push_task_state::TerminalPushTaskState;

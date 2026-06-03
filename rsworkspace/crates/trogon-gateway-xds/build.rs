@@ -44,10 +44,7 @@ fn main() -> io::Result<()> {
         .build_server(true)
         .build_client(true)
         .compile_protos(
-            &protos
-                .iter()
-                .map(|path| proto_root.join(path))
-                .collect::<Vec<_>>(),
+            &protos.iter().map(|path| proto_root.join(path)).collect::<Vec<_>>(),
             &includes,
         )
 }

@@ -72,10 +72,7 @@ mod export {
                     owner_team: "product-ops".into(),
                     allowed_workloads: vec!["sentinel:human".into()],
                     allowed_tools: vec!["linear.issues.read".into(), "slack.post_message".into()],
-                    allowed_audiences: vec![
-                        "mcp.server.linear".into(),
-                        "agent:acme/human-fronted-assistant".into(),
-                    ],
+                    allowed_audiences: vec!["mcp.server.linear".into(), "agent:acme/human-fronted-assistant".into(),],
                     allowed_purposes: vec!["ops.triage".into()],
                     mesh_token_ttl_s: None,
                     metadata: serde_json::json!({

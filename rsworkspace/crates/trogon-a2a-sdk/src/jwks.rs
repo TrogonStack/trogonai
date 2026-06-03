@@ -38,7 +38,9 @@ impl Rs256Jwks {
 impl Jwks for Rs256Jwks {
     async fn decoding_key(&self, kid: Option<&str>) -> Result<DecodingKey, SdkError> {
         let key = if let Some(kid) = kid {
-            self.jwks.find(kid).ok_or_else(|| SdkError::InvalidToken(format!("unknown kid {kid}")))?
+            self.jwks
+                .find(kid)
+                .ok_or_else(|| SdkError::InvalidToken(format!("unknown kid {kid}")))?
         } else {
             self.jwks
                 .keys

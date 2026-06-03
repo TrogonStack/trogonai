@@ -8,8 +8,8 @@ mod tests;
 pub use cache::{ImportGateCacheKey, ZedTokenCache, ZedTokenSnapshot};
 pub use client::{BulkImportPermissionCheck, LiveBulkImportPermissionClient};
 pub use config::{
-    ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint, SpiceDbImportGateBuildError,
-    SpiceDbToken, ZedTokenTtl,
+    ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint,
+    SpiceDbImportGateBuildError, SpiceDbToken, ZedTokenTtl,
 };
 
 use std::sync::Arc;
@@ -110,11 +110,9 @@ impl SpiceDbImportGate {
 
         if let Some(snapshot) = self.zed_token_cache.get(&cache_key).await {
             request.consistency = Some(Consistency {
-                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(
-                    ZedToken {
-                        token: snapshot.token,
-                    },
-                )),
+                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(ZedToken {
+                    token: snapshot.token,
+                })),
             });
         }
 
@@ -133,9 +131,7 @@ impl SpiceDbImportGate {
 
         let allowed = response.pairs.first().is_some_and(pair_is_allowed);
 
-        if allowed
-            && let Some(token) = response.checked_at.map(|zed| zed.token)
-        {
+        if allowed && let Some(token) = response.checked_at.map(|zed| zed.token) {
             self.zed_token_cache.insert(cache_key, token).await;
         }
 
@@ -204,10 +200,7 @@ pub fn parse_subject_reference(raw: &str) -> Option<(String, String)> {
     None
 }
 
-fn federated_agent_card_resource(
-    imported_from: &ImportedAccountName,
-    agent_id: &A2aAgentId,
-) -> ObjectReference {
+fn federated_agent_card_resource(imported_from: &ImportedAccountName, agent_id: &A2aAgentId) -> ObjectReference {
     ObjectReference {
         object_type: FEDERATED_AGENT_CARD_RESOURCE_TYPE.to_owned(),
         object_id: format!("{}:{}", imported_from.as_str(), agent_id.as_str()),

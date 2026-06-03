@@ -14,7 +14,7 @@
 //! compatibility with the pre-identity Phase 1 byte shape.
 
 use trogon_mcp_gateway::audit::{
-    audit_publish_subject, jsonrpc_method_root, AuditActChainEntry, AuditEnvelope, IdentityFields,
+    AuditActChainEntry, AuditEnvelope, IdentityFields, audit_publish_subject, jsonrpc_method_root,
 };
 use trogon_mcp_gateway::authz::IdentitySource;
 

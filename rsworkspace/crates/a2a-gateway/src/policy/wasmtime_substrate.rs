@@ -1,10 +1,4 @@
-use a2a_redaction::{
-    wasm::WasmRedactorHost,
-    Ed25519PublicKey,
-    Redactor,
-    SkillId,
-    WasmBundlePath,
-};
+use a2a_redaction::{Ed25519PublicKey, Redactor, SkillId, WasmBundlePath, wasm::WasmRedactorHost};
 use a2a_types::{Artifact, Message};
 
 use crate::policy::error::PolicyError;
@@ -39,27 +33,15 @@ impl WasmtimeSubstrate {
         Ok(self.redaction.preload_skill_bundle(skill)?)
     }
 
-    pub fn register_redaction_skill(
-        &self,
-        skill: SkillId,
-        wasm_binary: &[u8],
-    ) -> Result<(), PolicyError> {
+    pub fn register_redaction_skill(&self, skill: SkillId, wasm_binary: &[u8]) -> Result<(), PolicyError> {
         Ok(self.redaction.register_skill_wasm(skill, wasm_binary)?)
     }
 
-    pub fn redact_message_parts(
-        &self,
-        message: Message,
-        skill: &SkillId,
-    ) -> Result<Message, PolicyError> {
+    pub fn redact_message_parts(&self, message: Message, skill: &SkillId) -> Result<Message, PolicyError> {
         Ok(self.redaction.redact_message(message, skill)?)
     }
 
-    pub fn redact_artifact_parts(
-        &self,
-        artifact: Artifact,
-        skill: &SkillId,
-    ) -> Result<Artifact, PolicyError> {
+    pub fn redact_artifact_parts(&self, artifact: Artifact, skill: &SkillId) -> Result<Artifact, PolicyError> {
         Ok(self.redaction.redact_artifact(artifact, skill)?)
     }
 }
@@ -69,14 +51,13 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::policy::tier2::{Tier2Decision, Tier2EvaluationContext};
     use a2a_redaction::{SkillId, WasmBundlePath};
     use a2a_types::part;
     use a2a_types::{Artifact, Role};
-    use crate::policy::tier2::{Tier2Decision, Tier2EvaluationContext};
 
     fn fixture_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../a2a-redaction/tests/fixtures/identity_redact_part.wasm")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../a2a-redaction/tests/fixtures/identity_redact_part.wasm")
     }
 
     #[test]
@@ -85,7 +66,9 @@ mod tests {
         let substrate = WasmtimeSubstrate::try_new(dir).expect("wasmtime substrate");
         let wasm = std::fs::read(fixture_path()).expect("read identity fixture");
         let skill = SkillId::new("fixture");
-        substrate.register_redaction_skill(skill.clone(), &wasm).expect("register wasm");
+        substrate
+            .register_redaction_skill(skill.clone(), &wasm)
+            .expect("register wasm");
 
         let msg_in = Message {
             message_id: "m".into(),
@@ -96,7 +79,9 @@ mod tests {
             }],
             ..Default::default()
         };
-        let got = substrate.redact_message_parts(msg_in.clone(), &skill).expect("redact message");
+        let got = substrate
+            .redact_message_parts(msg_in.clone(), &skill)
+            .expect("redact message");
         assert_eq!(
             serde_json::to_value(&got).unwrap(),
             serde_json::to_value(&msg_in).unwrap()

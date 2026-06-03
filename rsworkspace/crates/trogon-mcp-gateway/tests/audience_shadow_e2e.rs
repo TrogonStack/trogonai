@@ -40,5 +40,8 @@ fn shadow_mismatch_emits_aud_mismatch_envelope() {
 
     // Subject is fixed for JetStream wiring in a follow-up PR.
     assert_eq!(aud_mismatch_audit_subject("mcp"), "mcp.audit.gateway.aud_mismatch");
-    assert_eq!(aud_mismatch_audit_subject("acme.mcp"), "acme.mcp.audit.gateway.aud_mismatch");
+    assert_eq!(
+        aud_mismatch_audit_subject("acme.mcp"),
+        "acme.mcp.audit.gateway.aud_mismatch"
+    );
 }

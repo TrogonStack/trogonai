@@ -6,7 +6,7 @@ use crate::envelope::AuditEnvelope;
 use crate::error::{IndexerError, ProjectorError};
 use crate::event::{ActChainHop, TrafficEvent, TrafficQueryFilter, TrafficSource};
 use crate::indexer::TrafficIndex;
-use crate::projector::{normalize, AuditProjector};
+use crate::projector::{AuditProjector, normalize};
 
 pub struct PostgresIndexer {
     pool: PgPool,

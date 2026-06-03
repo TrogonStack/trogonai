@@ -134,11 +134,9 @@ impl Tier1ResourceTupleTable {
             .ok_or(Tier1DeriveError::UnknownMethod)?;
 
         Ok(match shape {
-            Tier1TupleResourceShape::AgentCardView => Tier1ResourceTuple::new(
-                "agent_card",
-                format!("{publisher_account}/{agent_id}"),
-                "view",
-            ),
+            Tier1TupleResourceShape::AgentCardView => {
+                Tier1ResourceTuple::new("agent_card", format!("{publisher_account}/{agent_id}"), "view")
+            }
             Tier1TupleResourceShape::AgentInvoke => Tier1ResourceTuple::new("agent", agent_id, "invoke"),
             Tier1TupleResourceShape::AgentDiscover => Tier1ResourceTuple::new("agent", agent_id, "discover"),
             Tier1TupleResourceShape::TaskRead => {

@@ -44,12 +44,7 @@ fn base64_decode_url(input: &str) -> Result<Vec<u8>, base64::DecodeError> {
 
 /// Shadow-mode telemetry when inbound mesh `aud` differs from the egress target audience.
 #[must_use]
-pub fn record_shadow_aud_mismatch(
-    expected_aud: &str,
-    presented_aud: &str,
-    tenant: &str,
-    caller_sub: &str,
-) -> bool {
+pub fn record_shadow_aud_mismatch(expected_aud: &str, presented_aud: &str, tenant: &str, caller_sub: &str) -> bool {
     if expected_aud == presented_aud {
         return false;
     }

@@ -9,14 +9,9 @@ use super::path::{ParsedPath, PathSegment};
 use super::rule::RedactionAction;
 use super::ruleset::RedactionRuleset;
 
+#[derive(Default)]
 pub struct RedactionOptions<'a> {
     pub hash_salt: Option<&'a str>,
-}
-
-impl Default for RedactionOptions<'_> {
-    fn default() -> Self {
-        Self { hash_salt: None }
-    }
 }
 
 #[must_use]
@@ -173,15 +168,17 @@ fn regex_replace_text(text: &str, pattern: &str, replacement: &str) -> Option<St
 }
 
 fn is_literal_pattern(pattern: &str) -> bool {
-    !pattern
-        .chars()
-        .any(|c| matches!(c, '.' | '*' | '+' | '?' | '[' | ']' | '(' | ')' | '{' | '}' | '^' | '$' | '|' | '\\'))
+    !pattern.chars().any(|c| {
+        matches!(
+            c,
+            '.' | '*' | '+' | '?' | '[' | ']' | '(' | ')' | '{' | '}' | '^' | '$' | '|' | '\\'
+        )
+    })
 }
 
 /// Minimal wildcard matcher: `.` matches any char, `.*` matches any suffix.
 fn simple_wildcard_replace(text: &str, pattern: &str, replacement: &str) -> Option<String> {
-    if pattern.ends_with(".*") {
-        let prefix = &pattern[..pattern.len() - 2];
+    if let Some(prefix) = pattern.strip_suffix(".*") {
         if prefix.is_empty() {
             return Some(replacement.to_string());
         }
@@ -274,25 +271,18 @@ mod tests {
     #[test]
     fn mask_replaces_scalar_with_stars() {
         let mut doc = serde_json::json!({ "params": { "api_key": "sk-live" } });
-        let rules = RedactionRuleset::builder()
-            .rule(mask_rule("$.params.api_key"))
-            .build();
+        let rules = RedactionRuleset::builder().rule(mask_rule("$.params.api_key")).build();
 
         let outcome = redact(&mut doc, &rules);
 
         assert_eq!(doc["params"]["api_key"], "***");
-        assert_eq!(
-            outcome.rewrites,
-            vec![RewriteEntry::new("$.params.api_key", "mask")]
-        );
+        assert_eq!(outcome.rewrites, vec![RewriteEntry::new("$.params.api_key", "mask")]);
     }
 
     #[test]
     fn hash_is_deterministic_with_salt() {
         let mut doc = serde_json::json!({ "params": { "token": "secret" } });
-        let rules = RedactionRuleset::builder()
-            .rule(hash_rule("$.params.token"))
-            .build();
+        let rules = RedactionRuleset::builder().rule(hash_rule("$.params.token")).build();
         let options = RedactionOptions {
             hash_salt: Some("tenant-a"),
         };

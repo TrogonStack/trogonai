@@ -26,16 +26,15 @@ struct CacheEntry {
 pub trait SchemaCache: Send + Sync {
     async fn get(&self, key: &SchemaCacheKey) -> Result<Option<CachedSchema>, SchemaCacheError>;
 
-    async fn put(
-        &self,
-        key: SchemaCacheKey,
-        entry: CachedSchema,
-        tool_name: &str,
-    ) -> Result<(), SchemaCacheError>;
+    async fn put(&self, key: SchemaCacheKey, entry: CachedSchema, tool_name: &str) -> Result<(), SchemaCacheError>;
 
     async fn invalidate(&self, server_id: &ServerId) -> Result<(), SchemaCacheError>;
 
-    async fn lookup_tool(&self, server_id: &ServerId, tool_name: &str) -> Result<Option<CachedSchema>, SchemaCacheError>;
+    async fn lookup_tool(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+    ) -> Result<Option<CachedSchema>, SchemaCacheError>;
 
     async fn lookup_tool_annotations(
         &self,
@@ -96,18 +95,14 @@ impl InMemorySchemaCache {
 
     async fn remove_key(&self, key: &SchemaCacheKey) {
         self.entries.write().await.remove(key);
-        self.tool_index.write().await.retain(|tool_key, hash| {
-            !(tool_key.server_id == key.server_id && *hash == key.schema_hash)
-        });
+        self.tool_index
+            .write()
+            .await
+            .retain(|tool_key, hash| !(tool_key.server_id == key.server_id && *hash == key.schema_hash));
         self.lru.write().await.retain(|existing| existing != key);
     }
 
-    async fn insert_tool_annotations(
-        &self,
-        server_id: &ServerId,
-        tool_name: &str,
-        annotations: ToolAnnotations,
-    ) {
+    async fn insert_tool_annotations(&self, server_id: &ServerId, tool_name: &str, annotations: ToolAnnotations) {
         self.tool_annotations.write().await.insert(
             ToolIndexKey {
                 server_id: server_id.clone(),
@@ -171,12 +166,7 @@ impl SchemaCache for InMemorySchemaCache {
         Ok(Some(cached))
     }
 
-    async fn put(
-        &self,
-        key: SchemaCacheKey,
-        entry: CachedSchema,
-        tool_name: &str,
-    ) -> Result<(), SchemaCacheError> {
+    async fn put(&self, key: SchemaCacheKey, entry: CachedSchema, tool_name: &str) -> Result<(), SchemaCacheError> {
         if !self.config.enabled {
             return Ok(());
         }
@@ -223,7 +213,11 @@ impl SchemaCache for InMemorySchemaCache {
         Ok(())
     }
 
-    async fn lookup_tool(&self, server_id: &ServerId, tool_name: &str) -> Result<Option<CachedSchema>, SchemaCacheError> {
+    async fn lookup_tool(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+    ) -> Result<Option<CachedSchema>, SchemaCacheError> {
         let index_key = ToolIndexKey {
             server_id: server_id.clone(),
             tool_name: tool_name.to_string(),
@@ -271,12 +265,7 @@ impl SchemaCache for Arc<InMemorySchemaCache> {
         self.as_ref().get(key).await
     }
 
-    async fn put(
-        &self,
-        key: SchemaCacheKey,
-        entry: CachedSchema,
-        tool_name: &str,
-    ) -> Result<(), SchemaCacheError> {
+    async fn put(&self, key: SchemaCacheKey, entry: CachedSchema, tool_name: &str) -> Result<(), SchemaCacheError> {
         self.as_ref().put(key, entry, tool_name).await
     }
 
@@ -284,7 +273,11 @@ impl SchemaCache for Arc<InMemorySchemaCache> {
         self.as_ref().invalidate(server_id).await
     }
 
-    async fn lookup_tool(&self, server_id: &ServerId, tool_name: &str) -> Result<Option<CachedSchema>, SchemaCacheError> {
+    async fn lookup_tool(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+    ) -> Result<Option<CachedSchema>, SchemaCacheError> {
         self.as_ref().lookup_tool(server_id, tool_name).await
     }
 
@@ -356,10 +349,7 @@ mod tests {
         let cache_key = key("server-a", 1);
         let entry = sample_entry("alpha");
 
-        cache
-            .put(cache_key.clone(), entry.clone(), "alpha")
-            .await
-            .expect("put");
+        cache.put(cache_key.clone(), entry.clone(), "alpha").await.expect("put");
         let got = cache.get(&cache_key).await.expect("get").expect("entry");
         assert_eq!(got, entry);
     }
@@ -384,10 +374,7 @@ mod tests {
             .await
             .expect("put b1");
 
-        cache
-            .invalidate(&ServerId::new("server-a"))
-            .await
-            .expect("invalidate");
+        cache.invalidate(&ServerId::new("server-a")).await.expect("invalidate");
 
         assert!(cache.get(&server_a_key_one).await.expect("get").is_none());
         assert!(cache.get(&server_a_key_two).await.expect("get").is_none());
@@ -398,9 +385,7 @@ mod tests {
     async fn expired_entry_is_evicted_on_get() {
         let cache = cache_with_ttl(Duration::from_secs(1));
         let cache_key = key("server-a", 9);
-        let stale_at = SystemTime::now()
-            .checked_sub(Duration::from_secs(5))
-            .expect("clock");
+        let stale_at = SystemTime::now().checked_sub(Duration::from_secs(5)).expect("clock");
         cache
             .put(
                 cache_key.clone(),

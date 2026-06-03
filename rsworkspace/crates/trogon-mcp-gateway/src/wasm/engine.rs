@@ -7,17 +7,17 @@ use tokio::sync::RwLock;
 use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
 
-use crate::bundle::{LoadedBundle, HOST_TARGET_WIT};
+use crate::bundle::{HOST_TARGET_WIT, LoadedBundle};
 use crate::cel_builtins::HostEvalContext;
 
 use tracing::Instrument;
 
-use super::bindings::{contract_identity, RequestCtx, WIT_PACKAGE, WIT_VERSION};
+use super::bindings::{RequestCtx, WIT_PACKAGE, WIT_VERSION, contract_identity};
 use super::config::PoolConfig;
 use super::error::{EvaluateOutcome, WasmEngineError};
 use super::pool::ComponentPool;
 use super::store_state::WasmStoreState;
-use super::tracing::{populate_request_span, WASM_EVALUATE_SPAN_NAME};
+use super::tracing::{WASM_EVALUATE_SPAN_NAME, populate_request_span};
 use super::wasi_stub;
 
 /// Process-wide Wasmtime engine with digest-keyed component pools.
@@ -55,8 +55,7 @@ impl WasmEngine {
         wasm_config.concurrency_support(true);
         wasm_config.consume_fuel(true);
         wasm_config.max_wasm_stack(512 * 1024);
-        let engine = Engine::new(&wasm_config)
-            .map_err(|err| WasmEngineError::Config(err.to_string()))?;
+        let engine = Engine::new(&wasm_config).map_err(|err| WasmEngineError::Config(err.to_string()))?;
         Ok(Self {
             engine,
             config,
@@ -94,18 +93,15 @@ impl WasmEngine {
 
         let mut pools = HashMap::new();
         for component in &bundle.components {
-            let compiled = Component::from_binary(&self.engine, &component.bytes).map_err(|err| {
-                WasmEngineError::Compile {
+            let compiled =
+                Component::from_binary(&self.engine, &component.bytes).map_err(|err| WasmEngineError::Compile {
                     component_id: component.entry.id.clone(),
                     detail: err.to_string(),
-                }
-            })?;
+                })?;
             let mut component_linker = linker.clone();
-            wasi_stub::prepare_linker(&mut component_linker, &compiled).map_err(|err| {
-                WasmEngineError::Link {
-                    component_id: component.entry.id.clone(),
-                    detail: err.to_string(),
-                }
+            wasi_stub::prepare_linker(&mut component_linker, &compiled).map_err(|err| WasmEngineError::Link {
+                component_id: component.entry.id.clone(),
+                detail: err.to_string(),
             })?;
             let pool = ComponentPool::new(
                 self.engine.clone(),
@@ -155,14 +151,18 @@ impl WasmEngine {
         parent: &tracing::Span,
     ) -> Result<EvaluateOutcome, WasmEngineError> {
         let _guard = parent.enter();
-        let component_id = component_id
-            .or(handle.default_component.as_deref())
+        let component_id =
+            component_id
+                .or(handle.default_component.as_deref())
+                .ok_or_else(|| WasmEngineError::UnknownComponent {
+                    component_id: String::new(),
+                })?;
+        let pool = handle
+            .pools
+            .get(component_id)
             .ok_or_else(|| WasmEngineError::UnknownComponent {
-                component_id: String::new(),
+                component_id: component_id.to_string(),
             })?;
-        let pool = handle.pools.get(component_id).ok_or_else(|| WasmEngineError::UnknownComponent {
-            component_id: component_id.to_string(),
-        })?;
         let mut request = request.clone();
         populate_request_span(&mut request);
         let evaluate_span = tracing::info_span!(
@@ -192,12 +192,12 @@ impl WasmEngine {
 
     #[cfg(test)]
     pub(crate) async fn register_handle_for_test(&self, handle: WasmBundleHandle) {
-        self.handles
-            .write()
-            .await
-            .insert(handle.key.clone(), Arc::new(LoadedPools {
+        self.handles.write().await.insert(
+            handle.key.clone(),
+            Arc::new(LoadedPools {
                 pools: handle.pools.clone(),
-            }));
+            }),
+        );
     }
 
     #[cfg(test)]
@@ -226,8 +226,8 @@ impl WasmBundleHandle {
 #[cfg(test)]
 mod tests {
     use crate::bundle::{
-        BundleManifest, BundleScope, ComponentEntry, LoadedBundle, LoadedComponent, ManifestDigest,
-        MANIFEST_FILENAME, Signing, HOST_TARGET_WIT,
+        BundleManifest, BundleScope, ComponentEntry, HOST_TARGET_WIT, LoadedBundle, LoadedComponent, MANIFEST_FILENAME,
+        ManifestDigest, Signing,
     };
 
     use super::*;
@@ -318,16 +318,9 @@ mod tests {
         wasm_config.wasm_component_model(true);
         let component_engine = Engine::new(&wasm_config).expect("engine");
         const MINIMAL: &[u8] = include_bytes!("testdata/minimal.component.wasm");
-        let component = Component::from_binary(&component_engine, MINIMAL)
-            .expect("minimal component");
+        let component = Component::from_binary(&component_engine, MINIMAL).expect("minimal component");
         let linker = Linker::new(&component_engine);
-        ComponentPool::new_without_prewarm(
-            component_engine,
-            linker,
-            component,
-            config,
-            Arc::from("policy"),
-        )
+        ComponentPool::new_without_prewarm(component_engine, linker, component, config, Arc::from("policy"))
     }
 
     #[tokio::test]

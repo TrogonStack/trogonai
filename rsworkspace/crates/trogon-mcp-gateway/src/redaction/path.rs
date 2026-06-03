@@ -15,9 +15,7 @@ pub(crate) struct ParsedPath {
 impl ParsedPath {
     pub fn parse(path: &str) -> Result<Self, RedactionError> {
         if path.is_empty() || !path.starts_with('$') {
-            return Err(RedactionError::InvalidPath(format!(
-                "path must start with $: {path}"
-            )));
+            return Err(RedactionError::InvalidPath(format!("path must start with $: {path}")));
         }
         let mut segments = vec![PathSegment::Root];
         let rest = path.trim_start_matches('$');
@@ -25,9 +23,7 @@ impl ParsedPath {
             return Ok(Self { segments });
         }
         if !rest.starts_with('.') && !rest.starts_with('[') {
-            return Err(RedactionError::InvalidPath(format!(
-                "invalid path after $: {path}"
-            )));
+            return Err(RedactionError::InvalidPath(format!("invalid path after $: {path}")));
         }
         let mut chars = rest.chars().peekable();
         while chars.peek().is_some() {
@@ -45,9 +41,7 @@ impl ParsedPath {
                         )));
                     }
                     if chars.next() != Some(']') {
-                        return Err(RedactionError::InvalidPath(format!(
-                            "unclosed array wildcard: {path}"
-                        )));
+                        return Err(RedactionError::InvalidPath(format!("unclosed array wildcard: {path}")));
                     }
                     segments.push(PathSegment::Wildcard);
                 }
@@ -73,9 +67,7 @@ fn read_field_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, path: &
         chars.next();
     }
     if key.is_empty() {
-        return Err(RedactionError::InvalidPath(format!(
-            "empty field name in path: {path}"
-        )));
+        return Err(RedactionError::InvalidPath(format!("empty field name in path: {path}")));
     }
     Ok(key)
 }

@@ -5,7 +5,11 @@ pub enum SignedExportError {
     UnknownKeyId(String),
     SignatureMismatch,
     PayloadDigestMismatch,
-    StaleSignature { signed_at_unix_ms: u64, now_unix_ms: u64, max_age_ms: u64 },
+    StaleSignature {
+        signed_at_unix_ms: u64,
+        now_unix_ms: u64,
+        max_age_ms: u64,
+    },
     Malformed(String),
 }
 

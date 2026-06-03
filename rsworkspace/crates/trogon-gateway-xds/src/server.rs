@@ -2,20 +2,20 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use prost::Message;
 use tokio::sync::mpsc;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::mapping::MappedResources;
+use crate::proto::AggregatedDiscoveryService;
 use crate::proto::envoy::service::discovery::v3::{
     DeltaDiscoveryRequest, DeltaDiscoveryResponse, DiscoveryRequest, DiscoveryResponse,
 };
-use crate::proto::AggregatedDiscoveryService;
 use crate::state::{ConfigStore, NodeSnapshot};
 use crate::type_urls;
 
@@ -51,10 +51,7 @@ impl AdsServer {
         self.nonce.fetch_add(1, Ordering::Relaxed).to_string()
     }
 
-    fn resolve_node<'a>(
-        &'a self,
-        request: &'a DiscoveryRequest,
-    ) -> Result<Arc<NodeSnapshot>, Status> {
+    fn resolve_node<'a>(&'a self, request: &'a DiscoveryRequest) -> Result<Arc<NodeSnapshot>, Status> {
         let node_id = request
             .node
             .as_ref()
@@ -96,11 +93,11 @@ impl StreamState {
             self.sent_versions.remove(&type_url);
             return;
         }
-        if let Some(sent_version) = self.sent_versions.get(&type_url) {
-            if &request.version_info == sent_version {
-                self.acked_versions
-                    .insert(type_url.clone(), request.version_info.clone());
-            }
+        if let Some(sent_version) = self.sent_versions.get(&type_url)
+            && &request.version_info == sent_version
+        {
+            self.acked_versions
+                .insert(type_url.clone(), request.version_info.clone());
         }
     }
 
@@ -110,10 +107,8 @@ impl StreamState {
     }
 
     fn mark_sent(&mut self, type_url: &str, version: &str, nonce: &str) {
-        self.sent_versions
-            .insert(type_url.to_string(), version.to_string());
-        self.last_nonce
-            .insert(type_url.to_string(), nonce.to_string());
+        self.sent_versions.insert(type_url.to_string(), version.to_string());
+        self.last_nonce.insert(type_url.to_string(), nonce.to_string());
     }
 }
 
@@ -230,10 +225,7 @@ fn subscribed_type_urls(request: &DiscoveryRequest) -> Vec<String> {
     }
 }
 
-fn resources_for_type(
-    type_url: &str,
-    mapped: &MappedResources,
-) -> Result<Vec<prost_types::Any>, Status> {
+fn resources_for_type(type_url: &str, mapped: &MappedResources) -> Result<Vec<prost_types::Any>, Status> {
     let mut resources = Vec::new();
     match type_url {
         type_urls::LISTENER => {
@@ -262,9 +254,7 @@ fn resources_for_type(
             }
         }
         other => {
-            return Err(Status::invalid_argument(format!(
-                "unsupported type_url `{other}`"
-            )));
+            return Err(Status::invalid_argument(format!("unsupported type_url `{other}`")));
         }
     }
     Ok(resources)
@@ -275,6 +265,16 @@ fn encode_resource<T: Message>(type_url: &str, message: &T) -> Result<prost_type
         type_url: type_url.to_string(),
         value: message.encode_to_vec(),
     })
+}
+
+trait DiscoveryRequestExt {
+    fn has_error_detail(&self) -> bool;
+}
+
+impl DiscoveryRequestExt for DiscoveryRequest {
+    fn has_error_detail(&self) -> bool {
+        self.error_detail.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -333,15 +333,5 @@ mod tests {
         assert_eq!(responses.len(), 1);
         assert_eq!(responses[0].version_info, "fixture-v1");
         assert_eq!(responses[0].resources.len(), 1);
-    }
-}
-
-trait DiscoveryRequestExt {
-    fn has_error_detail(&self) -> bool;
-}
-
-impl DiscoveryRequestExt for DiscoveryRequest {
-    fn has_error_detail(&self) -> bool {
-        self.error_detail.is_some()
     }
 }

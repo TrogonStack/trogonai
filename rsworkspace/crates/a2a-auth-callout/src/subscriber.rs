@@ -74,10 +74,7 @@ impl<D: AuthDispatcher> Subscriber<D> {
                 }
             };
 
-            let request = match self
-                .wire
-                .decode_request(msg.payload.to_vec(), msg.headers.as_ref())
-            {
+            let request = match self.wire.decode_request(msg.payload.to_vec(), msg.headers.as_ref()) {
                 Ok(r) => r,
                 Err(e) => {
                     warn!(error = %e, "failed to decode auth callout request; dropping");
@@ -92,8 +89,7 @@ impl<D: AuthDispatcher> Subscriber<D> {
             tokio::spawn(async move {
                 match dispatcher.dispatch(request.clone()).await {
                     Ok(user_jwt) => {
-                        if let Err(e) = publish_success(&client, &reply, &wire, &request, user_jwt).await
-                        {
+                        if let Err(e) = publish_success(&client, &reply, &wire, &request, user_jwt).await {
                             error!(error = %e, "failed to publish auth callout response");
                         }
                     }

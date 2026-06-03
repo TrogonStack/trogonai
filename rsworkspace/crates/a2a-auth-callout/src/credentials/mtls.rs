@@ -6,8 +6,8 @@ use x509_parser::time::ASN1Time;
 
 use crate::error::AuthCalloutError;
 use crate::jwt::{
-    derive_caller_id, external_subject_from_der, spicedb_bundle_for_opaque, AudienceAccount, ExternalSubject,
-    UserJwtClaims,
+    AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, external_subject_from_der,
+    spicedb_bundle_for_opaque,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,8 +47,8 @@ impl X509MtlsVerifier {
 
     fn leaf_der(pem: &str) -> Result<Vec<u8>, AuthCalloutError> {
         for pem_result in Pem::iter_from_buffer(pem.as_bytes()) {
-            let pem = pem_result
-                .map_err(|e| AuthCalloutError::CredentialVerification(format!("PEM parse error: {e}")))?;
+            let pem =
+                pem_result.map_err(|e| AuthCalloutError::CredentialVerification(format!("PEM parse error: {e}")))?;
             if pem.label.to_uppercase().contains("CERTIFICATE") {
                 return Ok(pem.contents);
             }
@@ -60,9 +60,7 @@ impl X509MtlsVerifier {
 
     fn anchor_pems(bundle: &str) -> Result<Vec<Pem>, AuthCalloutError> {
         Pem::iter_from_buffer(bundle.as_bytes())
-            .map(|r| {
-                r.map_err(|e| AuthCalloutError::CredentialVerification(format!("trust anchor PEM: {e}")))
-            })
+            .map(|r| r.map_err(|e| AuthCalloutError::CredentialVerification(format!("trust anchor PEM: {e}"))))
             .collect()
     }
 
@@ -72,9 +70,9 @@ impl X509MtlsVerifier {
             if !pem.label.to_uppercase().contains("CERTIFICATE") {
                 continue;
             }
-            let x509 = pem.parse_x509().map_err(|e| {
-                AuthCalloutError::CredentialVerification(format!("invalid trust anchor cert DER: {e}"))
-            })?;
+            let x509 = pem
+                .parse_x509()
+                .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid trust anchor cert DER: {e}")))?;
             out.push(x509);
         }
         if out.is_empty() {
@@ -92,16 +90,12 @@ impl X509MtlsVerifier {
         now: OffsetDateTime,
     ) -> Result<UserJwtClaims, AuthCalloutError> {
         let leaf_der = Self::leaf_der(cert.as_str())?;
-        let (_, leaf) = X509Certificate::from_der(&leaf_der).map_err(|e| {
-            AuthCalloutError::CredentialVerification(format!("invalid leaf certificate: {e}"))
-        })?;
+        let (_, leaf) = X509Certificate::from_der(&leaf_der)
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid leaf certificate: {e}")))?;
         let anchor_pems = Self::anchor_pems(self.anchors.as_str())?;
         let cas = Self::parse_cas(&anchor_pems)?;
 
-        if !leaf
-            .validity()
-            .is_valid_at(ASN1Time::from(now))
-        {
+        if !leaf.validity().is_valid_at(ASN1Time::from(now)) {
             return Err(AuthCalloutError::CredentialVerification(
                 "client certificate validity window does not include verification time".into(),
             ));
@@ -124,17 +118,14 @@ impl X509MtlsVerifier {
             ));
         }
 
-        let sub = ExternalSubject::from_x509(&leaf, &leaf_der).map_err(|e| {
-            AuthCalloutError::CredentialVerification(format!("mTLS subject extraction failed: {e}"))
-        })?;
+        let sub = ExternalSubject::from_x509(&leaf, &leaf_der)
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("mTLS subject extraction failed: {e}")))?;
         let data = spicedb_bundle_for_opaque(serde_json::json!({
             "spicedb_subject": sub.as_str(),
             "mtls": true,
         }));
-        let caller_id =
-            derive_caller_id(sub.as_str(), account).map_err(|e| {
-                AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}"))
-            })?;
+        let caller_id = derive_caller_id(sub.as_str(), account)
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
 
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
@@ -160,28 +151,19 @@ impl ExternalSubjectExt for ExternalSubject {
                 AuthCalloutError::CredentialVerification(format!("fallback subject encoding failed: {e}"))
             });
         }
-        ExternalSubject::new(dn).map_err(|e| {
-            AuthCalloutError::CredentialVerification(format!("invalid external subject from DN: {e}"))
-        })
+        ExternalSubject::new(dn)
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid external subject from DN: {e}")))
     }
 }
 
 #[async_trait::async_trait]
 pub trait MTlsVerifier: Send + Sync + 'static {
-    async fn verify(
-        &self,
-        cert: &ClientCertPem,
-        account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError>;
+    async fn verify(&self, cert: &ClientCertPem, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError>;
 }
 
 #[async_trait::async_trait]
 impl MTlsVerifier for X509MtlsVerifier {
-    async fn verify(
-        &self,
-        cert: &ClientCertPem,
-        account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(&self, cert: &ClientCertPem, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
         let now = OffsetDateTime::now_utc();
         Ok(self.verify_sync(cert, account, now)?)
     }
@@ -201,9 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn verifies_rcgen_chain() {
-        use rcgen::{
-            BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
-        };
+        use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
 
         let ca_key = KeyPair::generate().expect("ca key");
         let mut ca_dn = DistinguishedName::new();
@@ -226,10 +206,7 @@ mod tests {
 
         let v = X509MtlsVerifier::new(TrustAnchorPem::new(anchors));
         let account = AudienceAccount::new("acct-1");
-        let claims = v
-            .verify(&ClientCertPem::new(leaf_pem), &account)
-            .await
-            .expect("verify");
+        let claims = v.verify(&ClientCertPem::new(leaf_pem), &account).await.expect("verify");
         assert_eq!(claims.aud.as_str(), "acct-1");
         assert!(claims.sub.as_str().contains("test-service"));
         assert!(!claims.caller_id.as_str().contains('.'));
@@ -237,9 +214,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_wrong_anchor() {
-        use rcgen::{
-            BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
-        };
+        use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
 
         let unrelated_key = KeyPair::generate().expect("k");
         let mut unrelated_dn = DistinguishedName::new();

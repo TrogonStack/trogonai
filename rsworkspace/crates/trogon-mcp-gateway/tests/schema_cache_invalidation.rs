@@ -4,9 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use trogon_mcp_gateway::schema_cache::{
-    SchemaCache, SchemaCacheConfig, SchemaCacheRuntime, SchemaSource, ServerId,
-    handle_list_changed_notification, hash_schema, lookup_tool_schema, sniff_tools_list_reply,
-    should_invalidate,
+    SchemaCache, SchemaCacheConfig, SchemaCacheRuntime, SchemaSource, ServerId, handle_list_changed_notification,
+    hash_schema, lookup_tool_schema, should_invalidate, sniff_tools_list_reply,
 };
 
 mod harness {
@@ -56,8 +55,18 @@ mod tools_list_populates_cache {
             .await
             .expect("sniff");
         assert_eq!(stored, 2);
-        assert!(lookup_tool_schema(&runtime, &server, "alpha").await.expect("lookup").is_some());
-        assert!(lookup_tool_schema(&runtime, &server, "beta").await.expect("lookup").is_some());
+        assert!(
+            lookup_tool_schema(&runtime, &server, "alpha")
+                .await
+                .expect("lookup")
+                .is_some()
+        );
+        assert!(
+            lookup_tool_schema(&runtime, &server, "beta")
+                .await
+                .expect("lookup")
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -156,7 +165,12 @@ mod list_changed_invalidation {
         .await
         .expect("invalidate");
         assert!(invalidated);
-        assert!(lookup_tool_schema(&runtime, &server, "alpha").await.expect("lookup").is_none());
+        assert!(
+            lookup_tool_schema(&runtime, &server, "alpha")
+                .await
+                .expect("lookup")
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -214,16 +228,19 @@ mod ttl_expiry {
                 key,
                 CachedSchema {
                     schema,
-                    fetched_at: SystemTime::now()
-                        .checked_sub(Duration::from_secs(5))
-                        .expect("clock"),
+                    fetched_at: SystemTime::now().checked_sub(Duration::from_secs(5)).expect("clock"),
                     source: SchemaSource::ToolsListSniff,
                 },
                 "alpha",
             )
             .await
             .expect("put");
-        assert!(lookup_tool_schema(&runtime, &server, "alpha").await.expect("lookup").is_none());
+        assert!(
+            lookup_tool_schema(&runtime, &server, "alpha")
+                .await
+                .expect("lookup")
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -246,7 +263,12 @@ mod ttl_expiry {
         )
         .await
         .expect("warm");
-        assert!(lookup_tool_schema(&runtime, &server, "fresh").await.expect("lookup").is_some());
+        assert!(
+            lookup_tool_schema(&runtime, &server, "fresh")
+                .await
+                .expect("lookup")
+                .is_some()
+        );
     }
 }
 
@@ -306,8 +328,18 @@ mod cross_server_isolation {
         warm(&server_a, &runtime, "a").await;
         warm(&server_b, &runtime, "b").await;
         runtime.invalidate_server(&server_a).await.expect("invalidate a");
-        assert!(lookup_tool_schema(&runtime, &server_a, "a").await.expect("lookup").is_none());
-        assert!(lookup_tool_schema(&runtime, &server_b, "b").await.expect("lookup").is_some());
+        assert!(
+            lookup_tool_schema(&runtime, &server_a, "a")
+                .await
+                .expect("lookup")
+                .is_none()
+        );
+        assert!(
+            lookup_tool_schema(&runtime, &server_b, "b")
+                .await
+                .expect("lookup")
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -345,7 +377,12 @@ mod cross_server_isolation {
         warm(&server_a, &runtime, "a").await;
         warm(&server_b, &runtime, "b").await;
         runtime.invalidate_on_reconnect(&server_a).await.expect("reconnect a");
-        assert!(lookup_tool_schema(&runtime, &server_b, "b").await.expect("lookup").is_some());
+        assert!(
+            lookup_tool_schema(&runtime, &server_b, "b")
+                .await
+                .expect("lookup")
+                .is_some()
+        );
     }
 }
 
@@ -392,9 +429,12 @@ mod gateway_e2e {
         let prefix_segment = format!("{}", Uuid::now_v7().as_simple());
         let prefix_token = format!("{}.mcp", prefix_segment);
         let prefix = McpPrefix::new(&prefix_token).expect("prefix");
-        let mcp_conf = McpConfig::new(prefix.clone(), nats_conf.clone()).with_operation_timeout(Duration::from_secs(15));
+        let mcp_conf =
+            McpConfig::new(prefix.clone(), nats_conf.clone()).with_operation_timeout(Duration::from_secs(15));
 
-        let backend = connect(&nats_conf, Duration::from_secs(15)).await.expect("backend nats");
+        let backend = connect(&nats_conf, Duration::from_secs(15))
+            .await
+            .expect("backend nats");
         let tools = serde_json::json!([
             {"name": "echo", "inputSchema": {"type": "object", "properties": {"msg": {"type": "string"}}}}
         ]);
@@ -413,7 +453,11 @@ mod gateway_e2e {
                 while let Some(msg) = sub.next().await {
                     let Some(reply) = msg.reply else { continue };
                     backend_nats
-                        .publish_with_headers(reply.to_string(), async_nats::HeaderMap::new(), Bytes::from(backend_reply))
+                        .publish_with_headers(
+                            reply.to_string(),
+                            async_nats::HeaderMap::new(),
+                            Bytes::from(backend_reply),
+                        )
                         .await
                         .ok();
                     backend_nats.flush().await.ok();
@@ -434,12 +478,20 @@ mod gateway_e2e {
             egress: None,
             chain_resolver: None,
             rate_limit: None,
-        stepup_policy: None,
-        stepup_bridge: None,
-        freshness_clock: None,
+            approval_gate: None,
+            mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
+            context_throttle: None,
+            anomaly_emitter: None,
+            stepup_policy: None,
+            stepup_bridge: None,
+            freshness_clock: None,
         };
 
-        let gateway_client = Arc::new(connect(&nats_conf, Duration::from_secs(15)).await.expect("gateway nats"));
+        let gateway_client = Arc::new(
+            connect(&nats_conf, Duration::from_secs(15))
+                .await
+                .expect("gateway nats"),
+        );
         let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = Arc::new(AllowAllPermissionChecker);
         let traces = trogon_mcp_gateway::trace::TraceStore::default();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -458,11 +510,7 @@ mod gateway_e2e {
         let ingress = format!("{}.gateway.request.fixture.tools.list", prefix.as_str());
         let payload = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
         gateway_client
-            .request_with_headers(
-                ingress,
-                headers,
-                serde_json::to_vec(&payload).unwrap().into(),
-            )
+            .request_with_headers(ingress, headers, serde_json::to_vec(&payload).unwrap().into())
             .await
             .expect("tools/list");
 

@@ -1,4 +1,4 @@
-use tier3_skill_abi::{read_input, write_meta, write_output, AbiError};
+use tier3_skill_abi::{AbiError, read_input, write_meta, write_output};
 
 const REFUSE: &[u8] = b"A2A_T3_REFUSE:UnauthorizedDataCategory";
 const REFUSE_TRIGGER: &str = "SMOKE_T3_REFUSE_ME";

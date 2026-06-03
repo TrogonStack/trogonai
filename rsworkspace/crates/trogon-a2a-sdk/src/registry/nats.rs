@@ -69,10 +69,9 @@ impl Registry for NatsRegistry {
             serde_json::from_slice(&body).map_err(|e| SdkError::LookupFailed(e.to_string()))?;
         match wire {
             LookupWireResponse::Found { record } => Ok(record.into()),
-            LookupWireResponse::NotFound => Err(SdkError::LookupFailed(format!(
-                "agent {} not found",
-                agent_id.as_str()
-            ))),
+            LookupWireResponse::NotFound => {
+                Err(SdkError::LookupFailed(format!("agent {} not found", agent_id.as_str())))
+            }
             LookupWireResponse::Revoked { reason } => Err(SdkError::LookupFailed(reason)),
         }
     }

@@ -31,9 +31,6 @@ impl RegionAuditSink for RecordingRegionAuditSink {
     }
 
     fn region_recovered(&self, region: &RegionId) {
-        self.recoveries
-            .lock()
-            .expect("audit lock")
-            .push(region.clone());
+        self.recoveries.lock().expect("audit lock").push(region.clone());
     }
 }

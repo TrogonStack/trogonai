@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 
 use super::bundle_audit::BundleAuditPublisher;
 use super::errors::BundleLoadError;
-use super::{load_bundle, LoadedBundle, TrustedKeys};
+use super::{LoadedBundle, TrustedKeys, load_bundle};
 
 const DEFAULT_RING_CAPACITY: usize = 5;
 const DEFAULT_DEBOUNCE_MS: u64 = 0;
@@ -32,11 +32,7 @@ pub struct BundleKvLoaderOpts {
 }
 
 impl BundleKvLoaderOpts {
-    pub fn new(
-        bundle_key: impl Into<String>,
-        bundle_id: impl Into<String>,
-        audit: BundleAuditPublisher,
-    ) -> Self {
+    pub fn new(bundle_key: impl Into<String>, bundle_id: impl Into<String>, audit: BundleAuditPublisher) -> Self {
         Self {
             bundle_key: bundle_key.into(),
             bundle_id: bundle_id.into(),
@@ -107,21 +103,13 @@ pub struct BundleHandle {
 
 impl BundleHandle {
     pub fn current(&self) -> Result<Arc<LoadedBundle>, BundleLoadError> {
-        let guard = self
-            .state
-            .active
-            .read()
-            .map_err(|_| BundleLoadError::BundleNotLoaded)?;
+        let guard = self.state.active.read().map_err(|_| BundleLoadError::BundleNotLoaded)?;
         let active = guard.as_ref().ok_or(BundleLoadError::BundleNotLoaded)?;
         Ok(Arc::clone(&active.bundle))
     }
 
     pub fn status(&self) -> Result<BundleStatus, BundleLoadError> {
-        let guard = self
-            .state
-            .active
-            .read()
-            .map_err(|_| BundleLoadError::BundleNotLoaded)?;
+        let guard = self.state.active.read().map_err(|_| BundleLoadError::BundleNotLoaded)?;
         let active = guard.as_ref().ok_or(BundleLoadError::BundleNotLoaded)?;
         Ok(BundleStatus {
             revision: active.revision,
@@ -138,21 +126,11 @@ impl BundleHandle {
                 .map(|r| (r.archive_bytes.clone(), Arc::clone(&r.bundle), r.revision))
         };
         let Some((archive_bytes, bundle, revision)) = record else {
-            return Err(BundleLoadError::RevisionNotFound {
-                revision: version_id,
-            });
+            return Err(BundleLoadError::RevisionNotFound { revision: version_id });
         };
 
         let previous_digest = self.status()?.digest_hex;
-        activate_bundle(
-            &self.state,
-            &self.opts,
-            archive_bytes,
-            bundle,
-            revision,
-            true,
-        )
-        .await?;
+        activate_bundle(&self.state, &self.opts, archive_bytes, bundle, revision, true).await?;
 
         self.opts
             .audit
@@ -183,11 +161,7 @@ where
     S: BundleKvSource + Send + Sync + 'static,
 {
     pub fn new(source: S, trusted: TrustedKeys, opts: BundleKvLoaderOpts) -> Self {
-        Self {
-            source,
-            trusted,
-            opts,
-        }
+        Self { source, trusted, opts }
     }
 
     pub async fn start(self) -> Result<BundleHandle, BundleLoadError> {
@@ -196,31 +170,23 @@ where
             ring: Mutex::new(RevisionRing::new(self.opts.ring_capacity)),
         });
 
-        let (bytes, revision) = self
-            .source
-            .fetch(&self.opts.bundle_key)
-            .await?
-            .ok_or_else(|| BundleLoadError::KvEmpty {
-                key: self.opts.bundle_key.clone(),
-            })?;
+        let (bytes, revision) =
+            self.source
+                .fetch(&self.opts.bundle_key)
+                .await?
+                .ok_or_else(|| BundleLoadError::KvEmpty {
+                    key: self.opts.bundle_key.clone(),
+                })?;
 
         let bundle = Arc::new(load_bundle(&bytes, &self.trusted)?);
-        activate_bundle(
-            &state,
-            &self.opts,
-            bytes,
-            bundle,
-            revision,
-            false,
-        )
-        .await?;
+        activate_bundle(&state, &self.opts, bytes, bundle, revision, false).await?;
 
         self.opts
             .audit
             .load_succeeded(
                 &self.opts.bundle_id,
                 revision,
-                &state
+                state
                     .active
                     .read()
                     .expect("active lock")
@@ -233,11 +199,7 @@ where
             )
             .await;
 
-        let watch_stream = self
-            .source
-            .watch(&self.opts.bundle_key)
-            .await
-            .map_err(|error| error)?;
+        let watch_stream = self.source.watch(&self.opts.bundle_key).await?;
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let watcher_opts = self.opts.clone();
@@ -290,11 +252,7 @@ async fn activate_bundle(
         let mut guard = state.active.write().map_err(|_| BundleLoadError::BundleNotLoaded)?;
         let had_prior = guard.is_some();
         let loaded_at = guard.as_ref().map(|a| a.loaded_at).unwrap_or(now);
-        let last_swap_at = if had_prior || is_rollback {
-            Some(now)
-        } else {
-            None
-        };
+        let last_swap_at = if had_prior || is_rollback { Some(now) } else { None };
         *guard = Some(ActiveState {
             bundle: Arc::clone(&bundle),
             revision,
@@ -320,9 +278,7 @@ async fn activate_bundle(
             .manifest_digest
             .as_hex()
             .to_string();
-        opts.audit
-            .hot_swapped(&opts.bundle_id, revision, &digest, prev)
-            .await;
+        opts.audit.hot_swapped(&opts.bundle_id, revision, &digest, prev).await;
     }
 
     Ok(())
@@ -335,13 +291,7 @@ async fn try_promote(
     bytes: Vec<u8>,
     revision: u64,
 ) {
-    if state
-        .active
-        .read()
-        .ok()
-        .and_then(|g| g.as_ref().map(|a| a.revision))
-        == Some(revision)
-    {
+    if state.active.read().ok().and_then(|g| g.as_ref().map(|a| a.revision)) == Some(revision) {
         return;
     }
 
@@ -353,26 +303,13 @@ async fn try_promote(
 
     match load_bundle(&bytes, trusted) {
         Ok(loaded) => {
-            if let Err(error) = activate_bundle(
-                state,
-                opts,
-                bytes.clone(),
-                Arc::new(loaded),
-                revision,
-                false,
-            )
-            .await
-            {
-                opts.audit
-                    .load_failed(&opts.bundle_id, revision, &error)
-                    .await;
+            if let Err(error) = activate_bundle(state, opts, bytes.clone(), Arc::new(loaded), revision, false).await {
+                opts.audit.load_failed(&opts.bundle_id, revision, &error).await;
             }
             let _ = previous_digest;
         }
         Err(error) => {
-            opts.audit
-                .load_failed(&opts.bundle_id, revision, &error)
-                .await;
+            opts.audit.load_failed(&opts.bundle_id, revision, &error).await;
         }
     }
 }
@@ -405,8 +342,7 @@ async fn run_kv_watcher(
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                 match tokio::time::timeout(remaining, stream.next()).await {
                     Ok(Some(Ok(later)))
-                        if later.operation != Operation::Delete
-                            && later.operation != Operation::Purge =>
+                        if later.operation != Operation::Delete && later.operation != Operation::Purge =>
                     {
                         entry = later;
                         deadline = tokio::time::Instant::now() + debounce;
@@ -422,9 +358,7 @@ async fn run_kv_watcher(
 
 fn instant_to_system(instant: Instant) -> SystemTime {
     let elapsed = instant.elapsed();
-    SystemTime::now()
-        .checked_sub(elapsed)
-        .unwrap_or(UNIX_EPOCH)
+    SystemTime::now().checked_sub(elapsed).unwrap_or(UNIX_EPOCH)
 }
 
 #[derive(Debug, Clone)]
@@ -461,9 +395,7 @@ impl NatsKvSource {
 impl BundleKvSource for NatsKvSource {
     async fn fetch(&self, key: &str) -> Result<Option<(Vec<u8>, u64)>, BundleLoadError> {
         match self.store.entry(key).await {
-            Ok(Some(entry))
-                if entry.operation != Operation::Delete && entry.operation != Operation::Purge =>
-            {
+            Ok(Some(entry)) if entry.operation != Operation::Delete && entry.operation != Operation::Purge => {
                 Ok(Some((entry.value.to_vec(), entry.revision)))
             }
             Ok(_) => Ok(None),
@@ -474,8 +406,7 @@ impl BundleKvSource for NatsKvSource {
     async fn watch(
         &self,
         key: &str,
-    ) -> Result<Pin<Box<dyn futures::Stream<Item = Result<KvEntry, BundleLoadError>> + Send>>, BundleLoadError>
-    {
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = Result<KvEntry, BundleLoadError>> + Send>>, BundleLoadError> {
         let watch = self
             .store
             .watch(key)
@@ -505,7 +436,7 @@ pub mod fake_kv {
     use std::collections::HashMap;
 
     use futures::stream;
-    use tokio::sync::{mpsc, RwLock};
+    use tokio::sync::{RwLock, mpsc};
 
     use super::*;
 
@@ -543,19 +474,13 @@ pub mod fake_kv {
 
         async fn latest(&self, key: &str) -> Option<(Vec<u8>, u64)> {
             let map = self.inner.read().await;
-            map.get(key).and_then(|history| {
-                history.last().map(|(rev, bytes)| (bytes.clone(), *rev))
-            })
+            map.get(key)
+                .and_then(|history| history.last().map(|(rev, bytes)| (bytes.clone(), *rev)))
         }
 
         async fn register_watch(&self, key: &str) -> mpsc::UnboundedReceiver<KvEntry> {
             let (tx, rx) = mpsc::unbounded_channel();
-            self.watchers
-                .write()
-                .await
-                .entry(key.to_string())
-                .or_default()
-                .push(tx);
+            self.watchers.write().await.entry(key.to_string()).or_default().push(tx);
             rx
         }
     }
@@ -568,10 +493,7 @@ pub mod fake_kv {
 
     impl FakeKvSource {
         pub fn new(kv: FakeBundleKv, key: impl Into<String>) -> Self {
-            Self {
-                kv,
-                key: key.into(),
-            }
+            Self { kv, key: key.into() }
         }
     }
 
@@ -584,17 +506,10 @@ pub mod fake_kv {
         async fn watch(
             &self,
             key: &str,
-        ) -> Result<
-            Pin<Box<dyn futures::Stream<Item = Result<KvEntry, BundleLoadError>> + Send>>,
-            BundleLoadError,
-        > {
+        ) -> Result<Pin<Box<dyn futures::Stream<Item = Result<KvEntry, BundleLoadError>> + Send>>, BundleLoadError>
+        {
             let rx = self.kv.register_watch(key).await;
-            let stream = stream::unfold(rx, |mut rx| async move {
-                match rx.recv().await {
-                    Some(entry) => Some((Ok(entry), rx)),
-                    None => None,
-                }
-            });
+            let stream = stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|entry| (Ok(entry), rx)) });
             Ok(Box::pin(stream))
         }
 
@@ -615,8 +530,8 @@ mod tests {
     use super::*;
     use crate::bundle::bundle_audit::{EVENT_HOT_SWAPPED, EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED, EVENT_ROLLED_BACK};
     use crate::bundle::{
-        build_tar, hash_member, manifest_digest_bytes, signature_path, BundleArchive, HOST_TARGET_WIT,
-        MANIFEST_FILENAME,
+        BundleArchive, HOST_TARGET_WIT, MANIFEST_FILENAME, build_tar, hash_member, manifest_digest_bytes,
+        signature_path,
     };
 
     fn manifest_toml(nkey_pub: &str, cel_hash: &str, version: &str) -> String {
@@ -684,10 +599,7 @@ priority = 1
         let (audit, _) = BundleAuditPublisher::recording();
         let opts = BundleKvLoaderOpts::new(key, "acme/demo", audit);
         let loader = BundleKvLoader::new(FakeKvSource::new(kv, key), trusted_for(&kp), opts);
-        assert!(matches!(
-            loader.start().await,
-            Err(BundleLoadError::KvEmpty { .. })
-        ));
+        assert!(matches!(loader.start().await, Err(BundleLoadError::KvEmpty { .. })));
     }
 
     #[tokio::test]
@@ -727,7 +639,12 @@ priority = 1
         let mut archive = crate::bundle::extract_archive(&bad).expect("extract");
         archive.insert(
             MANIFEST_FILENAME,
-            manifest_toml(&kp.public_key(), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "2.0.0").into_bytes(),
+            manifest_toml(
+                &kp.public_key(),
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "2.0.0",
+            )
+            .into_bytes(),
         );
         let bad_tar = build_tar(&archive);
         kv.put(key, bad_tar).await;
@@ -736,7 +653,11 @@ priority = 1
         assert_eq!(handle.status().expect("status").digest_hex, digest_v1);
         let events = records.lock().await;
         assert!(events.iter().any(|e| e.event == EVENT_LOAD_FAILED));
-        assert!(!events.iter().any(|e| e.event == EVENT_HOT_SWAPPED && e.fields.revision > 1));
+        assert!(
+            !events
+                .iter()
+                .any(|e| e.event == EVENT_HOT_SWAPPED && e.fields.revision > 1)
+        );
     }
 
     #[tokio::test]

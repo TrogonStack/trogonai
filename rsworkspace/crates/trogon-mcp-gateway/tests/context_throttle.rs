@@ -7,9 +7,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use mcp_nats::{Config as McpConfig, McpPrefix};
 use serde_json::{Value, json};
 use trogon_mcp_gateway::authz::AllowAllPermissionChecker;
-use trogon_mcp_gateway::context_throttle::{
-    ContextBudget, ContextThrottle, ContextThrottleConfig, TestClock,
-};
+use trogon_mcp_gateway::context_throttle::{ContextBudget, ContextThrottle, ContextThrottleConfig, TestClock};
 use trogon_mcp_gateway::gateway::GatewaySettings;
 use trogon_mcp_gateway::rpc_codes;
 use trogon_nats::{NatsAuth, NatsConfig, connect};
@@ -41,12 +39,7 @@ mod harness {
         .expect("jwt validator")
     }
 
-    pub fn jwt_for_context(
-        sub: &str,
-        tenant: &str,
-        agent_id: Option<&str>,
-        purpose: Option<&str>,
-    ) -> String {
+    pub fn jwt_for_context(sub: &str, tenant: &str, agent_id: Option<&str>, purpose: Option<&str>) -> String {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -104,8 +97,7 @@ mod harness {
         };
 
         let nats = Arc::new(connect(&nats_conf, connect_timeout).await.expect("nats connect"));
-        let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> =
-            Arc::new(AllowAllPermissionChecker);
+        let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = Arc::new(AllowAllPermissionChecker);
         let traces = trogon_mcp_gateway::trace::TraceStore::default();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let run_nats = nats.clone();
@@ -156,13 +148,9 @@ mod harness {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("authorization", format!("Bearer {token}").as_str());
         let payload = json!({"jsonrpc":"2.0","id":request_id,"method":"tools/list","params":{}});
-        nats.request_with_headers(
-            ingress,
-            headers,
-            serde_json::to_vec(&payload).unwrap().into(),
-        )
-        .await
-        .expect("ingress request")
+        nats.request_with_headers(ingress, headers, serde_json::to_vec(&payload).unwrap().into())
+            .await
+            .expect("ingress request")
     }
 
     pub fn assert_rate_limited(body: &Value, scope: &str) {
@@ -214,7 +202,10 @@ async fn context_throttle_allows_under_budget() {
     )
     .await;
     let body: Value = serde_json::from_slice(&resp.payload).expect("json");
-    assert!(body.get("result").is_some(), "expected success under budget, got {body}");
+    assert!(
+        body.get("result").is_some(),
+        "expected success under budget, got {body}"
+    );
 
     clock.advance(Duration::from_secs(1));
     let resp2 = tools_list(
@@ -229,7 +220,10 @@ async fn context_throttle_allows_under_budget() {
     )
     .await;
     let body2: Value = serde_json::from_slice(&resp2.payload).expect("json");
-    assert!(body2.get("result").is_some(), "expected refill after clock advance, got {body2}");
+    assert!(
+        body2.get("result").is_some(),
+        "expected refill after clock advance, got {body2}"
+    );
 
     h.shutdown_tx.send(()).ok();
     h.join.await.expect("join").expect("gateway run");

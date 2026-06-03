@@ -15,9 +15,7 @@ mod errors;
 mod mode;
 
 pub use aud_format::compute_expected_aud;
-pub use audit_sink::{
-    AudMismatchEnvelope, AudienceAuditSink, RecordingAuditSink, aud_mismatch_audit_subject,
-};
+pub use audit_sink::{AudMismatchEnvelope, AudienceAuditSink, RecordingAuditSink, aud_mismatch_audit_subject};
 pub use checker::{AudienceCheckContext, AudienceShadowChecker, ClaimAud};
 pub use errors::AudienceShadowError;
 pub use mode::AudienceShadowMode;

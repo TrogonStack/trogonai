@@ -28,8 +28,7 @@ mod harness {
     use std::time::Duration;
 
     #[allow(dead_code)]
-    pub const ADMIN_IGNORE: &str =
-        "scaffold; implement when admin API lands";
+    pub const ADMIN_IGNORE: &str = "scaffold; implement when admin API lands";
     #[allow(dead_code)]
     pub const ADMIN_LISTEN_ADDR: &str = "127.0.0.1:8081";
     #[allow(dead_code)]
@@ -371,8 +370,8 @@ mod ctl_cli {
 
     use nkeys::KeyPair;
     use trogon_mcp_gateway::bundle::{
-        build_tar, hash_member, manifest_digest_bytes, signature_path, BundleArchive, HOST_TARGET_WIT,
-        MANIFEST_FILENAME,
+        BundleArchive, HOST_TARGET_WIT, MANIFEST_FILENAME, build_tar, hash_member, manifest_digest_bytes,
+        signature_path,
     };
 
     fn workspace_root() -> PathBuf {
@@ -384,10 +383,7 @@ mod ctl_cli {
     }
 
     fn temp_path(label: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
         std::env::temp_dir().join(format!("trogon-gateway-ctl-{label}-{nanos}"))
     }
 
@@ -475,7 +471,11 @@ priority = 1
         let _ = fs::remove_file(bundle_path);
         let _ = fs::remove_file(keys_path);
 
-        assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("\"result\":\"VALID\""));
         assert!(stdout.contains("acme/demo"));
@@ -561,10 +561,7 @@ priority = 1
 
     #[test]
     fn config_show_emits_gateway_settings_json() {
-        let output = ctl_command()
-            .args(["config", "show"])
-            .output()
-            .expect("config show");
+        let output = ctl_command().args(["config", "show"]).output().expect("config show");
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("\"mcp_prefix\""));

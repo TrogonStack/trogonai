@@ -14,7 +14,7 @@ mod router;
 mod topology;
 
 pub use audit::{NoopRegionAuditSink, RecordingRegionAuditSink, RegionAuditSink};
-pub use config::{MultiRegionConfig, MultiRegionConfigError, ENV_TROGON_GATEWAY_REGIONS};
+pub use config::{ENV_TROGON_GATEWAY_REGIONS, MultiRegionConfig, MultiRegionConfigError};
 pub use errors::{RegionRouteError, RegionRouteErrorKind};
 pub use health::{RegionHealth, RegionHealthConfig, RegionHealthState};
 pub use region_id::{RegionId, RegionIdError};

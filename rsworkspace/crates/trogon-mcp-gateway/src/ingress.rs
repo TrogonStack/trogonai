@@ -69,10 +69,7 @@ impl<R: RegistryLookup + Clone> IngressChainResolver<R> {
     }
 
     /// Returns `Some(deny)` when strict mode blocks the request.
-    pub async fn resolve_inbound_chain(
-        &self,
-        chain: Option<&[ActChainEntry]>,
-    ) -> Option<IngressChainDeny> {
+    pub async fn resolve_inbound_chain(&self, chain: Option<&[ActChainEntry]>) -> Option<IngressChainDeny> {
         if self.mode == ChainResolutionMode::Off {
             return None;
         }

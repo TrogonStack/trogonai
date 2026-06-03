@@ -3,10 +3,11 @@ use tracing::{instrument, warn};
 use crate::agent::handler::{A2aError, A2aHandler};
 use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
-use crate::push::delivery_semantics::{
-    DeliverySemanticsParseError, merged_request_delivery_semantics, upsert_delivery_semantics_on_push_config_json_object,
-};
 use crate::push::PushDeliverySemanticsRegistry;
+use crate::push::delivery_semantics::{
+    DeliverySemanticsParseError, merged_request_delivery_semantics,
+    upsert_delivery_semantics_on_push_config_json_object,
+};
 use crate::push::push_notification_config_id::PushNotificationConfigId;
 use crate::task_id::A2aTaskId;
 
@@ -87,7 +88,13 @@ pub async fn handle_set<H, N>(
     };
 
     let serde_json::Value::Object(mut map) = raw_params else {
-        send_error(nats, &reply, id.clone(), A2aError::internal("params must be a JSON object")).await;
+        send_error(
+            nats,
+            &reply,
+            id.clone(),
+            A2aError::internal("params must be a JSON object"),
+        )
+        .await;
         return;
     };
 
@@ -97,16 +104,16 @@ pub async fn handle_set<H, N>(
         serde_json::Value::Bool(b) => Some(b),
         _ => None,
     });
-    let requested_semantics =
-        match merged_request_delivery_semantics(delivery_sem_json.as_ref(), exactly_bool) {
-            Ok(s) => s,
-            Err(e) => {
-                send_error(nats, &reply, id, map_delivery_semantics_parse_error(e)).await;
-                return;
-            }
-        };
+    let requested_semantics = match merged_request_delivery_semantics(delivery_sem_json.as_ref(), exactly_bool) {
+        Ok(s) => s,
+        Err(e) => {
+            send_error(nats, &reply, id, map_delivery_semantics_parse_error(e)).await;
+            return;
+        }
+    };
 
-    let proto_cfg: a2a_types::TaskPushNotificationConfig = match serde_json::from_value(serde_json::Value::Object(map)) {
+    let proto_cfg: a2a_types::TaskPushNotificationConfig = match serde_json::from_value(serde_json::Value::Object(map))
+    {
         Ok(c) => c,
         Err(e) => {
             send_error(
@@ -127,7 +134,10 @@ pub async fn handle_set<H, N>(
                 upsert_delivery_semantics_on_push_config_json_object(o, &requested_semantics);
             }
 
-            match (A2aTaskId::new(resp.task_id.clone()), PushNotificationConfigId::new(resp.id.clone())) {
+            match (
+                A2aTaskId::new(resp.task_id.clone()),
+                PushNotificationConfigId::new(resp.id.clone()),
+            ) {
                 (Ok(tid), Ok(cid)) => semantics_registry.set(tid, cid, requested_semantics),
                 _ => warn!(
                     task_id = resp.task_id,
@@ -166,7 +176,10 @@ fn inject_registry_semantics(
     upsert_delivery_semantics_on_push_config_json_object(config_object, &sem);
 }
 
-#[instrument(name = "a2a.agent.push_notification_get", skip(handler, payload, reply_subject, nats, semantics_registry))]
+#[instrument(
+    name = "a2a.agent.push_notification_get",
+    skip(handler, payload, reply_subject, nats, semantics_registry)
+)]
 pub async fn handle_get<H, N>(
     handler: &H,
     payload: &[u8],
@@ -182,8 +195,7 @@ pub async fn handle_get<H, N>(
         return;
     };
 
-    let (id, result) =
-        unary_parse_and_call(handler, payload, |h, p| Box::pin(h.push_notification_get(p))).await;
+    let (id, result) = unary_parse_and_call(handler, payload, |h, p| Box::pin(h.push_notification_get(p))).await;
 
     match result {
         Ok(resp) => {
@@ -198,7 +210,10 @@ pub async fn handle_get<H, N>(
     }
 }
 
-#[instrument(name = "a2a.agent.push_notification_list", skip(handler, payload, reply_subject, nats, semantics_registry))]
+#[instrument(
+    name = "a2a.agent.push_notification_list",
+    skip(handler, payload, reply_subject, nats, semantics_registry)
+)]
 pub async fn handle_list<H, N>(
     handler: &H,
     payload: &[u8],
@@ -214,26 +229,26 @@ pub async fn handle_list<H, N>(
         return;
     };
 
-    let (id, result) =
-        unary_parse_and_call(handler, payload, |h, p| Box::pin(h.push_notification_list(p))).await;
+    let (id, result) = unary_parse_and_call(handler, payload, |h, p| Box::pin(h.push_notification_list(p))).await;
 
     match result {
         Ok(resp) => {
             let Ok(mut envelope) = serde_json::to_value(resp) else {
-                send_error(nats, &reply, id, A2aError::internal("failed to serialize list response")).await;
+                send_error(
+                    nats,
+                    &reply,
+                    id,
+                    A2aError::internal("failed to serialize list response"),
+                )
+                .await;
                 return;
             };
 
-            if let Some(serde_json::Value::Array(configs)) =
-                envelope.as_object_mut().and_then(|m| m.get_mut("configs"))
+            if let Some(serde_json::Value::Array(configs)) = envelope.as_object_mut().and_then(|m| m.get_mut("configs"))
             {
                 for entry in configs.iter_mut() {
                     if let serde_json::Value::Object(cfg_obj) = entry {
-                        let task_id_dom = cfg_obj
-                            .get("taskId")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_owned();
+                        let task_id_dom = cfg_obj.get("taskId").and_then(|v| v.as_str()).unwrap_or("").to_owned();
                         inject_registry_semantics(semantics_registry, task_id_dom.as_str(), cfg_obj);
                     }
                 }

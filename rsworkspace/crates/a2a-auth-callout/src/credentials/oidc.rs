@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet};
-use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use crate::error::AuthCalloutError;
 use crate::jwt::{
-    derive_caller_id, spicedb_principal_from_oidc_claims, AudienceAccount, ExternalSubject, UserJwtClaims,
+    AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, spicedb_principal_from_oidc_claims,
 };
 use crate::permissions::IssuedPermissions;
+use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet};
+use jsonwebtoken::{DecodingKey, Validation, decode, decode_header};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OidcIssuerUrl(String);
@@ -58,10 +58,7 @@ impl BearerToken {
 }
 
 pub enum JwksSource {
-    Remote {
-        jwks_uri: String,
-        http: reqwest::Client,
-    },
+    Remote { jwks_uri: String, http: reqwest::Client },
     Static(Arc<JwkSet>),
 }
 
@@ -72,11 +69,7 @@ pub struct JwksOidcVerifier {
 }
 
 impl JwksOidcVerifier {
-    pub fn with_static_jwks(
-        issuer: OidcIssuerUrl,
-        expected_id_token_audiences: Vec<String>,
-        jwks: JwkSet,
-    ) -> Self {
+    pub fn with_static_jwks(issuer: OidcIssuerUrl, expected_id_token_audiences: Vec<String>, jwks: JwkSet) -> Self {
         Self {
             issuer,
             expected_id_token_audiences,
@@ -104,9 +97,7 @@ impl JwksOidcVerifier {
         let jwks_uri = doc
             .get("jwks_uri")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                AuthCalloutError::CredentialVerification("missing jwks_uri in OIDC discovery".into())
-            })?;
+            .ok_or_else(|| AuthCalloutError::CredentialVerification("missing jwks_uri in OIDC discovery".into()))?;
         Ok(Self {
             issuer,
             expected_id_token_audiences,
@@ -133,15 +124,10 @@ impl JwksOidcVerifier {
         }
     }
 
-    fn decoding_key_for_jwk(
-        jwk: &jsonwebtoken::jwk::Jwk,
-    ) -> Result<DecodingKey, AuthCalloutError> {
+    fn decoding_key_for_jwk(jwk: &jsonwebtoken::jwk::Jwk) -> Result<DecodingKey, AuthCalloutError> {
         match &jwk.algorithm {
-            AlgorithmParameters::RSA(rsa) => {
-                DecodingKey::from_rsa_components(&rsa.n, &rsa.e).map_err(|e| {
-                    AuthCalloutError::CredentialVerification(format!("invalid RSA JWK components: {e}"))
-                })
-            }
+            AlgorithmParameters::RSA(rsa) => DecodingKey::from_rsa_components(&rsa.n, &rsa.e)
+                .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid RSA JWK components: {e}"))),
             _ => Err(AuthCalloutError::CredentialVerification(
                 "OIDC JWK must be RSA for this verifier".into(),
             )),
@@ -159,29 +145,22 @@ impl JwksOidcVerifier {
             ));
         }
         let jwks = self.fetch_jwks().await?;
-        let header = decode_header(token.as_str()).map_err(|e| {
-            AuthCalloutError::CredentialVerification(format!("invalid JWT header: {e}"))
-        })?;
+        let header = decode_header(token.as_str())
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid JWT header: {e}")))?;
         let kid = header
             .kid
             .as_ref()
             .ok_or_else(|| AuthCalloutError::CredentialVerification("JWT header missing kid".into()))?;
-        let jwk = jwks.find(kid).ok_or_else(|| {
-            AuthCalloutError::CredentialVerification(format!("no JWK for kid {kid}"))
-        })?;
-        let auds: Vec<&str> = self
-            .expected_id_token_audiences
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let jwk = jwks
+            .find(kid)
+            .ok_or_else(|| AuthCalloutError::CredentialVerification(format!("no JWK for kid {kid}")))?;
+        let auds: Vec<&str> = self.expected_id_token_audiences.iter().map(String::as_str).collect();
         let mut validation = Validation::new(header.alg);
         validation.set_issuer(&[self.issuer.as_str()]);
         validation.set_audience(&auds);
         let decoding_key = Self::decoding_key_for_jwk(jwk)?;
-        let token_data =
-            decode::<serde_json::Value>(token.as_str(), &decoding_key, &validation).map_err(|e| {
-                AuthCalloutError::CredentialVerification(format!("OIDC token validation failed: {e}"))
-            })?;
+        let token_data = decode::<serde_json::Value>(token.as_str(), &decoding_key, &validation)
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("OIDC token validation failed: {e}")))?;
         let sub_str = token_data
             .claims
             .get("sub")
@@ -191,9 +170,8 @@ impl JwksOidcVerifier {
             AuthCalloutError::CredentialVerification(format!("invalid external subject in OIDC token: {e}"))
         })?;
         let data = spicedb_principal_from_oidc_claims(&token_data.claims);
-        let caller_id = derive_caller_id(sub_str, account).map_err(|e| {
-            AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}"))
-        })?;
+        let caller_id = derive_caller_id(sub_str, account)
+            .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
         let nats_permissions = IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
@@ -208,20 +186,12 @@ impl JwksOidcVerifier {
 
 #[async_trait::async_trait]
 pub trait OidcVerifier: Send + Sync + 'static {
-    async fn verify(
-        &self,
-        token: &BearerToken,
-        account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError>;
+    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError>;
 }
 
 #[async_trait::async_trait]
 impl OidcVerifier for JwksOidcVerifier {
-    async fn verify(
-        &self,
-        token: &BearerToken,
-        account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
         self.verify_internal(token, account).await
     }
 }
@@ -233,28 +203,33 @@ mod tests {
     use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
     use std::time::Duration;
 
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use jsonwebtoken::jwk::{
         AlgorithmParameters, CommonParameters, Jwk, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType,
     };
-    use serde::Serialize;
     use rand::rngs::OsRng;
+    use rsa::RsaPrivateKey;
     use rsa::pkcs8::EncodePrivateKey;
     use rsa::traits::PublicKeyParts;
-    use rsa::RsaPrivateKey;
+    use serde::Serialize;
 
     fn b64url_uint_be(bytes: &[u8]) -> String {
-        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len().saturating_sub(1));
-        let trimmed = if start >= bytes.len() { &bytes[bytes.len().saturating_sub(1)..] } else { &bytes[start..] };
+        let start = bytes
+            .iter()
+            .position(|&b| b != 0)
+            .unwrap_or(bytes.len().saturating_sub(1));
+        let trimmed = if start >= bytes.len() {
+            &bytes[bytes.len().saturating_sub(1)..]
+        } else {
+            &bytes[start..]
+        };
         URL_SAFE_NO_PAD.encode(trimmed)
     }
 
     fn test_jwks_and_encoding_key(rng: &mut OsRng) -> (JwkSet, jsonwebtoken::EncodingKey) {
         let key = RsaPrivateKey::new(rng, 2048).expect("rsa key");
         let encoding_key = jsonwebtoken::EncodingKey::from_rsa_pem(
-            key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-                .expect("pem")
-                .as_bytes(),
+            key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).expect("pem").as_bytes(),
         )
         .expect("encoding key");
         let public = key.to_public_key();
@@ -284,20 +259,14 @@ mod tests {
     fn rejects_empty_audience_config() {
         let rng = &mut OsRng;
         let (jwks, _) = test_jwks_and_encoding_key(rng);
-        let v = JwksOidcVerifier::with_static_jwks(
-            OidcIssuerUrl::parse("https://issuer.example").unwrap(),
-            vec![],
-            jwks,
-        );
+        let v =
+            JwksOidcVerifier::with_static_jwks(OidcIssuerUrl::parse("https://issuer.example").unwrap(), vec![], jwks);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let err = rt
-            .block_on(v.verify_internal(
-                &BearerToken::new("x.y.z"),
-                &AudienceAccount::new("acct"),
-            ))
+            .block_on(v.verify_internal(&BearerToken::new("x.y.z"), &AudienceAccount::new("acct")))
             .unwrap_err();
         assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
     }
@@ -307,11 +276,7 @@ mod tests {
         let rng = &mut OsRng;
         let (jwks, enc) = test_jwks_and_encoding_key(rng);
         let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
-        let verifier = JwksOidcVerifier::with_static_jwks(
-            issuer.clone(),
-            vec!["a2a-client".into()],
-            jwks,
-        );
+        let verifier = JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
         #[derive(Serialize)]
         struct IdClaims {
             sub: String,
@@ -368,11 +333,7 @@ mod tests {
         let rng = &mut OsRng;
         let (jwks, enc) = test_jwks_and_encoding_key(rng);
         let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
-        let verifier = JwksOidcVerifier::with_static_jwks(
-            issuer.clone(),
-            vec!["a2a-client".into()],
-            jwks,
-        );
+        let verifier = JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
         #[derive(Serialize)]
         struct IdClaims {
             sub: String,
@@ -415,10 +376,7 @@ mod tests {
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/.well-known/openid-configuration"))
             .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
-                format!(
-                    r#"{{"jwks_uri":"{}/jwks"}}"#,
-                    mock_srv.uri(),
-                ),
+                format!(r#"{{"jwks_uri":"{}/jwks"}}"#, mock_srv.uri(),),
                 "application/json",
             ))
             .mount(&mock_srv)
@@ -426,10 +384,7 @@ mod tests {
         let jwk_body = serde_json::json!({"keys":[]});
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/jwks"))
-            .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .set_body_raw(jwk_body.to_string(), "application/json"),
-            )
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(jwk_body.to_string(), "application/json"))
             .mount(&mock_srv)
             .await;
         let issuer = OidcIssuerUrl::parse(mock_srv.uri()).unwrap();

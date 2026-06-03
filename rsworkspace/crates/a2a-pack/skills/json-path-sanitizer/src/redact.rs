@@ -131,17 +131,11 @@ fn segments_match(rule_seg: &str, path_seg: &str) -> bool {
 }
 
 fn normalize_segments(path: &str) -> Vec<String> {
-    let trimmed = path
-        .strip_prefix("$")
-        .unwrap_or(path)
-        .trim_start_matches('.');
+    let trimmed = path.strip_prefix("$").unwrap_or(path).trim_start_matches('.');
     if trimmed.is_empty() {
         return Vec::new();
     }
-    trimmed
-        .split('.')
-        .flat_map(expand_segment)
-        .collect()
+    trimmed.split('.').flat_map(expand_segment).collect()
 }
 
 fn expand_segment(segment: &str) -> Vec<String> {

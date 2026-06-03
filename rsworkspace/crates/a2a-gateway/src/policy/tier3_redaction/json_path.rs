@@ -45,7 +45,9 @@ pub fn to_json_pointer(path: &str) -> Option<String> {
         if tokens.is_empty() {
             return None;
         }
-        let pointer = tokens.iter().fold(String::from("/"), |acc, segment| format!("{acc}{segment}/"));
+        let pointer = tokens
+            .iter()
+            .fold(String::from("/"), |acc, segment| format!("{acc}{segment}/"));
         return Some(pointer.trim_end_matches('/').to_owned());
     }
     None

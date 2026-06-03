@@ -94,10 +94,7 @@ impl ConfigWatcher {
     }
 }
 
-pub async fn watch_kv(
-    kv: kv::Store,
-    key_prefix: impl Into<String>,
-) -> Result<ConfigWatcher, SnapshotError> {
+pub async fn watch_kv(kv: kv::Store, key_prefix: impl Into<String>) -> Result<ConfigWatcher, SnapshotError> {
     let prefix = key_prefix.into();
     let (store, _rx) = ConfigStore::new(HashMap::new());
     seed_from_kv(&store, &kv, &prefix).await?;
@@ -110,45 +107,30 @@ pub async fn watch_kv(
         }
     });
 
-    Ok(ConfigWatcher {
-        store,
-        _task: task,
-    })
+    Ok(ConfigWatcher { store, _task: task })
 }
 
-async fn seed_from_kv(
-    store: &ConfigStore,
-    kv: &kv::Store,
-    prefix: &str,
-) -> Result<(), SnapshotError> {
-    let mut entries = kv
-        .keys()
-        .await
-        .map_err(|error| SnapshotError::Kv(error.to_string()))?;
+async fn seed_from_kv(store: &ConfigStore, kv: &kv::Store, prefix: &str) -> Result<(), SnapshotError> {
+    let mut entries = kv.keys().await.map_err(|error| SnapshotError::Kv(error.to_string()))?;
     while let Some(key) = entries
         .next()
         .await
         .transpose()
         .map_err(|error| SnapshotError::Kv(error.to_string()))?
     {
-        if key.starts_with(prefix) {
-            if let Some(entry) = kv
+        if key.starts_with(prefix)
+            && let Some(entry) = kv
                 .get(&key)
                 .await
                 .map_err(|error| SnapshotError::Kv(error.to_string()))?
-            {
-                apply_kv_value(store, &key, prefix, &entry)?;
-            }
+        {
+            apply_kv_value(store, &key, prefix, &entry)?;
         }
     }
     Ok(())
 }
 
-async fn run_watch_loop(
-    kv: kv::Store,
-    store: ConfigStore,
-    prefix: String,
-) -> Result<(), SnapshotError> {
+async fn run_watch_loop(kv: kv::Store, store: ConfigStore, prefix: String) -> Result<(), SnapshotError> {
     let mut watcher = kv
         .watch(prefix.clone())
         .await
@@ -166,17 +148,8 @@ async fn run_watch_loop(
     Ok(())
 }
 
-fn apply_kv_value(
-    store: &ConfigStore,
-    key: &str,
-    prefix: &str,
-    value: &[u8],
-) -> Result<(), SnapshotError> {
-    let node_id = key
-        .strip_prefix(prefix)
-        .unwrap_or(key)
-        .trim_matches('/')
-        .to_string();
+fn apply_kv_value(store: &ConfigStore, key: &str, prefix: &str, value: &[u8]) -> Result<(), SnapshotError> {
+    let node_id = key.strip_prefix(prefix).unwrap_or(key).trim_matches('/').to_string();
     let config = GatewayConfigSnapshot::parse_json(value)?;
     store.upsert(NodeSnapshot::from_config(node_id, config));
     Ok(())
@@ -184,10 +157,7 @@ fn apply_kv_value(
 
 #[cfg(test)]
 pub fn test_store_with_fixture(node_id: &str) -> ConfigStore {
-    let snapshot = NodeSnapshot::from_config(
-        node_id,
-        crate::config::fixtures::sample_snapshot(),
-    );
+    let snapshot = NodeSnapshot::from_config(node_id, crate::config::fixtures::sample_snapshot());
     let (store, _rx) = ConfigStore::new(HashMap::from([(node_id.to_string(), Arc::new(snapshot))]));
     store
 }

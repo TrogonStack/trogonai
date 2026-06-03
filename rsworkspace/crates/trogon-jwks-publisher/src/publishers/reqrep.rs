@@ -37,7 +37,7 @@ pub async fn run_reqrep_publisher(
     mut watch_rx: watch::Receiver<Jwks>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = async_nats::connect(nats_url).await?;
-        let state = ReqRepState::new(watch_rx.borrow().clone());
+    let state = ReqRepState::new(watch_rx.borrow().clone());
     let cache = Arc::clone(&state.jwks);
     tokio::spawn(async move {
         while watch_rx.changed().await.is_ok() {

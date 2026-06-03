@@ -1,15 +1,13 @@
 use trogon_mcp_gateway::bundle::{
-    build_tar, hash_member, BundleArchive, BundleManifest, Capabilities, ComponentEntry,
-    ProgramEntry, Signing, HOST_TARGET_WIT, MANIFEST_FILENAME,
+    BundleArchive, BundleManifest, Capabilities, ComponentEntry, HOST_TARGET_WIT, MANIFEST_FILENAME, ProgramEntry,
+    Signing, build_tar, hash_member,
 };
 
 use crate::cel::{
-    AUDIT_ID, AUDIT_PATH, CATALOG_FILTER_ID, CATALOG_FILTER_PATH, DEFAULT_AUDIT,
-    DEFAULT_CATALOG_FILTER, DEFAULT_RESOURCE_TUPLE, RESOURCE_TUPLE_ID, RESOURCE_TUPLE_PATH,
+    AUDIT_ID, AUDIT_PATH, CATALOG_FILTER_ID, CATALOG_FILTER_PATH, DEFAULT_AUDIT, DEFAULT_CATALOG_FILTER,
+    DEFAULT_RESOURCE_TUPLE, RESOURCE_TUPLE_ID, RESOURCE_TUPLE_PATH,
 };
-use crate::components::{
-    SCHEMA_LEARNER_ID, SCHEMA_LEARNER_PATH, SCHEMA_LEARNER_STUB,
-};
+use crate::components::{SCHEMA_LEARNER_ID, SCHEMA_LEARNER_PATH, SCHEMA_LEARNER_STUB};
 use crate::sign::{sign_manifest, signature_archive_path};
 use crate::{McpPackError, McpPackSpec};
 
@@ -75,9 +73,7 @@ pub fn assemble_manifest(spec: &McpPackSpec, members: &[BundleMember]) -> Result
         let wasm = members
             .iter()
             .find(|member| member.path == SCHEMA_LEARNER_PATH)
-            .ok_or_else(|| {
-                McpPackError::Build("schema-learner member missing".into())
-            })?;
+            .ok_or_else(|| McpPackError::Build("schema-learner member missing".into()))?;
         components.push(ComponentEntry {
             id: SCHEMA_LEARNER_ID.into(),
             path: SCHEMA_LEARNER_PATH.into(),
@@ -96,10 +92,7 @@ pub fn assemble_manifest(spec: &McpPackSpec, members: &[BundleMember]) -> Result
         created_at: spec.created_at.clone(),
         description: spec.description.clone(),
         capabilities: Capabilities {
-            imports: vec![
-                "host.spicedb-check".into(),
-                "host.audit-emit".into(),
-            ],
+            imports: vec!["host.spicedb-check".into(), "host.audit-emit".into()],
         },
         signing: Signing {
             nkey_pub: spec.signer.public_key(),

@@ -2,19 +2,17 @@
 
 use std::time::{Duration, Instant};
 
-use async_nats::jetstream;
 use async_nats::HeaderMap;
+use async_nats::jetstream;
 use bytes::Bytes;
 use serde_json::Value as JsonValue;
-use tracing::{instrument, Span};
-use trogon_nats::{inject_trace_context, RequestClient};
+use tracing::{Span, instrument};
+use trogon_nats::{RequestClient, inject_trace_context};
 
 use crate::audit::{self, AuditEnvelope, IdentityFields};
 use crate::authz::IdentitySource;
 
-use super::{
-    plugin_subject, PluginCalloutError, PluginDecision, PluginRequest, PluginStage,
-};
+use super::{PluginCalloutError, PluginDecision, PluginRequest, PluginStage, plugin_subject};
 
 pub const DEFAULT_CALLOUT_TIMEOUT_MS: u64 = 250;
 
@@ -87,15 +85,8 @@ impl<'a, N: RequestClient> PluginDispatcher<'a, N> {
         let subject = plugin_subject(&self.config.prefix, plugin_name);
         let started = Instant::now();
 
-        self.emit_audit(
-            AUDIT_OUTCOME_INVOKED,
-            &subject,
-            plugin_name,
-            req,
-            None,
-            None,
-        )
-        .await;
+        self.emit_audit(AUDIT_OUTCOME_INVOKED, &subject, plugin_name, req, None, None)
+            .await;
 
         let mut wire = req.clone();
         wire.stage = stage;
@@ -103,9 +94,8 @@ impl<'a, N: RequestClient> PluginDispatcher<'a, N> {
             wire.traceparent = current_traceparent().unwrap_or_default();
         }
 
-        let payload = serde_json::to_vec(&wire).map_err(|e| {
-            PluginCalloutError::MalformedReply(format!("request serialize: {e}"))
-        })?;
+        let payload = serde_json::to_vec(&wire)
+            .map_err(|e| PluginCalloutError::MalformedReply(format!("request serialize: {e}")))?;
 
         let mut headers = HeaderMap::new();
         inject_trace_context(&mut headers);
@@ -249,21 +239,17 @@ fn parse_identity_source(raw: &str) -> IdentitySource {
 fn current_traceparent() -> Option<String> {
     let mut headers = HeaderMap::new();
     inject_trace_context(&mut headers);
-    headers
-        .get("traceparent")
-        .map(|v| v.as_str().to_string())
+    headers.get("traceparent").map(|v| v.as_str().to_string())
 }
 
 fn parse_plugin_reply(payload: &[u8]) -> Result<PluginDecision, PluginCalloutError> {
-    let value: JsonValue = serde_json::from_slice(payload)
-        .map_err(|e| PluginCalloutError::MalformedReply(e.to_string()))?;
+    let value: JsonValue =
+        serde_json::from_slice(payload).map_err(|e| PluginCalloutError::MalformedReply(e.to_string()))?;
 
     let decision = value
         .get("decision")
         .and_then(JsonValue::as_str)
-        .ok_or_else(|| {
-            PluginCalloutError::ProtocolMismatch("missing decision field".into())
-        })?;
+        .ok_or_else(|| PluginCalloutError::ProtocolMismatch("missing decision field".into()))?;
 
     match decision {
         "allow" => Ok(PluginDecision::Allow),
@@ -271,17 +257,16 @@ fn parse_plugin_reply(payload: &[u8]) -> Result<PluginDecision, PluginCalloutErr
             let reason = value
                 .get("reason")
                 .and_then(JsonValue::as_str)
-                .ok_or_else(|| {
-                    PluginCalloutError::ProtocolMismatch("deny requires reason".into())
-                })?;
+                .ok_or_else(|| PluginCalloutError::ProtocolMismatch("deny requires reason".into()))?;
             Ok(PluginDecision::Deny {
                 reason: reason.to_string(),
             })
         }
         "rewrite" => {
-            let params = value.get("params").cloned().ok_or_else(|| {
-                PluginCalloutError::ProtocolMismatch("rewrite requires params".into())
-            })?;
+            let params = value
+                .get("params")
+                .cloned()
+                .ok_or_else(|| PluginCalloutError::ProtocolMismatch("rewrite requires params".into()))?;
             let result = value.get("result").cloned();
             Ok(PluginDecision::Rewrite { params, result })
         }
@@ -383,10 +368,7 @@ mod tests {
     #[tokio::test]
     async fn dispatcher_happy_path_allow() {
         let nats = MockRequestClient::default();
-        nats.set_response(
-            "mcp.plugin.risk-scorer",
-            br#"{"decision":"allow"}"#.as_slice(),
-        );
+        nats.set_response("mcp.plugin.risk-scorer", br#"{"decision":"allow"}"#.as_slice());
 
         let dispatcher = PluginDispatcher::new(
             nats,
@@ -475,10 +457,7 @@ mod tests {
     #[tokio::test]
     async fn protocol_mismatch_is_permanent() {
         let nats = MockRequestClient::default();
-        nats.set_response(
-            "mcp.plugin.redaction",
-            br#"{"decision":"deny"}"#.as_slice(),
-        );
+        nats.set_response("mcp.plugin.redaction", br#"{"decision":"deny"}"#.as_slice());
 
         let dispatcher = PluginDispatcher::new(
             nats,
@@ -499,10 +478,8 @@ mod tests {
 
     #[test]
     fn parse_reply_rewrite() {
-        let decision = parse_plugin_reply(
-            br#"{"decision":"rewrite","params":{"x":1},"result":{"ok":true}}"#,
-        )
-        .expect("parse");
+        let decision =
+            parse_plugin_reply(br#"{"decision":"rewrite","params":{"x":1},"result":{"ok":true}}"#).expect("parse");
         assert!(matches!(decision, PluginDecision::Rewrite { .. }));
     }
 }

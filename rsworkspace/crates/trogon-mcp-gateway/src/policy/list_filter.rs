@@ -2,18 +2,20 @@
 
 use std::sync::Arc;
 
-use cel_interpreter::objects::Key;
 use cel_interpreter::Context;
+use cel_interpreter::objects::Key;
 use tracing::warn;
 
 use crate::act_chain::ActChainEntry;
 use crate::authz::{GatewayIdentity, PermissionChecker};
-use crate::cel_builtins::{classify_list_filter_host_error, HostEvalContext, HostFailure, PermissionCheckerSpicedbBackend};
+use crate::cel_builtins::{
+    HostEvalContext, HostFailure, PermissionCheckerSpicedbBackend, classify_list_filter_host_error,
+};
 use crate::jwt::VerifiedJwtClaims;
 use crate::policy::hierarchical::{
-    self, CompiledRule, EffectivePolicy, HierarchicalDecision,     MergeEngine, MergeError, MergeRequestContext,
+    self, CompiledRule, EffectivePolicy, HierarchicalDecision, MergeEngine, MergeError, MergeRequestContext,
 };
-use crate::policy::{configure_policy_cel_context, evaluate_cel_with_host_classified, CelHostEvalOutcome, PolicyError};
+use crate::policy::{CelHostEvalOutcome, PolicyError, configure_policy_cel_context, evaluate_cel_with_host_classified};
 
 pub const AUDIT_FILTERED_BY_CEL: &str = "filtered_by_cel";
 pub const AUDIT_CEL_EVAL_ERROR: &str = "cel_eval_error";
@@ -185,9 +187,8 @@ fn evaluate_tool_visibility(
     list_filter_index: usize,
     tool: &ToolCandidate,
 ) -> ToolDisposition {
-    let configure = |ctx: &mut Context| {
-        configure_list_filter_context(ctx, identity, claims, act_chain, list_filter_index, tool)
-    };
+    let configure =
+        |ctx: &mut Context| configure_list_filter_context(ctx, identity, claims, act_chain, list_filter_index, tool);
 
     match evaluate_effective_with_host(effective, host, configure) {
         Ok(HierarchicalDecision::Allow { .. }) => ToolDisposition::Keep,
@@ -315,9 +316,7 @@ fn eval_rule_with_host(
                     HostFailure::Transient => ToolDisposition::DropFiltered {
                         reason: "authz_unreachable",
                     },
-                    HostFailure::Permanent => ToolDisposition::DropPermanent {
-                        reason: detail.clone(),
-                    },
+                    HostFailure::Permanent => ToolDisposition::DropPermanent { reason: detail.clone() },
                     HostFailure::NotApplicable => ToolDisposition::Keep,
                 })
             } else {
@@ -350,8 +349,8 @@ pub fn log_list_filter_audit_events(server_id: &str, events: &[ListFilterAuditEv
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::authz::{AllowAllPermissionChecker, AuthzContext, AuthzError, IdentitySource};
@@ -696,9 +695,7 @@ mod tests {
             permission: "invoke".into(),
         };
         futures::executor::block_on(async {
-            cache
-                .insert_zed_token(&params, "zed-session-token".into(), None)
-                .await;
+            cache.insert_zed_token(&params, "zed-session-token".into(), None).await;
         });
 
         let zed_reads = Arc::new(AtomicUsize::new(0));

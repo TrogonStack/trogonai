@@ -8,9 +8,9 @@ use tokio::time::timeout;
 
 use a2a_auth_callout::{BridgeMintRequest, BridgeMintResponse};
 
-pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
 #[cfg(test)]
 pub(crate) use callout_mint::harness_callout_dispatcher;
+pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
 
 use crate::error::BridgeError;
 use crate::identity::{BridgeUserJwt, CallerHttpsAuth};
@@ -92,9 +92,7 @@ impl AuthMintWire for AsyncNatsAuthMintWire {
     async fn roundtrip_message(&self, subject: String, payload: BytesPayload) -> Result<Vec<u8>, BridgeError> {
         tokio::time::timeout(self.request_timeout, self.client.request(subject, payload.0.into()))
             .await
-            .map_err(|_| BridgeError::Mint(
-                "auth mint NATS roundtrip exceeded timeout".into(),
-            ))?
+            .map_err(|_| BridgeError::Mint("auth mint NATS roundtrip exceeded timeout".into()))?
             .map_err(|e| BridgeError::Mint(e.to_string()))
             .map(|m| m.payload.to_vec())
     }
@@ -148,9 +146,10 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
             server_id: None,
             request_jti: None,
         };
-        let bytes =
-            serde_json::to_vec(&envelope).map_err(|e: serde_json::Error| BridgeError::Serialize(e))?;
-        let mint = self.wire.roundtrip_message(self.mint_subject.to_string(), BytesPayload(bytes));
+        let bytes = serde_json::to_vec(&envelope).map_err(|e: serde_json::Error| BridgeError::Serialize(e))?;
+        let mint = self
+            .wire
+            .roundtrip_message(self.mint_subject.to_string(), BytesPayload(bytes));
         let reply = timeout(Duration::from_secs(30), mint)
             .await
             .map_err(|_| BridgeError::Mint("auth mint client deadline exceeded".into()))??;

@@ -15,9 +15,13 @@ use trogon_nats::inject_trace_context;
 
 use crate::approvals::{RequestId, build_approval_required_step_up, jsonrpc_error_with_approval_data};
 use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
-use crate::anomaly::{AnomalyEmit, AnomalyIngressContext};
 use crate::agent_identity::AgentIdentityMode;
-use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED};
+use crate::anomaly::{AnomalyEmit, AnomalyIngressContext};
+use crate::approvals::{
+    ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest, ApprovalSubject, RequestId,
+    build_approval_required_step_up, build_approval_required_with_subject, jsonrpc_error_with_approval_data,
+};
+use crate::audit::{self, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED, AuditEnvelope};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
 use crate::context_throttle::{ContextThrottle, ContextThrottleKey, ContextThrottleOutcome};
 use crate::egress::{
@@ -28,11 +32,11 @@ use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::policy::hierarchical::{self, MergeRequestContext};
-use crate::policy::{CallContext, MeshGatewayConfig, RiskDecision, evaluate_risk};
 use crate::policy::list_filter::{self, ListFilterParams, ToolCandidate};
+use crate::policy::{CallContext, MeshGatewayConfig, RiskDecision, evaluate_risk};
 use crate::redaction::{
-    RedactionApplyResult, RedactionDirection, RedactionOutcome, RedactionRegistry, RewriteEntry, SchemaRedactionContext,
-    apply_schema_redaction, merge_outcomes,
+    RedactionApplyResult, RedactionDirection, RedactionOutcome, RedactionRegistry, RewriteEntry,
+    SchemaRedactionContext, apply_schema_redaction, merge_outcomes,
 };
 use crate::rpc_codes;
 use crate::schema_cache::{
@@ -288,9 +292,7 @@ async fn handle_ingress_inner(
     let jwt_claims = gateway_resolution.claims;
 
     if let Some(resolver) = settings.chain_resolver.as_ref()
-        && let Some(deny) = resolver
-            .resolve_inbound_chain(jwt_claims.act_chain.as_deref())
-            .await
+        && let Some(deny) = resolver.resolve_inbound_chain(jwt_claims.act_chain.as_deref()).await
     {
         finish_ingress_blocked(FinishIngressBlockedParams {
             client,
@@ -354,22 +356,20 @@ async fn handle_ingress_inner(
 
     let limiter = rate_limiter(settings);
     if let Some(deny) = limiter.check_caller(tenant_for_rate, caller_sub_for_rate) {
-        finish_ingress_rate_limited(
-            FinishIngressRateLimitedParams {
-                client,
-                jetstream,
-                mcp: &settings.mcp,
-                msg: &msg,
-                backend_subject: &backend_subject,
-                jsonrpc_method: &jsonrpc_method,
-                gateway_identity: gateway_identity.clone(),
-                request_id: request_id.clone(),
-                requires_spicedb,
-                spicedb_allowed: None,
-                traces,
-                deny,
-            },
-        )
+        finish_ingress_rate_limited(FinishIngressRateLimitedParams {
+            client,
+            jetstream,
+            mcp: &settings.mcp,
+            msg: &msg,
+            backend_subject: &backend_subject,
+            jsonrpc_method: &jsonrpc_method,
+            gateway_identity: gateway_identity.clone(),
+            request_id: request_id.clone(),
+            requires_spicedb,
+            spicedb_allowed: None,
+            traces,
+            deny,
+        })
         .await;
         return Ok(());
     }
@@ -380,7 +380,7 @@ async fn handle_ingress_inner(
         &jwt_claims,
         act_chain_entries,
         tenant_for_rate,
-        &server_id,
+        server_id,
         &jsonrpc_method,
         tool_call.as_deref(),
     ) {
@@ -557,7 +557,7 @@ async fn handle_ingress_inner(
         policy,
         settings,
         tenant_for_rate,
-        &server_id,
+        server_id,
         &jsonrpc_method,
         tool_call.as_deref(),
     )
@@ -771,10 +771,7 @@ async fn handle_ingress_inner(
         }
     };
 
-    let tenant_for_redaction = gateway_identity
-        .tenant
-        .as_deref()
-        .or(legacy_tenant_hdr.as_deref());
+    let tenant_for_redaction = gateway_identity.tenant.as_deref().or(legacy_tenant_hdr.as_deref());
     let (forward_payload, request_redaction, request_redaction_skip) = redact_tools_call_payload(
         server_id,
         tool_call.as_deref(),
@@ -939,17 +936,10 @@ async fn handle_ingress_inner(
         Ok(Ok(response)) => {
             if jsonrpc_method == "tools/list"
                 && let Some(runtime) = SchemaCacheRuntime::shared()
+                && let Err(err) =
+                    sniff_tools_list_reply(&runtime.cache, &runtime.config, &server_id_typed, &response.payload).await
             {
-                if let Err(err) = sniff_tools_list_reply(
-                    &runtime.cache,
-                    &runtime.config,
-                    &server_id_typed,
-                    &response.payload,
-                )
-                .await
-                {
-                    warn!(error = %err, server_id = %server_id, "tools/list schema sniff failed");
-                }
+                warn!(error = %err, server_id = %server_id, "tools/list schema sniff failed");
             }
             let payload = if jsonrpc_method == "tools/list" {
                 shape_tools_list_response(
@@ -1241,6 +1231,80 @@ fn evaluate_hierarchical_policy(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn hitl_approval_requirement(
+    mesh_config: &MeshGatewayConfig,
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+    payload: &[u8],
+    request_id: &Option<serde_json::Value>,
+) -> Option<(String, u64)> {
+    let ctx = policy_call_context(
+        gateway_identity,
+        jwt_claims,
+        tenant,
+        server_id,
+        jsonrpc_method,
+        tool_name,
+        payload,
+        request_id,
+    );
+    match evaluate_risk(&ctx, mesh_config) {
+        RiskDecision::RequireApproval { reason, ttl_s } => Some((reason, ttl_s)),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn policy_call_context(
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+    payload: &[u8],
+    request_id: &Option<serde_json::Value>,
+) -> CallContext {
+    let caller_sub = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
+    CallContext {
+        tenant: tenant.to_string(),
+        agent_id: jwt_claims.agent_id.clone().unwrap_or_else(|| caller_sub.to_string()),
+        purpose: jwt_claims.purpose.clone().unwrap_or_default(),
+        target_aud: backend_target_aud(tenant, server_id),
+        scope_fingerprint: scope_for_tools_call(server_id, tool_name).unwrap_or_default(),
+        jsonrpc_method: jsonrpc_method.to_string(),
+        tool_name: tool_name.map(str::to_string),
+        recent_denials_60s: 0,
+        args: jsonrpc_params(payload),
+        request_id: approval_correlation_id(request_id),
+    }
+}
+
+fn approval_correlation_id(request_id: &Option<serde_json::Value>) -> String {
+    match request_id {
+        Some(value) if !value.is_null() => value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string()),
+        _ => format!(
+            "{:032x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ),
+    }
+}
+
+fn jsonrpc_params(payload: &[u8]) -> serde_json::Value {
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| value.get("params").cloned())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
 fn context_throttle_key(
     gateway_identity: &GatewayIdentity,
     jwt_claims: &crate::jwt::VerifiedJwtClaims,
@@ -1366,15 +1430,8 @@ async fn publish_redaction_rule_audits(
         );
         envelope.apply_rewrites(std::slice::from_ref(rewrite));
         let method_root = audit::jsonrpc_method_root(jsonrpc_method);
-        let audit_subject =
-            audit::audit_publish_subject(prefix, AUDIT_OUTCOME_REDACTED, direction, &method_root);
-        audit::publish_audit(
-            jetstream,
-            audit_subject,
-            &envelope,
-            std::time::Duration::from_secs(5),
-        )
-        .await;
+        let audit_subject = audit::audit_publish_subject(prefix, AUDIT_OUTCOME_REDACTED, direction, &method_root);
+        audit::publish_audit(jetstream, audit_subject, &envelope, std::time::Duration::from_secs(5)).await;
     }
 }
 
@@ -1405,19 +1462,8 @@ async fn publish_redaction_skipped_audit(
     );
     envelope.apply_redaction_skip_reason(reason);
     let method_root = audit::jsonrpc_method_root(jsonrpc_method);
-    let audit_subject = audit::audit_publish_subject(
-        prefix,
-        AUDIT_OUTCOME_REDACTION_SKIPPED,
-        direction,
-        &method_root,
-    );
-    audit::publish_audit(
-        jetstream,
-        audit_subject,
-        &envelope,
-        std::time::Duration::from_secs(5),
-    )
-    .await;
+    let audit_subject = audit::audit_publish_subject(prefix, AUDIT_OUTCOME_REDACTION_SKIPPED, direction, &method_root);
+    audit::publish_audit(jetstream, audit_subject, &envelope, std::time::Duration::from_secs(5)).await;
 }
 
 async fn redact_tools_call_payload(
@@ -1454,8 +1500,7 @@ async fn redact_tools_call_payload(
         RedactionApplyResult::Passthrough => Ok((payload.clone(), RedactionOutcome::empty(), None)),
         RedactionApplyResult::Skipped { reason } => Ok((payload.clone(), RedactionOutcome::empty(), Some(reason))),
         RedactionApplyResult::Applied(outcome) => {
-            let bytes =
-                serde_json::to_vec(&doc).map_err(|e| GatewayError(format!("jsonrpc payload encode: {e}")))?;
+            let bytes = serde_json::to_vec(&doc).map_err(|e| GatewayError(format!("jsonrpc payload encode: {e}")))?;
             Ok((Bytes::from(bytes), outcome, None))
         }
     }
@@ -1845,8 +1890,7 @@ async fn shape_tools_list_response(
     });
     list_filter::log_list_filter_audit_events(server_id, &cel_outcome.audit_events);
 
-    let kept_names: std::collections::HashSet<String> =
-        cel_outcome.kept.into_iter().map(|tool| tool.name).collect();
+    let kept_names: std::collections::HashSet<String> = cel_outcome.kept.into_iter().map(|tool| tool.name).collect();
     tools.retain(|tool| {
         tool.get("name")
             .and_then(serde_json::Value::as_str)
@@ -1900,10 +1944,7 @@ async fn reply_with_rate_limited_error(
     let retry_ms = deny.retry_after_ms.to_string();
     headers.insert(HEADER_RETRY_AFTER_MS, retry_ms.as_str());
     headers.insert(HEADER_RATE_LIMIT_SCOPE, deny.scope.as_str());
-    if let Err(e) = client
-        .publish_with_headers(reply.to_string(), headers, body)
-        .await
-    {
+    if let Err(e) = client.publish_with_headers(reply.to_string(), headers, body).await {
         warn!(error = %e, "failed to publish rate_limited JSON-RPC to reply subject");
     }
     if let Err(e) = client.flush().await {
@@ -1929,24 +1970,20 @@ fn rate_limited_error_bytes(id: Option<serde_json::Value>, trace_id: &str, deny:
 }
 
 fn trace_id_from_headers(headers: Option<&async_nats::HeaderMap>) -> String {
-    if let Some(h) = headers {
-        if let Some(tp) = h
-            .get_last(TRACEPARENT_HEADER)
-            .or_else(|| h.get(TRACEPARENT_HEADER))
-        {
-            let parts: Vec<&str> = tp.as_str().split('-').collect();
-            if parts.len() >= 3 && parts[1].len() == 32 {
-                return parts[1].to_string();
-            }
+    if let Some(h) = headers
+        && let Some(tp) = h.get_last(TRACEPARENT_HEADER).or_else(|| h.get(TRACEPARENT_HEADER))
+    {
+        let parts: Vec<&str> = tp.as_str().split('-').collect();
+        if parts.len() >= 3 && parts[1].len() == 32 {
+            return parts[1].to_string();
         }
     }
-    format!(
-        "{:032x}",
+    format!("{:032x}", {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos() as u128
-    )
+            .as_nanos()
+    })
 }
 
 async fn reply_with_jsonrpc_error(
@@ -2084,10 +2121,7 @@ mod tests {
             TRACEPARENT_HEADER,
             "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         );
-        assert_eq!(
-            trace_id_from_headers(Some(&h)),
-            "4bf92f3577b34da6a3ce929d0e0e4736"
-        );
+        assert_eq!(trace_id_from_headers(Some(&h)), "4bf92f3577b34da6a3ce929d0e0e4736");
     }
 
     #[test]

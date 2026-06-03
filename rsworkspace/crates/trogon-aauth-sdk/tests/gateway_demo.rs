@@ -9,25 +9,21 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters,
-    EllipticCurveKeyType, Jwk, JwkSet, PublicKeyUse,
+    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
+    JwkSet, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, EncodingKey};
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use trogon_aauth_person::{
-    AllowConfiguredScopes, BootstrapRequest as PsBootstrap, InMemoryStore, PersonCore,
-    TokenRequest as PsToken,
+    AllowConfiguredScopes, BootstrapRequest as PsBootstrap, InMemoryStore, PersonCore, TokenRequest as PsToken,
 };
-use trogon_aauth_sdk::{
-    AgentKeypair, ChallengeOutcome, NatsRequestSigner, parse_challenge_headers,
-};
+use trogon_aauth_sdk::{AgentKeypair, ChallengeOutcome, NatsRequestSigner, parse_challenge_headers};
 use trogon_aauth_verify::challenge::ResourceChallenge;
 use trogon_aauth_verify::replay::InMemoryReplayStore;
 use trogon_aauth_verify::{
-    ChallengeMinter, NatsHeaders, NatsPopVerifier, NatsRequest, StaticJwks, TokenVerifier,
-    time_source::TimeSource,
+    ChallengeMinter, NatsHeaders, NatsPopVerifier, NatsRequest, StaticJwks, TokenVerifier, time_source::TimeSource,
 };
 use trogon_identity_types::aauth::headers as aauth_headers;
 
@@ -65,13 +61,19 @@ async fn agent_recovers_from_resource_challenge() {
     let ps_signing = SigningKey::random(&mut OsRng);
     let ps_jwk = p256_jwk(ps_signing.verifying_key(), "ps-key");
     let ps_set = JwkSet { keys: vec![ps_jwk] };
-    let ps_pem = ps_signing.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap().to_string();
+    let ps_pem = ps_signing
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
     let ps_enc = EncodingKey::from_ec_pem(ps_pem.as_bytes()).unwrap();
 
     let res_signing = SigningKey::random(&mut OsRng);
     let res_jwk = p256_jwk(res_signing.verifying_key(), "res-key");
     let res_set = JwkSet { keys: vec![res_jwk] };
-    let res_pem = res_signing.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap().to_string();
+    let res_pem = res_signing
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
     let res_enc = EncodingKey::from_ec_pem(res_pem.as_bytes()).unwrap();
 
     let ps_iss = "https://ps.demo".to_string();
@@ -83,9 +85,7 @@ async fn agent_recovers_from_resource_challenge() {
 
     // PersonCore.
     let store = Arc::new(InMemoryStore::default());
-    let policy = Arc::new(
-        AllowConfiguredScopes::new(300).with("user-alice", "agent-supplychain", &res_iss, "read:po"),
-    );
+    let policy = Arc::new(AllowConfiguredScopes::new(300).with("user-alice", "agent-supplychain", &res_iss, "read:po"));
     let core = Arc::new(PersonCore {
         iss: ps_iss.clone(),
         signing_kid: "ps-key".into(),

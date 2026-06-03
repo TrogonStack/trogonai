@@ -77,9 +77,8 @@ pub fn verify_manifest_signature(
     }
 
     let digest = manifest_digest_bytes(manifest_bytes);
-    let public = KeyPair::from_public_key(signer_nkey_pub).map_err(|error| {
-        BundleLoadError::SignatureMalformed(format!("invalid signing NKey public key: {error}"))
-    })?;
+    let public = KeyPair::from_public_key(signer_nkey_pub)
+        .map_err(|error| BundleLoadError::SignatureMalformed(format!("invalid signing NKey public key: {error}")))?;
     public
         .verify(&digest, &signature)
         .map_err(|_| BundleLoadError::SignatureInvalid)?;
@@ -97,26 +96,15 @@ mod tests {
     #[test]
     fn untrusted_signer_rejected_before_crypto() {
         let trusted = TrustedKeys::from_allowlist(["UABTRUSTED"]);
-        let error = verify_manifest_signature(
-            b"manifest",
-            &[0u8; 64],
-            "UABOTHER",
-            &trusted,
-        )
-        .expect_err("must reject");
+        let error = verify_manifest_signature(b"manifest", &[0u8; 64], "UABOTHER", &trusted).expect_err("must reject");
         assert!(matches!(error, BundleLoadError::UntrustedSigner { .. }));
     }
 
     #[test]
     fn trusted_signer_with_invalid_signature_bytes_is_malformed() {
         let trusted = TrustedKeys::from_allowlist(["UABTRUSTED"]);
-        let error = verify_manifest_signature(
-            b"manifest",
-            &[0u8; 8],
-            "UABTRUSTED",
-            &trusted,
-        )
-        .expect_err("short signature");
+        let error =
+            verify_manifest_signature(b"manifest", &[0u8; 8], "UABTRUSTED", &trusted).expect_err("short signature");
         assert!(matches!(
             error,
             BundleLoadError::SignatureMalformed(_) | BundleLoadError::SignatureInvalid
@@ -128,9 +116,6 @@ mod tests {
         let raw = vec![7u8; 64];
         assert_eq!(parse_signature_bytes(&raw).expect("raw"), raw);
         let encoded = STANDARD.encode(&raw);
-        assert_eq!(
-            parse_signature_bytes(encoded.as_bytes()).expect("base64"),
-            raw
-        );
+        assert_eq!(parse_signature_bytes(encoded.as_bytes()).expect("base64"), raw);
     }
 }

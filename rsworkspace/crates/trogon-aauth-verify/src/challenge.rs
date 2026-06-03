@@ -34,7 +34,11 @@ pub struct ChallengeMinter<C: TimeSource> {
 
 impl<C: TimeSource> ChallengeMinter<C> {
     pub fn new(signing_key: EncodingKey, alg: Algorithm, clock: C) -> Self {
-        Self { signing_key, alg, clock }
+        Self {
+            signing_key,
+            alg,
+            clock,
+        }
     }
 
     pub fn mint(&self, c: &ResourceChallenge<'_>) -> Result<String, ChallengeError> {

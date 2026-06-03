@@ -65,7 +65,11 @@ pub struct TokenVerifier<R: JwksResolver, C: TimeSource> {
 
 impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
     pub fn new(jwks: R, clock: C) -> Self {
-        Self { jwks, clock, leeway_secs: 60 }
+        Self {
+            jwks,
+            clock,
+            leeway_secs: 60,
+        }
     }
 
     #[must_use]
@@ -78,16 +82,24 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
     /// of the agent's confirmation key.
     pub async fn verify_agent(&self, jwt: &str) -> Result<VerifiedAgent, TokenError> {
         let (header, alg) = parse_typ(jwt, TYP_AGENT)?;
-        let claims_raw: serde_json::Value = self.decode_with_jwks(jwt, alg, header.kid.as_deref(), iss_of(jwt)?, None).await?;
+        let claims_raw: serde_json::Value = self
+            .decode_with_jwks(jwt, alg, header.kid.as_deref(), iss_of(jwt)?, None)
+            .await?;
         let claims: AgentClaims =
             serde_json::from_value(claims_raw.clone()).map_err(|_| TokenError::MissingClaim("agent claims"))?;
-        let jkt = crate::jkt::jwk_thumbprint(&claims.cnf.jwk).map_err(|e| TokenError::InvalidClaim(match e {
-            crate::jkt::JktError::MissingKty => "cnf.jwk.kty",
-            crate::jkt::JktError::MissingField(f) => f,
-            crate::jkt::JktError::UnsupportedKty(_) => "cnf.jwk.kty",
-        }))?;
+        let jkt = crate::jkt::jwk_thumbprint(&claims.cnf.jwk).map_err(|e| {
+            TokenError::InvalidClaim(match e {
+                crate::jkt::JktError::MissingKty => "cnf.jwk.kty",
+                crate::jkt::JktError::MissingField(f) => f,
+                crate::jkt::JktError::UnsupportedKty(_) => "cnf.jwk.kty",
+            })
+        })?;
         self.assert_freshness(claims.iat, claims.exp)?;
-        Ok(VerifiedAgent { claims, jkt, raw_jwt: jwt.to_string() })
+        Ok(VerifiedAgent {
+            claims,
+            jkt,
+            raw_jwt: jwt.to_string(),
+        })
     }
 
     /// Verify an `aa-resource+jwt` issued by a resource. `expected_aud` is the PS
@@ -100,7 +112,10 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         let claims: ResourceClaims =
             serde_json::from_value(claims_raw).map_err(|_| TokenError::MissingClaim("resource claims"))?;
         self.assert_freshness(claims.iat, claims.exp)?;
-        Ok(VerifiedResource { claims, raw_jwt: jwt.to_string() })
+        Ok(VerifiedResource {
+            claims,
+            raw_jwt: jwt.to_string(),
+        })
     }
 
     /// Verify an `aa-auth+jwt`. `expected_aud` is the resource URL or id that this
@@ -113,7 +128,10 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         let claims: AuthClaims =
             serde_json::from_value(claims_raw).map_err(|_| TokenError::MissingClaim("auth claims"))?;
         self.assert_freshness(claims.iat, claims.exp)?;
-        Ok(VerifiedAuth { claims, raw_jwt: jwt.to_string() })
+        Ok(VerifiedAuth {
+            claims,
+            raw_jwt: jwt.to_string(),
+        })
     }
 
     fn assert_freshness(&self, iat: i64, exp: i64) -> Result<(), TokenError> {
@@ -157,8 +175,8 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         validation.validate_exp = false;
         validation.required_spec_claims.remove("exp");
 
-        let data = decode::<serde_json::Value>(jwt, &key, &validation)
-            .map_err(|e| TokenError::Signature(e.to_string()))?;
+        let data =
+            decode::<serde_json::Value>(jwt, &key, &validation).map_err(|e| TokenError::Signature(e.to_string()))?;
         Ok(data.claims)
     }
 }
@@ -184,7 +202,10 @@ fn parse_typ(jwt: &str, expected: &'static str) -> Result<(jsonwebtoken::Header,
     let header = decode_header(jwt).map_err(|_| TokenError::BadHeader)?;
     let typ = header.typ.as_deref();
     if typ != Some(expected) {
-        return Err(TokenError::WrongTyp { expected, actual: typ.map(str::to_string) });
+        return Err(TokenError::WrongTyp {
+            expected,
+            actual: typ.map(str::to_string),
+        });
     }
     let alg = header.alg;
     if !matches!(alg, Algorithm::ES256 | Algorithm::ES384 | Algorithm::EdDSA) {
@@ -194,11 +215,7 @@ fn parse_typ(jwt: &str, expected: &'static str) -> Result<(jsonwebtoken::Header,
 }
 
 fn pick_jwk<'a>(set: &'a JwkSet, alg: Algorithm, kid: Option<&str>) -> Option<&'a Jwk> {
-    let compat: Vec<&Jwk> = set
-        .keys
-        .iter()
-        .filter(|k| jwk_compatible_with_alg(k, alg))
-        .collect();
+    let compat: Vec<&Jwk> = set.keys.iter().filter(|k| jwk_compatible_with_alg(k, alg)).collect();
     if let Some(kid) = kid
         && let Some(j) = compat.iter().copied().find(|j| j.common.key_id.as_deref() == Some(kid))
     {
@@ -222,9 +239,9 @@ fn jwk_compatible_with_alg(jwk: &Jwk, alg: Algorithm) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::jwks::StaticJwks;
     use crate::time_source::SystemTimeSource;
+    use std::sync::Arc;
 
     fn freshness_clock(value: Arc<std::sync::atomic::AtomicI64>) -> impl TimeSource {
         struct C(Arc<std::sync::atomic::AtomicI64>);

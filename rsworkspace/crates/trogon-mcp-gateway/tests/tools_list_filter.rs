@@ -19,9 +19,7 @@ use trogon_mcp_gateway::jwt::VerifiedJwtClaims;
 use trogon_mcp_gateway::policy::hierarchical::{
     MergeEngine, PolicyEffect, PolicyLevel, PolicyRule, PolicyStore, ScopeBundle, ScopeConfig, ScopeKey,
 };
-use trogon_mcp_gateway::policy::list_filter::{
-    self, ListFilterParams, ToolCandidate, AUDIT_FILTERED_BY_CEL,
-};
+use trogon_mcp_gateway::policy::list_filter::{self, AUDIT_FILTERED_BY_CEL, ListFilterParams, ToolCandidate};
 
 fn sample_identity() -> GatewayIdentity {
     GatewayIdentity {
@@ -173,11 +171,7 @@ mod unit_list_filter {
         );
 
         assert_eq!(
-            outcome
-                .kept
-                .iter()
-                .map(|tool| tool.name.as_str())
-                .collect::<Vec<_>>(),
+            outcome.kept.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(),
             vec!["t0", "t2"]
         );
     }

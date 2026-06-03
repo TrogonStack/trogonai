@@ -9,11 +9,9 @@ use tracing::{info, warn};
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
-use crate::constants::GATEWAY_CALLER_ID_HEADER;
 use crate::catalog::import_gate::SpiceDbPrincipal;
-use crate::catalog::spicedb_permission::{
-    AgentViewCheckOutcome, AgentViewGate, session_from_principal,
-};
+use crate::catalog::spicedb_permission::{AgentViewCheckOutcome, AgentViewGate, session_from_principal};
+use crate::constants::GATEWAY_CALLER_ID_HEADER;
 
 use super::store::CatalogStore;
 
@@ -77,15 +75,15 @@ where
     N: trogon_nats::SubscribeClient + trogon_nats::PublishClient + Clone + Send + Sync + 'static,
 {
     pub fn new(prefix: A2aPrefix, store: S, nats: N) -> Self {
-        Self::with_view_gate(prefix, store, nats, Arc::new(crate::catalog::spicedb_permission::NoopAgentViewGate))
+        Self::with_view_gate(
+            prefix,
+            store,
+            nats,
+            Arc::new(crate::catalog::spicedb_permission::NoopAgentViewGate),
+        )
     }
 
-    pub fn with_view_gate(
-        prefix: A2aPrefix,
-        store: S,
-        nats: N,
-        view_gate: Arc<dyn AgentViewGate>,
-    ) -> Self {
+    pub fn with_view_gate(prefix: A2aPrefix, store: S, nats: N, view_gate: Arc<dyn AgentViewGate>) -> Self {
         Self {
             prefix,
             store,

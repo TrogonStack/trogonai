@@ -1,17 +1,17 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::agent_id::A2aAgentId;
+use crate::catalog::import_gate::{
+    BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
+    ZedTokenSnapshot, ZedTokenTtl, parse_subject_reference,
+};
 use async_trait::async_trait;
 use authzed::v1::check_bulk_permissions_pair;
 use authzed::v1::check_permission_response::Permissionship;
 use authzed::v1::{
     CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, SubjectReference,
     ZedToken,
-};
-use crate::agent_id::A2aAgentId;
-use crate::catalog::import_gate::{
-    BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
-    ZedTokenSnapshot, ZedTokenTtl, parse_subject_reference,
 };
 
 pub const ENV_TIER1_SPICEDB_ENABLED: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENABLED";
@@ -108,7 +108,9 @@ pub struct SpiceDbSessionCache {
 impl SpiceDbSessionCache {
     pub fn new(ttl: ZedTokenTtl) -> Self {
         Self {
-            inner: moka::future::Cache::builder().max_capacity(SESSION_CACHE_CAPACITY).build(),
+            inner: moka::future::Cache::builder()
+                .max_capacity(SESSION_CACHE_CAPACITY)
+                .build(),
             ttl,
         }
     }
@@ -187,10 +189,7 @@ pub struct LiveAgentViewGate {
 
 impl LiveAgentViewGate {
     pub fn new(client: Arc<dyn BulkImportPermissionCheck>, session_cache: SpiceDbSessionCache) -> Self {
-        Self {
-            client,
-            session_cache,
-        }
+        Self { client, session_cache }
     }
 
     pub async fn connect(
@@ -218,7 +217,10 @@ impl AgentViewGate for LiveAgentViewGate {
         let outcomes = self
             .bulk_check_agent_view(session, principal, std::slice::from_ref(agent_id))
             .await;
-        outcomes.into_iter().next().unwrap_or(AgentViewCheckOutcome::TransportError)
+        outcomes
+            .into_iter()
+            .next()
+            .unwrap_or(AgentViewCheckOutcome::TransportError)
     }
 
     async fn bulk_check_agent_view(
@@ -262,11 +264,9 @@ impl AgentViewGate for LiveAgentViewGate {
 
         if let Some(snapshot) = self.session_cache.get(session).await {
             request.consistency = Some(Consistency {
-                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(
-                    ZedToken {
-                        token: snapshot.token,
-                    },
-                )),
+                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(ZedToken {
+                    token: snapshot.token,
+                })),
             });
         } else {
             request.consistency = Some(Consistency {
@@ -351,7 +351,9 @@ fn optional_tier1_credentials<E: trogon_std::env::ReadEnv>(
         Ok(value) => Some(value),
         Err(std::env::VarError::NotPresent) => None,
         Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(SpiceDbImportGateBuildError::InvalidToken(ENV_TIER1_SPICEDB_TOKEN.into()));
+            return Err(SpiceDbImportGateBuildError::InvalidToken(
+                ENV_TIER1_SPICEDB_TOKEN.into(),
+            ));
         }
     };
 
@@ -387,9 +389,7 @@ impl AgentViewGateLayer {
         };
 
         let gate = LiveAgentViewGate::connect(&endpoint, &token, ttl).await?;
-        Ok(Self {
-            gate: Arc::new(gate),
-        })
+        Ok(Self { gate: Arc::new(gate) })
     }
 }
 
@@ -431,11 +431,7 @@ fn parse_subject_id(raw: &str) -> Option<String> {
     {
         return Some(object_id.to_owned());
     }
-    if !raw.is_empty() {
-        Some(raw.to_owned())
-    } else {
-        None
-    }
+    if !raw.is_empty() { Some(raw.to_owned()) } else { None }
 }
 
 #[cfg(test)]

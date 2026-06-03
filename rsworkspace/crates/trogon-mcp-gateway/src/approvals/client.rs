@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::approvals::state::{ApprovalCache, ApprovalStateMachine};
 use crate::approvals::types::{
-    ApprovalDecisionMessage, ApprovalClientError, ApprovalSubject, ApprovalWaitOutcome, ArgsHash, RequestId,
+    ApprovalClientError, ApprovalDecisionMessage, ApprovalSubject, ApprovalWaitOutcome, ArgsHash, RequestId,
 };
 
 pub struct ApprovalClient {
@@ -56,17 +56,9 @@ impl ApprovalClient {
         .await;
 
         match wait {
-            Ok(ApprovalWaitOutcome::Approved {
-                approver,
-                expires_at,
-            }) => {
-                self.cache
-                    .store(request_id, args_hash, expires_at)
-                    .await;
-                Ok(ApprovalWaitOutcome::Approved {
-                    approver,
-                    expires_at,
-                })
+            Ok(ApprovalWaitOutcome::Approved { approver, expires_at }) => {
+                self.cache.store(request_id, args_hash, expires_at).await;
+                Ok(ApprovalWaitOutcome::Approved { approver, expires_at })
             }
             Ok(other) => Ok(other),
             Err(_) => Ok(ApprovalWaitOutcome::TimedOut),

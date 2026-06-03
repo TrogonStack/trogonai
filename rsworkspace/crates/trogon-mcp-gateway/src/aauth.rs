@@ -116,11 +116,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         let mut resolution = AAuthResolution::from_agent(&agent);
 
         if let Some(auth_jwt) = auth_token {
-            match self
-                .token_verifier
-                .verify_auth(auth_jwt, &self.cfg.resource_iss)
-                .await
-            {
+            match self.token_verifier.verify_auth(auth_jwt, &self.cfg.resource_iss).await {
                 Ok(auth) => resolution.attach_auth(auth),
                 Err(e) => return self.deny_or_shadow(e.to_string(), Some(&agent.jkt)).await,
             }
