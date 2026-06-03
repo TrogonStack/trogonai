@@ -1,0 +1,9 @@
+{
+  "bucket": "mcp-gateway-config",
+  "description": "Live gateway configuration bucket (route table, policy bundle digest pins, multi-region topology). Watched by trogon-mcp-gateway and trogon-gateway-xds (ADR 0026 hot-swap).",
+  "history": 10,
+  "ttl": 0,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}

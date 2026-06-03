@@ -1,0 +1,13 @@
+{
+  "name": "A2A_PUSH_DLQ",
+  "description": "A2A push delivery dead-letter queue (terminal failures from agent push dispatcher and gateway mirror). Auto-provisioned by a2a-nats-agent::provision_streams; pre-provision with this manifest for hardened deployments.",
+  "subjects": ["a2a.push.dlq.*.*", "a2a.push.dlq.mirror.*.*"],
+  "retention": "limits",
+  "storage": "file",
+  "max_age": 86400000000000,
+  "max_msgs": -1,
+  "max_bytes": -1,
+  "discard": "old",
+  "duplicate_window": 120000000000,
+  "num_replicas": 3
+}

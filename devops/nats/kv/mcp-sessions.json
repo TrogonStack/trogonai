@@ -1,0 +1,9 @@
+{
+  "bucket": "mcp-sessions",
+  "description": "MCP session state (encrypted blob keyed by Mcp-Session-Id). Per ADR 0018, AES-256-GCM with operator-supplied key; TTL bounds session lifetime.",
+  "history": 1,
+  "ttl": 3600000000000,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}

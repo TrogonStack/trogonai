@@ -1,0 +1,9 @@
+{
+  "bucket": "mcp-jwks",
+  "description": "Mesh JWKS published by trogon-jwks-publisher; key 'mesh/current' holds the active JWK Set consumed by in-mesh JWT validators.",
+  "history": 5,
+  "ttl": 0,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}
