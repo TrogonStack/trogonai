@@ -105,6 +105,56 @@ async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
 }
 
 #[tokio::test]
+async fn spawn_agent_tool_includes_session_id_in_payload() {
+    // The updated SpawnAgentTool must send 3 fields: capability, prompt, session_id.
+    let (_c, nats) = start_nats().await;
+    let prefix = "trogon.test3";
+    let session_id = "sess-abc-123";
+
+    let nats_clone = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_clone
+            .subscribe(format!("{prefix}.agent.spawn"))
+            .await
+            .unwrap();
+        if let Some(msg) = sub.next().await {
+            let body: serde_json::Value =
+                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let echo = serde_json::to_string(&body).unwrap();
+            if let Some(reply) = msg.reply {
+                nats_clone.publish(reply, echo.into()).await.unwrap();
+            }
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let tool = SpawnAgentTool::new(nats, prefix, session_id);
+    let result = tool
+        .call_tool(
+            "spawn_agent",
+            &serde_json::json!({"capability": "explore", "prompt": "list rust files"}),
+        )
+        .await
+        .unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    // Verify all three fields are present.
+    assert_eq!(parsed["capability"].as_str(), Some("explore"));
+    assert_eq!(parsed["prompt"].as_str(), Some("list rust files"));
+    assert_eq!(
+        parsed["session_id"].as_str(),
+        Some(session_id),
+        "payload must include session_id so the spawn handler can load the parent session"
+    );
+
+    // Verify exactly 3 fields — no extras, no missing.
+    let field_count = parsed.as_object().map(|o| o.len()).unwrap_or(0);
+    assert_eq!(field_count, 3, "payload must have exactly 3 fields: capability, prompt, session_id");
+}
+
+#[tokio::test]
 async fn spawn_agent_tool_times_out_when_no_responder() {
     let (_c, nats) = start_nats().await;
     let prefix = "trogon.noresponder";

@@ -32,7 +32,7 @@ pub use traits::{
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
     JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JsMessageOf,
+    JetStreamPublisher, JetStreamStreamUpdater, JsMessageOf,
 };
 
 #[cfg(any(test, feature = "test-support"))]

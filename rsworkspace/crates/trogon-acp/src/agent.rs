@@ -167,6 +167,7 @@ where
         current_mode: &str,
         current_model: &str,
         allow_bypass: bool,
+        compactor_model: Option<&str>,
     ) -> Vec<SessionConfigOption> {
         use agent_client_protocol::SessionConfigSelectOption;
         let mut mode_options: Vec<SessionConfigSelectOption> = vec![
@@ -186,11 +187,29 @@ where
             .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
             .collect();
 
+        // Compaction model: "default" means same as session model (compactor_model = None).
+        // All options are Claude models (same Anthropic provider) so the select
+        // naturally enforces the same-provider constraint.
+        let mut compactor_options: Vec<SessionConfigSelectOption> =
+            vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
+        compactor_options.extend(
+            AVAILABLE_MODELS
+                .iter()
+                .map(|(id, name)| SessionConfigSelectOption::new(*id, *name)),
+        );
+        let current_compactor = compactor_model.unwrap_or("");
+
         vec![
             SessionConfigOption::select("mode", "Mode", current_mode.to_string(), mode_options)
                 .category(SessionConfigOptionCategory::Mode),
             SessionConfigOption::select("model", "Model", current_model.to_string(), model_options)
                 .category(SessionConfigOptionCategory::Model),
+            SessionConfigOption::select(
+                "compactor_model",
+                "Compaction Model",
+                current_compactor.to_string(),
+                compactor_options,
+            ),
         ]
     }
 
@@ -799,7 +818,7 @@ where
         let modes = Self::build_mode_state(&state.mode, allow_bypass);
         let models = Self::build_model_state(&self.default_model);
         let config_options =
-            Self::build_config_options(&state.mode, &self.default_model, allow_bypass);
+            Self::build_config_options(&state.mode, &self.default_model, allow_bypass, state.compactor_model.as_deref());
 
         Ok(NewSessionResponse::new(sid)
             .modes(modes)
@@ -836,7 +855,7 @@ where
         let allow_bypass = !is_running_as_root();
         let modes = Self::build_mode_state(current_mode, allow_bypass);
         let models = Self::build_model_state(current_model);
-        let config_options = Self::build_config_options(current_mode, current_model, allow_bypass);
+        let config_options = Self::build_config_options(current_mode, current_model, allow_bypass, state.compactor_model.as_deref());
 
         Ok(LoadSessionResponse::new()
             .modes(modes)
@@ -897,7 +916,7 @@ where
 
         // Send updated config options
         let config_options =
-            Self::build_config_options(&mode_id, current_model, !is_running_as_root());
+            Self::build_config_options(&mode_id, current_model, !is_running_as_root(), state.compactor_model.as_deref());
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
             SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -971,6 +990,13 @@ where
             if let Err(e) = self.store.save(&session_id, &state).await {
                 Self::warn_save_session_model_failed(&session_id, &e);
             }
+        } else if config_id == "compactor_model" {
+            // Write to the shared KV store so TrogonAgent (acp-runner) picks it up
+            // on the next prompt — both share the same NatsSessionStore instance.
+            state.compactor_model = if value.is_empty() { None } else { Some(value.clone()) };
+            if let Err(e) = self.store.save(&session_id, &state).await {
+                warn!(session_id, error = %e, "agent: failed to persist compactor_model");
+            }
         }
 
         let current_mode = if state.mode.is_empty() {
@@ -979,8 +1005,12 @@ where
             &state.mode
         };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
-        let config_options =
-            Self::build_config_options(current_mode, current_model, !is_running_as_root());
+        let config_options = Self::build_config_options(
+            current_mode,
+            current_model,
+            !is_running_as_root(),
+            state.compactor_model.as_deref(),
+        );
 
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
@@ -1022,7 +1052,7 @@ where
             &state.mode
         };
         let config_options =
-            Self::build_config_options(current_mode, &model, !is_running_as_root());
+            Self::build_config_options(current_mode, &model, !is_running_as_root(), state.compactor_model.as_deref());
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
             SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -1158,6 +1188,7 @@ where
         let new_state = SessionState {
             messages,
             model: src_state.model.clone(),
+            compactor_model: src_state.compactor_model.clone(),
             mode: src_state.mode.clone(),
             cwd,
             created_at: now_iso8601(),
@@ -1180,9 +1211,12 @@ where
             token_budget: src_state.token_budget,
             todos: src_state.todos.clone(),
             permission_rules_text: src_state.permission_rules_text.clone(),
-            compactor_model: src_state.compactor_model.clone(),
             spawn_depth: src_state.spawn_depth,
             tool_hooks: src_state.tool_hooks.clone(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);
@@ -1211,6 +1245,7 @@ where
                 current_mode,
                 current_model,
                 allow_bypass,
+                new_state.compactor_model.as_deref(),
             )))
     }
 
@@ -1247,6 +1282,7 @@ where
                 current_mode,
                 current_model,
                 allow_bypass,
+                state.compactor_model.as_deref(),
             )))
     }
 
@@ -1729,13 +1765,14 @@ mod tests {
 
     #[test]
     fn build_config_options_returns_two_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false);
-        assert_eq!(opts.len(), 2);
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        // mode + model + compactor_model
+        assert_eq!(opts.len(), 3);
     }
 
     #[test]
     fn build_config_options_first_option_is_mode() {
-        let opts = TestAgent::build_config_options("plan", "claude-sonnet-4-6", false);
+        let opts = TestAgent::build_config_options("plan", "claude-sonnet-4-6", false, None);
         assert_eq!(opts[0].id.0.as_ref(), "mode");
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             assert_eq!(s.current_value.0.as_ref(), "plan");
@@ -1746,7 +1783,7 @@ mod tests {
 
     #[test]
     fn build_config_options_second_option_is_model() {
-        let opts = TestAgent::build_config_options("default", "claude-opus-4-6", false);
+        let opts = TestAgent::build_config_options("default", "claude-opus-4-6", false, None);
         assert_eq!(opts[1].id.0.as_ref(), "model");
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[1].kind {
             assert_eq!(s.current_value.0.as_ref(), "claude-opus-4-6");
@@ -1757,7 +1794,7 @@ mod tests {
 
     #[test]
     fn build_config_options_with_bypass_mode_has_five_select_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", true);
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", true, None);
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
                 agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
@@ -1774,7 +1811,7 @@ mod tests {
 
     #[test]
     fn build_config_options_without_bypass_mode_has_four_select_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false);
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
                 agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
@@ -2022,11 +2059,13 @@ mod tests {
 
     #[test]
     fn build_config_options_returns_mode_and_model() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false);
-        assert_eq!(opts.len(), 2);
+        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        // mode + model + compactor_model
+        assert_eq!(opts.len(), 3);
         let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
         assert!(ids.iter().any(|id| id == "mode"));
         assert!(ids.iter().any(|id| id == "model"));
+        assert!(ids.iter().any(|id| id == "compactor_model"));
     }
 
     // ── convert_mcp_servers ───────────────────────────────────────────────────

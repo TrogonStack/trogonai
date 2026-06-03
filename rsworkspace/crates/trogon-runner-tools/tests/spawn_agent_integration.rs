@@ -161,8 +161,12 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
             assert_eq!(v["capability"].as_str().unwrap(), "explore");
             assert_eq!(v["prompt"].as_str().unwrap(), "list files");
 
-            // no extra fields
-            assert!(v.as_object().map(|o| o.len() == 2).unwrap_or(false));
+            // session_id is forwarded so the spawned agent knows its parent
+            // session (added in feat(spawn-agent): isolated worktree sub-agents).
+            assert_eq!(v["session_id"].as_str().unwrap(), "");
+
+            // no unexpected fields beyond capability, prompt, session_id
+            assert!(v.as_object().map(|o| o.len() == 3).unwrap_or(false));
 
             if let Some(reply) = msg.reply {
                 registry_client.publish(reply, "ok".into()).await.unwrap();
@@ -301,6 +305,8 @@ async fn call_tool_returns_registry_reply_verbatim() {
                 .unwrap();
         }
     });
+
+    tokio::task::yield_now().await;
 
     let tool = SpawnAgentTool::new(client, "ns", "");
     let result = tool

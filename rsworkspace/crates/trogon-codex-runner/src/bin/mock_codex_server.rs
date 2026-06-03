@@ -26,6 +26,7 @@
 //! | `MOCK_EMIT_STRAY_THREAD_EVENT`   | Emit an `item/updated` for a nonexistent thread before `turn/completed` |
 //! | `MOCK_SEND_TOOL_EVENT`           | Emit one tool `item/updated` + `item/completed` pair before `turn/completed` |
 //! | `MOCK_BROADCAST_ERROR_AFTER_TURNS=N` | After N `turn/start` acks, emit an `error` with no `threadId` (broadcasts to all active turns) |
+//! | `MOCK_VALIDATE_SCHEMA`               | Reject messages that violate JSON-RPC + Codex protocol schema (missing required params) |
 //!
 //! Set `CODEX_BIN` in the test process to the path of this binary so that
 //! `CodexProcess::spawn()` forks this mock instead of the real CLI.
@@ -56,11 +57,15 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
     let emit_stray_thread_event = std::env::var("MOCK_EMIT_STRAY_THREAD_EVENT").is_ok();
+    // Path to write the `userInput` field from the first `turn/start` request.
+    // Used by pending_history integration tests to verify the prepend.
+    let record_turn_input_file = std::env::var("MOCK_RECORD_TURN_INPUT_FILE").ok();
     let send_tool_event = std::env::var("MOCK_SEND_TOOL_EVENT").is_ok();
     let broadcast_error_after_turns: Option<usize> =
         std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
             .ok()
             .and_then(|s| s.parse().ok());
+    let validate_schema = std::env::var("MOCK_VALIDATE_SCHEMA").is_ok();
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -142,6 +147,30 @@ fn main() {
                     continue;
                 }
 
+                // Schema validation: params.threadId must be a non-empty string;
+                // params.userInput must be a string.
+                if validate_schema {
+                    let thread_id_ok = msg["params"]["threadId"]
+                        .as_str()
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false);
+                    let user_input_ok = msg["params"]["userInput"].is_string();
+                    if !thread_id_ok {
+                        respond_error(&mut out, &id, "schema: turn/start params.threadId must be a non-empty string");
+                        continue;
+                    }
+                    if !user_input_ok {
+                        respond_error(&mut out, &id, "schema: turn/start params.userInput must be a string");
+                        continue;
+                    }
+                    if let Some(model_val) = msg["params"].get("model") {
+                        if !model_val.is_null() && model_val.as_str().map(|s| s.is_empty()).unwrap_or(true) {
+                            respond_error(&mut out, &id, "schema: turn/start params.model must be a non-empty string when present");
+                            continue;
+                        }
+                    }
+                }
+
                 if let Some(expected) = &require_model {
                     let got = msg["params"]["model"].as_str().unwrap_or("");
                     if got != expected {
@@ -155,6 +184,12 @@ fn main() {
                 }
 
                 let thread_id = msg["params"]["threadId"].as_str().unwrap_or("").to_string();
+
+                // Record the userInput to a file if requested (used by pending_history tests).
+                if let Some(ref path) = record_turn_input_file {
+                    let user_input = msg["params"]["userInput"].as_str().unwrap_or("");
+                    std::fs::write(path, user_input).ok();
+                }
 
                 // Ack the request first.
                 respond(&mut out, &id, Value::Null);

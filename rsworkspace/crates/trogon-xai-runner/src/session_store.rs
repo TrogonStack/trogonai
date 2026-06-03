@@ -21,7 +21,7 @@ pub struct SessionSnapshot {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Same-provider compaction model override. Persisted so it survives reload.
+    /// Per-session context-compaction model override. Persisted like `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compactor_model: Option<String>,
     #[serde(default)]
@@ -41,6 +41,12 @@ pub struct SessionSnapshot {
     /// restart / KV reload. `#[serde(default)]` keeps older snapshots readable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_output_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_read_tokens: u64,
 }
 
 /// Per-message token usage written to the SESSIONS bucket.
@@ -56,6 +62,10 @@ pub struct MessageUsage {
 }
 
 fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
@@ -284,6 +294,9 @@ mod tests {
             tools: vec![],
             memory_path: None,
             agent_id: Some("agent-42".into()),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
             messages: vec![
                 SnapshotMessage {
                     role: "user".into(),
@@ -358,6 +371,9 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         }
     }
 

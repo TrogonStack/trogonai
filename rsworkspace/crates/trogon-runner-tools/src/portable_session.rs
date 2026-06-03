@@ -5,6 +5,15 @@ use trogon_tools::{ContentBlock, Message};
 pub struct PortableMessage {
     pub role: String, // "user" | "assistant"
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<PortableBlock>,
+}
+
+impl PortableMessage {
+    /// Convenience constructor for text-only turns (codex, xai history).
+    pub fn text_only(role: impl Into<String>, text: impl Into<String>) -> Self {
+        Self { role: role.into(), text: text.into(), blocks: vec![] }
+    }
 }
 
 pub const EXPORT_VERSION_V2: u32 = 2;
@@ -184,6 +193,7 @@ pub fn messages_to_v1(messages: &[Message]) -> Vec<PortableMessage> {
             PortableMessage {
                 role: m.role.clone(),
                 text,
+                blocks: vec![],
             }
         })
         .collect()
@@ -218,6 +228,7 @@ pub fn v2_message_to_text(m: &PortableMessageV2) -> PortableMessage {
     PortableMessage {
         role: m.role.clone(),
         text: parts.join("\n"),
+        blocks: vec![],
     }
 }
 
@@ -274,14 +285,12 @@ mod tests {
 
     #[test]
     fn portable_message_serde_round_trip() {
-        let original = PortableMessage {
-            role: "user".into(),
-            text: "hello world".into(),
-        };
+        let original = PortableMessage::text_only("user", "hello world");
         let json = serde_json::to_string(&original).unwrap();
         let decoded: PortableMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.role, original.role);
         assert_eq!(decoded.text, original.text);
+        assert!(decoded.blocks.is_empty());
     }
 
     #[test]
@@ -351,5 +360,76 @@ mod tests {
         let json = serde_json::to_string(&export).unwrap();
         let parsed = parse_export_json(&json).unwrap();
         assert!(matches!(parsed, ParsedExport::V2(_)));
+    }
+
+    #[test]
+    fn portable_message_vec_round_trip() {
+        let original = vec![
+            PortableMessage::text_only("user", "q"),
+            PortableMessage::text_only("assistant", "a"),
+        ];
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: Vec<PortableMessage> = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded[0].role, "user");
+        assert_eq!(decoded[0].text, "q");
+        assert_eq!(decoded[1].role, "assistant");
+        assert_eq!(decoded[1].text, "a");
+    }
+
+    #[test]
+    fn portable_message_json_shape() {
+        let msg = PortableMessage::text_only("user", "hi");
+        let json = serde_json::to_string(&msg).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["role"], "user");
+        assert_eq!(value["text"], "hi");
+        // blocks omitted when empty
+        assert!(value.get("blocks").is_none());
+    }
+
+    #[test]
+    fn cross_runner_export_json_importable_by_all_runners() {
+        // Old format (no blocks field) still deserializes correctly.
+        let json = r#"[{"role":"user","text":"question"},{"role":"assistant","text":"answer"}]"#;
+        let decoded: Vec<PortableMessage> = serde_json::from_str(json).unwrap();
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded[0].role, "user");
+        assert_eq!(decoded[0].text, "question");
+        assert!(decoded[0].blocks.is_empty());
+        assert_eq!(decoded[1].role, "assistant");
+        assert_eq!(decoded[1].text, "answer");
+    }
+
+    #[test]
+    fn portable_block_serde_round_trip() {
+        let blocks = vec![
+            PortableBlock::Text { text: "hello".into() },
+            PortableBlock::ToolUse {
+                id: "c1".into(),
+                name: "read_file".into(),
+                input_summary: serde_json::json!({"path": "/foo"}).to_string(),
+            },
+            PortableBlock::ToolResult { id: "c1".into(), output_summary: "file contents".into() },
+        ];
+        let msg = PortableMessage { role: "assistant".into(), text: "hello".into(), blocks };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: PortableMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.blocks.len(), 3);
+        match &decoded.blocks[1] {
+            PortableBlock::ToolUse { id, name, input_summary } => {
+                assert_eq!(id, "c1");
+                assert_eq!(name, "read_file");
+                assert!(input_summary.contains("/foo"));
+            }
+            _ => panic!("expected ToolUse"),
+        }
+        match &decoded.blocks[2] {
+            PortableBlock::ToolResult { id, output_summary } => {
+                assert_eq!(id, "c1");
+                assert_eq!(output_summary, "file contents");
+            }
+            _ => panic!("expected ToolResult"),
+        }
     }
 }

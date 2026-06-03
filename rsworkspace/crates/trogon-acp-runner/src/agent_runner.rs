@@ -221,7 +221,7 @@ mod tests {
 
 // ── Mock (test-helpers feature) ───────────────────────────────────────────────
 
-#[cfg(feature = "test-helpers")]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod mock {
     use super::*;
     use std::sync::Mutex;

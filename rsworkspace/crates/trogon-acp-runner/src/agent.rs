@@ -36,6 +36,7 @@ use trogon_runner_tools::build_mode_permission_checker;
 use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::CompactError;
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -138,24 +139,41 @@ fn estimate_token_count(messages: &[Message]) -> u64 {
 /// absent compactor never holds the session semaphore long enough to cause the
 /// registry entry to expire or the CLI to time out.
 #[cfg_attr(coverage, coverage(off))]
+/// Request sent to `trogon-compactor`. acp is Anthropic-only, so `provider` is
+/// always `"anthropic"`; the service compacts with the session `model` unless a
+/// same-provider `compactor_model` override is set.
+#[derive(serde::Serialize)]
+struct CompactReq<'a> {
+    messages: &'a [Message],
+    provider: &'a str,
+    model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compactor_model: Option<&'a str>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompactResp {
+    messages: Vec<Message>,
+    #[serde(default)]
+    compacted: bool,
+    #[serde(default)]
+    tokens_before: usize,
+    #[serde(default)]
+    tokens_after: usize,
+    /// Number of kept trailing messages (Gap 2). acp ignores it — uses
+    /// `messages` directly since its format is already Anthropic-shaped.
+    #[serde(default)]
+    #[allow(dead_code)]
+    kept_count: usize,
+}
+
 /// Builds the JSON payload for a compaction request. Extracted so the wire
 /// contract (provider/model/compactor_model) is unit-testable without NATS.
-/// acp is Anthropic-only, so `provider` is always `"anthropic"`; the service
-/// compacts with the session `model` unless a same-provider `compactor_model`
-/// override is set.
 fn build_compact_payload(
     messages: &[Message],
     model: &str,
     compactor_model: Option<&str>,
 ) -> Result<Vec<u8>, serde_json::Error> {
-    #[derive(serde::Serialize)]
-    struct CompactReq<'a> {
-        messages: &'a [Message],
-        provider: &'a str,
-        model: &'a str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compactor_model: Option<&'a str>,
-    }
     serde_json::to_vec(&CompactReq {
         messages,
         provider: "anthropic",
@@ -164,27 +182,23 @@ fn build_compact_payload(
     })
 }
 
+/// Requests compaction from `trogon-compactor`.
+///
+/// Returns `Ok(Some(messages))` when the compactor compacted, `Ok(None)` when it
+/// declined (nothing to compact), and `Err` when the compactor was unavailable or
+/// returned an invalid response. Distinguishing these three outcomes lets each
+/// caller pick its policy: the manual `/compact` handler propagates the `Err` so
+/// the user sees the compactor-down failure, while the auto-path degrades and
+/// continues uncompacted in the background.
 async fn compact_messages(
     nats: &async_nats::Client,
-    messages: Vec<Message>,
+    messages: &[Message],
     session_id: &str,
     model: &str,
     compactor_model: Option<&str>,
-) -> Vec<Message> {
-    #[derive(serde::Deserialize)]
-    struct CompactResp {
-        messages: Vec<Message>,
-        #[serde(default)]
-        compacted: bool,
-        #[serde(default)]
-        tokens_before: usize,
-        #[serde(default)]
-        tokens_after: usize,
-    }
-
-    let Ok(payload) = build_compact_payload(&messages, model, compactor_model) else {
-        return messages;
-    };
+) -> Result<Option<Vec<Message>>, CompactError> {
+    let payload = build_compact_payload(messages, model, compactor_model)
+        .map_err(|e| CompactError::Serialize(e.to_string()))?;
 
     let reply = match tokio::time::timeout(
         std::time::Duration::from_secs(25),
@@ -193,32 +207,27 @@ async fn compact_messages(
     .await
     {
         Ok(Ok(r)) => r,
-        Ok(Err(e)) => {
-            warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
-            return messages;
-        }
+        Ok(Err(e)) => return Err(CompactError::Request(e.to_string())),
         Err(_elapsed) => {
-            warn!(session_id, "compactor did not respond within 25 s — skipping compaction");
-            return messages;
+            return Err(CompactError::InvalidResponse(
+                "compactor did not respond within 25 s".into(),
+            ));
         }
     };
 
-    match serde_json::from_slice::<CompactResp>(&reply.payload) {
-        Ok(resp) => {
-            if resp.compacted {
-                info!(
-                    session_id,
-                    tokens_before = resp.tokens_before,
-                    tokens_after = resp.tokens_after,
-                    "context compacted"
-                );
-            }
-            resp.messages
-        }
-        Err(e) => {
-            warn!(session_id, error = %e, "compactor returned invalid response — skipping");
-            messages
-        }
+    let resp: CompactResp = serde_json::from_slice(&reply.payload)
+        .map_err(|e| CompactError::InvalidResponse(e.to_string()))?;
+
+    if resp.compacted {
+        info!(
+            session_id,
+            tokens_before = resp.tokens_before,
+            tokens_after = resp.tokens_after,
+            "context compacted"
+        );
+        Ok(Some(resp.messages))
+    } else {
+        Ok(None)
     }
 }
 
@@ -623,11 +632,21 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         if let Some(ref nats) = self.compactor_nats
             && estimate_token_count(&state.messages) > state.token_budget * 85 / 100
         {
-            let model = state.model.clone().unwrap_or_else(|| self.default_model.clone());
+            let model = state
+                .model
+                .as_deref()
+                .unwrap_or(&self.default_model)
+                .to_string();
             let compactor_model = state.compactor_model.clone();
-            let msgs = std::mem::take(&mut state.messages);
-            state.messages =
-                compact_messages(nats, msgs, &session_id, &model, compactor_model.as_deref()).await;
+            match compact_messages(nats, &state.messages, &session_id, &model, compactor_model.as_deref())
+                .await
+            {
+                Ok(Some(new_msgs)) => state.messages = new_msgs,
+                Ok(None) => {}
+                Err(e) => {
+                    warn!(session_id, error = %e, "auto-compaction failed — continuing uncompacted");
+                }
+            }
         }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
@@ -655,9 +674,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 || needs_perm
                 || needs_elic
                 || gateway.is_some()
-                || self.execution_nats.is_some();
+                || self.execution_nats.is_some()
+                || !state.cwd.is_empty();
             if needs_clone {
                 let mut a = (*self.agent).clone();
+                if !state.cwd.is_empty() {
+                    a.set_cwd(state.cwd.clone());
+                }
                 if let Some(ref model) = state.model {
                     a.set_model(model.clone());
                 }
@@ -1003,6 +1026,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
+                                        state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
+                                        state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
+                                        state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+                                        state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
+                                        if let Err(e) = self.store.save(&session_id, &state).await {
+                                            warn!(session_id, error = %e, "agent: failed to save token usage on max_iterations");
+                                        }
                                         publish_via_converter(
                                             prompt_client,
                                             &mut converter,
@@ -1020,6 +1050,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
+                                        state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
+                                        state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
+                                        state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+                                        state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
+                                        if let Err(e) = self.store.save(&session_id, &state).await {
+                                            warn!(session_id, error = %e, "agent: failed to save token usage on max_tokens");
+                                        }
                                         publish_via_converter(
                                             prompt_client,
                                             &mut converter,
@@ -1113,6 +1150,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     updated.push(Message { role: "user".to_string(), content: tool_results });
                 }
                 final_messages = Some(updated);
+            } else if last_input_tokens > 0 || last_output_tokens > 0 {
+                // No partial turn to commit, but persist token usage from completed turns.
+                state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
+                state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
+                state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+                state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id, error = %e, "agent: failed to save token usage on cancel");
+                }
             }
         }
 
@@ -1151,6 +1197,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             if mode_changed {
                 merged.mode = prompt_mode;
             }
+            // Accumulate this turn's token usage onto the reloaded `merged` state
+            // (the value actually persisted below), preserving prior totals.
+            merged.total_input_tokens = merged.total_input_tokens.saturating_add(last_input_tokens as u64);
+            merged.total_output_tokens = merged.total_output_tokens.saturating_add(last_output_tokens as u64);
+            merged.total_cache_creation_tokens = merged.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+            merged.total_cache_read_tokens = merged.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
             let new_entries = audit_buf
                 .lock()
                 .map(|mut g| g.drain(..).collect::<Vec<_>>())
@@ -1529,6 +1581,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 session_meta
                     .insert("branchedAtIndex".to_string(), serde_json::json!(idx));
             }
+            if state.total_input_tokens > 0 || state.total_output_tokens > 0 {
+                session_meta.insert("totalInputTokens".to_string(), serde_json::json!(state.total_input_tokens));
+                session_meta.insert("totalOutputTokens".to_string(), serde_json::json!(state.total_output_tokens));
+                session_meta.insert("totalCacheCreationTokens".to_string(), serde_json::json!(state.total_cache_creation_tokens));
+                session_meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(state.total_cache_read_tokens));
+            }
             if !session_meta.is_empty() {
                 info = info.meta(session_meta);
             }
@@ -1570,6 +1628,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         state.cwd = req.cwd.to_string_lossy().into_owned();
         state.parent_session_id = Some(source_id.clone());
         state.branched_at_index = branch_at;
+        state.total_input_tokens = 0;
+        state.total_output_tokens = 0;
+        state.total_cache_creation_tokens = 0;
+        state.total_cache_read_tokens = 0;
         if let Err(e) = self.store.save(&new_id, &state).await {
             warn!(new_id, error = %e, "agent: failed to save forked session");
         }
@@ -1741,6 +1803,62 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/compact" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str().ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string())
+            })?;
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .map_err(|_| internal_error("session lock closed"))?;
+            let mut state = self
+                .store
+                .load(session_id)
+                .await
+                .map_err(|e| internal_error(e.to_string()))?;
+            let tokens_before = estimate_token_count(&state.messages);
+            let (compacted, tokens_after) = if let Some(ref nats) = self.compactor_nats {
+                let model = state.model.clone().unwrap_or_else(|| self.default_model.clone());
+                let compactor_model = state.compactor_model.clone();
+                // Manual /compact propagates a compactor-down failure as an error so
+                // the user sees it, rather than reporting a misleading "no compaction
+                // needed". Distinct from the auto-path, which degrades silently.
+                let compacted_msgs =
+                    compact_messages(nats, &state.messages, session_id, &model, compactor_model.as_deref())
+                        .await
+                        .map_err(|e| internal_error(e.to_string()))?;
+                match compacted_msgs {
+                    Some(new_msgs) => {
+                        let after = estimate_token_count(&new_msgs);
+                        state.messages = new_msgs;
+                        if after < tokens_before {
+                            state.updated_at = now_iso8601();
+                            self.store
+                                .save(session_id, &state)
+                                .await
+                                .map_err(|e| internal_error(e.to_string()))?;
+                            (true, after)
+                        } else {
+                            (false, tokens_before)
+                        }
+                    }
+                    None => (false, tokens_before),
+                }
+            } else {
+                (false, tokens_before)
+            };
+            let result = serde_json::json!({
+                "compacted": compacted,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+            });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| internal_error(e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
@@ -1839,8 +1957,7 @@ mod tests {
     #[test]
     fn build_compact_payload_includes_provider_model_and_override() {
         let msgs = vec![Message::user_text("hi")];
-        let bytes =
-            build_compact_payload(&msgs, "claude-opus-4-6", Some("claude-haiku-4-5")).unwrap();
+        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", Some("claude-haiku-4-5")).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["provider"], "anthropic", "acp always compacts via anthropic");
         assert_eq!(v["model"], "claude-opus-4-6", "session model is sent");
@@ -2172,14 +2289,24 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "test-helpers")]
-    #[tokio::test]
-    async fn set_session_config_option_compactor_model_persists_to_store() {
-        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+    // ── session/export of non-text blocks → versioned V2 wrapper ──────────────
+    //
+    // A message containing any block that is not plain Text/Image (ToolUse,
+    // ToolResult, Thinking) is exported as the versioned V2 wrapper, which
+    // preserves the block structurally instead of flattening it to prose. These
+    // tests exercise the acp-runner `session/export` ext_method handler and parse
+    // the result with `parse_export_json` (which handles both V1 and V2 shapes).
 
-        let store = MemorySessionStore::new();
-        let store_clone = store.clone();
-        let agent = TrogonAgent::new(
+    /// Build a `TrogonAgent` over a `MemorySessionStore` for ext_method tests.
+    #[cfg(feature = "test-helpers")]
+    fn make_export_test_agent(
+        store: trogon_runner_tools::session_store::mock::MemorySessionStore,
+    ) -> TrogonAgent<
+        trogon_runner_tools::session_store::mock::MemorySessionStore,
+        crate::agent_runner::mock::MockAgentRunner,
+        crate::session_notifier::mock::MockSessionNotifier,
+    > {
+        TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
             store,
             crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
@@ -2188,34 +2315,183 @@ mod tests {
             None,
             None,
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        );
+        )
+    }
 
-        agent
-            .set_session_config_option(SetSessionConfigOptionRequest::new(
-                "s-cm",
-                "compactor_model",
-                "claude-haiku-4-5",
-            ))
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_represents_tool_use_as_v2_block() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: vec![AgentContentBlock::ToolUse {
+                    id: "call-x".to_string(),
+                    name: "read_file".to_string(),
+                    input: serde_json::json!({"path": "/tmp/foo"}),
+                    parent_tool_use_id: None,
+                }],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("tu1", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tu1")))
             .await
             .unwrap();
-        let state = store_clone.load("s-cm").await.unwrap();
-        assert_eq!(
-            state.compactor_model,
-            Some("claude-haiku-4-5".to_string()),
-            "compactor_model override must persist on the acp session"
-        );
 
-        // Empty value clears it.
-        agent
-            .set_session_config_option(SetSessionConfigOptionRequest::new(
-                "s-cm",
-                "compactor_model",
-                "",
-            ))
+        // A tool_use message exports as V2 with the call preserved as a structured
+        // ToolUse block — the bare tool name is never emitted as prose (MED-18).
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert_eq!(exp.messages[0].role, "assistant");
+                assert!(
+                    exp.messages[0].blocks.iter().any(
+                        |b| matches!(b, PortableBlock::ToolUse { name, .. } if name == "read_file")
+                    ),
+                    "export must preserve the tool_use as a ToolUse block; got: {:?}",
+                    exp.messages[0].blocks
+                );
+            }
+            ParsedExport::V1(_) => panic!("a tool_use message must export as V2"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_preserves_tool_result_content_v2() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![AgentContentBlock::ToolResult {
+                    tool_use_id: "call-1".to_string(),
+                    content: "tool output here".to_string(),
+                }],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("tr1", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tr1")))
             .await
             .unwrap();
-        let cleared = store_clone.load("s-cm").await.unwrap();
-        assert_eq!(cleared.compactor_model, None, "empty value clears the override");
+
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert_eq!(exp.messages[0].role, "user");
+                assert!(
+                    exp.messages[0].blocks.iter().any(|b| matches!(
+                        b,
+                        PortableBlock::ToolResult { output_summary, .. }
+                            if output_summary == "tool output here"
+                    )),
+                    "export must preserve the tool result content; got: {:?}",
+                    exp.messages[0].blocks
+                );
+            }
+            ParsedExport::V1(_) => panic!("a tool_result message must export as V2"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_mixed_text_and_tool_result_v2() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![
+                    AgentContentBlock::Text { text: "before".to_string() },
+                    AgentContentBlock::ToolResult {
+                        tool_use_id: "c2".to_string(),
+                        content: "result".to_string(),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("tr2", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tr2")))
+            .await
+            .unwrap();
+
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                let blocks = &exp.messages[0].blocks;
+                assert!(
+                    blocks.iter().any(|b| matches!(b, PortableBlock::Text { text } if text == "before")),
+                    "text block must be preserved; got: {blocks:?}"
+                );
+                assert!(
+                    blocks.iter().any(|b| matches!(
+                        b,
+                        PortableBlock::ToolResult { output_summary, .. } if output_summary == "result"
+                    )),
+                    "tool result must be preserved alongside the text; got: {blocks:?}"
+                );
+            }
+            ParsedExport::V1(_) => panic!("a message with a tool_result must export as V2"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_represents_thinking_as_v2_block() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: vec![AgentContentBlock::Thinking {
+                    thinking: "internal reasoning".to_string(),
+                }],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("th1", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("th1")))
+            .await
+            .unwrap();
+
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert!(
+                    exp.messages[0].blocks.iter().any(|b| matches!(
+                        b,
+                        PortableBlock::Thinking { text } if text == "internal reasoning"
+                    )),
+                    "thinking must be preserved as a structured Thinking block; got: {:?}",
+                    exp.messages[0].blocks
+                );
+            }
+            ParsedExport::V1(_) => panic!("a thinking message must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
@@ -2254,6 +2530,54 @@ mod tests {
             AgentContentBlock::Text { text } => assert_eq!(text, "imported"),
             _ => panic!("expected Text block"),
         }
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_compactor_model_persists_to_store() {
+        use agent_client_protocol::Agent as _;
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "s-cm",
+                "compactor_model",
+                "claude-haiku-4-5",
+            ))
+            .await
+            .unwrap();
+
+        // Must persist to the store (acp's SessionState is the persisted type).
+        let state = store_clone.load("s-cm").await.unwrap();
+        assert_eq!(
+            state.compactor_model,
+            Some("claude-haiku-4-5".to_string()),
+            "compactor_model override must persist on the acp session"
+        );
+
+        // Empty value clears it.
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "s-cm",
+                "compactor_model",
+                "",
+            ))
+            .await
+            .unwrap();
+        let cleared = store_clone.load("s-cm").await.unwrap();
+        assert_eq!(cleared.compactor_model, None, "empty value clears the override");
     }
 
     #[cfg(feature = "test-helpers")]
@@ -2420,221 +2744,6 @@ mod tests {
         );
     }
 
-    // These tests exercise the V2 export format: any message carrying a richer
-    // block (ToolResult / ToolUse / Thinking) is exported as a versioned V2 object
-    // that PRESERVES the block, not the legacy text-only V1 array. The V1 path is
-    // still covered by `ext_method_export_returns_portable_messages` (plain text).
-
-    #[cfg(feature = "test-helpers")]
-    #[tokio::test]
-    async fn ext_method_export_v2_preserves_tool_result_content() {
-        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
-        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
-
-        let store = MemorySessionStore::new();
-        let store_clone = store.clone();
-
-        let state = SessionState {
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: vec![AgentContentBlock::ToolResult {
-                    tool_use_id: "call-1".to_string(),
-                    content: "tool output here".to_string(),
-                }],
-            }],
-            ..Default::default()
-        };
-        store_clone.save("tr1", &state).await.unwrap();
-
-        let agent = TrogonAgent::new(
-            crate::session_notifier::mock::MockSessionNotifier::new(),
-            store,
-            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
-            "test-prefix",
-            "claude-3-5-sonnet-20241022",
-            None,
-            None,
-            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        );
-
-        let resp = agent
-            .ext_method(ExtRequest::new("session/export", make_export_params("tr1")))
-            .await
-            .unwrap();
-
-        match parse_export_json(resp.0.get()).unwrap() {
-            ParsedExport::V2(exp) => {
-                assert_eq!(exp.messages.len(), 1);
-                assert_eq!(exp.messages[0].role, "user");
-                assert!(
-                    matches!(&exp.messages[0].blocks[0],
-                        PortableBlock::ToolResult { id, output_summary }
-                        if id == "call-1" && output_summary == "tool output here"),
-                    "tool_result content must be preserved in V2, got {:?}",
-                    exp.messages[0].blocks[0]
-                );
-            }
-            ParsedExport::V1(_) => panic!("rich content must export as V2"),
-        }
-    }
-
-    #[cfg(feature = "test-helpers")]
-    #[tokio::test]
-    async fn ext_method_export_v2_mixed_text_and_tool_result() {
-        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
-        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
-
-        let store = MemorySessionStore::new();
-        let store_clone = store.clone();
-
-        let state = SessionState {
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: vec![
-                    AgentContentBlock::Text { text: "before".to_string() },
-                    AgentContentBlock::ToolResult {
-                        tool_use_id: "c2".to_string(),
-                        content: "result".to_string(),
-                    },
-                ],
-            }],
-            ..Default::default()
-        };
-        store_clone.save("tr2", &state).await.unwrap();
-
-        let agent = TrogonAgent::new(
-            crate::session_notifier::mock::MockSessionNotifier::new(),
-            store,
-            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
-            "test-prefix",
-            "claude-3-5-sonnet-20241022",
-            None,
-            None,
-            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        );
-
-        let resp = agent
-            .ext_method(ExtRequest::new("session/export", make_export_params("tr2")))
-            .await
-            .unwrap();
-
-        match parse_export_json(resp.0.get()).unwrap() {
-            ParsedExport::V2(exp) => {
-                assert_eq!(exp.messages.len(), 1);
-                let blocks = &exp.messages[0].blocks;
-                assert_eq!(blocks.len(), 2, "both blocks preserved in order");
-                assert!(matches!(&blocks[0], PortableBlock::Text { text } if text == "before"));
-                assert!(matches!(&blocks[1],
-                    PortableBlock::ToolResult { output_summary, .. } if output_summary == "result"));
-            }
-            ParsedExport::V1(_) => panic!("rich content must export as V2"),
-        }
-    }
-
-    #[cfg(feature = "test-helpers")]
-    #[tokio::test]
-    async fn ext_method_export_v2_preserves_tool_use_blocks() {
-        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
-        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
-
-        let store = MemorySessionStore::new();
-        let store_clone = store.clone();
-
-        let state = SessionState {
-            messages: vec![Message {
-                role: "assistant".to_string(),
-                content: vec![AgentContentBlock::ToolUse {
-                    id: "call-x".to_string(),
-                    name: "read_file".to_string(),
-                    input: serde_json::json!({"path": "/tmp/foo"}),
-                    parent_tool_use_id: None,
-                }],
-            }],
-            ..Default::default()
-        };
-        store_clone.save("tu1", &state).await.unwrap();
-
-        let agent = TrogonAgent::new(
-            crate::session_notifier::mock::MockSessionNotifier::new(),
-            store,
-            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
-            "test-prefix",
-            "claude-3-5-sonnet-20241022",
-            None,
-            None,
-            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        );
-
-        let resp = agent
-            .ext_method(ExtRequest::new("session/export", make_export_params("tu1")))
-            .await
-            .unwrap();
-
-        match parse_export_json(resp.0.get()).unwrap() {
-            ParsedExport::V2(exp) => {
-                assert_eq!(exp.messages.len(), 1);
-                assert!(
-                    matches!(&exp.messages[0].blocks[0],
-                        PortableBlock::ToolUse { id, name, .. }
-                        if id == "call-x" && name == "read_file"),
-                    "tool_use id/name must be preserved in V2, got {:?}",
-                    exp.messages[0].blocks[0]
-                );
-            }
-            ParsedExport::V1(_) => panic!("rich content must export as V2"),
-        }
-    }
-
-    #[cfg(feature = "test-helpers")]
-    #[tokio::test]
-    async fn ext_method_export_v2_preserves_thinking_blocks() {
-        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
-        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
-
-        let store = MemorySessionStore::new();
-        let store_clone = store.clone();
-
-        let state = SessionState {
-            messages: vec![Message {
-                role: "assistant".to_string(),
-                content: vec![AgentContentBlock::Thinking {
-                    thinking: "internal reasoning".to_string(),
-                }],
-            }],
-            ..Default::default()
-        };
-        store_clone.save("th1", &state).await.unwrap();
-
-        let agent = TrogonAgent::new(
-            crate::session_notifier::mock::MockSessionNotifier::new(),
-            store,
-            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
-            "test-prefix",
-            "claude-3-5-sonnet-20241022",
-            None,
-            None,
-            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        );
-
-        let resp = agent
-            .ext_method(ExtRequest::new("session/export", make_export_params("th1")))
-            .await
-            .unwrap();
-
-        match parse_export_json(resp.0.get()).unwrap() {
-            ParsedExport::V2(exp) => {
-                assert_eq!(exp.messages.len(), 1);
-                assert!(
-                    matches!(&exp.messages[0].blocks[0],
-                        PortableBlock::Thinking { text } if text == "internal reasoning"),
-                    "thinking text must be preserved in V2, got {:?}",
-                    exp.messages[0].blocks[0]
-                );
-            }
-            ParsedExport::V1(_) => panic!("rich content must export as V2"),
-        }
-    }
-
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
     async fn ext_method_import_malformed_messages_returns_error() {
@@ -2659,5 +2768,366 @@ mod tests {
         ).unwrap();
         let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
         assert!(result.is_err(), "malformed messages must return Err");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_prompt_accumulates_token_usage_in_session_state() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_creation_tokens: 10,
+                cache_read_tokens: 5,
+            }]);
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let req = PromptRequest::new("s1", vec![]);
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent.run_prompt(&req, &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_input_tokens, 100);
+        assert_eq!(saved.total_output_tokens, 50);
+        assert_eq!(saved.total_cache_creation_tokens, 10);
+        assert_eq!(saved.total_cache_read_tokens, 5);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_prompt_persists_tokens_on_cancellation() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 200,
+                output_tokens: 80,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 20,
+            }])
+            .with_steer_wait()
+            .with_started_notify(std::sync::Arc::clone(&started));
+
+        let agent = std::sync::Arc::new(TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        ));
+
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let req = PromptRequest::new("s1", vec![]);
+        let agent_clone = std::sync::Arc::clone(&agent);
+
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async move {
+            let handle = tokio::task::spawn_local(async move {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent_clone.run_prompt(&req, &client, Some(cancel_rx), None).await
+            });
+            started.notified().await;
+            let _ = cancel_tx.send(());
+            handle.await.unwrap().unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_input_tokens, 200, "tokens from completed turns must be persisted on cancel");
+        assert_eq!(saved.total_output_tokens, 80);
+        assert_eq!(saved.total_cache_read_tokens, 20);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn list_sessions_exposes_token_totals_after_prompt() {
+        use agent_client_protocol::{Agent as _, ListSessionsRequest, PromptRequest};
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 80,
+                output_tokens: 30,
+                cache_creation_tokens: 5,
+                cache_read_tokens: 10,
+            }]);
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let req = PromptRequest::new("s1", vec![]);
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent.run_prompt(&req, &client, None, None).await.unwrap();
+
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1")
+                .expect("session must appear in list");
+            let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
+            assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(80));
+            assert_eq!(meta.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(30));
+            assert_eq!(meta.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(5));
+            assert_eq!(meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(10));
+        }).await;
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        use agent_client_protocol::{Agent as _, ListSessionsRequest};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState {
+            total_input_tokens: 120,
+            total_output_tokens: 45,
+            total_cache_creation_tokens: 7,
+            total_cache_read_tokens: 18,
+            ..Default::default()
+        }).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1")
+            .expect("session must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be present for pre-saved tokens");
+        assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(120));
+        assert_eq!(meta.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(45));
+        assert_eq!(meta.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(7));
+        assert_eq!(meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(18));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn fork_session_resets_token_totals_to_zero() {
+        use agent_client_protocol::{Agent as _, ForkSessionRequest};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("src", &SessionState {
+            total_input_tokens: 150,
+            total_output_tokens: 60,
+            total_cache_creation_tokens: 8,
+            total_cache_read_tokens: 12,
+            ..Default::default()
+        }).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let fork_resp = agent.fork_session(ForkSessionRequest::new("src", "/tmp")).await.unwrap();
+        let new_id = fork_resp.session_id.to_string();
+
+        let forked = store_clone.load(&new_id).await.unwrap();
+        assert_eq!(forked.total_input_tokens, 0);
+        assert_eq!(forked.total_output_tokens, 0);
+        assert_eq!(forked.total_cache_creation_tokens, 0);
+        assert_eq!(forked.total_cache_read_tokens, 0);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn token_totals_accumulate_across_multiple_prompts() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 100, output_tokens: 50,
+                cache_creation_tokens: 0, cache_read_tokens: 0,
+            }]);
+        let agent1 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store.clone(),
+            runner1,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent1.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 80, output_tokens: 40,
+                cache_creation_tokens: 0, cache_read_tokens: 0,
+            }]);
+        let agent2 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner2,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local2 = tokio::task::LocalSet::new();
+        local2.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent2.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_input_tokens, 180);
+        assert_eq!(saved.total_output_tokens, 90);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cache_tokens_accumulate_across_multiple_prompts() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 10, output_tokens: 5,
+                cache_creation_tokens: 6, cache_read_tokens: 15,
+            }]);
+        let agent1 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store.clone(),
+            runner1,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent1.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 10, output_tokens: 5,
+                cache_creation_tokens: 9, cache_read_tokens: 20,
+            }]);
+        let agent2 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner2,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local2 = tokio::task::LocalSet::new();
+        local2.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent2.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_cache_creation_tokens, 15);
+        assert_eq!(saved.total_cache_read_tokens, 35);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn prompt_without_usage_summary_preserves_existing_token_totals() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState {
+            total_input_tokens: 100,
+            total_output_tokens: 40,
+            ..Default::default()
+        }).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_input_tokens, 100, "tokens must not decrease when prompt has no usage event");
+        assert_eq!(saved.total_output_tokens, 40);
     }
 }

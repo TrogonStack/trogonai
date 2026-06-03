@@ -38,6 +38,7 @@ trogon-nats  = { workspace = true }
 trogon-tools = { path = "../trogon-tools" }
 
 [dev-dependencies]
+agent-client-protocol  = { workspace = true }
 async-nats             = { workspace = true }
 bytes                  = { workspace = true }
 futures-util           = { version = "0.3", default-features = false, features = ["std"] }
@@ -56,3 +57,9 @@ test-helpers = []
 [[test]]
 name = "wasm_bash_integration"
 required-features = ["test-helpers"]
+
+[[test]]
+name = "worktree_tests"
+
+[[test]]
+name = "spawn_session_tests"

@@ -35,7 +35,7 @@ mod client_subjects {
     }
 }
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, PromptRequest, SetSessionConfigOptionRequest, SessionConfigOptionValue, SetSessionConfigOptionResponse, TextContent, TerminalId};
+use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, ListSessionsRequest, ListSessionsResponse, PromptRequest, SetSessionConfigOptionRequest, SessionConfigOptionValue, SetSessionConfigOptionResponse, TextContent, TerminalId};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::nats_todo_tool::NatsTodoTool;
 use trogon_runner_tools::spawn_agent_tool::SpawnAgentTool;
@@ -381,6 +381,42 @@ fn sse_event(event_type: &str, data: serde_json::Value) -> String {
         "event: {event_type}\ndata: {}\n\n",
         serde_json::to_string(&data).unwrap()
     )
+}
+
+fn sse_end_turn_stream_with_tokens(
+    text: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens
+            }}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": output_tokens}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
 }
 
 fn sse_end_turn_stream(text: &str) -> String {
@@ -2084,6 +2120,109 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
             assert!(
                 json.contains("context-summary"),
                 "expected <context-summary> in persisted messages after compaction; got: {json}"
+            );
+        })
+        .await;
+}
+
+/// After auto-compact triggers on the first prompt, the runner continues
+/// working normally: a second prompt sent immediately after also completes
+/// with `end_turn`, and the persisted state reflects the second turn.
+///
+/// This exercises the real scenario where a user keeps chatting after the
+/// context window compaction point is crossed mid-session.
+#[tokio::test]
+async fn runner_continues_working_after_auto_compact() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("ok"));
+    });
+
+    let nats_for_compactor = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_for_compactor
+            .subscribe("trogon.compactor.compact")
+            .await
+            .unwrap();
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            let compacted = serde_json::json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "<context-summary>\nCompacted\n</context-summary>"}]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Continuing from summary."}]
+                    }
+                ],
+                "compacted": true,
+                "tokens_before": 50000,
+                "tokens_after": 500
+            });
+            nats_for_compactor
+                .publish(reply, serde_json::to_vec(&compacted).unwrap().into())
+                .await
+                .ok();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let prefix = "test-compact2";
+    let session_id = "sess-compact2-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_compactor(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+            )
+            .await;
+
+            let seed_state = trogon_acp_runner::SessionState {
+                token_budget: 1,
+                ..Default::default()
+            };
+            store.save(session_id, &seed_state).await.unwrap();
+
+            // ── Prompt 1 → compaction fires → end_turn ────────────────────────
+            let (mut notif_sub1, mut resp_sub1) =
+                send_text(&nats, prefix, session_id, "first message").await;
+            let (_notifs1, resp1) =
+                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must end_turn after compaction; got: {resp1}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // ── Prompt 2 → runner must still work after compact ────────────────
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "second message").await;
+            let (_notifs2, resp2) =
+                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("end_turn"),
+                "second prompt must complete normally after prior compaction; got: {resp2}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            let json = serde_json::to_string(&state.messages).unwrap();
+            assert!(
+                json.contains("context-summary"),
+                "compacted history must survive into state after second prompt; got: {json}"
             );
         })
         .await;
@@ -3806,4 +3945,1020 @@ async fn runner_fork_session_inherits_todos_and_permission_rules() {
             );
         })
         .await;
+}
+
+/// After forking a session, a prompt sent to the forked session must complete
+/// with `end_turn` — verifying that the new session is fully wired to the
+/// agent's NATS subscriptions and the LLM can be reached through it.
+///
+/// The existing fork test only verifies that the forked session inherits state.
+/// This test closes the gap by exercising the actual prompt→response path on
+/// the forked session.
+#[tokio::test]
+async fn runner_prompt_on_forked_session_returns_end_turn() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-fork-prompt";
+    let source_id = "sess-fork-prompt-src-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done in forked session"));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Fork the source session via NATS.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
+            let fork_msg = nats
+                .request(
+                    fork_subject,
+                    Bytes::from(serde_json::to_vec(&fork_req).unwrap()),
+                )
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&fork_msg.payload)
+                    .expect("response must deserialize as ForkSessionResponse");
+            let forked_id = fork_resp.session_id.to_string();
+            assert!(!forked_id.is_empty(), "fork must return a non-empty session_id");
+
+            // Send a prompt to the forked session.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, &forked_id, "continue here").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt to forked session must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — completion persists totals to NATS KV ───────────────────
+
+/// After a successful turn the agent must persist the token totals to the
+/// NATS KV store so they survive across restarts and appear in subsequent
+/// `list_sessions` responses.
+#[tokio::test]
+async fn runner_completion_persists_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done"));
+    });
+
+    let prefix = "test-tok-persist";
+    let session_id = "sess-tok-p-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "count tokens").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "completion must persist input token total to KV; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 8,
+                "completion must persist output token total to KV; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — list_sessions exposes token totals via NATS ─────────────
+
+/// After a completed prompt, `list_sessions` via NATS must return the session
+/// with `totalInputTokens` and `totalOutputTokens` in its `_meta` field.
+#[tokio::test]
+async fn runner_list_sessions_exposes_token_totals_via_nats() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("reply"));
+    });
+
+    let prefix = "test-tok-list";
+    let session_id = "sess-tok-l-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "query").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let list_subject = format!("{prefix}.agent.session.list");
+            let resp_msg = nats
+                .request(
+                    list_subject,
+                    Bytes::from(serde_json::to_vec(&ListSessionsRequest::new()).unwrap()),
+                )
+                .await
+                .expect("list_sessions request must succeed");
+            let list_resp: ListSessionsResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ListSessionsResponse");
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after prompt with usage");
+            assert_eq!(
+                meta.get("totalInputTokens"),
+                Some(&serde_json::json!(10)),
+                "list_sessions must expose totalInputTokens; got: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalOutputTokens"),
+                Some(&serde_json::json!(8)),
+                "list_sessions must expose totalOutputTokens; got: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — list_sessions exposes cache token totals ────────────────
+
+/// After a prompt that includes cache tokens, `list_sessions` must expose
+/// `totalCacheCreationTokens` and `totalCacheReadTokens` alongside the main
+/// token counts in the session's `_meta` field.
+#[tokio::test]
+async fn runner_list_sessions_exposes_cache_tokens_in_meta() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("cached reply", 10, 5, 200, 50));
+    });
+
+    let prefix = "test-tok-list-cache";
+    let session_id = "sess-tok-lc-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "cache query").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let list_subject = format!("{prefix}.agent.session.list");
+            let resp_msg = nats
+                .request(
+                    list_subject,
+                    Bytes::from(serde_json::to_vec(&ListSessionsRequest::new()).unwrap()),
+                )
+                .await
+                .expect("list_sessions request must succeed");
+            let list_resp: ListSessionsResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ListSessionsResponse");
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after prompt with cache tokens");
+            assert_eq!(
+                meta.get("totalCacheCreationTokens"),
+                Some(&serde_json::json!(200)),
+                "list_sessions must expose totalCacheCreationTokens; got: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalCacheReadTokens"),
+                Some(&serde_json::json!(50)),
+                "list_sessions must expose totalCacheReadTokens; got: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — fork_session resets token totals to zero ────────────────
+
+/// After forking a session that has accumulated token totals, the new session
+/// must start with zero token totals — tokens belong to the branch, not
+/// inherited from the parent.
+#[tokio::test]
+async fn runner_fork_session_resets_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("src reply"));
+    });
+
+    let prefix = "test-tok-fork";
+    let source_id = "sess-tok-f-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Prompt the source session so it accumulates token totals.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, source_id, "accumulate").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let src_state = store.load(source_id).await.unwrap();
+            assert!(
+                src_state.total_input_tokens > 0,
+                "source must have accumulated tokens before fork"
+            );
+
+            // Fork the session via NATS.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let resp_msg = nats
+                .request(
+                    fork_subject,
+                    Bytes::from(serde_json::to_vec(&ForkSessionRequest::new(source_id, "/fork")).unwrap()),
+                )
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ForkSessionResponse");
+            let forked_id = fork_resp.session_id.to_string();
+
+            // The forked session must have zero token totals.
+            let fork_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                fork_state.total_input_tokens, 0,
+                "forked session must start with zero input tokens"
+            );
+            assert_eq!(
+                fork_state.total_output_tokens, 0,
+                "forked session must start with zero output tokens"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — cancel does not corrupt previously saved token totals ────
+
+/// After a first prompt completes and saves token totals to KV, a subsequent
+/// prompt that is cancelled must NOT zero-out or overwrite those saved totals.
+/// The KV entry from the completed turn must survive the cancellation.
+#[tokio::test]
+async fn runner_cancel_preserves_prior_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second prompt → slow (2 s), giving the cancel time to arrive.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("turn 2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .delay(Duration::from_secs(2))
+            .body(sse_end_turn_stream("never reached"));
+    });
+    // First prompt → completes immediately with tokens.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("ok", 10, 8, 0, 0));
+    });
+
+    let prefix = "test-tok-cancel2";
+    let session_id = "sess-tok-c2-1";
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // First prompt: completes normally, tokens saved to KV.
+            let (mut notif_sub1, mut resp_sub1) =
+                send_text(&nats, prefix, session_id, "turn 1").await;
+            let (_notifs1, resp1) =
+                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must complete with end_turn; got: {resp1}"
+            );
+
+            // Second prompt: slow — cancel fires during the HTTP call.
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "turn 2").await;
+
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let (_notifs2, resp2) =
+                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("cancelled"),
+                "second prompt must be cancelled; got: {resp2}"
+            );
+
+            // Token totals from the completed first prompt must still be in KV.
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "cancel must not erase token totals saved by the prior end_turn; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 8,
+                "cancel must not erase output tokens saved by the prior end_turn; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — max_tokens error path persists tokens ───────────────────
+
+/// When the model returns `max_tokens`, the agent must persist accumulated token
+/// totals to KV before returning — not silently discard them.
+#[tokio::test]
+async fn runner_max_tokens_persists_token_totals_to_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(max_tokens_body());
+    });
+
+    let prefix = "test-tok-maxtok";
+    let session_id = "sess-tok-mt-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "fill the context").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("max_tokens"),
+                "expected stop_reason=max_tokens; got: {resp}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            // max_tokens_body() sends input=10, output=4096
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "max_tokens path must persist input tokens to KV; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 4096,
+                "max_tokens path must persist output tokens to KV; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — multi-turn accumulation + load-from-KV via NATS ─────────
+
+/// Two consecutive prompts must accumulate token totals in KV. This also
+/// verifies load-from-KV: the second prompt loads the state saved after the
+/// first and adds to it, so the final total equals the sum of both turns.
+#[tokio::test]
+async fn runner_multi_turn_tokens_accumulate() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("ok", 15, 6, 0, 0));
+    });
+
+    let prefix = "test-tok-multi";
+    let session_id = "sess-tok-m-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Turn 1.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "turn 1").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // Turn 2 — agent must load KV state from turn 1 and accumulate.
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "turn 2").await;
+            collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 30,
+                "input tokens must accumulate across two turns (15+15=30); got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 12,
+                "output tokens must accumulate across two turns (6+6=12); got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — cache tokens persisted to KV ────────────────────────────
+
+/// The Anthropic SSE can include cache_creation_input_tokens and
+/// cache_read_input_tokens. These must be accumulated and persisted to KV
+/// so that the full billing picture is available in session state.
+#[tokio::test]
+async fn runner_cache_tokens_persisted_to_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("cached", 10, 5, 200, 50));
+    });
+
+    let prefix = "test-tok-cache";
+    let session_id = "sess-tok-ch-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "cache test").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_cache_creation_tokens, 200,
+                "cache_creation tokens must be persisted to KV; got {}",
+                state.total_cache_creation_tokens
+            );
+            assert_eq!(
+                state.total_cache_read_tokens, 50,
+                "cache_read tokens must be persisted to KV; got {}",
+                state.total_cache_read_tokens
+            );
+        })
+        .await;
+}
+
+// ── Stateful bash: terminal reused across two successive prompts ───────────────
+
+/// Spawns mock NATS responders for TWO successive bash tool calls on the same
+/// terminal.  The first call creates the terminal and runs command 1.  The
+/// second call must reuse the same terminal (no extra `terminal.create` request)
+/// and runs command 2.
+fn spawn_two_bash_calls(
+    nats: async_nats::Client,
+    base: String,
+    ext_base: String,
+    terminal_id: &'static str,
+    output1: &'static str,
+    output2: &'static str,
+) {
+    tokio::spawn(async move {
+        use futures_util::StreamExt;
+        let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        // ── First bash call ────────────────────────────────────────────────────
+        // terminal.create (only once — second call reuses the same terminal)
+        if let Some(msg) = create_sub.next().await {
+            let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
+            nats.publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
+        }
+        // baseline output (empty)
+        if let Some(msg) = output_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": ""}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // write_stdin for command 1
+        if let Some(msg) = write_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"ok": true}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // poll output for command 1
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output1}__EXIT_0__\n");
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": full}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+
+        // ── Second bash call (no create — terminal already exists) ─────────────
+        // baseline output
+        if let Some(msg) = output_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": ""}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // write_stdin for command 2
+        if let Some(msg) = write_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"ok": true}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // poll output for command 2
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output2}__EXIT_0__\n");
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": full}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+    });
+}
+
+/// Stateful bash: two successive prompts on the same session each trigger a bash
+/// tool call.  The second call must reuse the same terminal (no extra
+/// `terminal.create` request), which proves that the terminal_id is persisted
+/// in NATS KV after the first call and loaded by the second.
+///
+/// Concretely:
+/// - Prompt 1 → bash tool_use "cmd1" → terminal.create + run → end_turn
+/// - Prompt 2 → bash tool_use "cmd2" → no terminal.create (reuse) → run → end_turn
+///
+/// Assertion: both prompts complete, and session.terminal_id is non-None
+/// throughout (same terminal was used for both calls).
+#[tokio::test]
+async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-bash-stateful";
+    let session_id = "sess-bash-stateful-1";
+    let terminal_id = "term-stateful-001";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    spawn_two_bash_calls(
+        nats.clone(),
+        base,
+        ext_base,
+        terminal_id,
+        "output-from-cmd1\n",
+        "output-from-cmd2\n",
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let server = MockServer::start();
+
+    // Prompt 2, second LLM turn: tool_result → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("output-from-cmd2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("cmd2 done"));
+    });
+    // Prompt 2, first LLM turn: → bash tool_use for cmd2
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("output-from-cmd1"); // history from prompt 1 is present
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_s2",
+                "bash",
+                serde_json::json!({"command": "cmd2"}),
+            ));
+    });
+    // Prompt 1, second LLM turn: tool_result → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("output-from-cmd1");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("cmd1 done"));
+    });
+    // Prompt 1, first LLM turn: → bash tool_use for cmd1
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_s1",
+                "bash",
+                serde_json::json!({"command": "cmd1"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_tool(
+                nats.clone(),
+                &js,
+                prefix,
+                session_id,
+                &server.base_url(),
+            )
+            .await;
+
+            // ── Prompt 1 ──────────────────────────────────────────────────────────
+            let (mut notif_sub1, mut resp_sub1) =
+                send_text(&nats, prefix, session_id, "run cmd1").await;
+            let (_notifs1, resp1) =
+                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt 1 must complete with end_turn; got: {resp1}"
+            );
+
+            let state_after_1 = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state_after_1.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must be persisted after prompt 1"
+            );
+
+            // Short pause so session state is committed to NATS KV before prompt 2.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // ── Prompt 2 ──────────────────────────────────────────────────────────
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "run cmd2").await;
+            let (_notifs2, resp2) =
+                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt 2 must complete with end_turn; got: {resp2}"
+            );
+
+            let state_after_2 = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state_after_2.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must remain the same after prompt 2 (same terminal reused)"
+            );
+        })
+        .await;
+}
+
+/// Full programming tool chain: LLM calls `read_file` → sees file contents →
+/// calls `str_replace` to edit → calls `git_diff` to inspect the diff →
+/// finally produces `end_turn`.
+///
+/// Exercises the realistic multi-step code-editing workflow that is the primary
+/// use-case for the acp-runner programming mode, verifying all three tool
+/// dispatch-and-forward roundtrips in sequence.
+#[tokio::test]
+async fn programming_tool_sequence_read_str_replace_git_diff() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("src.rs"),
+        "fn old_function() {}\n",
+    )
+    .unwrap();
+
+    let server = MockServer::start();
+
+    // Call 4: git_diff tool_result in body (identified by tu_gd) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_gd");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done with edits"));
+    });
+
+    // Call 3: str_replace tool_result in body (identified by tu_sr) → git_diff.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_sr");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_gd",
+                "git_diff",
+                serde_json::json!({}),
+            ));
+    });
+
+    // Call 2: read_file tool_result in body (identified by tu_rf) → str_replace.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_rf");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_sr",
+                "str_replace",
+                serde_json::json!({
+                    "path": "src.rs",
+                    "old_str": "old_function",
+                    "new_str": "new_function"
+                }),
+            ));
+    });
+
+    // Call 1: initial user message (no tool_result yet) → read_file.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_rf",
+                "read_file",
+                serde_json::json!({"path": "src.rs"}),
+            ));
+    });
+
+    let prefix = "test-prog-chain";
+    let session_id = "sess-prog-chain-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(trogon_agent_core::tools::ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "refactor the function").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 20).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "programming tool chain must complete with end_turn; got: {resp}"
+            );
+
+            // Verify the file was actually modified by str_replace.
+            let content = std::fs::read_to_string(dir.path().join("src.rs")).unwrap();
+            assert!(
+                content.contains("new_function"),
+                "str_replace must have renamed old_function to new_function; got: {content:?}"
+            );
+        })
+        .await;
+}
+
+/// Validates that acp-runner sends correctly-formatted requests to the Anthropic Messages API.
+///
+/// The httpmock `when` clause acts as a schema assertion: the mock only fires if
+/// ALL conditions are satisfied simultaneously. If any required field is absent or
+/// has the wrong type, the mock does not match, the agent receives no response,
+/// and `mock.assert()` at the end catches the failure.
+///
+/// Required Anthropic Messages API fields verified here:
+/// - `anthropic-version: 2023-06-01` header (required by the API)
+/// - `model`: serialized as a non-empty JSON string (`"model":"...`)
+/// - `messages`: JSON array (`"messages":[`)
+/// - `max_tokens`: integer field present
+/// - At least one message with `"role":"user"` and a `"content":` field
+/// - `"stream":true` — the runner always uses SSE streaming
+#[tokio::test]
+async fn acp_request_has_required_anthropic_message_fields() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            // Anthropic requires this header on every request.
+            .header("anthropic-version", "2023-06-01")
+            // model must be serialized as a non-empty JSON string.
+            .body_contains("\"model\":\"")
+            // messages must be a JSON array.
+            .body_contains("\"messages\":[")
+            // max_tokens must be present (Anthropic requires it).
+            .body_contains("\"max_tokens\":")
+            // Runner always streams — stream:true must be set.
+            .body_contains("\"stream\":true")
+            // At least one message must have a valid user role.
+            .body_contains("\"role\":\"user\"")
+            // content field must be present in messages.
+            .body_contains("\"content\":");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("schema check passed"));
+    });
+
+    let prefix = "schema-acp";
+    let session_id = "sess-schema-acp-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "schema validation test").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "acp-runner must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+
+    // All schema conditions were met — mock was called exactly once.
+    mock.assert();
 }

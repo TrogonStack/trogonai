@@ -9,12 +9,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent as _, CloseSessionRequest, ContentBlock, ForkSessionRequest, NewSessionRequest,
-    PromptRequest, SessionNotification, SetSessionModelRequest,
+    Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
+    NewSessionRequest, PromptRequest, SessionId, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
-use futures_util::stream::{self, LocalBoxStream};
+use futures_util::stream::{self, LocalBoxStream, StreamExt as _};
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
@@ -84,6 +84,7 @@ impl XaiHttpClient for ReplyWithUsageHttpClient {
             XaiEvent::Usage {
                 prompt_tokens: 10,
                 completion_tokens: 5,
+                cached_tokens: 0,
             },
             XaiEvent::TextDelta {
                 text: "Hello with usage!".to_string(),
@@ -820,4 +821,548 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
             );
         })
         .await;
+}
+
+// ── token tracking persisted to KV ───────────────────────────────────────────
+
+/// After a prompt with token usage, `totalInputTokens` and `totalOutputTokens`
+/// must appear in the SESSIONS KV snapshot.
+#[tokio::test]
+async fn token_totals_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyWithUsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("track my tokens")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
+            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+        })
+        .await;
+}
+
+/// After forking a session that has token totals, the fork's KV snapshot must
+/// not carry the parent's totals (zero values are omitted from JSON).
+#[tokio::test]
+async fn fork_session_token_totals_absent_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyWithUsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    src.session_id,
+                    vec![ContentBlock::from("prompt")],
+                ))
+                .await
+                .unwrap();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert!(
+                v.get("total_input_tokens").is_none(),
+                "fork must not inherit parent's total_input_tokens; got: {v}"
+            );
+            assert!(
+                v.get("total_output_tokens").is_none(),
+                "fork must not inherit parent's total_output_tokens; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cache_read_tokens in KV ───────────────────────────────────────────────────
+
+/// HTTP client that returns a Usage event with non-zero cached_tokens.
+struct CacheReadUsageHttpClient;
+
+#[async_trait(?Send)]
+impl XaiHttpClient for CacheReadUsageHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        Box::pin(stream::iter(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cached_tokens: 50,
+            },
+            XaiEvent::TextDelta {
+                text: "cached reply".to_string(),
+            },
+        ]))
+    }
+}
+
+/// After a prompt where the xAI Usage event has `cached_tokens > 0`,
+/// `total_cache_read_tokens` must be persisted to the SESSIONS KV bucket.
+#[tokio::test]
+async fn cache_read_tokens_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", CacheReadUsageHttpClient)
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("use cache")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_cache_read_tokens"], 50,
+                "total_cache_read_tokens must be 50 when cached_tokens=50; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cancel path persists tokens to KV ────────────────────────────────────────
+
+/// HTTP client that emits Usage + partial text then blocks forever.
+/// Signals `ready` when the stream is set up so the test can time the cancel.
+struct SlowCancelHttpClient {
+    ready: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait(?Send)]
+impl XaiHttpClient for SlowCancelHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        self.ready.notify_one();
+        let initial = stream::iter(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 20,
+                completion_tokens: 8,
+                cached_tokens: 15,
+            },
+            XaiEvent::TextDelta {
+                text: "partial".to_string(),
+            },
+        ]);
+        Box::pin(initial.chain(stream::pending()))
+    }
+}
+
+/// When a prompt is cancelled after the xAI Usage event has been received
+/// (but before the stream ends), the cancel path must persist the billed
+/// tokens to the SESSIONS KV bucket.
+#[tokio::test]
+async fn cancel_prompt_token_totals_persisted_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let agent = Arc::new(
+        XaiAgent::with_deps(
+            NoOpNotifier,
+            "grok-4",
+            "dummy-key",
+            SlowCancelHttpClient {
+                ready: Arc::clone(&ready),
+            },
+        )
+        .with_session_store(Arc::new(store)),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let session_id = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let agent_prompt = Arc::clone(&agent);
+            let sid_for_prompt = session_id.clone();
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt
+                    .prompt(PromptRequest::new(
+                        sid_for_prompt,
+                        vec![ContentBlock::from("partial call")],
+                    ))
+                    .await
+                    .unwrap()
+            });
+
+            // `chat_stream` was called → Usage event already in the stream buffer,
+            // cancel channel is registered. Sending cancel now will interrupt after
+            // the Usage event has been processed.
+            ready.notified().await;
+            agent
+                .cancel(CancelNotification::new(session_id.clone()))
+                .await
+                .unwrap();
+
+            let result = prompt_handle.await.unwrap();
+            assert_eq!(
+                result.stop_reason,
+                agent_client_protocol::StopReason::Cancelled,
+                "stop_reason must be Cancelled"
+            );
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist after cancel with billed tokens");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_input_tokens"], 20,
+                "cancel path must persist input tokens to KV; got: {v}"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 8,
+                "cancel path must persist output tokens to KV; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_read_tokens"], 15,
+                "cancel path must persist cache_read tokens to KV; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── Context compaction end-to-end (runner → compactor over NATS) ─────────────────
+
+/// Drives a prompt whose history exceeds 85 % of the model's context window, with
+/// a stand-in compactor responder on `trogon.compactor.compact`. Verifies the
+/// runner: (1) detects the threshold, (2) calls the compactor over NATS, (3)
+/// applies the compacted history, and (4) clears `last_response_id` (mandatory
+/// for xAI's stateful API so the next turn re-sends the compacted history).
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn prompt_compacts_via_nats_and_clears_last_response_id() {
+    use std::time::Duration;
+    use trogon_xai_runner::Message;
+
+    // Raw NATS client (needed for compactor_nats + the responder) + JetStream store.
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // Stand-in compactor: replies with a 3-message compacted history.
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let body = serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "<context-summary>\nsummary\n</context-summary>"}]},
+                        {"role": "assistant", "content": [{"type": "text", "text": "ack"}]},
+                        {"role": "user", "content": [{"type": "text", "text": "recent"}]}
+                    ],
+                    "compacted": true,
+                    "tokens_before": 999_999,
+                    "tokens_after": 100,
+                    "kept_count": 1
+                });
+                responder
+                    .publish(reply, serde_json::to_vec(&body).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // grok-3 → 131_072 token window; 85 % ≈ 111_411 tokens.
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-3", "test-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store))
+        .with_compactor(nats.clone());
+
+    // Insert a session whose history is well over the threshold (25 × 30 KB ≈
+    // 750 KB ≈ 187k tokens; even after trim_history to the recent window it stays
+    // over 111k). Pre-set last_response_id so we can prove it gets cleared.
+    let big = "x".repeat(30_000);
+    let mut history = Vec::new();
+    for i in 0..25 {
+        if i % 2 == 0 {
+            history.push(Message::user(format!("{big}{i}")));
+        } else {
+            history.push(Message::assistant_text(format!("{big}{i}")));
+        }
+    }
+    agent
+        .test_insert_session_with_response_id(
+            "s-compact",
+            "/tmp",
+            None,
+            Some("resp-old".to_string()),
+        )
+        .await;
+    agent.test_set_session_history("s-compact", history).await;
+    assert_eq!(
+        agent.test_last_response_id("s-compact").await,
+        Some("resp-old".to_string()),
+        "precondition: last_response_id is set before the turn"
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            agent
+                .prompt(PromptRequest::new(
+                    SessionId::from("s-compact"),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // The compactor's 3-message result replaced the large history.
+            let hist = agent.test_session_history("s-compact").await;
+            assert_eq!(
+                hist.len(),
+                3,
+                "history must be replaced by the compactor's compacted result"
+            );
+            assert!(
+                hist[0]
+                    .content
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("context-summary"),
+                "first message must be the summary checkpoint"
+            );
+            // Mandatory: last_response_id cleared so the next turn re-sends the
+            // full compacted history to xAI.
+            assert_eq!(
+                agent.test_last_response_id("s-compact").await,
+                None,
+                "last_response_id must be cleared after compaction"
+            );
+        })
+        .await;
+}
+
+// ── Permission emit e2e: xai emits request_permission on Ask and gates on the reply ──
+
+/// Notifier that records every notification so the test can assert the deny update.
+struct RecordingNotifier {
+    notes: Arc<std::sync::Mutex<Vec<SessionNotification>>>,
+}
+
+#[async_trait(?Send)]
+impl SessionNotifier for RecordingNotifier {
+    async fn notify(&self, n: SessionNotification) {
+        self.notes.lock().unwrap().push(n);
+    }
+}
+
+/// On the first turn asks to call the client-side `read_file` tool (no permission
+/// rule → `Ask`); ends on the continuation turn.
+struct ReadFileToolThenDone {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait(?Send)]
+impl XaiHttpClient for ReadFileToolThenDone {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if n == 0 {
+            Box::pin(stream::iter(vec![
+                XaiEvent::ResponseId { id: "r1".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "c1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"secret.txt"}"#.to_string(),
+                },
+                XaiEvent::Done,
+            ]))
+        } else {
+            Box::pin(stream::iter(vec![XaiEvent::Done]))
+        }
+    }
+}
+
+/// End-to-end: a tool hitting `RuleDecision::Ask` makes xai emit an ACP
+/// `request_permission` over NATS; the IDE stand-in replies "reject"; the runner
+/// gates (denies) the tool. Proves the runner-side half of the permission relay.
+#[tokio::test]
+async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
+    use acp_nats::acp_prefix::AcpPrefix;
+    use agent_client_protocol::{
+        RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate,
+    };
+    use std::time::Duration;
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+
+    // IDE stand-in: capture the permission request, reply "reject".
+    let captured: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+    let captured_c = captured.clone();
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder
+            .subscribe("acp.session.*.client.session.request_permission".to_string())
+            .await
+            .unwrap();
+        while let Some(msg) = sub.next().await {
+            *captured_c.lock().unwrap() = Some(String::from_utf8_lossy(&msg.payload).to_string());
+            if let Some(reply) = msg.reply {
+                let resp = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                    SelectedPermissionOutcome::new("reject"),
+                ));
+                responder
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let notes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = XaiAgent::with_deps(
+        RecordingNotifier { notes: notes.clone() },
+        "grok-4",
+        "dummy-key",
+        ReadFileToolThenDone { calls: std::sync::atomic::AtomicUsize::new(0) },
+    )
+    .with_permissions(nats.clone(), AcpPrefix::new("acp").unwrap());
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(tmp.path().to_path_buf()))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("read the file")]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    // 1. xai emitted request_permission for the gated tool.
+    let payload = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("xai must emit request_permission when a tool hits Ask");
+    assert!(
+        payload.contains("read_file"),
+        "permission request must carry the tool name; got: {payload}"
+    );
+
+    // 2. The IDE's reject decision gated the tool (denied, never executed).
+    let notes = notes.lock().unwrap();
+    let denied = notes.iter().any(|n| match &n.update {
+        SessionUpdate::ToolCallUpdate(tcu) => tcu
+            .fields
+            .raw_output
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("permission denied"))
+            .unwrap_or(false),
+        _ => false,
+    });
+    assert!(
+        denied,
+        "tool must be denied after the IDE rejected the permission request"
+    );
 }
