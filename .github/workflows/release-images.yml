@@ -25,6 +25,8 @@ jobs:
           - a2a-bridge
           - a2a-gateway
           - a2a-auth-callout
+          - a2a-nats-discovery
+          - acp-nats-server
           - acp-nats-stdio
           - agctl
           - mcp-nats-server
@@ -36,6 +38,7 @@ jobs:
           - trogon-jwks-publisher
           - trogon-mcp-gateway
           - trogon-sts
+          - trogon-traffic-view
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -62,6 +65,12 @@ jobs:
             echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Set up QEMU
+        if: steps.resolve.outputs.skip == 'false'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
       - name: Set up Docker Buildx
         if: steps.resolve.outputs.skip == 'false'
         uses: docker/setup-buildx-action@v4
@@ -85,9 +94,12 @@ jobs:
         with:
           context: .
           file: devops/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
           build-args: |
             BIN=${{ matrix.bin }}
           push: true
+          provenance: true
+          sbom: true
           tags: |
             ${{ steps.resolve.outputs.image }}:${{ steps.resolve.outputs.version }}
             ${{ steps.resolve.outputs.image }}:sha-${{ steps.resolve.outputs.short_sha }}
