@@ -29,6 +29,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-identity-types = { path = "../trogon-identity-types" }
+trogon-aauth-verify = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-sts = { workspace = true }
 trogon-sts-client = { workspace = true }

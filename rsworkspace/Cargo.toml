@@ -43,6 +43,9 @@ trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
 trogon-jwks-publisher = { path = "crates/trogon-jwks-publisher" }
 trogon-mcp-gateway = { path = "crates/trogon-mcp-gateway" }
+trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
+trogon-aauth-person = { path = "crates/trogon-aauth-person" }
+trogon-aauth-sdk = { path = "crates/trogon-aauth-sdk" }
 trogon-gateway-k8s = { path = "crates/trogon-gateway-k8s" }
 
 # Kubernetes controller (Block G)
