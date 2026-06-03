@@ -83,6 +83,7 @@ tower-http = { version = "=0.6.8", features = ["trace"] }
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+serde_yml = "=0.0.12"
 jsonschema = { version = "=0.46.5", default-features = false }
 toml = "=0.9.12"
 
