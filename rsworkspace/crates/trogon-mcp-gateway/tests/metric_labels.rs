@@ -104,9 +104,7 @@ mod duration {
     pub const LABEL_METHOD_ROOT: &str = "method_root";
 
     /// Stable bucket boundaries (seconds) pinned for Phase 1+.
-    pub const BUCKET_UPPER_BOUNDS: &[f64] = &[
-        5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1.0, 5.0, 10.0,
-    ];
+    pub const BUCKET_UPPER_BOUNDS: &[f64] = &[5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1.0, 5.0, 10.0];
 
     #[tokio::test]
     #[ignore = "scaffold; implement when metric surface lands"]

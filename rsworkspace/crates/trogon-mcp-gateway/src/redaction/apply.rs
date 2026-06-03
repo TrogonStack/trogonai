@@ -1,11 +1,11 @@
 use crate::schema_cache::{SchemaCacheRuntime, lookup_tool_schema};
 
-use super::engine::{redact_with_options, RedactionOptions};
+use super::engine::{RedactionOptions, redact_with_options};
 use super::outcome::{RedactionApplyResult, RedactionOutcome};
+use super::path::ParsedPath;
 use super::registry::{RedactionDirection, RedactionRegistry};
 use super::ruleset::RedactionRuleset;
 use super::schema_validate::path_in_schema;
-use super::path::ParsedPath;
 
 pub struct SchemaRedactionContext<'a> {
     pub server_id: &'a str,
@@ -33,7 +33,13 @@ pub async fn apply_schema_redaction(
 
     let schema_tool = RedactionRegistry::schema_tool_name(ctx.tool_name, ctx.direction);
     let schema = match schema_runtime {
-        Some(runtime) => match lookup_tool_schema(runtime, &crate::schema_cache::ServerId::new(ctx.server_id), &schema_tool).await {
+        Some(runtime) => match lookup_tool_schema(
+            runtime,
+            &crate::schema_cache::ServerId::new(ctx.server_id),
+            &schema_tool,
+        )
+        .await
+        {
             Ok(Some(cached)) => Some(cached.schema),
             Ok(None) => None,
             Err(_) => None,
@@ -98,8 +104,8 @@ pub fn merge_outcomes(mut base: RedactionOutcome, extra: RedactionOutcome) -> Re
 mod tests {
     use super::*;
     use crate::redaction::rule::{JsonPath, RedactionAction, RedactionRule};
-    use crate::schema_cache::{SchemaCacheConfig, SchemaCacheRuntime, sniff_tools_list_reply};
     use crate::schema_cache::ServerId;
+    use crate::schema_cache::{SchemaCacheConfig, SchemaCacheRuntime, sniff_tools_list_reply};
 
     #[tokio::test]
     async fn missing_schema_skips_redaction() {
@@ -166,9 +172,14 @@ mod tests {
                 }]
             }
         });
-        sniff_tools_list_reply(&runtime.cache, &runtime.config, &server, &serde_json::to_vec(&list).unwrap())
-            .await
-            .expect("sniff");
+        sniff_tools_list_reply(
+            &runtime.cache,
+            &runtime.config,
+            &server,
+            &serde_json::to_vec(&list).unwrap(),
+        )
+        .await
+        .expect("sniff");
 
         let mut doc = serde_json::json!({ "params": { "token": "plain" } });
         let result = apply_schema_redaction(

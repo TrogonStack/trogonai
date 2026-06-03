@@ -6,7 +6,7 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
@@ -249,7 +249,9 @@ impl UserJwtClaims {
     ) -> Result<Self, JwtError> {
         let claims = Self::verify_with_source(token, source)?;
         if claims.aud.as_str() != expected_aud.as_str() {
-            return Err(JwtError::Decode("user JWT audience does not match gateway account".into()));
+            return Err(JwtError::Decode(
+                "user JWT audience does not match gateway account".into(),
+            ));
         }
         let payload = decode_nats_user_payload(token)?;
         let now = SystemTime::now()
@@ -354,15 +356,11 @@ mod tests {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
-        let subject =
-            UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+        let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
         let token = claims
             .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
             .unwrap();
-        let handle = SigningKeyHandle::new(
-            material.version().clone(),
-            SigningKey::from_seed(&issuer_seed).unwrap(),
-        );
+        let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
         let decoded = UserJwtClaims::verify_with_handles(token.as_str(), &[handle]).unwrap();
         assert_eq!(decoded.sub.as_str(), "user/alice");
         assert_eq!(decoded.aud.as_str(), "tenant-acme");
@@ -390,8 +388,7 @@ mod tests {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
-        let subject =
-            UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+        let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
         let token = claims
             .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
             .unwrap();
@@ -409,7 +406,12 @@ mod tests {
 
     #[test]
     fn external_subject_requires_non_empty() {
-        assert!(ExternalSubject::new("").unwrap_err().to_string().contains("external subject"));
+        assert!(
+            ExternalSubject::new("")
+                .unwrap_err()
+                .to_string()
+                .contains("external subject")
+        );
     }
 
     #[test]
@@ -428,6 +430,10 @@ mod tests {
     #[test]
     fn spicedb_subject_accessor_absent_when_missing_or_empty() {
         assert!(SpiceDbPrincipal(json!({})).spicedb_subject().is_none());
-        assert!(SpiceDbPrincipal(json!({"spicedb_subject": ""})).spicedb_subject().is_none());
+        assert!(
+            SpiceDbPrincipal(json!({"spicedb_subject": ""}))
+                .spicedb_subject()
+                .is_none()
+        );
     }
 }

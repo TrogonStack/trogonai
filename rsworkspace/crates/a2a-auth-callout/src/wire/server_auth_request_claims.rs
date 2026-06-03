@@ -1,7 +1,7 @@
 use std::fmt;
 
-use nats_jwt_rs::authorization::AuthRequest;
 use nats_jwt_rs::Claims;
+use nats_jwt_rs::authorization::AuthRequest;
 use serde::Deserialize;
 
 use super::NkeyPublic;
@@ -55,7 +55,8 @@ impl ServerAuthRequestClaims {
             });
         let hint = hint.ok_or_else(|| {
             AuthCalloutError::CredentialVerification(
-                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)".into(),
+                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)"
+                    .into(),
             )
         })?;
         RequestedAccount::new(hint.to_owned()).map_err(AuthCalloutError::from)
@@ -96,8 +97,7 @@ impl ServerAuthRequestClaims {
             None => None,
         };
         let tls = tls.filter(|t| {
-            t.certs.as_ref().is_some_and(|c| !c.is_empty())
-                || t.verified_chains.as_ref().is_some_and(|c| !c.is_empty())
+            t.certs.as_ref().is_some_and(|c| !c.is_empty()) || t.verified_chains.as_ref().is_some_and(|c| !c.is_empty())
         });
         let Some(tls) = tls else {
             return Vec::new();
@@ -121,7 +121,6 @@ impl ServerAuthRequestClaims {
     pub fn primary_client_cert(&self) -> Option<ClientCertPem> {
         self.client_tls_pem_certs().into_iter().next()
     }
-
 }
 
 fn non_empty_opt(value: Option<&str>) -> Option<&str> {

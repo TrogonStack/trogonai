@@ -56,11 +56,7 @@ impl EgressMinter {
         }
     }
 
-    pub fn from_parts(
-        sts: StsClient,
-        config: EgressMintConfig,
-        metrics: Option<Arc<async_nats::Client>>,
-    ) -> Arc<Self> {
+    pub fn from_parts(sts: StsClient, config: EgressMintConfig, metrics: Option<Arc<async_nats::Client>>) -> Arc<Self> {
         Arc::new(Self::new(sts, config, metrics))
     }
 

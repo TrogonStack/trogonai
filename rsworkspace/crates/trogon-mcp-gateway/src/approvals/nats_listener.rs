@@ -11,11 +11,7 @@ use crate::approvals::types::{ApprovalDecisionMessage, wire_to_decision};
 pub struct ApprovalNatsListener;
 
 impl ApprovalNatsListener {
-    pub fn start(
-        client: Client,
-        subject_prefix: &str,
-        coordinator: Arc<ApprovalCoordinator>,
-    ) -> JoinHandle<()> {
+    pub fn start(client: Client, subject_prefix: &str, coordinator: Arc<ApprovalCoordinator>) -> JoinHandle<()> {
         let subject_prefix = subject_prefix.to_string();
         let wildcard = format!("{subject_prefix}.>");
         tokio::spawn(async move {
@@ -28,16 +24,13 @@ impl ApprovalNatsListener {
             };
 
             while let Some(message) = subscription.next().await {
-                let Some(request_id) =
-                    request_id_from_subject(message.subject.as_str(), subject_prefix.as_str())
+                let Some(request_id) = request_id_from_subject(message.subject.as_str(), subject_prefix.as_str())
                 else {
                     warn!(subject = %message.subject, "ignored approval subject outside prefix");
                     continue;
                 };
 
-                let Ok(decision_message) =
-                    serde_json::from_slice::<ApprovalDecisionMessage>(&message.payload)
-                else {
+                let Ok(decision_message) = serde_json::from_slice::<ApprovalDecisionMessage>(&message.payload) else {
                     warn!(subject = %message.subject, "ignored malformed approval decision");
                     continue;
                 };

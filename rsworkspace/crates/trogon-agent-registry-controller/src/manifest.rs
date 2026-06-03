@@ -78,7 +78,11 @@ pub enum ValidationError {
     OwnerTeamMissing,
     Digest(String),
     Version(String),
-    MonotonicVersion { agent_id: String, current: String, proposed: String },
+    MonotonicVersion {
+        agent_id: String,
+        current: String,
+        proposed: String,
+    },
 }
 
 impl fmt::Display for ValidationError {
@@ -165,11 +169,7 @@ pub fn version_gt(left: &str, right: &str) -> bool {
     }
 }
 
-pub fn monotonic_version(
-    agent_id: &str,
-    current: &str,
-    proposed: &str,
-) -> Result<(), ValidationError> {
+pub fn monotonic_version(agent_id: &str, current: &str, proposed: &str) -> Result<(), ValidationError> {
     if version_gt(proposed, current) {
         Ok(())
     } else {

@@ -3,13 +3,13 @@ use std::time::Duration;
 
 use tempfile::NamedTempFile;
 
-use crate::jwt::{CallerId, ExternalSubject, UserJwtClaims, UserJwtSubject};
-use crate::permissions::IssuedPermissions;
 use super::env::test_env_dev_warn_count;
 use super::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
     SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
 };
+use crate::jwt::{CallerId, ExternalSubject, UserJwtClaims, UserJwtSubject};
+use crate::permissions::IssuedPermissions;
 use crate::{AccountName, SpiceDbPrincipal};
 use nkeys::KeyPair;
 
@@ -89,8 +89,7 @@ fn file_reads_current_and_optional_previous() {
     previous
         .write_all(previous_kp.seed().expect("previous seed").as_bytes())
         .expect("write previous");
-    let source =
-        FileSigningKeySource::new(current.path(), Some(previous.path())).expect("file overlap");
+    let source = FileSigningKeySource::new(current.path(), Some(previous.path())).expect("file overlap");
     assert_eq!(source.accepted().len(), 2);
 }
 
@@ -134,8 +133,7 @@ fn rotation_mint_verify_round_trip() {
         .into_iter()
         .find(|h| h.version().as_str() == "previous")
         .expect("previous handle");
-    let subject =
-        UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let old_token = claims
         .mint(
             &old_handle.minting_material(),
@@ -160,8 +158,7 @@ fn rotation_mint_verify_round_trip() {
         )
         .expect("mint with current key");
 
-    let verified_current =
-        UserJwtClaims::verify_with_source(&current_token, &source).expect("verify current");
+    let verified_current = UserJwtClaims::verify_with_source(current_token.as_str(), &source).expect("verify current");
     assert_eq!(verified_current.kid.as_str(), "current");
 }
 

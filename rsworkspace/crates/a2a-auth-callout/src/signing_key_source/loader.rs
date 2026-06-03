@@ -5,8 +5,7 @@ use crate::error::AuthCalloutError;
 use super::{EnvSigningKeySource, FileSigningKeySource, SigningKeySource};
 
 pub fn signing_key_source_from_process_env() -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
-    let kind = std::env::var("AUTH_CALLOUT_SIGNING_KEY_SOURCE")
-        .unwrap_or_else(|_| "env".into());
+    let kind = std::env::var("AUTH_CALLOUT_SIGNING_KEY_SOURCE").unwrap_or_else(|_| "env".into());
     match kind.as_str() {
         "env" => {
             if std::env::var("AUTH_CALLOUT_SIGNING_SECRET").is_err() {
@@ -25,15 +24,11 @@ pub fn signing_key_source_from_process_env() -> Result<Arc<dyn SigningKeySource>
         "file" => {
             let current = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PATH").map_err(|_| {
                 AuthCalloutError::Internal(
-                    "AUTH_CALLOUT_SIGNING_KEY_PATH is required when AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
-                        .into(),
+                    "AUTH_CALLOUT_SIGNING_KEY_PATH is required when AUTH_CALLOUT_SIGNING_KEY_SOURCE=file".into(),
                 )
             })?;
             let previous = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH").ok();
-            Ok(Arc::new(FileSigningKeySource::new(
-                current,
-                previous.as_deref(),
-            )?))
+            Ok(Arc::new(FileSigningKeySource::new(current, previous.as_deref())?))
         }
         "vault" => Err(AuthCalloutError::Internal(
             "AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault is not wired yet; use file or env".into(),

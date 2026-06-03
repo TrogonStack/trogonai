@@ -19,9 +19,9 @@ mod loader_api {
 
     use nkeys::KeyPair;
     use trogon_mcp_gateway::bundle::{
-        build_tar, extract_archive, hash_member, load_bundle, manifest_digest_bytes, resolve_manifest,
-        signature_path, validate_members, BundleArchive, BundleLoadError, BundleManifest, TrustedKeys,
-        HOST_TARGET_WIT, MANIFEST_FILENAME,
+        BundleArchive, BundleLoadError, BundleManifest, HOST_TARGET_WIT, MANIFEST_FILENAME, TrustedKeys, build_tar,
+        extract_archive, hash_member, load_bundle, manifest_digest_bytes, resolve_manifest, signature_path,
+        validate_members,
     };
 
     fn manifest_toml(nkey_pub: &str, cel_hash: &str) -> String {
@@ -89,13 +89,9 @@ priority = 100
             .into_bytes(),
         );
         archive.insert("policies/allow-create-issue.cel", b"tampered".to_vec());
-        let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest"))
-            .expect("parse");
+        let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest")).expect("parse");
         let error = validate_members(&manifest, &archive).expect_err("hash mismatch");
-        assert!(matches!(
-            error,
-            BundleLoadError::ContentHashMismatch { .. }
-        ));
+        assert!(matches!(error, BundleLoadError::ContentHashMismatch { .. }));
     }
 
     #[test]
@@ -107,8 +103,7 @@ priority = 100
         archive.insert(MANIFEST_FILENAME, manifest_toml(&kp.public_key(), &hash).into_bytes());
         archive.insert("policies/allow-create-issue.cel", cel.to_vec());
         archive.insert("policies/unlisted.cel", b"false".to_vec());
-        let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest"))
-            .expect("parse");
+        let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest")).expect("parse");
         let error = validate_members(&manifest, &archive).expect_err("unknown member");
         assert!(matches!(error, BundleLoadError::UnknownMember { .. }));
     }
@@ -150,10 +145,9 @@ mod kv_loader_api {
     use nkeys::KeyPair;
     use trogon_mcp_gateway::bundle::fake_kv::{FakeBundleKv, FakeKvSource};
     use trogon_mcp_gateway::bundle::{
-        build_tar, extract_archive, hash_member, manifest_digest_bytes, signature_path, BundleArchive,
-        BundleAuditPublisher, BundleKvLoader, BundleKvLoaderOpts, BundleLoadError, TrustedKeys,
-        EVENT_HOT_SWAPPED, EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED, EVENT_ROLLED_BACK, HOST_TARGET_WIT,
-        MANIFEST_FILENAME,
+        BundleArchive, BundleAuditPublisher, BundleKvLoader, BundleKvLoaderOpts, BundleLoadError, EVENT_HOT_SWAPPED,
+        EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED, EVENT_ROLLED_BACK, HOST_TARGET_WIT, MANIFEST_FILENAME, TrustedKeys,
+        build_tar, extract_archive, hash_member, manifest_digest_bytes, signature_path,
     };
 
     fn manifest_toml(nkey_pub: &str, cel_hash: &str, version: &str) -> String {
@@ -208,10 +202,7 @@ priority = 100
             trusted(&kp),
             BundleKvLoaderOpts::new(key, key, audit),
         );
-        assert!(matches!(
-            loader.start().await,
-            Err(BundleLoadError::KvEmpty { .. })
-        ));
+        assert!(matches!(loader.start().await, Err(BundleLoadError::KvEmpty { .. })));
     }
 
     #[tokio::test]
@@ -306,14 +297,8 @@ priority = 100
             .iter()
             .find(|e| e.event == EVENT_ROLLED_BACK)
             .expect("rollback audit");
-        assert_eq!(
-            rolled.fields.previous_digest.as_deref(),
-            Some(digest_v2.as_str())
-        );
-        assert_eq!(
-            rolled.fields.policy_bundle_digest.as_deref(),
-            Some(digest_v1.as_str())
-        );
+        assert_eq!(rolled.fields.previous_digest.as_deref(), Some(digest_v2.as_str()));
+        assert_eq!(rolled.fields.policy_bundle_digest.as_deref(), Some(digest_v1.as_str()));
     }
 
     #[tokio::test]

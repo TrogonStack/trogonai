@@ -69,12 +69,10 @@ pub trait RegistryLookup: Send + Sync + Clone {
                     reason,
                 })
             }
-            Err(StsError::AccessDenied(reason)) if reason.contains("revoked") => {
-                Ok(RegistryLookupResponse::Revoked {
-                    agent_id: request.agent_id.clone(),
-                    reason,
-                })
-            }
+            Err(StsError::AccessDenied(reason)) if reason.contains("revoked") => Ok(RegistryLookupResponse::Revoked {
+                agent_id: request.agent_id.clone(),
+                reason,
+            }),
             Err(err) => Err(err),
         }
     }
@@ -100,15 +98,15 @@ impl RegistryLookup for InMemoryRegistry {
     async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError> {
         match self.lookup_raw(request).await? {
             RegistryLookupResponse::Ok { record, .. } => Ok(*record),
-            RegistryLookupResponse::NotFound { agent_id, reason } => {
-                Err(StsError::AccessDenied(format!("registry not_found for {agent_id}: {reason}")))
-            }
-            RegistryLookupResponse::Revoked { agent_id, reason } => {
-                Err(StsError::AccessDenied(format!("registry revoked for {agent_id}: {reason}")))
-            }
-            RegistryLookupResponse::Deprecated { agent_id, reason } => {
-                Err(StsError::AccessDenied(format!("registry deprecated for {agent_id}: {reason}")))
-            }
+            RegistryLookupResponse::NotFound { agent_id, reason } => Err(StsError::AccessDenied(format!(
+                "registry not_found for {agent_id}: {reason}"
+            ))),
+            RegistryLookupResponse::Revoked { agent_id, reason } => Err(StsError::AccessDenied(format!(
+                "registry revoked for {agent_id}: {reason}"
+            ))),
+            RegistryLookupResponse::Deprecated { agent_id, reason } => Err(StsError::AccessDenied(format!(
+                "registry deprecated for {agent_id}: {reason}"
+            ))),
             RegistryLookupResponse::Error { reason } => Err(StsError::RegistryUnavailable(reason)),
         }
     }
@@ -200,11 +198,7 @@ where
     R: RegistryLookup + Send + Sync,
 {
     async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError> {
-        map_breaker_error(
-            self.breaker
-                .call(|| async { self.inner.lookup(request).await })
-                .await,
-        )
+        map_breaker_error(self.breaker.call(|| async { self.inner.lookup(request).await }).await)
     }
 
     async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {

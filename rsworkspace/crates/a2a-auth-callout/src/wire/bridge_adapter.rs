@@ -1,8 +1,8 @@
 //! Converts internal JSON bridge mint requests into [`ServerAuthRequestClaims`]
 //! for reuse of [`crate::dispatcher::CalloutDispatcher`].
 
-use nats_jwt_rs::authorization::AuthRequest;
 use nats_jwt_rs::Claims;
+use nats_jwt_rs::authorization::AuthRequest;
 
 use super::ServerAuthRequestClaims;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeMintRequest};
@@ -14,9 +14,7 @@ impl ServerAuthRequestClaims {
         let account = request
             .account
             .filter(|a| !a.trim().is_empty())
-            .ok_or_else(|| {
-                AuthCalloutError::CredentialVerification("bridge mint request missing account".into())
-            })?;
+            .ok_or_else(|| AuthCalloutError::CredentialVerification("bridge mint request missing account".into()))?;
 
         let (jwt, auth_token) = match request.connect_opts.as_ref().and_then(|o| o.auth_scheme) {
             Some(BridgeAuthScheme::ApiKey) => {

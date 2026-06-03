@@ -133,11 +133,7 @@ pub trait TaskEventsEgressPlanner {
 
     fn pull_hints(&self) -> PullConsumerHints;
 
-    fn plan_message_stream(
-        &self,
-        prefix: &A2aPrefix,
-        req_id: &ReqId,
-    ) -> Result<MessageStreamEgressPlan, Self::Error>;
+    fn plan_message_stream(&self, prefix: &A2aPrefix, req_id: &ReqId) -> Result<MessageStreamEgressPlan, Self::Error>;
 
     fn plan_resubscribe(
         &self,
@@ -146,11 +142,7 @@ pub trait TaskEventsEgressPlanner {
         last_seq: u64,
     ) -> Result<ResubscribeEgressPlan, Self::Error>;
 
-    fn forward_disposition(
-        &self,
-        attempt: u32,
-        forward_error: Option<&str>,
-    ) -> EgressAckDisposition;
+    fn forward_disposition(&self, attempt: u32, forward_error: Option<&str>) -> EgressAckDisposition;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -173,11 +165,7 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
         self.hints
     }
 
-    fn plan_message_stream(
-        &self,
-        prefix: &A2aPrefix,
-        req_id: &ReqId,
-    ) -> Result<MessageStreamEgressPlan, Self::Error> {
+    fn plan_message_stream(&self, prefix: &A2aPrefix, req_id: &ReqId) -> Result<MessageStreamEgressPlan, Self::Error> {
         Ok(MessageStreamEgressPlan {
             filter_subject: format!("{}.task.*.events.{req_id}", prefix.as_str()),
             hints: self.hints,
@@ -196,11 +184,7 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
         })
     }
 
-    fn forward_disposition(
-        &self,
-        attempt: u32,
-        forward_error: Option<&str>,
-    ) -> EgressAckDisposition {
+    fn forward_disposition(&self, attempt: u32, forward_error: Option<&str>) -> EgressAckDisposition {
         match forward_error {
             None => EgressAckDisposition::Ack,
             Some(_) if attempt < 3 => EgressAckDisposition::Nak { delay: None },
@@ -255,10 +239,7 @@ pub fn gateway_events_pull_enabled<E: ReadEnv>(env: &E) -> bool {
     let Ok(flag) = env.var(ENV_GATEWAY_EVENTS_PULL) else {
         return false;
     };
-    matches!(
-        flag.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    matches!(flag.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 pub fn gateway_egress_subject(prefix: &A2aPrefix, req_id: &ReqId) -> String {
@@ -391,11 +372,7 @@ async fn run_fetch_cycle(
         .await
         .map_err(|e| format!("get_stream {stream_name}: {e}"))?;
 
-    let consumer_config = gateway_events_consumer(
-        prefix,
-        durable.as_str(),
-        config.max_ack_pending.as_i64(),
-    );
+    let consumer_config = gateway_events_consumer(prefix, durable.as_str(), config.max_ack_pending.as_i64());
     let consumer = stream
         .get_or_create_consumer(durable.as_str(), consumer_config)
         .await
@@ -434,10 +411,7 @@ async fn run_fetch_cycle(
         let forward_result = forward_task_event(client, prefix, &req_id, &message.payload).await;
         match planner.forward_disposition(attempt, forward_result.err().as_deref()) {
             EgressAckDisposition::Ack => {
-                message
-                    .ack()
-                    .await
-                    .map_err(|e| format!("ack {subject}: {e}"))?;
+                message.ack().await.map_err(|e| format!("ack {subject}: {e}"))?;
             }
             EgressAckDisposition::Nak { delay } => {
                 message
@@ -491,8 +465,7 @@ mod tests {
 
     #[test]
     fn parse_task_events_subject_extracts_ids() {
-        let (task_id, req_id) =
-            parse_task_events_subject("a2a", "a2a.task.t1.events.r1").expect("parsed");
+        let (task_id, req_id) = parse_task_events_subject("a2a", "a2a.task.t1.events.r1").expect("parsed");
         assert_eq!(task_id.as_str(), "t1");
         assert_eq!(req_id.as_str(), "r1");
     }
@@ -504,10 +477,7 @@ mod tests {
             planner.forward_disposition(1, Some("fail")),
             EgressAckDisposition::Nak { delay: None }
         );
-        assert_eq!(
-            planner.forward_disposition(3, Some("fail")),
-            EgressAckDisposition::Term
-        );
+        assert_eq!(planner.forward_disposition(3, Some("fail")), EgressAckDisposition::Term);
         assert_eq!(planner.forward_disposition(1, None), EgressAckDisposition::Ack);
     }
 
@@ -536,10 +506,7 @@ mod tests {
     #[test]
     fn gateway_egress_subject_includes_req_id() {
         let req_id = ReqId::from_header("req-1");
-        assert_eq!(
-            gateway_egress_subject(&prefix(), &req_id),
-            "a2a.gateway.egress.req-1"
-        );
+        assert_eq!(gateway_egress_subject(&prefix(), &req_id), "a2a.gateway.egress.req-1");
     }
 
     #[test]

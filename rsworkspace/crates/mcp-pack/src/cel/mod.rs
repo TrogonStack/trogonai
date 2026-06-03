@@ -1,9 +1,7 @@
 //! Embedded Tier-2 CEL programs for the first-party pack.
 
-pub const DEFAULT_CATALOG_FILTER: &str =
-    include_str!("default_catalog_filter.cel");
-pub const DEFAULT_RESOURCE_TUPLE: &str =
-    include_str!("default_resource_tuple.cel");
+pub const DEFAULT_CATALOG_FILTER: &str = include_str!("default_catalog_filter.cel");
+pub const DEFAULT_RESOURCE_TUPLE: &str = include_str!("default_resource_tuple.cel");
 pub const DEFAULT_AUDIT: &str = include_str!("default_audit.cel");
 
 pub const CATALOG_FILTER_PATH: &str = "policies/default_catalog_filter.cel";

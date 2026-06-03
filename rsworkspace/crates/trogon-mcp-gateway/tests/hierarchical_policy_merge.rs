@@ -9,8 +9,8 @@ use cel_interpreter::Context;
 use trogon_mcp_gateway::authz::{GatewayIdentity, IdentitySource};
 use trogon_mcp_gateway::jwt::VerifiedJwtClaims;
 use trogon_mcp_gateway::policy::hierarchical::{
-    HierarchicalDecision, MergeEngine, MergeRequestContext, PolicyEffect, PolicyLevel, PolicyRule,
-    PolicyStore, ScopeBundle, ScopeConfig, ScopeKey, NO_POLICY_CODE,
+    HierarchicalDecision, MergeEngine, MergeRequestContext, NO_POLICY_CODE, PolicyEffect, PolicyLevel, PolicyRule,
+    PolicyStore, ScopeBundle, ScopeConfig, ScopeKey,
 };
 use trogon_mcp_gateway::policy::new_policy_cel_context_for_request;
 use trogon_mcp_gateway::rpc_codes;
@@ -80,9 +80,7 @@ mod org_baseline_allow {
             jsonrpc_method: "tools/list".into(),
             tool_name: None,
         };
-        let decision = engine
-            .evaluate(&ctx, &cel_context("tools/list", None))
-            .expect("eval");
+        let decision = engine.evaluate(&ctx, &cel_context("tools/list", None)).expect("eval");
         assert!(matches!(decision, HierarchicalDecision::Allow { .. }));
     }
 
@@ -306,9 +304,7 @@ mod default_deny {
             jsonrpc_method: "tools/call".into(),
             tool_name: None,
         };
-        let decision = engine
-            .evaluate(&ctx, &cel_context("tools/call", None))
-            .expect("eval");
+        let decision = engine.evaluate(&ctx, &cel_context("tools/call", None)).expect("eval");
         assert!(matches!(
             decision,
             HierarchicalDecision::Deny {
@@ -354,9 +350,7 @@ mod default_deny {
             jsonrpc_method: "tools/call".into(),
             tool_name: None,
         };
-        let decision = engine
-            .evaluate(&ctx, &cel_context("tools/call", None))
-            .expect("eval");
+        let decision = engine.evaluate(&ctx, &cel_context("tools/call", None)).expect("eval");
         assert!(matches!(
             decision,
             HierarchicalDecision::Deny {
@@ -484,9 +478,7 @@ mod shallow_cel_merge {
                     cel: r#"mcp.method == "tools/call""#.into(),
                 }],
                 config: ScopeConfig {
-                    spicedb_gate_cel: Some(
-                        r#"mcp.method == "tools/call" || mcp.method == "resources/read""#.into(),
-                    ),
+                    spicedb_gate_cel: Some(r#"mcp.method == "tools/call" || mcp.method == "resources/read""#.into()),
                     ..ScopeConfig::default()
                 },
             },
@@ -548,7 +540,9 @@ mod shallow_cel_merge {
         };
 
         assert!(matches!(
-            engine.evaluate(&list_ctx, &cel_context("tools/list", None)).expect("eval"),
+            engine
+                .evaluate(&list_ctx, &cel_context("tools/list", None))
+                .expect("eval"),
             HierarchicalDecision::Allow { .. }
         ));
         assert!(matches!(
@@ -612,7 +606,11 @@ mod audit_rules_fired {
             .evaluate(&ctx, &cel_context("tools/call", Some("prod_deploy")))
             .expect("eval");
         match decision {
-            HierarchicalDecision::Deny { rules_fired, expression_hash, .. } => {
+            HierarchicalDecision::Deny {
+                rules_fired,
+                expression_hash,
+                ..
+            } => {
                 assert!(rules_fired.contains(&"org/default-employees".to_string()));
                 assert!(rules_fired.contains(&"tenant/acme-block-secrets".to_string()));
                 assert!(expression_hash.starts_with("sha256:"));

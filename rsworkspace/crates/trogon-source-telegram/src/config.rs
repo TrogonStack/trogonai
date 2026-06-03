@@ -5,8 +5,8 @@ use trogon_nats::NatsConfig;
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{
-    DEFAULT_MAX_BODY_SIZE, DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE,
-    DEFAULT_STREAM_NAME, DEFAULT_SUBJECT_PREFIX,
+    DEFAULT_MAX_BODY_SIZE, DEFAULT_NATS_ACK_TIMEOUT, DEFAULT_PORT, DEFAULT_STREAM_MAX_AGE, DEFAULT_STREAM_NAME,
+    DEFAULT_SUBJECT_PREFIX,
 };
 
 /// Configuration for the Telegram webhook source.

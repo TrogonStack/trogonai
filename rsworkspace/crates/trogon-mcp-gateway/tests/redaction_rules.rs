@@ -12,8 +12,8 @@
 //! - fail-closed `-32104` / `schema_unknown` when the schema cache misses
 
 use trogon_mcp_gateway::redaction::{
-    JsonPath, RedactionAction, RedactionApplyResult, RedactionDirection, RedactionRegistry,
-    RedactionRule, RedactionRuleset, RewriteEntry, SchemaRedactionContext, apply_schema_redaction, redact,
+    JsonPath, RedactionAction, RedactionApplyResult, RedactionDirection, RedactionRegistry, RedactionRule,
+    RedactionRuleset, RewriteEntry, SchemaRedactionContext, apply_schema_redaction, redact,
 };
 
 /// Touch scaffold redaction types so the integration file compiles before the gateway wires them.
@@ -56,25 +56,18 @@ mod unit {
     #[test]
     fn hash_replaces_token_before_backend_egress() {
         let mut doc = serde_json::json!({ "params": { "token": "sk-live-secret" } });
-        let ruleset = RedactionRuleset::builder()
-            .rule(hash_rule("$.params.token"))
-            .build();
+        let ruleset = RedactionRuleset::builder().rule(hash_rule("$.params.token")).build();
 
         let outcome = redact(&mut doc, &ruleset);
 
         assert_ne!(doc["params"]["token"], "sk-live-secret");
         assert!(doc["params"]["token"].as_str().unwrap().starts_with("sha256:"));
-        assert_eq!(
-            outcome.rewrites,
-            vec![RewriteEntry::new("$.params.token", "hash")]
-        );
+        assert_eq!(outcome.rewrites, vec![RewriteEntry::new("$.params.token", "hash")]);
     }
 
     #[test]
     fn hash_is_deterministic_for_identical_input() {
-        let ruleset = RedactionRuleset::builder()
-            .rule(hash_rule("$.params.token"))
-            .build();
+        let ruleset = RedactionRuleset::builder().rule(hash_rule("$.params.token")).build();
         let mut first = serde_json::json!({ "params": { "token": "same" } });
         let mut second = serde_json::json!({ "params": { "token": "same" } });
 
@@ -112,9 +105,7 @@ mod unit {
     #[test]
     fn mask_replaces_field_with_literal_stars() {
         let mut doc = serde_json::json!({ "params": { "api_key": "plain" } });
-        let ruleset = RedactionRuleset::builder()
-            .rule(mask_rule("$.params.api_key"))
-            .build();
+        let ruleset = RedactionRuleset::builder().rule(mask_rule("$.params.api_key")).build();
 
         let _ = redact(&mut doc, &ruleset);
 
@@ -175,9 +166,7 @@ mod unit {
             "github",
             "create_issue",
             RedactionDirection::Request,
-            RedactionRuleset::builder()
-                .rule(hash_rule("$.params.token"))
-                .build(),
+            RedactionRuleset::builder().rule(hash_rule("$.params.token")).build(),
         );
         let runtime = trogon_mcp_gateway::schema_cache::SchemaCacheRuntime::new(
             trogon_mcp_gateway::schema_cache::SchemaCacheConfig::default(),

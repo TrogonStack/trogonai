@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use a2a_redaction::{
-    output_is_tier3_refusal, tier3_refusal_reason_tag, RedactionError, SkillId, WasmRedactorHost,
-};
+use a2a_redaction::{RedactionError, SkillId, WasmRedactorHost, output_is_tier3_refusal, tier3_refusal_reason_tag};
 use tracing::warn;
 
 use super::context::Tier3EvaluationContext;
@@ -98,10 +96,7 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
                 let reason = tier3_refusal_reason_tag(&output_bytes)
                     .map(Tier3RefusalReason::from_sentinel_tag)
                     .unwrap_or(Tier3RefusalReason::SkillPolicyDeniedPart);
-                return Tier3RedactionDecision::Refuse {
-                    reason,
-                    rule: skill_id,
-                };
+                return Tier3RedactionDecision::Refuse { reason, rule: skill_id };
             }
 
             let after_value: serde_json::Value = match serde_json::from_slice(&output_bytes) {
@@ -197,10 +192,6 @@ impl Tier3PartInvoker for MockTier3PartInvoker {
                 RedactionError::Json(msg) => RedactionError::Json(msg.clone()),
             });
         }
-        Ok(self
-            .outputs
-            .get(skill)
-            .cloned()
-            .unwrap_or_else(|| payload.to_vec()))
+        Ok(self.outputs.get(skill).cloned().unwrap_or_else(|| payload.to_vec()))
     }
 }

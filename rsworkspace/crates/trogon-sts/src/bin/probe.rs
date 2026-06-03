@@ -6,8 +6,8 @@ use clap::Parser;
 use serde_json::json;
 use tracing::{info, warn};
 
-use trogon_sts::types::StsExchangeRequest;
 use trogon_sts::EXCHANGE_SUBJECT;
+use trogon_sts::types::StsExchangeRequest;
 
 const METRICS_SUBJECT: &str = "mcp.metrics.sts.latency";
 const VIOLATION_SUBJECT: &str = "mcp.audit.sts.latency_violation";
@@ -90,12 +90,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "p99_ms": p99,
                     "sample_count": samples.len(),
                 });
-                let _ = nats
-                    .publish(METRICS_SUBJECT, serde_json::to_vec(&metric)?.into())
-                    .await;
+                let _ = nats.publish(METRICS_SUBJECT, serde_json::to_vec(&metric)?.into()).await;
 
                 if p99 > args.p99_threshold_ms {
-                    warn!(p99_ms = p99, threshold_ms = args.p99_threshold_ms, "p99 latency threshold exceeded");
+                    warn!(
+                        p99_ms = p99,
+                        threshold_ms = args.p99_threshold_ms,
+                        "p99 latency threshold exceeded"
+                    );
                     let violation = json!({
                         "schema": "trogon.mcp.audit.sts.latency_violation/v1",
                         "p99_ms": p99,

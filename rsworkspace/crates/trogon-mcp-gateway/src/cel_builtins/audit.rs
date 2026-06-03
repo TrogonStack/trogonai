@@ -37,10 +37,7 @@ pub const RESERVED_AUDIT_KEYS: &[&str] = &[
 ];
 
 pub fn emit(extra_fields: Value) -> Result<Value, CelBuiltinsError> {
-    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(
-        EMIT_NAME,
-        "host eval context missing",
-    ))?;
+    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(EMIT_NAME, "host eval context missing"))?;
     let map = expect_map(extra_fields, EMIT_NAME, 0)?;
     let fields = map_to_json_object(map)?;
     Ok(Value::Bool(host.audit_emit(fields)?))
@@ -50,11 +47,11 @@ pub fn emit(extra_fields: Value) -> Result<Value, CelBuiltinsError> {
 mod tests {
     use std::collections::HashMap;
 
-    use cel_interpreter::objects::Key;
     use cel_interpreter::Value;
+    use cel_interpreter::objects::Key;
 
     use super::{EMIT_NAME, emit};
-    use crate::cel_builtins::context::{with_host_eval, HostEvalContext};
+    use crate::cel_builtins::context::{HostEvalContext, with_host_eval};
     use crate::cel_builtins::errors::HostFailure;
 
     #[test]
@@ -62,10 +59,7 @@ mod tests {
         let host = HostEvalContext::for_tests();
         with_host_eval(&host, || {
             let mut map = HashMap::new();
-            map.insert(
-                Key::from("policy_rule"),
-                Value::from("business_hours".to_string()),
-            );
+            map.insert(Key::from("policy_rule"), Value::from("business_hours".to_string()));
             assert_eq!(emit(Value::Map(map.into())).unwrap(), Value::Bool(true));
         });
         let journal = host.audit.lock().expect("audit lock");

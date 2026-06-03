@@ -69,11 +69,7 @@ impl<R: AgentRegistry> ChainResolver<R> {
         })
     }
 
-    async fn resolve_agent_id(
-        &self,
-        agent_id: &str,
-        mode: ChainResolutionMode,
-    ) -> Result<(), ChainResolutionError> {
+    async fn resolve_agent_id(&self, agent_id: &str, mode: ChainResolutionMode) -> Result<(), ChainResolutionError> {
         if mode == ChainResolutionMode::Cache
             && let Some(status) = self.cache.get(agent_id)
         {
@@ -208,15 +204,9 @@ mod tests {
 
     #[tokio::test]
     async fn strict_mode_rejects_revoked_entry_at_index() {
-        let registry = MockAgentRegistry::new([
-            active_record("acme/active"),
-            revoked_record("acme/revoked"),
-        ]);
+        let registry = MockAgentRegistry::new([active_record("acme/active"), revoked_record("acme/revoked")]);
         let resolver = ChainResolver::new(registry);
-        let chain = vec![
-            entry("user", Some("acme/active")),
-            entry("agent", Some("acme/revoked")),
-        ];
+        let chain = vec![entry("user", Some("acme/active")), entry("agent", Some("acme/revoked"))];
 
         let err = resolver
             .resolve(chain.as_slice(), ChainResolutionMode::Strict)

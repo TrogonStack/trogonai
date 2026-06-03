@@ -13,9 +13,7 @@ pub struct ContextThrottleKey {
 
 impl PartialEq for ContextThrottleKey {
     fn eq(&self, other: &Self) -> bool {
-        self.tenant_id == other.tenant_id
-            && self.agent_id == other.agent_id
-            && self.purpose == other.purpose
+        self.tenant_id == other.tenant_id && self.agent_id == other.agent_id && self.purpose == other.purpose
     }
 }
 
@@ -29,11 +27,7 @@ impl Hash for ContextThrottleKey {
 
 impl fmt::Display for ContextThrottleKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}/{}:{}",
-            self.tenant_id, self.agent_id, self.purpose
-        )
+        write!(f, "{}/{}:{}", self.tenant_id, self.agent_id, self.purpose)
     }
 }
 
@@ -70,27 +64,18 @@ mod tests {
     #[test]
     fn empty_tenant_is_malformed() {
         let err = ContextThrottleKey::new("", "agent/a", "deploy").unwrap_err();
-        assert_eq!(
-            err,
-            ContextThrottleError::MalformedKey { field: "tenant_id" }
-        );
+        assert_eq!(err, ContextThrottleError::MalformedKey { field: "tenant_id" });
     }
 
     #[test]
     fn empty_agent_is_malformed() {
         let err = ContextThrottleKey::new("acme", "", "deploy").unwrap_err();
-        assert_eq!(
-            err,
-            ContextThrottleError::MalformedKey { field: "agent_id" }
-        );
+        assert_eq!(err, ContextThrottleError::MalformedKey { field: "agent_id" });
     }
 
     #[test]
     fn empty_purpose_is_malformed() {
         let err = ContextThrottleKey::new("acme", "agent/a", "").unwrap_err();
-        assert_eq!(
-            err,
-            ContextThrottleError::MalformedKey { field: "purpose" }
-        );
+        assert_eq!(err, ContextThrottleError::MalformedKey { field: "purpose" });
     }
 }

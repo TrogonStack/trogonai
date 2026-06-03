@@ -5,11 +5,14 @@ use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
 
 use trogon_gateway_xds::proto::AggregatedDiscoveryServiceServer;
-use trogon_gateway_xds::state::{self, ConfigStore, NodeSnapshot, DEFAULT_KV_BUCKET, DEFAULT_KV_KEY_PREFIX};
+use trogon_gateway_xds::state::{self, ConfigStore, DEFAULT_KV_BUCKET, DEFAULT_KV_KEY_PREFIX, NodeSnapshot};
 use trogon_gateway_xds::{AdsServer, AdsServerOpts};
 
 #[derive(Debug, Parser)]
-#[command(name = "trogon-gateway-xds", about = "Envoy xDS v3 interop bridge for Trogon gateway config")]
+#[command(
+    name = "trogon-gateway-xds",
+    about = "Envoy xDS v3 interop bridge for Trogon gateway config"
+)]
 struct Cli {
     #[arg(long, env = "TROGON_XDS_LISTEN", default_value = "0.0.0.0:18000")]
     listen: SocketAddr,

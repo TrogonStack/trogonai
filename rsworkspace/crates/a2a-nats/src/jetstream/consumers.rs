@@ -20,11 +20,7 @@ use crate::task_id::A2aTaskId;
 const INACTIVE_THRESHOLD: Duration = Duration::from_secs(300);
 
 /// Durable gateway egress consumer on the full task-events filter.
-pub fn gateway_events_consumer(
-    prefix: &A2aPrefix,
-    durable_name: &str,
-    max_ack_pending: i64,
-) -> Config {
+pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_pending: i64) -> Config {
     let pfx = prefix.as_str();
     Config {
         durable_name: Some(durable_name.to_string()),

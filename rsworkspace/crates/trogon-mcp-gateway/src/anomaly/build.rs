@@ -6,7 +6,7 @@ use crate::egress::backend_target_aud;
 use super::features::AnomalyFeatures;
 use super::novelty::NoveltyTracker;
 use super::rate::RateTracker;
-use super::{now_unix, AnomalyError};
+use super::{AnomalyError, now_unix};
 
 /// Identity inputs available after policy + SpiceDB authorization in ingress.
 #[derive(Clone, Debug)]
@@ -43,20 +43,11 @@ impl AnomalyIngressSnapshot {
     ) -> Result<AnomalyFeatures, AnomalyError> {
         let ts_unix_ms = now_unix().saturating_mul(1_000);
         let target = self.target_audience();
-        let is_novel_triple = novelty.observe(
-            &self.tenant_id,
-            &self.agent_id,
-            &self.purpose,
-            &target,
-            ts_unix_ms,
-        );
+        let is_novel_triple = novelty.observe(&self.tenant_id, &self.agent_id, &self.purpose, &target, ts_unix_ms);
         rate.record(&self.agent_id, ts_unix_ms);
         let exchange_rate_per_min = rate.exchange_rate_per_min(&self.agent_id, ts_unix_ms);
         let chain_depth = u32::try_from(self.act_chain_len).unwrap_or(u32::MAX);
-        let request_id = self
-            .request_id
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
+        let request_id = self.request_id.clone().unwrap_or_else(|| "unknown".to_string());
 
         Ok(AnomalyFeatures {
             chain_depth,
@@ -97,8 +88,7 @@ impl<'a> AnomalyIngressContext<'a> {
     ) -> Result<AnomalyFeatures, AnomalyError> {
         let ts_unix_ms = now_unix().saturating_mul(1_000);
         let target = self.target_audience();
-        let is_novel_triple =
-            novelty.observe(self.tenant_id, self.agent_id, self.purpose, &target, ts_unix_ms);
+        let is_novel_triple = novelty.observe(self.tenant_id, self.agent_id, self.purpose, &target, ts_unix_ms);
         rate.record(self.agent_id, ts_unix_ms);
         let exchange_rate_per_min = rate.exchange_rate_per_min(self.agent_id, ts_unix_ms);
         let chain_depth = u32::try_from(self.act_chain.len()).unwrap_or(u32::MAX);

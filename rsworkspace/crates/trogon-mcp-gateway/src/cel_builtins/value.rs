@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use cel_interpreter::objects::Key;
-use cel_interpreter::{to_value, Value};
+use cel_interpreter::{Value, to_value};
 
 use super::errors::CelBuiltinsError;
 
@@ -88,19 +88,13 @@ pub fn value_to_json(value: &Value) -> Result<serde_json::Value, CelBuiltinsErro
             v.as_ref(),
         ))),
         Value::List(items) => Ok(serde_json::Value::Array(
-            items
-                .iter()
-                .map(value_to_json)
-                .collect::<Result<Vec<_>, _>>()?,
+            items.iter().map(value_to_json).collect::<Result<Vec<_>, _>>()?,
         )),
         Value::Map(map) => {
             let mut obj = serde_json::Map::new();
             for (key, item) in map.map.iter() {
                 let Key::String(key_str) = key else {
-                    return Err(CelBuiltinsError::policy_fault(
-                        "jsonpath",
-                        "map keys must be strings",
-                    ));
+                    return Err(CelBuiltinsError::policy_fault("jsonpath", "map keys must be strings"));
                 };
                 obj.insert(key_str.to_string(), value_to_json(item)?);
             }
@@ -117,7 +111,11 @@ pub fn json_to_value(value: serde_json::Value) -> Result<Value, CelBuiltinsError
     to_value(&value).map_err(|err| CelBuiltinsError::policy_fault("host", err.to_string()))
 }
 
-pub fn expect_map(value: Value, name: &'static str, position: usize) -> Result<cel_interpreter::objects::Map, CelBuiltinsError> {
+pub fn expect_map(
+    value: Value,
+    name: &'static str,
+    position: usize,
+) -> Result<cel_interpreter::objects::Map, CelBuiltinsError> {
     match value {
         Value::Map(map) => Ok(map),
         _ => Err(CelBuiltinsError::WrongType {

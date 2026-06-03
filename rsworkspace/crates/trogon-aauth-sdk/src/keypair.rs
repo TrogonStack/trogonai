@@ -30,8 +30,8 @@ impl AgentKeypair {
     /// Reconstruct from an existing PKCS#8 PEM-encoded private key (useful for
     /// persistent agents whose key sits in a Kubernetes Secret).
     pub fn from_pkcs8_pem(pem: &str) -> Result<Self, SdkError> {
-        let signing = SigningKey::from_pkcs8_pem(pem)
-            .map_err(|e| SdkError::InvalidResponse(format!("pkcs8 pem: {e}")))?;
+        let signing =
+            SigningKey::from_pkcs8_pem(pem).map_err(|e| SdkError::InvalidResponse(format!("pkcs8 pem: {e}")))?;
         Self::from_signing(signing)
     }
 
@@ -56,8 +56,7 @@ impl AgentKeypair {
             "alg": "ES256",
             "use": "sig",
         });
-        let jkt = jwk_thumbprint(&public_jwk)
-            .map_err(|e| SdkError::InvalidResponse(format!("jkt: {e}")))?;
+        let jkt = jwk_thumbprint(&public_jwk).map_err(|e| SdkError::InvalidResponse(format!("jkt: {e}")))?;
         let pem = signing
             .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
             .map_err(|e| SdkError::InvalidResponse(format!("pkcs8: {e}")))?

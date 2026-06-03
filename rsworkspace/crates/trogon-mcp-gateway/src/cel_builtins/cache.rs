@@ -10,10 +10,7 @@ pub(crate) const GET_NAME: &str = "cache.get";
 pub(crate) const SET_NAME: &str = "cache.set";
 
 pub fn get(key: Value) -> Result<Value, CelBuiltinsError> {
-    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(
-        GET_NAME,
-        "host eval context missing",
-    ))?;
+    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(GET_NAME, "host eval context missing"))?;
     let key = expect_string(key, GET_NAME, 0)?;
     match host.cache_get(key.as_str())? {
         Some(json) => json_to_value(json),
@@ -22,16 +19,11 @@ pub fn get(key: Value) -> Result<Value, CelBuiltinsError> {
 }
 
 pub fn set(key: Value, value: Value, ttl: Value) -> Result<Value, CelBuiltinsError> {
-    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(
-        SET_NAME,
-        "host eval context missing",
-    ))?;
+    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(SET_NAME, "host eval context missing"))?;
     let key = expect_string(key, SET_NAME, 0)?;
     let ttl_secs = duration_secs(ttl, SET_NAME, 2)?;
     let json = value_to_json(&value)?;
-    Ok(Value::Bool(
-        host.cache_set(key.as_str(), json, ttl_secs)?,
-    ))
+    Ok(Value::Bool(host.cache_set(key.as_str(), json, ttl_secs)?))
 }
 
 #[cfg(test)]
@@ -39,7 +31,7 @@ mod tests {
     use cel_interpreter::Value;
 
     use super::{GET_NAME, get, set};
-    use crate::cel_builtins::context::{with_host_eval, HostEvalContext};
+    use crate::cel_builtins::context::{HostEvalContext, with_host_eval};
     use crate::cel_builtins::errors::HostFailure;
 
     fn s(v: &str) -> Value {
@@ -67,10 +59,7 @@ mod tests {
     fn oversize_value_rejected_without_error() {
         let host = HostEvalContext::for_tests();
         let huge = "x".repeat(70_000);
-        let accepted = with_host_eval(&host, || {
-            set(s("big"), s(&huge), Value::Int(60))
-        })
-        .unwrap();
+        let accepted = with_host_eval(&host, || set(s("big"), s(&huge), Value::Int(60))).unwrap();
         assert_eq!(accepted, Value::Bool(false));
     }
 
@@ -87,10 +76,7 @@ mod tests {
     fn ttl_clamped_to_bounds() {
         let host = HostEvalContext::for_tests();
         with_host_eval(&host, || {
-            assert_eq!(
-                set(s("a"), s("v"), Value::Int(0)).unwrap(),
-                Value::Bool(true)
-            );
+            assert_eq!(set(s("a"), s("v"), Value::Int(0)).unwrap(), Value::Bool(true));
             assert!(get(s("a")).unwrap() != Value::Null);
         });
     }

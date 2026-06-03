@@ -248,12 +248,11 @@ mod wasm_boundary {
     //! WASM `request-ctx.span` propagation (ADR 0032). NATS ingress/egress cases stay ignored above.
 
     use trogon_mcp_gateway::wasm::{
-        extract_trace_id, parent_from_span_context, populate_request_span, traceparent_is_sampled,
-        RequestCtx, SpanContext,
+        RequestCtx, SpanContext, extract_trace_id, parent_from_span_context, populate_request_span,
+        traceparent_is_sampled,
     };
 
-    const SAMPLE_TRACEPARENT: &str =
-        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    const SAMPLE_TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 
     fn request_with_traceparent(traceparent: &str) -> RequestCtx {
         RequestCtx {

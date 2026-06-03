@@ -10,7 +10,7 @@ mod spicedb;
 mod time;
 mod value;
 
-pub use context::{with_host_eval, HostEvalContext, PolicyCache, PolicyRateLimiter};
+pub use context::{HostEvalContext, PolicyCache, PolicyRateLimiter, with_host_eval};
 pub use errors::{CelBuiltinsError, HostFailure};
 pub use spicedb::{PermissionCheckerSpicedbBackend, SpicedbHostBackend};
 
@@ -41,11 +41,7 @@ fn builtin_error(ftx: &FunctionContext, err: CelBuiltinsError) -> ExecutionError
     ftx.error(err.to_string())
 }
 
-fn cel_check(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_check(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("spicedb") {
         return Err(builtin_error(
             ftx,
@@ -66,15 +62,10 @@ fn cel_check(
             },
         ));
     }
-    spicedb::check(args.0[0].clone(), args.0[1].clone(), args.0[2].clone())
-        .map_err(|err| builtin_error(ftx, err))
+    spicedb::check(args.0[0].clone(), args.0[1].clone(), args.0[2].clone()).map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_get(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_get(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     match namespace_id(&this) {
         Some("cache") => {
             if args.0.len() != 1 {
@@ -100,8 +91,7 @@ fn cel_get(
                     },
                 ));
             }
-            jsonpath::get(args.0[0].clone(), args.0[1].clone())
-                .map_err(|err| builtin_error(ftx, err))
+            jsonpath::get(args.0[0].clone(), args.0[1].clone()).map_err(|err| builtin_error(ftx, err))
         }
         _ => Err(builtin_error(
             ftx,
@@ -114,11 +104,7 @@ fn cel_get(
     }
 }
 
-fn cel_set(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_set(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     match namespace_id(&this) {
         Some("cache") => {
             if args.0.len() != 3 {
@@ -131,8 +117,7 @@ fn cel_set(
                     },
                 ));
             }
-            cache::set(args.0[0].clone(), args.0[1].clone(), args.0[2].clone())
-                .map_err(|err| builtin_error(ftx, err))
+            cache::set(args.0[0].clone(), args.0[1].clone(), args.0[2].clone()).map_err(|err| builtin_error(ftx, err))
         }
         Some("jsonpath") => {
             if args.0.len() != 3 {
@@ -159,11 +144,7 @@ fn cel_set(
     }
 }
 
-fn cel_delete(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_delete(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("jsonpath") {
         return Err(builtin_error(
             ftx,
@@ -187,11 +168,7 @@ fn cel_delete(
     jsonpath::delete(args.0[0].clone(), args.0[1].clone()).map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_query(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_query(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("jsonpath") {
         return Err(builtin_error(
             ftx,
@@ -215,11 +192,7 @@ fn cel_query(
     jsonpath::query(args.0[0].clone(), args.0[1].clone()).map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_extract(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_extract(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("jsonpath") {
         return Err(builtin_error(
             ftx,
@@ -243,11 +216,7 @@ fn cel_extract(
     jsonpath::extract(args.0[0].clone(), args.0[1].clone()).map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_has(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_has(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("jsonpath") {
         return Err(builtin_error(
             ftx,
@@ -271,11 +240,7 @@ fn cel_has(
     jsonpath::has(args.0[0].clone(), args.0[1].clone()).map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_emit(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_emit(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("audit") {
         return Err(builtin_error(
             ftx,
@@ -299,11 +264,7 @@ fn cel_emit(
     audit::emit(args.0[0].clone()).map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_now(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_now(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("time") {
         return Err(builtin_error(
             ftx,
@@ -327,11 +288,7 @@ fn cel_now(
     time::now().map_err(|err| builtin_error(ftx, err))
 }
 
-fn cel_acquire(
-    ftx: &FunctionContext,
-    This(this): This<Value>,
-    args: Arguments,
-) -> Result<Value, ExecutionError> {
+fn cel_acquire(ftx: &FunctionContext, This(this): This<Value>, args: Arguments) -> Result<Value, ExecutionError> {
     if namespace_id(&this) != Some("rate") {
         return Err(builtin_error(
             ftx,
@@ -403,7 +360,7 @@ pub fn classify_list_filter_host_error(message: &str) -> Option<HostFailure> {
 
 #[cfg(test)]
 mod tests {
-    use super::{register_all, with_host_eval, HostEvalContext};
+    use super::{HostEvalContext, register_all, with_host_eval};
     use cel_interpreter::{Context, Program, Value};
 
     fn ctx_with_builtins() -> Context<'static> {
@@ -421,8 +378,8 @@ mod tests {
 
     #[test]
     fn register_wires_spicedb_check() {
-        let err = execute_with_host(r#"spicedb.check("user:alice", "invoke", "tool:github|create_issue")"#)
-            .unwrap_err();
+        let err =
+            execute_with_host(r#"spicedb.check("user:alice", "invoke", "tool:github|create_issue")"#).unwrap_err();
         assert!(err.contains("spicedb.check"));
     }
 

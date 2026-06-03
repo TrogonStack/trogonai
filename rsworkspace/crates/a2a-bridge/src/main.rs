@@ -2,9 +2,8 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use a2a_bridge::{
     AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-    AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher,
-    StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort, default_a2a_prefix,
-    gateway_router,
+    AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
+    StubInboundGatewayPublish, StubTaskJetStreamPort, default_a2a_prefix, gateway_router,
 };
 
 #[cfg(not(coverage))]
@@ -83,8 +82,7 @@ impl std::error::Error for BootstrapError {
 }
 
 fn bootstrap_stub_transport(nats_url: &str) -> AppState {
-    let auth_callout_url =
-        env::var("AUTH_CALLOUT_NATS_URL").unwrap_or_else(|_| nats_url.trim().to_owned());
+    let auth_callout_url = env::var("AUTH_CALLOUT_NATS_URL").unwrap_or_else(|_| nats_url.trim().to_owned());
     tracing::warn!(
         transport = "stub",
         nats_url = %nats_url.trim(),
@@ -107,10 +105,8 @@ async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeErro
         ));
     }
 
-    let connect_timeout =
-        Duration::from_secs(parse_u64_env("BRIDGE_CONNECT_TIMEOUT_SECS").unwrap_or(30).max(1));
-    let mint_wire_timeout =
-        Duration::from_secs(parse_u64_env("BRIDGE_AUTH_MINT_TIMEOUT_SECS").unwrap_or(30).max(1));
+    let connect_timeout = Duration::from_secs(parse_u64_env("BRIDGE_CONNECT_TIMEOUT_SECS").unwrap_or(30).max(1));
+    let mint_wire_timeout = Duration::from_secs(parse_u64_env("BRIDGE_AUTH_MINT_TIMEOUT_SECS").unwrap_or(30).max(1));
     let gateway_rpc_timeout =
         Duration::from_secs(parse_u64_env("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS").unwrap_or(180).max(1));
 
@@ -131,9 +127,7 @@ async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeErro
         .map(|v| v.trim().to_owned())
         .filter(|s| !s.is_empty())
         .map(|s| Arc::from(s.into_boxed_str()))
-        .unwrap_or_else(|| {
-            Arc::from(AuthCalloutJsonMintClient::<AsyncNatsAuthMintWire>::default_mint_subject())
-        });
+        .unwrap_or_else(|| Arc::from(AuthCalloutJsonMintClient::<AsyncNatsAuthMintWire>::default_mint_subject()));
 
     let tenant_account = match env::var("BRIDGE_TENANT_ACCOUNT") {
         Ok(raw) if !raw.trim().is_empty() => Some(BridgeTenantAccount::new(raw)?),

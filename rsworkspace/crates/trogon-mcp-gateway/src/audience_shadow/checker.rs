@@ -2,11 +2,11 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::AudienceShadowOutcome;
 use super::aud_format::compute_expected_aud;
 use super::audit_sink::{AudMismatchEnvelope, AudienceAuditSink};
 use super::errors::AudienceShadowError;
 use super::mode::AudienceShadowMode;
-use super::AudienceShadowOutcome;
 
 /// Correlation fields copied into [`AudMismatchEnvelope`].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,7 +42,7 @@ impl<'a> ClaimAud<'a> {
         match self {
             Self::Missing => false,
             Self::Single(aud) => aud == &expected_aud,
-            Self::List(values) => values.iter().any(|aud| *aud == expected_aud),
+            Self::List(values) => values.contains(&expected_aud),
         }
     }
 

@@ -3,8 +3,8 @@ use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use trogon_traffic_view::envelope::AuditEnvelope;
-use trogon_traffic_view::indexer::postgres::PostgresIndexer;
 use trogon_traffic_view::indexer::TrafficIndex;
+use trogon_traffic_view::indexer::postgres::PostgresIndexer;
 use trogon_traffic_view::projector::AuditProjector;
 
 const POSTGRES_IMAGE: &str = "postgres";
@@ -75,8 +75,16 @@ async fn postgres_indexer_roundtrip_fifty_events() {
         .query(trogon_traffic_view::TrafficQueryFilter {
             tenant: Some("acme".into()),
             agent_id: Some("acme/agent-1".into()),
-            since: Some(DateTime::parse_from_rfc3339("2026-05-27T14:00:00Z").unwrap().with_timezone(&Utc)),
-            until: Some(DateTime::parse_from_rfc3339("2026-05-27T15:00:00Z").unwrap().with_timezone(&Utc)),
+            since: Some(
+                DateTime::parse_from_rfc3339("2026-05-27T14:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            until: Some(
+                DateTime::parse_from_rfc3339("2026-05-27T15:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
             limit: Some(100),
         })
         .await

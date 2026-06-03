@@ -10,10 +10,7 @@ pub enum StsClientError {
     #[error("STS response decode failed: {0}")]
     Decode(String),
     #[error("STS rejected exchange: {error} ({error_description})")]
-    ExchangeRejected {
-        error: String,
-        error_description: String,
-    },
+    ExchangeRejected { error: String, error_description: String },
 }
 
 impl StsClientError {

@@ -2,8 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::header::{IntoHeaderValue, NATS_MESSAGE_ID};
 use async_nats::HeaderMap;
+use async_nats::header::{IntoHeaderValue, NATS_MESSAGE_ID};
 use bytes::Bytes;
 
 use crate::constants::HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS;
@@ -212,18 +212,21 @@ impl PushDispatcher for HttpPushDispatcher {
         payload: &[u8],
     ) -> Result<(), DispatchError> {
         let PushNotificationTarget::Http(url) = PushNotificationTarget::parse(&config.url)? else {
-            return Err(DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
-                raw: config.url.clone(),
-            }));
+            return Err(DispatchError::InvalidTarget(
+                PushNotificationTargetError::UnknownScheme {
+                    raw: config.url.clone(),
+                },
+            ));
         };
 
         let authorization =
             authorization_header_value(config.authentication.as_ref()).map_err(DispatchError::InvalidAuthorization)?;
 
-        let maybe_key =
-            maybe_terminal_push_idempotency_key(config, task_id, &delivery_semantics, terminal_task_state).map_err(DispatchError::Prep)?;
+        let maybe_key = maybe_terminal_push_idempotency_key(config, task_id, &delivery_semantics, terminal_task_state)
+            .map_err(DispatchError::Prep)?;
 
-        let max_attempts_usize = usize::try_from(delivery_semantics.webhook_max_publish_attempts()).unwrap_or(HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS as usize);
+        let max_attempts_usize = usize::try_from(delivery_semantics.webhook_max_publish_attempts())
+            .unwrap_or(HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS as usize);
 
         let mut delay = std::time::Duration::from_millis(100);
 
@@ -241,8 +244,8 @@ impl PushDispatcher for HttpPushDispatcher {
             if let Some(hn) = delivery_semantics.webhook_idempotency_carrier()
                 && let Some(ref k) = maybe_key
             {
-                let hv =
-                    reqwest::header::HeaderValue::from_str(k.as_str()).map_err(|e| DispatchError::InvalidHeader(Box::new(e)))?;
+                let hv = reqwest::header::HeaderValue::from_str(k.as_str())
+                    .map_err(|e| DispatchError::InvalidHeader(Box::new(e)))?;
                 request = request.header(hn.clone(), hv);
             }
 
@@ -253,8 +256,7 @@ impl PushDispatcher for HttpPushDispatcher {
                     }
 
                     let status = response.status().as_u16();
-                    let should_retry = webhook_http_retryable(status)
-                        && attempt + 1 < max_attempts_usize;
+                    let should_retry = webhook_http_retryable(status) && attempt + 1 < max_attempts_usize;
                     if should_retry {
                         tokio::time::sleep(delay).await;
                         delay = delay.saturating_mul(2).min(std::time::Duration::from_secs(3));
@@ -267,8 +269,7 @@ impl PushDispatcher for HttpPushDispatcher {
                     });
                 }
                 Err(e) => {
-                    let should_retry =
-                        push_transport_retryable(&e) && attempt + 1 < max_attempts_usize;
+                    let should_retry = push_transport_retryable(&e) && attempt + 1 < max_attempts_usize;
                     if should_retry {
                         tokio::time::sleep(delay).await;
                         delay = delay.saturating_mul(2).min(std::time::Duration::from_secs(3));
@@ -307,13 +308,15 @@ where
         payload: &[u8],
     ) -> Result<(), DispatchError> {
         let PushNotificationTarget::Nats(subject) = PushNotificationTarget::parse(&config.url)? else {
-            return Err(DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
-                raw: config.url.clone(),
-            }));
+            return Err(DispatchError::InvalidTarget(
+                PushNotificationTargetError::UnknownScheme {
+                    raw: config.url.clone(),
+                },
+            ));
         };
 
-        let maybe_key =
-            maybe_terminal_push_idempotency_key(config, task_id, &delivery_semantics, terminal_task_state).map_err(DispatchError::Prep)?;
+        let maybe_key = maybe_terminal_push_idempotency_key(config, task_id, &delivery_semantics, terminal_task_state)
+            .map_err(DispatchError::Prep)?;
 
         let nats_msg_id = maybe_key.as_ref().map(PushIdempotencyKey::as_str);
 
@@ -360,13 +363,15 @@ where
         payload: &[u8],
     ) -> Result<(), DispatchError> {
         let PushNotificationTarget::JetStream(subject) = PushNotificationTarget::parse(&config.url)? else {
-            return Err(DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
-                raw: config.url.clone(),
-            }));
+            return Err(DispatchError::InvalidTarget(
+                PushNotificationTargetError::UnknownScheme {
+                    raw: config.url.clone(),
+                },
+            ));
         };
 
-        let maybe_key =
-            maybe_terminal_push_idempotency_key(config, task_id, &delivery_semantics, terminal_task_state).map_err(DispatchError::Prep)?;
+        let maybe_key = maybe_terminal_push_idempotency_key(config, task_id, &delivery_semantics, terminal_task_state)
+            .map_err(DispatchError::Prep)?;
 
         let nats_msg_id = maybe_key.as_ref().map(PushIdempotencyKey::as_str);
 
@@ -490,12 +495,15 @@ where
         .await
         .map_err(|e| DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(subject.as_str(), e)))?;
 
-    let ack_result = ack.await.map_err(|e| {
-        DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(subject.as_str(), e))
-    })?;
+    let ack_result = ack
+        .await
+        .map_err(|e| DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(subject.as_str(), e)))?;
 
     if ack_result.duplicate {
-        tracing::trace!(subject = subject.as_str(), "JetStream accepted duplicate Msg-Id terminal push ack");
+        tracing::trace!(
+            subject = subject.as_str(),
+            "JetStream accepted duplicate Msg-Id terminal push ack"
+        );
     }
     Ok(())
 }
@@ -510,8 +518,17 @@ pub mod tests {
 
     pub struct MockPushDispatcher {
         #[allow(clippy::type_complexity)]
-        pub calls:
-            Arc<Mutex<Vec<(A2aTaskId, DeliverySemantics, TerminalPushTaskState, a2a_types::TaskPushNotificationConfig, Vec<u8>)>>>,
+        pub calls: Arc<
+            Mutex<
+                Vec<(
+                    A2aTaskId,
+                    DeliverySemantics,
+                    TerminalPushTaskState,
+                    a2a_types::TaskPushNotificationConfig,
+                    Vec<u8>,
+                )>,
+            >,
+        >,
         pub result: Arc<Mutex<Option<Result<(), String>>>>,
     }
 
@@ -623,7 +640,13 @@ pub mod tests {
         let payload = br#"{"event":"completed"}"#;
         let config = push_config("subject:a2a.push.acme.caller-42.task-9");
         dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), payload)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                payload,
+            )
             .await
             .unwrap();
 
@@ -640,7 +663,13 @@ pub mod tests {
         let config = push_config("subject:a2a.push.acme.caller.retry");
 
         dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), payload)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                payload,
+            )
             .await
             .unwrap();
 
@@ -656,7 +685,13 @@ pub mod tests {
         let config = push_config("subject:a2a.push.acme.caller.fail");
 
         let err = dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), br#"{}"#)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                br#"{}"#,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DispatchError::NatsPublish(_)));
@@ -670,7 +705,13 @@ pub mod tests {
         let config = push_config("https://example.com/hook");
 
         let err = dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), b"{}")
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                b"{}",
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DispatchError::InvalidTarget(_)));
@@ -720,7 +761,13 @@ pub mod tests {
         let config = push_config("jetstream:a2a.push.acme.caller-42.task-9");
 
         dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), payload)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                payload,
+            )
             .await
             .unwrap();
 
@@ -737,7 +784,13 @@ pub mod tests {
         let config = push_config("jetstream:a2a.push.acme.caller.retry");
 
         dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), payload)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                payload,
+            )
             .await
             .unwrap();
 
@@ -753,7 +806,13 @@ pub mod tests {
         let config = push_config("jetstream:a2a.push.acme.caller.fail");
 
         let err = dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), br#"{}"#)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                br#"{}"#,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DispatchError::JetStreamPublish(_)));
@@ -767,7 +826,13 @@ pub mod tests {
         let config = push_config("subject:a2a.push.acme.caller.task");
 
         let err = dispatcher
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), b"{}")
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                b"{}",
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DispatchError::InvalidTarget(_)));
@@ -783,7 +848,13 @@ pub mod tests {
         let config = push_config("subject:a2a.push.tenant.caller.task");
 
         composite
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), payload)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                payload,
+            )
             .await
             .unwrap();
 
@@ -800,7 +871,13 @@ pub mod tests {
         let config = push_config("jetstream:a2a.push.tenant.caller.task");
 
         composite
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), payload)
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                payload,
+            )
             .await
             .unwrap();
 
@@ -817,7 +894,13 @@ pub mod tests {
         let config = push_config("nats://broker");
 
         let err = composite
-            .dispatch(&task_id_fix(), &config, DeliverySemantics::AtLeastOnce, terminal_completed(), b"{}")
+            .dispatch(
+                &task_id_fix(),
+                &config,
+                DeliverySemantics::AtLeastOnce,
+                terminal_completed(),
+                b"{}",
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DispatchError::InvalidTarget(_)));

@@ -30,8 +30,7 @@ async fn reconcile_writes_mcp_gateway_config_to_memory_kv() {
     };
 
     let projection = project_mcp_gateway_config(&resource).expect("project");
-    let bytes = trogon_gateway_k8s::projection::encode_gateway_config(&projection.config)
-        .expect("encode");
+    let bytes = trogon_gateway_k8s::projection::encode_gateway_config(&projection.config).expect("encode");
     publish_bytes(&kv, &projection.key, &bytes, &projection.content_hash)
         .await
         .expect("kv put");

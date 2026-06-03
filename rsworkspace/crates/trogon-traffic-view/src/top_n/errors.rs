@@ -16,9 +16,5 @@ impl fmt::Display for TopNError {
 impl std::error::Error for TopNError {}
 
 pub(crate) fn validate_n(n: usize) -> Result<(), TopNError> {
-    if n == 0 {
-        Err(TopNError::InvalidN)
-    } else {
-        Ok(())
-    }
+    if n == 0 { Err(TopNError::InvalidN) } else { Ok(()) }
 }

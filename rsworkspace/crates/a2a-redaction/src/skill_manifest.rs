@@ -139,9 +139,7 @@ impl SkillManifest {
             return false;
         }
         let payload: HashSet<&str> = payload_paths.iter().map(JsonPathExpr::as_str).collect();
-        self.applies_to_paths
-            .iter()
-            .any(|path| payload.contains(path.as_str()))
+        self.applies_to_paths.iter().any(|path| payload.contains(path.as_str()))
     }
 }
 
@@ -189,12 +187,8 @@ impl SkillManifestRegistry {
                     second: path,
                 });
             }
-            registry
-                .sources
-                .insert(manifest.skill_id().clone(), path.clone());
-            registry
-                .manifests
-                .insert(manifest.skill_id().clone(), manifest);
+            registry.sources.insert(manifest.skill_id().clone(), path.clone());
+            registry.manifests.insert(manifest.skill_id().clone(), manifest);
         }
 
         Ok(registry)
@@ -252,11 +246,7 @@ pub struct SkillSelectionPlan {
 }
 
 impl SkillSelectionPlan {
-    pub fn plan(
-        registry: &SkillManifestRegistry,
-        method: &A2aMethod,
-        payload_paths: &[JsonPathExpr],
-    ) -> Self {
+    pub fn plan(registry: &SkillManifestRegistry, method: &A2aMethod, payload_paths: &[JsonPathExpr]) -> Self {
         let mut manifests: Vec<SkillManifest> = registry
             .skills_for_method(method)
             .into_iter()
@@ -361,7 +351,11 @@ impl fmt::Display for SkillManifestError {
                 write!(f, "invalid skill category `{category}`")
             }
             Self::EmptyPaths { path } => {
-                write!(f, "skill manifest {} requires at least one applies_to_paths entry", path.display())
+                write!(
+                    f,
+                    "skill manifest {} requires at least one applies_to_paths entry",
+                    path.display()
+                )
             }
         }
     }
@@ -404,10 +398,7 @@ enum RawCategory {
 #[serde(untagged)]
 enum RawMethodMatcher {
     Any(String),
-    Tagged {
-        kind: String,
-        methods: Option<Vec<String>>,
-    },
+    Tagged { kind: String, methods: Option<Vec<String>> },
 }
 
 fn parse_manifest_file(path: &Path) -> Result<SkillManifest, SkillManifestError> {
@@ -420,62 +411,47 @@ fn parse_manifest_file(path: &Path) -> Result<SkillManifest, SkillManifestError>
         source,
     })?;
 
-    let skill_id_raw = raw
-        .skill_id
-        .ok_or(SkillManifestError::MissingField {
-            path: path.to_path_buf(),
-            field: "skill_id",
-        })?;
+    let skill_id_raw = raw.skill_id.ok_or(SkillManifestError::MissingField {
+        path: path.to_path_buf(),
+        field: "skill_id",
+    })?;
     let skill_id = SkillId::new(skill_id_raw);
     validate_filename(path, &skill_id)?;
 
-    let wasm_path_raw = raw
-        .wasm_path
-        .ok_or(SkillManifestError::MissingField {
-            path: path.to_path_buf(),
-            field: "wasm_path",
-        })?;
+    let wasm_path_raw = raw.wasm_path.ok_or(SkillManifestError::MissingField {
+        path: path.to_path_buf(),
+        field: "wasm_path",
+    })?;
     let wasm_path = WasmBundlePath::new(wasm_path_raw);
 
     let applies_to_method = parse_method_matcher(
-        raw.applies_to_method
-            .ok_or(SkillManifestError::MissingField {
-                path: path.to_path_buf(),
-                field: "applies_to_method",
-            })?,
+        raw.applies_to_method.ok_or(SkillManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "applies_to_method",
+        })?,
         path,
     )?;
 
-    let paths_raw = raw
-        .applies_to_paths
-        .ok_or(SkillManifestError::MissingField {
-            path: path.to_path_buf(),
-            field: "applies_to_paths",
-        })?;
+    let paths_raw = raw.applies_to_paths.ok_or(SkillManifestError::MissingField {
+        path: path.to_path_buf(),
+        field: "applies_to_paths",
+    })?;
     if paths_raw.is_empty() {
         return Err(SkillManifestError::EmptyPaths {
             path: path.to_path_buf(),
         });
     }
-    let applies_to_paths = paths_raw
-        .into_iter()
-        .map(JsonPathExpr::new)
-        .collect::<Vec<_>>();
+    let applies_to_paths = paths_raw.into_iter().map(JsonPathExpr::new).collect::<Vec<_>>();
 
-    let category = parse_category(
-        raw.category
-            .ok_or(SkillManifestError::MissingField {
-                path: path.to_path_buf(),
-                field: "category",
-            })?,
-    )?;
+    let category = parse_category(raw.category.ok_or(SkillManifestError::MissingField {
+        path: path.to_path_buf(),
+        field: "category",
+    })?)?;
 
-    let version_raw = raw
-        .version
-        .ok_or(SkillManifestError::MissingField {
-            path: path.to_path_buf(),
-            field: "version",
-        })?;
+    let version_raw = raw.version.ok_or(SkillManifestError::MissingField {
+        path: path.to_path_buf(),
+        field: "version",
+    })?;
     let version = SkillManifestVersion::new(version_raw)?;
 
     Ok(SkillManifest {
@@ -503,10 +479,7 @@ fn validate_filename(path: &Path, skill_id: &SkillId) -> Result<(), SkillManifes
     Ok(())
 }
 
-fn parse_method_matcher(
-    raw: RawMethodMatcher,
-    path: &Path,
-) -> Result<SkillMethodMatcher, SkillManifestError> {
+fn parse_method_matcher(raw: RawMethodMatcher, path: &Path) -> Result<SkillMethodMatcher, SkillManifestError> {
     match raw {
         RawMethodMatcher::Any(value) if value == "Any" => Ok(SkillMethodMatcher::Any),
         RawMethodMatcher::Tagged { kind, methods } => match kind.as_str() {
@@ -532,7 +505,10 @@ fn parse_method_matcher(
 }
 
 fn parse_method(path: &Path, method: String) -> Result<A2aMethod, SkillManifestError> {
-    A2aMethod::from_str(&method).map_err(|_| SkillManifestError::InvalidMethod { path: path.to_path_buf(), method })
+    A2aMethod::from_str(&method).map_err(|_| SkillManifestError::InvalidMethod {
+        path: path.to_path_buf(),
+        method,
+    })
 }
 
 fn parse_category(raw: RawCategory) -> Result<SkillCategory, SkillManifestError> {

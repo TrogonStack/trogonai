@@ -1,5 +1,5 @@
 use a2a_nats::agent::{A2aHandler, Bridge};
-use a2a_nats::jetstream::{provision_streams_with_options, StreamProvisionOptions};
+use a2a_nats::jetstream::{StreamProvisionOptions, provision_streams_with_options};
 use a2a_nats::{
     A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,
     apply_timeout_overrides, nats_connect_timeout,

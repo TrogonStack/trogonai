@@ -1,8 +1,8 @@
 mod redact;
 
-use tier3_skill_abi::{read_input, write_meta, write_output, AbiError};
+use tier3_skill_abi::{AbiError, read_input, write_meta, write_output};
 
-pub use redact::{redact_json_bytes, RedactError, SanitizerConfig};
+pub use redact::{RedactError, SanitizerConfig, redact_json_bytes};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn redact_part_core(in_ptr: i32, in_len: i32, meta_ptr: i32) {

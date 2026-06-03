@@ -5,12 +5,12 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use super::AnomalyEmit;
 use super::build::AnomalyIngressSnapshot;
 use super::errors::AnomalyError;
 use super::features::AnomalyFeatures;
 use super::novelty::NoveltyTracker;
 use super::rate::RateTracker;
-use super::AnomalyEmit;
 
 /// Records emitted feature vectors; optionally fails every `emit` call.
 #[derive(Clone)]
@@ -43,18 +43,12 @@ impl FakeAnomalyEmitter {
             .clone()
     }
 
-    fn build_from_snapshot(
-        &self,
-        snapshot: &AnomalyIngressSnapshot,
-    ) -> Result<AnomalyFeatures, AnomalyError> {
+    fn build_from_snapshot(&self, snapshot: &AnomalyIngressSnapshot) -> Result<AnomalyFeatures, AnomalyError> {
         let mut novelty = self
             .novelty
             .lock()
             .expect("fake anomaly emitter novelty mutex poisoned");
-        let mut rate = self
-            .rate
-            .lock()
-            .expect("fake anomaly emitter rate mutex poisoned");
+        let mut rate = self.rate.lock().expect("fake anomaly emitter rate mutex poisoned");
         snapshot.build_features(&mut novelty, &mut rate)
     }
 }

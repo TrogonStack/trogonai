@@ -67,11 +67,7 @@ impl TokenBucket {
         self.last_touched
     }
 
-    pub(crate) fn try_acquire(
-        &mut self,
-        now: Instant,
-        cost: u32,
-    ) -> Result<AcquireResult, ContextThrottleError> {
+    pub(crate) fn try_acquire(&mut self, now: Instant, cost: u32) -> Result<AcquireResult, ContextThrottleError> {
         if now < self.last_refill {
             return Err(ContextThrottleError::ClockSkew);
         }

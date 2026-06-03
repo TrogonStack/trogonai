@@ -62,15 +62,9 @@ pub struct NatsConfigKv {
 }
 
 impl NatsConfigKv {
-    pub async fn connect(
-        nats_url: &str,
-        bucket: &str,
-        creds_path: Option<&str>,
-    ) -> Result<Self, ConfigKvError> {
+    pub async fn connect(nats_url: &str, bucket: &str, creds_path: Option<&str>) -> Result<Self, ConfigKvError> {
         let auth = match creds_path {
-            Some(path) => {
-                trogon_nats::NatsAuth::Credentials(std::path::PathBuf::from(path))
-            }
+            Some(path) => trogon_nats::NatsAuth::Credentials(std::path::PathBuf::from(path)),
             None => trogon_nats::NatsAuth::None,
         };
         let client = trogon_nats::connect(
@@ -113,13 +107,11 @@ impl ConfigKv for NatsConfigKv {
             .entry(key)
             .await
             .map_err(|error| ConfigKvError::Get(error.to_string()))?
+            && entry.operation != Operation::Delete
+            && entry.operation != Operation::Purge
+            && stored_hash_matches(&entry.value, &options.content_hash)
         {
-            if entry.operation != Operation::Delete
-                && entry.operation != Operation::Purge
-                && stored_hash_matches(&entry.value, &options.content_hash)
-            {
-                return Ok(ConfigKvPutOutcome::Unchanged);
-            }
+            return Ok(ConfigKvPutOutcome::Unchanged);
         }
 
         let revision = self
@@ -188,11 +180,7 @@ impl ConfigKv for MemoryConfigKv {
 
 impl MemoryConfigKv {
     pub async fn get(&self, key: &str) -> Option<Vec<u8>> {
-        self.inner
-            .read()
-            .await
-            .get(key)
-            .map(|entry| entry.value.clone())
+        self.inner.read().await.get(key).map(|entry| entry.value.clone())
     }
 }
 
@@ -201,10 +189,7 @@ fn stored_hash_matches(value: &[u8], expected: &str) -> bool {
     actual == expected
 }
 
-pub async fn open_default_config_kv(
-    nats_url: &str,
-    creds_path: Option<&str>,
-) -> Result<NatsConfigKv, ConfigKvError> {
+pub async fn open_default_config_kv(nats_url: &str, creds_path: Option<&str>) -> Result<NatsConfigKv, ConfigKvError> {
     NatsConfigKv::connect(nats_url, DEFAULT_CONFIG_BUCKET, creds_path).await
 }
 

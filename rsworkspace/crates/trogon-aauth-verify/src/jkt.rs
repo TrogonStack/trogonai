@@ -14,23 +14,47 @@ pub fn jwk_thumbprint(jwk: &serde_json::Value) -> Result<String, JktError> {
     let kty = jwk.get("kty").and_then(|v| v.as_str()).ok_or(JktError::MissingKty)?;
     let canonical = match kty {
         "EC" => {
-            let crv = jwk.get("crv").and_then(|v| v.as_str()).ok_or(JktError::MissingField("crv"))?;
-            let x = jwk.get("x").and_then(|v| v.as_str()).ok_or(JktError::MissingField("x"))?;
-            let y = jwk.get("y").and_then(|v| v.as_str()).ok_or(JktError::MissingField("y"))?;
+            let crv = jwk
+                .get("crv")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("crv"))?;
+            let x = jwk
+                .get("x")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("x"))?;
+            let y = jwk
+                .get("y")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("y"))?;
             format!(r#"{{"crv":"{crv}","kty":"EC","x":"{x}","y":"{y}"}}"#)
         }
         "OKP" => {
-            let crv = jwk.get("crv").and_then(|v| v.as_str()).ok_or(JktError::MissingField("crv"))?;
-            let x = jwk.get("x").and_then(|v| v.as_str()).ok_or(JktError::MissingField("x"))?;
+            let crv = jwk
+                .get("crv")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("crv"))?;
+            let x = jwk
+                .get("x")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("x"))?;
             format!(r#"{{"crv":"{crv}","kty":"OKP","x":"{x}"}}"#)
         }
         "RSA" => {
-            let e = jwk.get("e").and_then(|v| v.as_str()).ok_or(JktError::MissingField("e"))?;
-            let n = jwk.get("n").and_then(|v| v.as_str()).ok_or(JktError::MissingField("n"))?;
+            let e = jwk
+                .get("e")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("e"))?;
+            let n = jwk
+                .get("n")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("n"))?;
             format!(r#"{{"e":"{e}","kty":"RSA","n":"{n}"}}"#)
         }
         "oct" => {
-            let k = jwk.get("k").and_then(|v| v.as_str()).ok_or(JktError::MissingField("k"))?;
+            let k = jwk
+                .get("k")
+                .and_then(|v| v.as_str())
+                .ok_or(JktError::MissingField("k"))?;
             format!(r#"{{"k":"{k}","kty":"oct"}}"#)
         }
         other => return Err(JktError::UnsupportedKty(other.to_string())),

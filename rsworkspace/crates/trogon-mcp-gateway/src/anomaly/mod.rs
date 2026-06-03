@@ -15,8 +15,8 @@ mod rate;
 
 pub use build::{AnomalyIngressContext, AnomalyIngressSnapshot};
 pub use emitter::{AnomalyEmit, AnomalyEmitter, subject_for_tenant};
-pub use fake::FakeAnomalyEmitter;
 pub use errors::AnomalyError;
+pub use fake::FakeAnomalyEmitter;
 pub use features::AnomalyFeatures;
 pub use novelty::NoveltyTracker;
 pub use rate::RateTracker;

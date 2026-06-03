@@ -12,7 +12,7 @@ mod tests;
 pub use context::Tier3EvaluationContext;
 pub use decision::{Tier3EngineError, Tier3RedactionDecision, Tier3RefusalReason};
 pub use gate::{NoopTier3RedactionGate, Tier3RedactionGate};
-pub use manifest::{load_tier3_manifests_from_bundle, Tier3SkillManifest};
+pub use manifest::{Tier3SkillManifest, load_tier3_manifests_from_bundle};
 pub use real_gate::RealTier3RedactionGate;
 pub use rewrite::{RedactionRewrite, RewriteKind};
 
@@ -20,10 +20,7 @@ pub fn gateway_tier3_redaction_enabled<E: trogon_std::env::ReadEnv>(env: &E) -> 
     let Ok(flag) = env.var("A2A_GATEWAY_TIER3_REDACTION_ENABLED") else {
         return false;
     };
-    matches!(
-        flag.to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    matches!(flag.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 pub fn tier3_redaction_audit_rewrites(rewrites: &[RedactionRewrite]) -> Option<serde_json::Value> {

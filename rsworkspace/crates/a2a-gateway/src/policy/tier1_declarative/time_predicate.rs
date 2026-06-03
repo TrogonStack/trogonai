@@ -149,9 +149,7 @@ fn parse_window_bound(raw: &str, start: bool) -> Result<Time, TimeOfDayParseErro
 }
 
 fn parse_hh_mm(raw: &str) -> Result<Time, ()> {
-    let (hour, minute) = raw
-        .split_once(':')
-        .ok_or(())?;
+    let (hour, minute) = raw.split_once(':').ok_or(())?;
     let hour: u8 = hour.parse().map_err(|_| ())?;
     let minute: u8 = minute.parse().map_err(|_| ())?;
     Time::from_hms(hour, minute, 0).map_err(|_| ())
@@ -169,8 +167,12 @@ fn parse_timezone(raw: &str) -> Result<UtcOffset, TimeOfDayParseError> {
         } else {
             (rest, "00")
         };
-        let hours: i8 = hours.parse().map_err(|_| TimeOfDayParseError::InvalidTimezone(raw.into()))?;
-        let minutes: i8 = minutes.parse().map_err(|_| TimeOfDayParseError::InvalidTimezone(raw.into()))?;
+        let hours: i8 = hours
+            .parse()
+            .map_err(|_| TimeOfDayParseError::InvalidTimezone(raw.into()))?;
+        let minutes: i8 = minutes
+            .parse()
+            .map_err(|_| TimeOfDayParseError::InvalidTimezone(raw.into()))?;
         let total_seconds = sign * (i32::from(hours) * 3_600 + i32::from(minutes) * 60);
         return UtcOffset::from_whole_seconds(total_seconds)
             .map_err(|_| TimeOfDayParseError::InvalidTimezone(raw.into()));

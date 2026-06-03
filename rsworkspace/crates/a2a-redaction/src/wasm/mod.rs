@@ -8,7 +8,7 @@ use wasmtime::{Engine, Module};
 
 use crate::error::RedactionError;
 use crate::redactor::{self, Redactor};
-use crate::signed_bundle::{Ed25519PublicKey, SignedBundleManifest, verify_signed_bundle, SignatureVerificationError};
+use crate::signed_bundle::{Ed25519PublicKey, SignatureVerificationError, SignedBundleManifest, verify_signed_bundle};
 use crate::skill_id::SkillId;
 use crate::wasm_bundle_path::WasmBundlePath;
 
@@ -32,9 +32,7 @@ impl WasmRedactorHost {
     ) -> Result<Self, RedactionError> {
         if signing_pubkey.is_none() {
             SIGNING_DISABLED_WARN.call_once(|| {
-                tracing::warn!(
-                    "A2A_GATEWAY_TIER3_SIGNING_PUBKEY unset; tier-3 bundle signature verification disabled"
-                );
+                tracing::warn!("A2A_GATEWAY_TIER3_SIGNING_PUBKEY unset; tier-3 bundle signature verification disabled");
             });
         }
 
@@ -57,10 +55,7 @@ impl WasmRedactorHost {
     pub fn register_skill_wasm(&self, skill: SkillId, wasm_binary: &[u8]) -> Result<(), RedactionError> {
         let compiled = Module::from_binary(&self.engine, wasm_binary)
             .map_err(|e| RedactionError::WasmModule(format!("skill {skill}: {e}")))?;
-        let mut guard = self
-            .modules
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.modules.write().unwrap_or_else(|e| e.into_inner());
         guard.insert(skill, compiled);
         Ok(())
     }
@@ -68,9 +63,8 @@ impl WasmRedactorHost {
     pub fn preload_skill_bundle(&self, skill: SkillId) -> Result<(), RedactionError> {
         let wasm_path = self.bundles_base.join_skill_wasm(&skill);
         let manifest_path = self.bundles_base.join_skill_manifest(&skill);
-        let wasm_bytes = std::fs::read(&wasm_path).map_err(|err| {
-            RedactionError::WasmModule(format!("read {}: {err}", wasm_path.display()))
-        })?;
+        let wasm_bytes = std::fs::read(&wasm_path)
+            .map_err(|err| RedactionError::WasmModule(format!("read {}: {err}", wasm_path.display())))?;
         let manifest_bytes = std::fs::read(&manifest_path).map_err(|err| {
             RedactionError::WasmModule(format!(
                 "skill {skill}: read manifest {}: {err}",
@@ -153,7 +147,7 @@ mod tests {
 
     use super::*;
     use crate::signed_bundle::{Ed25519Signature, Sha256Digest, sign_bundle_digest};
-    use a2a_types::{part, Role};
+    use a2a_types::{Role, part};
 
     fn fixture_path() -> &'static Path {
         Path::new(concat!(
@@ -175,12 +169,7 @@ mod tests {
         let wasm_digest = Sha256Digest::hash(wasm_bytes);
         let message = sign_bundle_digest(manifest_digest, wasm_digest);
         let signature = Ed25519Signature::from_bytes(signing_key.sign(&message).to_bytes());
-        let envelope = SignedBundleManifest::new(
-            &SkillId::new(skill),
-            manifest_digest,
-            wasm_digest,
-            signature,
-        );
+        let envelope = SignedBundleManifest::new(&SkillId::new(skill), manifest_digest, wasm_digest, signature);
         let sig_json = serde_json::to_vec_pretty(&envelope).expect("serialize sig");
         fs::write(dir.join(format!("{skill}.sig")), sig_json).expect("write sig");
     }
@@ -195,10 +184,7 @@ mod tests {
             ..Default::default()
         };
         let out = host.redact_message(msg.clone(), &SkillId::new("missing")).unwrap();
-        assert_eq!(
-            serde_json::to_value(out).unwrap(),
-            serde_json::to_value(msg).unwrap()
-        );
+        assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(msg).unwrap());
     }
 
     #[test]
@@ -210,10 +196,7 @@ mod tests {
             ..Default::default()
         };
         let out = host.redact_artifact(art.clone(), &SkillId::new("missing")).unwrap();
-        assert_eq!(
-            serde_json::to_value(out).unwrap(),
-            serde_json::to_value(art).unwrap()
-        );
+        assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(art).unwrap());
     }
 
     #[test]
@@ -310,9 +293,7 @@ mod tests {
         let pubkey = Ed25519PublicKey::from_bytes(*signing_key.verifying_key().as_bytes());
         let host =
             WasmRedactorHost::new_with_signing_pubkey(WasmBundlePath::new(temp.path()), Some(pubkey)).expect("host");
-        let err = host
-            .preload_skill_bundle(SkillId::new(skill))
-            .expect_err("missing sig");
+        let err = host.preload_skill_bundle(SkillId::new(skill)).expect_err("missing sig");
         assert!(matches!(err, RedactionError::WasmModule(_)));
     }
 

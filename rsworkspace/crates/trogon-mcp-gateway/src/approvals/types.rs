@@ -63,12 +63,7 @@ pub struct ApprovalRequest {
 }
 
 impl ApprovalRequest {
-    pub fn new(
-        prefix: &str,
-        request_id: RequestId,
-        ttl: Duration,
-        approval_url: Option<String>,
-    ) -> Self {
+    pub fn new(prefix: &str, request_id: RequestId, ttl: Duration, approval_url: Option<String>) -> Self {
         let approval_subject = ApprovalSubject::for_request(prefix, &request_id);
         Self {
             request_id,
@@ -81,14 +76,8 @@ impl ApprovalRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApprovalDecision {
-    Granted {
-        approver: String,
-        expires_at: i64,
-    },
-    Denied {
-        approver: String,
-        reason: String,
-    },
+    Granted { approver: String, expires_at: i64 },
+    Denied { approver: String, reason: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -139,13 +128,8 @@ pub fn wire_to_decision(message: &ApprovalDecisionMessage) -> Result<ApprovalDec
 
 #[derive(Clone, Debug)]
 pub enum ApprovalWaitOutcome {
-    Approved {
-        approver: String,
-        expires_at: i64,
-    },
-    Denied {
-        reason: String,
-    },
+    Approved { approver: String, expires_at: i64 },
+    Denied { reason: String },
     TimedOut,
 }
 
@@ -200,4 +184,3 @@ mod tests {
         assert_eq!(wire_to_decision(&message), Err(ApprovalError::MalformedDecision));
     }
 }
-

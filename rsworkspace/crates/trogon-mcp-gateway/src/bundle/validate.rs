@@ -2,9 +2,7 @@ use sha2::{Digest, Sha256};
 
 use super::archive::BundleArchive;
 use super::errors::BundleLoadError;
-use super::manifest::{
-    normalize_member_path, BundleManifest, ComponentEntry, ProgramEntry, SchemaEntry,
-};
+use super::manifest::{BundleManifest, ComponentEntry, ProgramEntry, SchemaEntry, normalize_member_path};
 
 const IGNORED_PATH_PREFIXES: &[&str] = &["README.md", "signatures/"];
 
@@ -111,7 +109,10 @@ pub fn hash_member(bytes: &[u8]) -> String {
 
 fn verify_hash(path: &str, declared: &str, bytes: &[u8]) -> Result<(), BundleLoadError> {
     let actual = hash_member(bytes);
-    let expected = declared.strip_prefix("sha256:").unwrap_or(declared).to_ascii_lowercase();
+    let expected = declared
+        .strip_prefix("sha256:")
+        .unwrap_or(declared)
+        .to_ascii_lowercase();
     if actual != expected {
         return Err(BundleLoadError::ContentHashMismatch {
             path: normalize_member_path(path),
@@ -122,10 +123,7 @@ fn verify_hash(path: &str, declared: &str, bytes: &[u8]) -> Result<(), BundleLoa
     Ok(())
 }
 
-fn reject_unknown_members(
-    archive: &BundleArchive,
-    declared: &[String],
-) -> Result<(), BundleLoadError> {
+fn reject_unknown_members(archive: &BundleArchive, declared: &[String]) -> Result<(), BundleLoadError> {
     let declared_set: std::collections::BTreeSet<_> = declared.iter().cloned().collect();
     for path in archive.paths() {
         if is_ignored_path(path) {
@@ -151,9 +149,7 @@ fn is_ignored_path(path: &str) -> bool {
 mod tests {
     use super::*;
     use crate::bundle::archive::BundleArchive;
-    use crate::bundle::manifest::{
-        BundleManifest, Capabilities, ProgramEntry, Signing, HOST_TARGET_WIT,
-    };
+    use crate::bundle::manifest::{BundleManifest, Capabilities, HOST_TARGET_WIT, ProgramEntry, Signing};
 
     fn sample_manifest(program_hash: &str) -> BundleManifest {
         BundleManifest {
@@ -189,10 +185,7 @@ mod tests {
         let mut archive = BundleArchive::default();
         archive.insert("policies/rule.cel", body.to_vec());
         let error = validate_members(&manifest, &archive).expect_err("hash mismatch");
-        assert!(matches!(
-            error,
-            BundleLoadError::ContentHashMismatch { .. }
-        ));
+        assert!(matches!(error, BundleLoadError::ContentHashMismatch { .. }));
     }
 
     #[test]

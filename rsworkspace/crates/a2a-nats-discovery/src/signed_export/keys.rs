@@ -27,9 +27,8 @@ fn is_valid_operator_key_id(raw: &str) -> bool {
     if len == 0 || len > 64 {
         return false;
     }
-    raw.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'_' || byte == b'-'
-    })
+    raw.bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'_' || byte == b'-')
 }
 
 impl fmt::Display for OperatorKeyId {
@@ -48,9 +47,8 @@ impl Ed25519PublicKey {
 
     pub fn parse_hex(raw: impl AsRef<str>) -> Result<Self, SignedExportError> {
         let raw = raw.as_ref();
-        let decoded = hex::decode(raw).map_err(|error| {
-            SignedExportError::Malformed(format!("operator public key hex decode failed: {error}"))
-        })?;
+        let decoded = hex::decode(raw)
+            .map_err(|error| SignedExportError::Malformed(format!("operator public key hex decode failed: {error}")))?;
         let bytes: [u8; 32] = decoded
             .try_into()
             .map_err(|_| SignedExportError::Malformed("operator public key must be 32 bytes".into()))?;

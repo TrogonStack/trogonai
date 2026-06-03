@@ -134,12 +134,8 @@ impl Tier1DeclarativeBundle {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tier1DeclarativeDecision {
-    Allow {
-        rule: Option<Tier1DeclarativeRuleId>,
-    },
-    Deny {
-        rule: Tier1DeclarativeRuleId,
-    },
+    Allow { rule: Option<Tier1DeclarativeRuleId> },
+    Deny { rule: Tier1DeclarativeRuleId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

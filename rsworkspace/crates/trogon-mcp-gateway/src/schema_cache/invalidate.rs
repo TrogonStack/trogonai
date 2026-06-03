@@ -53,9 +53,7 @@ pub async fn handle_control_invalidate(
     let Some(server_id_raw) = value.get("server_id").and_then(|v| v.as_str()) else {
         return Ok(false);
     };
-    runtime
-        .invalidate_server(&ServerId::new(server_id_raw))
-        .await?;
+    runtime.invalidate_server(&ServerId::new(server_id_raw)).await?;
     Ok(true)
 }
 
@@ -75,10 +73,7 @@ mod tests {
     #[test]
     fn parse_client_id_from_subject() {
         assert_eq!(
-            parse_client_id_from_notification_subject(
-                "mcp",
-                "mcp.client.desktop.notifications.tools.list_changed"
-            ),
+            parse_client_id_from_notification_subject("mcp", "mcp.client.desktop.notifications.tools.list_changed"),
             Some("desktop".into())
         );
     }

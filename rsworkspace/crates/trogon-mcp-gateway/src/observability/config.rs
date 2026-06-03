@@ -31,10 +31,7 @@ impl ObservabilityConfig {
     #[must_use]
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
         let otel_endpoint = env.var(ENV_OTEL_ENDPOINT).ok().filter(|value| !value.is_empty());
-        let otel_service_name = env
-            .var(ENV_OTEL_SERVICE_NAME)
-            .ok()
-            .filter(|value| !value.is_empty());
+        let otel_service_name = env.var(ENV_OTEL_SERVICE_NAME).ok().filter(|value| !value.is_empty());
         let siem_subject = env.var(ENV_SIEM_SUBJECT).ok().filter(|value| !value.is_empty());
         let audit_consumer_durable = env
             .var(ENV_AUDIT_CONSUMER)
@@ -116,10 +113,7 @@ mod tests {
 
     impl ReadEnv for TestEnv {
         fn var(&self, key: &str) -> Result<String, std::env::VarError> {
-            self.values
-                .get(key)
-                .cloned()
-                .ok_or(std::env::VarError::NotPresent)
+            self.values.get(key).cloned().ok_or(std::env::VarError::NotPresent)
         }
     }
 
@@ -149,10 +143,7 @@ mod tests {
         ]);
 
         let config = ObservabilityConfig::from_env(&env);
-        assert_eq!(
-            config.otel_endpoint.as_deref(),
-            Some("http://collector:4318/v1/traces")
-        );
+        assert_eq!(config.otel_endpoint.as_deref(), Some("http://collector:4318/v1/traces"));
         assert_eq!(config.otel_service_name.as_deref(), Some("gateway-siem-sidecar"));
         assert_eq!(config.siem_subject.as_deref(), Some("siem.audit.events"));
         assert_eq!(config.audit_consumer_durable, "siem-bridge-test");
@@ -198,10 +189,7 @@ mod tests {
 
     impl EnvGuard {
         fn new(keys: &[&str]) -> Self {
-            let prior = keys
-                .iter()
-                .map(|key| std::env::var(*key).ok())
-                .collect();
+            let prior = keys.iter().map(|key| std::env::var(*key).ok()).collect();
             Self {
                 keys: keys.iter().map(|key| (*key).to_string()).collect(),
                 prior,

@@ -1,9 +1,9 @@
 use std::fmt;
 
+use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use bytes::Bytes;
 use futures::TryStreamExt;
 use serde_json::Value;
-use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys,
 };

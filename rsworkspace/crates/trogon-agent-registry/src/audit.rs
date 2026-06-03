@@ -82,8 +82,17 @@ mod tests {
     fn audit_subjects_respect_custom_prefix() {
         assert_eq!(audit_put_subject("mcp"), "mcp.audit.registry.put");
         assert_eq!(audit_delete_subject("acme.mcp"), "acme.mcp.audit.registry.delete");
-        assert_eq!(audit_lookup_found_subject("acme.mcp"), "acme.mcp.audit.registry.lookup.found");
-        assert_eq!(audit_lookup_notfound_subject("mcp"), "mcp.audit.registry.lookup.notfound");
-        assert_eq!(audit_lookup_revoked_subject("acme.mcp"), "acme.mcp.audit.registry.lookup.revoked");
+        assert_eq!(
+            audit_lookup_found_subject("acme.mcp"),
+            "acme.mcp.audit.registry.lookup.found"
+        );
+        assert_eq!(
+            audit_lookup_notfound_subject("mcp"),
+            "mcp.audit.registry.lookup.notfound"
+        );
+        assert_eq!(
+            audit_lookup_revoked_subject("acme.mcp"),
+            "acme.mcp.audit.registry.lookup.revoked"
+        );
     }
 }

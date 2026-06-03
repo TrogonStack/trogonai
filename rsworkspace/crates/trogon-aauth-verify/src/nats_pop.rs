@@ -15,10 +15,10 @@ use jsonwebtoken::{
 use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::{NatsSignatureEnvelope, headers};
 
+use crate::jwks::JwksResolver;
 use crate::replay::ReplayStore;
 use crate::time_source::TimeSource;
 use crate::token::{TokenError, TokenVerifier, VerifiedAgent};
-use crate::jwks::JwksResolver;
 
 /// Errors specific to NATS PoP verification.
 #[derive(Debug, thiserror::Error)]
@@ -120,7 +120,9 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> NatsPopVerifier<R, C, S> {
             .get(headers::NATS_SIG_CREATED)
             .ok_or(NatsPopError::MissingHeader(headers::NATS_SIG_CREATED))?
             .parse()
-            .map_err(|e: std::num::ParseIntError| NatsPopError::InvalidHeader(headers::NATS_SIG_CREATED, e.to_string()))?;
+            .map_err(|e: std::num::ParseIntError| {
+                NatsPopError::InvalidHeader(headers::NATS_SIG_CREATED, e.to_string())
+            })?;
         let nonce = req
             .headers
             .get(headers::NATS_SIG_NONCE)
@@ -176,7 +178,8 @@ pub fn content_digest_sha256(payload: &[u8]) -> String {
 }
 
 fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: &str) -> Result<(), NatsPopError> {
-    let jwk: Jwk = serde_json::from_value(jwk_val.clone()).map_err(|e| NatsPopError::InvalidHeader("cnf.jwk", e.to_string()))?;
+    let jwk: Jwk =
+        serde_json::from_value(jwk_val.clone()).map_err(|e| NatsPopError::InvalidHeader("cnf.jwk", e.to_string()))?;
     let alg = match &jwk.algorithm {
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P256 => Algorithm::ES256,
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P384 => Algorithm::ES384,

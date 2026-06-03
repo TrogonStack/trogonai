@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use jsonwebtoken::{Algorithm, Header};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::jwks::Jwks;
 use crate::keys::KeyError;
-use rsa::pkcs8::{DecodePublicKey, EncodePublicKey};
 use rsa::RsaPublicKey;
+use rsa::pkcs8::{DecodePublicKey, EncodePublicKey};
 
 use crate::keys::common::{kid_from_public_der, rsa_public_der_to_jwk};
 use crate::signer::{DEFAULT_MESH_ISSUER, MeshSigner, assemble_rs256_jwt, rs256_signing_input};

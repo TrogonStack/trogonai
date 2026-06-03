@@ -28,9 +28,7 @@ pub enum AttestError {
 impl From<StsError> for AttestError {
     fn from(value: StsError) -> Self {
         match &value {
-            StsError::ServerError(_) | StsError::DependencyUnavailable(_) => {
-                Self::Unavailable(value.to_string())
-            }
+            StsError::ServerError(_) | StsError::DependencyUnavailable(_) => Self::Unavailable(value.to_string()),
             _ => Self::Denied(value.to_string()),
         }
     }
@@ -154,14 +152,10 @@ impl WorkloadAttestor for NoOpAttestor {
             .pem()
             .await
             .map_err(|e| AttestError::Unavailable(e.to_string()))?;
-        let wkl = verify_actor_token(&presented.actor_token, &bundle_pem)
-            .map_err(|e| AttestError::Denied(e.to_string()))?;
+        let wkl =
+            verify_actor_token(&presented.actor_token, &bundle_pem).map_err(|e| AttestError::Denied(e.to_string()))?;
         let spiffe_id = SpiffeId::parse(&wkl).map_err(|e| AttestError::Denied(e.to_string()))?;
-        Ok(WorkloadSvid::new(
-            spiffe_id,
-            Vec::new(),
-            presented.actor_token.clone(),
-        ))
+        Ok(WorkloadSvid::new(spiffe_id, Vec::new(), presented.actor_token.clone()))
     }
 }
 

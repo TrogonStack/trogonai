@@ -2,10 +2,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use kube::runtime::controller::{Action, Controller};
-use kube::runtime::controller::Error as ControllerError;
-use kube::runtime::watcher::Config;
 use kube::Api;
+use kube::runtime::controller::Error as ControllerError;
+use kube::runtime::controller::{Action, Controller};
+use kube::runtime::watcher::Config;
 use serde::de::DeserializeOwned;
 
 use crate::controller::ControllerContext;
@@ -45,13 +45,7 @@ pub async fn run_controller<K, ReconcileFn, Fut>(
     reconcile_fn: ReconcileFn,
 ) -> Result<(), ReconcileError>
 where
-    K: kube::Resource<DynamicType = ()>
-        + Clone
-        + std::fmt::Debug
-        + DeserializeOwned
-        + Send
-        + Sync
-        + 'static,
+    K: kube::Resource<DynamicType = ()> + Clone + std::fmt::Debug + DeserializeOwned + Send + Sync + 'static,
     ReconcileFn: Fn(Arc<K>, Arc<ControllerContext>) -> Fut + Send + Sync + Clone + 'static,
     Fut: std::future::Future<Output = Result<Action, ConfigKvError>> + Send + 'static,
 {

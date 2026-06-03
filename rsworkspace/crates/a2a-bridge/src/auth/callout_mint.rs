@@ -1,11 +1,10 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use async_trait::async_trait;
 use a2a_auth_callout::{
-    AuthDispatcher, BridgeAuthScheme, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse,
-    ServerAuthRequestClaims,
+    AuthDispatcher, BridgeAuthScheme, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse, ServerAuthRequestClaims,
 };
+use async_trait::async_trait;
 
 use super::{AuthMintWire, BytesPayload};
 use crate::error::BridgeError;
@@ -65,8 +64,8 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
                 api_key: None,
             });
         }
-        let claims = ServerAuthRequestClaims::from_bridge_mint(request)
-            .map_err(|e| BridgeError::Mint(e.to_string()))?;
+        let claims =
+            ServerAuthRequestClaims::from_bridge_mint(request).map_err(|e| BridgeError::Mint(e.to_string()))?;
         let user_jwt = self
             .dispatcher
             .dispatch(claims)
@@ -84,15 +83,11 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::C
     use std::sync::Arc;
     use std::time::Duration;
 
-    use a2a_auth_callout::{
-        CalloutDispatcher, CalloutDispatcherConfig, StaticAccountResolver,
-    };
     use a2a_auth_callout::credentials::oidc::{BearerToken, OidcVerifier};
-    use a2a_auth_callout::jwt::{
-        AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims,
-    };
-    use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+    use a2a_auth_callout::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
     use a2a_auth_callout::permissions::IssuedPermissions;
+    use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+    use a2a_auth_callout::{CalloutDispatcher, CalloutDispatcherConfig, StaticAccountResolver};
     use serde_json::json;
 
     struct HarnessOidcVerifier {
@@ -152,11 +147,8 @@ mod tests {
         let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
         let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
         let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
-        let client = AuthCalloutJsonMintClient::with_tenant_account(
-            wire,
-            "a2a.bridge.auth.callout.request",
-            Some(tenant),
-        );
+        let client =
+            AuthCalloutJsonMintClient::with_tenant_account(wire, "a2a.bridge.auth.callout.request", Some(tenant));
         let jwt = client
             .mint(&CallerHttpsAuth::new("Bearer fixture-token"))
             .await

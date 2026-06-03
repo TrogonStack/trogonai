@@ -8,10 +8,7 @@ use super::errors::CelBuiltinsError;
 pub(crate) const NOW_NAME: &str = "time.now";
 
 pub fn now() -> Result<Value, CelBuiltinsError> {
-    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(
-        NOW_NAME,
-        "host eval context missing",
-    ))?;
+    let host = current_host_eval().ok_or(CelBuiltinsError::policy_fault(NOW_NAME, "host eval context missing"))?;
     Ok(Value::Int(host.now_unix_ms()))
 }
 
@@ -22,7 +19,7 @@ mod tests {
     use cel_interpreter::Value;
 
     use super::{NOW_NAME, now};
-    use crate::cel_builtins::context::{with_host_eval, HostEvalContext};
+    use crate::cel_builtins::context::{HostEvalContext, with_host_eval};
 
     #[test]
     fn now_returns_pinned_clock_ms() {

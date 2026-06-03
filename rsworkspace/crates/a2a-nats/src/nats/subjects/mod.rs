@@ -207,10 +207,7 @@ mod tests {
         let patterns = A2aStream::Events.subject_patterns(&p("a2a"));
         assert_eq!(patterns, vec!["a2a.task.*.events.*"]);
         let dlq_patterns = A2aStream::PushDlq.subject_patterns(&p("a2a"));
-        assert_eq!(
-            dlq_patterns,
-            vec!["a2a.push.dlq.*.*", "a2a.push.dlq.mirror.*.*"]
-        );
+        assert_eq!(dlq_patterns, vec!["a2a.push.dlq.*.*", "a2a.push.dlq.mirror.*.*"]);
     }
 
     #[test]

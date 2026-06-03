@@ -6,8 +6,7 @@ use kube::Client;
 use tracing_subscriber::EnvFilter;
 
 use trogon_gateway_k8s::controller::{
-    run_gateway_controller, run_http_route_controller, run_mcp_gateway_config_controller,
-    ControllerContext,
+    ControllerContext, run_gateway_controller, run_http_route_controller, run_mcp_gateway_config_controller,
 };
 use trogon_gateway_k8s::health;
 use trogon_gateway_k8s::nats::open_default_config_kv;
@@ -51,8 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let client = Client::try_default().await?;
-    let kv_store =
-        open_default_config_kv(&args.nats_url, args.nats_creds.as_deref()).await?;
+    let kv_store = open_default_config_kv(&args.nats_url, args.nats_creds.as_deref()).await?;
     let kv: Arc<dyn trogon_gateway_k8s::nats::ConfigKv> = Arc::new(kv_store);
     let ctx = Arc::new(ControllerContext {
         client: client.clone(),

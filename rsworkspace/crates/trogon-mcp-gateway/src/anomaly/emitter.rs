@@ -40,10 +40,7 @@ impl AnomalyEmitter {
         }
     }
 
-    fn build_from_snapshot(
-        &self,
-        snapshot: &AnomalyIngressSnapshot,
-    ) -> Result<AnomalyFeatures, AnomalyError> {
+    fn build_from_snapshot(&self, snapshot: &AnomalyIngressSnapshot) -> Result<AnomalyFeatures, AnomalyError> {
         let mut novelty = self
             .novelty
             .lock()
@@ -65,8 +62,7 @@ impl AnomalyEmit for AnomalyEmitter {
 
     async fn emit(&self, features: &AnomalyFeatures) -> Result<(), AnomalyError> {
         let subject = subject_for_tenant(self.prefix.as_ref(), &features.tenant_id);
-        let payload =
-            serde_json::to_vec(features).map_err(AnomalyError::SerializeFailed)?;
+        let payload = serde_json::to_vec(features).map_err(AnomalyError::SerializeFailed)?;
         self.client
             .publish(subject, payload.into())
             .await

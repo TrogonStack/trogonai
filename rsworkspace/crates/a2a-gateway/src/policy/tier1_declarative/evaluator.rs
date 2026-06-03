@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use a2a_auth_callout::SpiceDbSubject;
-use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::A2aMethod;
+use a2a_nats::agent_id::A2aAgentId;
 use trogon_std::env::ReadEnv;
 
 use super::bundle::{
@@ -115,9 +115,7 @@ impl Tier1DeclarativeGate for RealTier1DeclarativeGate {
                     Tier1DeclarativeEffect::Allow => Tier1DeclarativeDecision::Allow {
                         rule: Some(rule.id.clone()),
                     },
-                    Tier1DeclarativeEffect::Deny => Tier1DeclarativeDecision::Deny {
-                        rule: rule.id.clone(),
-                    },
+                    Tier1DeclarativeEffect::Deny => Tier1DeclarativeDecision::Deny { rule: rule.id.clone() },
                 };
             }
         }
@@ -127,15 +125,12 @@ impl Tier1DeclarativeGate for RealTier1DeclarativeGate {
 }
 
 fn rule_matches_all(ctx: &Tier1DeclarativeContext, rule: &Tier1DeclarativeRule, clock: &dyn Tier1Clock) -> bool {
-    rule.matches
-        .iter()
-        .all(|item| match_hits(ctx, item, clock))
+    rule.matches.iter().all(|item| match_hits(ctx, item, clock))
 }
 
 fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock: &dyn Tier1Clock) -> bool {
     let matched = match item.kind {
-        Tier1ResourceKind::TimeOfDay => time_of_day_pattern_matches(&item.pattern, clock.now())
-            .unwrap_or(false),
+        Tier1ResourceKind::TimeOfDay => time_of_day_pattern_matches(&item.pattern, clock.now()).unwrap_or(false),
         kind => {
             let value = field_value(ctx, kind);
             pattern_matches(&item.pattern, &value)
@@ -205,10 +200,7 @@ impl fmt::Display for Tier1DeclarativeBuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBundleDir(path) => write!(f, "invalid tier-1 declarative bundle dir: {path}"),
-            Self::MissingBundleDir => write!(
-                f,
-                "{ENV_TIER1_DECLARATIVE_ENABLED}=on requires {ENV_TIER1_BUNDLE_DIR}"
-            ),
+            Self::MissingBundleDir => write!(f, "{ENV_TIER1_DECLARATIVE_ENABLED}=on requires {ENV_TIER1_BUNDLE_DIR}"),
             Self::Load(error) => write!(f, "{error}"),
         }
     }
@@ -265,9 +257,7 @@ fn tier1_declarative_enabled<E: ReadEnv>(env: &E) -> bool {
 
 pub fn tier1_declarative_audit_rule_fired(decision: &Tier1DeclarativeDecision) -> String {
     match decision {
-        Tier1DeclarativeDecision::Allow { rule: None } => {
-            "gateway.tier1.declarative.no_match_default_allow".into()
-        }
+        Tier1DeclarativeDecision::Allow { rule: None } => "gateway.tier1.declarative.no_match_default_allow".into(),
         Tier1DeclarativeDecision::Allow { rule: Some(id) } => {
             format!("gateway.tier1.declarative.allowed.{}", id.as_str())
         }
@@ -283,8 +273,7 @@ mod tests {
 
     use super::*;
     use crate::policy::tier1_declarative::bundle::{
-        Tier1DeclarativeEffect, Tier1DeclarativeMatch, Tier1DeclarativeRule, Tier1DeclarativeRuleId,
-        Tier1ResourceKind,
+        Tier1DeclarativeEffect, Tier1DeclarativeMatch, Tier1DeclarativeRule, Tier1DeclarativeRuleId, Tier1ResourceKind,
     };
 
     fn ctx(method: A2aMethod, agent: &str, caller: Option<&str>, subject: &str) -> Tier1DeclarativeContext {
@@ -296,7 +285,12 @@ mod tests {
         )
     }
 
-    fn rule(id: &str, priority: u32, effect: Tier1DeclarativeEffect, matches: Vec<Tier1DeclarativeMatch>) -> Tier1DeclarativeRule {
+    fn rule(
+        id: &str,
+        priority: u32,
+        effect: Tier1DeclarativeEffect,
+        matches: Vec<Tier1DeclarativeMatch>,
+    ) -> Tier1DeclarativeRule {
         Tier1DeclarativeRule {
             id: Tier1DeclarativeRuleId::new(id),
             matches,
@@ -338,21 +332,13 @@ mod tests {
                 "deny-planner",
                 100,
                 Tier1DeclarativeEffect::Deny,
-                vec![Tier1DeclarativeMatch::new(
-                    Tier1ResourceKind::AgentId,
-                    "other",
-                    false,
-                )],
+                vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "other", false)],
             ),
             rule(
                 "allow-planner",
                 50,
                 Tier1DeclarativeEffect::Allow,
-                vec![Tier1DeclarativeMatch::new(
-                    Tier1ResourceKind::AgentId,
-                    "planner",
-                    false,
-                )],
+                vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false)],
             ),
         ]));
 
@@ -377,21 +363,13 @@ mod tests {
                 "allow-low",
                 10,
                 Tier1DeclarativeEffect::Allow,
-                vec![Tier1DeclarativeMatch::new(
-                    Tier1ResourceKind::AgentId,
-                    "planner",
-                    false,
-                )],
+                vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false)],
             ),
             rule(
                 "deny-high",
                 100,
                 Tier1DeclarativeEffect::Deny,
-                vec![Tier1DeclarativeMatch::new(
-                    Tier1ResourceKind::AgentId,
-                    "planner",
-                    false,
-                )],
+                vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false)],
             ),
         ]));
 
@@ -414,8 +392,14 @@ mod tests {
         assert!(pattern_matches("message/send", "message/send"));
         assert!(!pattern_matches("message/send", "message/stream"));
         assert!(pattern_matches("user/*", "user/alice"));
-        assert!(pattern_matches("a2a.gateway.*.message.send", "a2a.gateway.planner.message.send"));
-        assert!(!pattern_matches("a2a.gateway.*.message.send", "a2a.gateway.planner.message.stream"));
+        assert!(pattern_matches(
+            "a2a.gateway.*.message.send",
+            "a2a.gateway.planner.message.send"
+        ));
+        assert!(!pattern_matches(
+            "a2a.gateway.*.message.send",
+            "a2a.gateway.planner.message.stream"
+        ));
     }
 
     #[test]

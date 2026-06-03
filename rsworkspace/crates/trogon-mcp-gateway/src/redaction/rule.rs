@@ -9,9 +9,7 @@ impl JsonPath {
             return Err(RedactionError::InvalidPath("path must not be empty".into()));
         }
         if !s.starts_with('$') {
-            return Err(RedactionError::InvalidPath(format!(
-                "path must start with $: {s}"
-            )));
+            return Err(RedactionError::InvalidPath(format!("path must start with $: {s}")));
         }
         Ok(Self(s.to_owned()))
     }
@@ -28,10 +26,7 @@ pub enum RedactionAction {
     Hash,
     Drop,
     Replace(String),
-    RegexReplace {
-        pattern: String,
-        replacement: String,
-    },
+    RegexReplace { pattern: String, replacement: String },
 }
 
 impl RedactionAction {
@@ -66,17 +61,11 @@ mod tests {
 
     #[test]
     fn parse_rejects_empty_string() {
-        assert!(matches!(
-            JsonPath::parse(""),
-            Err(RedactionError::InvalidPath(_))
-        ));
+        assert!(matches!(JsonPath::parse(""), Err(RedactionError::InvalidPath(_))));
     }
 
     #[test]
     fn parse_rejects_missing_dollar_prefix() {
-        assert!(matches!(
-            JsonPath::parse("foo"),
-            Err(RedactionError::InvalidPath(_))
-        ));
+        assert!(matches!(JsonPath::parse("foo"), Err(RedactionError::InvalidPath(_))));
     }
 }

@@ -45,10 +45,7 @@ impl PluginRegistry {
 
     #[must_use]
     pub fn plugins_for(&self, stage: PluginStage) -> &[String] {
-        self.chains
-            .get(&stage)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        self.chains.get(&stage).map(Vec::as_slice).unwrap_or(&[])
     }
 
     #[must_use]
@@ -77,10 +74,7 @@ mod tests {
             registry.plugins_for(PluginStage::PreAuthz),
             &["risk-scorer".to_string()]
         );
-        assert_eq!(
-            registry.plugins_for(PluginStage::PreCall),
-            &["redaction".to_string()]
-        );
+        assert_eq!(registry.plugins_for(PluginStage::PreCall), &["redaction".to_string()]);
         assert!(registry.plugins_for(PluginStage::PostCall).is_empty());
         assert!(!registry.is_empty());
     }

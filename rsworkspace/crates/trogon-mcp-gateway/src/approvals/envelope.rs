@@ -60,10 +60,7 @@ pub fn build_approval_required_with_subject(
 }
 
 #[must_use]
-pub fn jsonrpc_error_with_approval_data(
-    id: Option<Value>,
-    data: Value,
-) -> Value {
+pub fn jsonrpc_error_with_approval_data(id: Option<Value>, data: Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -103,10 +100,7 @@ mod tests {
         assert_eq!(body["request_id"], "req-abc");
         assert_eq!(body["ttl_seconds"], 300);
         assert_eq!(body["reason"], "high_risk_tool");
-        assert!(body["approval_url"]
-            .as_str()
-            .unwrap()
-            .ends_with("/approvals/req-abc"));
+        assert!(body["approval_url"].as_str().unwrap().ends_with("/approvals/req-abc"));
     }
 
     #[test]

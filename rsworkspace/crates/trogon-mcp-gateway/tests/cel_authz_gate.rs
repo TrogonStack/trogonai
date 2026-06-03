@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use cel_interpreter::{to_value, Context, Program, Value};
-use trogon_mcp_gateway::cel_builtins::{register_all, with_host_eval, HostEvalContext};
+use cel_interpreter::{Context, Program, Value, to_value};
+use trogon_mcp_gateway::cel_builtins::{HostEvalContext, register_all, with_host_eval};
 use trogon_mcp_gateway::policy::SpicedbGatePolicy;
 
 mod gate_selection {
@@ -62,9 +62,7 @@ mod host_builtins_wiring {
     #[test]
     fn cache_roundtrip_in_policy_context() {
         assert_eq!(
-            eval(
-                r#"cache.set("k", {"v": 1}, duration("30s")) && cache.get("k").v == 1"#
-            ),
+            eval(r#"cache.set("k", {"v": 1}, duration("30s")) && cache.get("k").v == 1"#),
             Value::Bool(true)
         );
     }
@@ -72,9 +70,7 @@ mod host_builtins_wiring {
     #[test]
     fn jsonpath_has_on_mcp_params() {
         assert_eq!(
-            eval(
-                r#"jsonpath.has(mcp, "$.method") && jsonpath.extract(mcp, "$.method") == "tools/call""#
-            ),
+            eval(r#"jsonpath.has(mcp, "$.method") && jsonpath.extract(mcp, "$.method") == "tools/call""#),
             Value::Bool(true)
         );
     }
@@ -82,9 +78,7 @@ mod host_builtins_wiring {
     #[test]
     fn audit_emit_and_time_now_succeed() {
         assert_eq!(
-            eval(
-                r#"audit.emit({"rule": "gate"}) && time.now() == 1700000000000"#
-            ),
+            eval(r#"audit.emit({"rule": "gate"}) && time.now() == 1700000000000"#),
             Value::Bool(true)
         );
     }

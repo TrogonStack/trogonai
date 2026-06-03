@@ -13,8 +13,8 @@ use crate::proto::envoy::config::core::v3::GrpcService;
 use crate::proto::envoy::config::rbac::v3::permission;
 use crate::proto::envoy::config::rbac::v3::rbac;
 use crate::proto::envoy::config::rbac::v3::{Permission, Policy, Principal, Rbac as RbacPolicy};
-use crate::proto::envoy::extensions::filters::http::ext_authz::v3::ext_authz;
 use crate::proto::envoy::extensions::filters::http::ext_authz::v3::ExtAuthz;
+use crate::proto::envoy::extensions::filters::http::ext_authz::v3::ext_authz;
 use crate::proto::envoy::extensions::filters::http::rbac::v3::Rbac as HttpRbacFilter;
 use crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::http_filter;
 use crate::proto::envoy::r#type::matcher::v3::path_matcher;
@@ -41,9 +41,7 @@ pub fn map_policies(policies: &[PolicyRule]) -> RbacMapping {
                 let permission = Permission {
                     rule: Some(permission::Rule::UrlPath(PathMatcher {
                         rule: Some(path_matcher::Rule::Path(StringMatcher {
-                            match_pattern: Some(string_matcher::MatchPattern::Prefix(
-                                format!("/{method}"),
-                            )),
+                            match_pattern: Some(string_matcher::MatchPattern::Prefix(format!("/{method}"))),
                             ..Default::default()
                         })),
                     })),
@@ -91,9 +89,7 @@ pub fn map_policies(policies: &[PolicyRule]) -> RbacMapping {
             Policy {
                 permissions: allow_permissions,
                 principals: vec![Principal {
-                    identifier: Some(
-                        crate::proto::envoy::config::rbac::v3::principal::Identifier::Any(true),
-                    ),
+                    identifier: Some(crate::proto::envoy::config::rbac::v3::principal::Identifier::Any(true)),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -106,9 +102,7 @@ pub fn map_policies(policies: &[PolicyRule]) -> RbacMapping {
             Policy {
                 permissions: deny_permissions,
                 principals: vec![Principal {
-                    identifier: Some(
-                        crate::proto::envoy::config::rbac::v3::principal::Identifier::Any(true),
-                    ),
+                    identifier: Some(crate::proto::envoy::config::rbac::v3::principal::Identifier::Any(true)),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -197,19 +191,25 @@ fn parse_header_eq(cel: &str) -> Option<(String, String)> {
 }
 
 impl RbacMapping {
-    pub fn http_filter(&self) -> Option<crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter> {
+    pub fn http_filter(
+        &self,
+    ) -> Option<crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter> {
         let rbac = self.filters.first()?.1.clone();
-        Some(crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter {
-            name: "envoy.filters.http.rbac".into(),
-            config_type: Some(http_filter::ConfigType::TypedConfig(Any {
-                type_url: type_urls::RBAC.into(),
-                value: rbac.encode_to_vec(),
-            })),
-            ..Default::default()
-        })
+        Some(
+            crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter {
+                name: "envoy.filters.http.rbac".into(),
+                config_type: Some(http_filter::ConfigType::TypedConfig(Any {
+                    type_url: type_urls::RBAC.into(),
+                    value: rbac.encode_to_vec(),
+                })),
+                ..Default::default()
+            },
+        )
     }
 
-    pub fn ext_authz_filter(&self) -> Option<crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter> {
+    pub fn ext_authz_filter(
+        &self,
+    ) -> Option<crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter> {
         if !self.requires_ext_authz {
             return None;
         }
@@ -227,16 +227,16 @@ impl RbacMapping {
             })),
             ..Default::default()
         };
-        Some(crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter {
-            name: "envoy.filters.http.ext_authz".into(),
-            config_type: Some(http_filter::ConfigType::TypedConfig(Any {
-                type_url:
-                    "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz"
-                        .into(),
-                value: ext_authz.encode_to_vec(),
-            })),
-            ..Default::default()
-        })
+        Some(
+            crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter {
+                name: "envoy.filters.http.ext_authz".into(),
+                config_type: Some(http_filter::ConfigType::TypedConfig(Any {
+                    type_url: "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz".into(),
+                    value: ext_authz.encode_to_vec(),
+                })),
+                ..Default::default()
+            },
+        )
     }
 }
 

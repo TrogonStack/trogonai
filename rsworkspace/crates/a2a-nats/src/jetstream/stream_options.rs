@@ -4,8 +4,7 @@ use trogon_std::env::ReadEnv;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::{
-    DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS, DEFAULT_STREAM_MAX_AGE, ENV_EVENTS_MAX_AGE_SECS,
-    ENV_PUSH_DLQ_DEDUP_WINDOW_SECS,
+    DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS, DEFAULT_STREAM_MAX_AGE, ENV_EVENTS_MAX_AGE_SECS, ENV_PUSH_DLQ_DEDUP_WINDOW_SECS,
 };
 use crate::nats::subjects::A2aStream;
 
@@ -85,7 +84,10 @@ pub fn push_dlq_duplicate_window_from_env<E: ReadEnv>(env: &E) -> PushDlqDuplica
         .unwrap_or(PushDlqDuplicateWindow::DEFAULT)
 }
 
-pub fn all_configs_with_options(prefix: &A2aPrefix, options: &StreamProvisionOptions) -> [async_nats::jetstream::stream::Config; 2] {
+pub fn all_configs_with_options(
+    prefix: &A2aPrefix,
+    options: &StreamProvisionOptions,
+) -> [async_nats::jetstream::stream::Config; 2] {
     [
         A2aStream::events_config(prefix, options.events_max_age),
         A2aStream::push_dlq_config(prefix, options.push_dlq_duplicate_window.as_duration()),

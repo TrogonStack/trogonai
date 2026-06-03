@@ -53,9 +53,7 @@ impl InflightRegistry {
     pub fn try_acquire(&self, key: &str, cap: u32) -> Result<InflightReleaseKey, u64> {
         let now = Instant::now();
         let mut map = self.counters.lock().expect("inflight map lock");
-        let counter = map
-            .entry(key.to_string())
-            .or_insert_with(|| InflightCounter::new(cap));
+        let counter = map.entry(key.to_string()).or_insert_with(|| InflightCounter::new(cap));
         counter.cap = cap;
         counter.try_acquire(now)?;
         Ok(InflightReleaseKey(key.to_string()))

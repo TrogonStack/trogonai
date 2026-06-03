@@ -6,9 +6,9 @@ use futures::StreamExt as _;
 use tokio_util::sync::CancellationToken;
 use tracing::{instrument, warn};
 
+use crate::agent::PrincipalCarrier;
 use crate::agent::handler::{A2aError, A2aHandler};
 use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
-use crate::agent::PrincipalCarrier;
 use crate::agent_id::A2aAgentId;
 use crate::audit::emitter::AuditEmitter;
 use crate::audit::task_lifecycle::TaskLifecycleEnvelope;
@@ -965,8 +965,8 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_push_dlq_subject_from_nats_principal_header() {
-        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
         use crate::agent::principal_carrier::principal_header_fixture;
+        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();

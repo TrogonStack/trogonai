@@ -7,7 +7,7 @@ pub use jwks::Jwks;
 pub use keys::file::FileKeySource;
 pub use keys::{JwksState, KeyError, KeySource};
 pub use signer::{
-    DEFAULT_MESH_ISSUER, DEFAULT_JWT_LEEWAY_SECS, MAX_MESH_TOKEN_TTL_SECS, MIN_ROTATION_OVERLAP_SECS, MeshSigner,
+    DEFAULT_JWT_LEEWAY_SECS, DEFAULT_MESH_ISSUER, MAX_MESH_TOKEN_TTL_SECS, MIN_ROTATION_OVERLAP_SECS, MeshSigner,
 };
 
 #[cfg(feature = "file-pem")]

@@ -239,7 +239,10 @@ mod tests {
         let tid = A2aTaskId::new("task7").unwrap();
         let p = a2a_auth_callout::SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "c1.d2"}));
         let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-        assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.push.dlq.c1_d2.task7");
+        assert_eq!(
+            push_dlq_publish_subject(&prefix, &cid, &tid),
+            "a2a.push.dlq.c1_d2.task7"
+        );
     }
 
     #[test]
@@ -248,10 +251,7 @@ mod tests {
         let tid = A2aTaskId::new("task7").unwrap();
         let p = a2a_auth_callout::SpiceDbPrincipal(serde_json::json!({}));
         let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-        assert_eq!(
-            push_dlq_publish_subject(&prefix, &cid, &tid),
-            "a2a.push.dlq._.task7"
-        );
+        assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.push.dlq._.task7");
     }
 
     #[tokio::test]
@@ -262,9 +262,7 @@ mod tests {
         let task_id = A2aTaskId::new("task-1").unwrap();
         let config = sample_config();
         let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
-            raw: "bad".into(),
-        });
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
         publish_push_delivery_failure(
             &js,
@@ -301,9 +299,7 @@ mod tests {
         let prefix = prefix();
         let task_id = A2aTaskId::new("task-1").unwrap();
         let config = sample_config();
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
-            raw: "bad".into(),
-        });
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
         publish_push_delivery_failure(
             &js,
@@ -340,9 +336,7 @@ mod tests {
         let prefix = prefix();
         let task_id = A2aTaskId::new("task-1").unwrap();
         let config = sample_config();
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
-            raw: "bad".into(),
-        });
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
 
         publish_push_delivery_failure(
             &js,

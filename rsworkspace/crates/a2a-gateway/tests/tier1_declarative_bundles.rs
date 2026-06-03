@@ -8,9 +8,9 @@ use a2a_gateway::policy::tier1_declarative::{
     FixedTier1Clock, RealTier1DeclarativeGate, Tier1DeclarativeBundle, Tier1DeclarativeContext,
     Tier1DeclarativeDecision, Tier1DeclarativeGate, Tier1DeclarativeRuleId, tier1_declarative_audit_rule_fired,
 };
+use a2a_nats::A2aMethod;
 use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::ingress_gateway_declarative_denied_response_bytes;
-use a2a_nats::A2aMethod;
 
 fn reference_policies_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../a2a-pack/policies")
@@ -23,12 +23,7 @@ fn load_reference_bundle(filename: &str) -> Tier1DeclarativeBundle {
     Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load bundle")
 }
 
-fn ctx(
-    method: A2aMethod,
-    agent: &str,
-    caller_subject: Option<&str>,
-    nats_subject: &str,
-) -> Tier1DeclarativeContext {
+fn ctx(method: A2aMethod, agent: &str, caller_subject: Option<&str>, nats_subject: &str) -> Tier1DeclarativeContext {
     Tier1DeclarativeContext::new(
         method,
         A2aAgentId::new(agent).expect("agent id"),
@@ -59,12 +54,7 @@ fn per_method_allowlist_allows_enumerated_methods() {
         A2aMethod::TasksList,
         A2aMethod::PushNotificationSet,
     ] {
-        let decision = gate.evaluate(&ctx(
-            method,
-            "planner",
-            Some("user/alice"),
-            &subject,
-        ));
+        let decision = gate.evaluate(&ctx(method, "planner", Some("user/alice"), &subject));
         assert!(
             matches!(decision, Tier1DeclarativeDecision::Allow { .. }),
             "expected allow, got {decision:?}"
@@ -127,12 +117,7 @@ fn per_agent_allowlist_allows_configured_callers() {
     let subject = ingress_subject("planner", "message.send");
 
     for caller in ["user/alice", "user/bob", "service/internal-bot"] {
-        let decision = gate.evaluate(&ctx(
-            A2aMethod::MessageSend,
-            "planner",
-            Some(caller),
-            &subject,
-        ));
+        let decision = gate.evaluate(&ctx(A2aMethod::MessageSend, "planner", Some(caller), &subject));
         assert_eq!(decision, Tier1DeclarativeDecision::Allow { rule: None });
     }
 }

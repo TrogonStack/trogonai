@@ -1,6 +1,6 @@
 use async_nats::HeaderMap;
 
-use a2a_auth_callout::{CallerJwtHeaderValue, MintedUserJwt, CALLER_JWT_HEADER_NAME};
+use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::constants::REQ_ID_HEADER;
 use crate::req_id::ReqId;
@@ -13,7 +13,10 @@ pub(crate) fn agent_rpc_headers(req_id: &ReqId) -> HeaderMap {
     headers
 }
 
-pub(crate) fn gateway_ingress_rpc_headers(req_id: &ReqId, caller_jwt: &MintedUserJwt) -> Result<HeaderMap, ClientError> {
+pub(crate) fn gateway_ingress_rpc_headers(
+    req_id: &ReqId,
+    caller_jwt: &MintedUserJwt,
+) -> Result<HeaderMap, ClientError> {
     caller_jwt
         .ensure_fresh()
         .map_err(|e| ClientError::GatewayCallerJwtExpired(e.to_string()))?;

@@ -30,14 +30,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mcp_nats::{Config as McpConfig, McpPrefix};
-use trogon_mcp_gateway::authz::AllowAllPermissionChecker;
-use trogon_mcp_gateway::gateway::GatewaySettings;
-use trogon_mcp_gateway::rpc_codes;
 use futures::StreamExt;
+use mcp_nats::{Config as McpConfig, McpPrefix};
 use trogon_mcp_gateway::anomaly::{
     AnomalyEmit, AnomalyEmitter, AnomalyFeatures, NoveltyTracker, RateTracker, subject_for_tenant,
 };
+use trogon_mcp_gateway::authz::AllowAllPermissionChecker;
+use trogon_mcp_gateway::gateway::GatewaySettings;
+use trogon_mcp_gateway::rpc_codes;
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 
 const POLICY_DENY: i32 = rpc_codes::POLICY_DENY;
@@ -214,7 +214,11 @@ mod request_rate {
     #[tokio::test]
     #[ignore = "scaffold; implement when risk features per Pin 8 land"]
     async fn cel_rule_denies_when_request_rate_exceeds_100_per_minute() {
-        let _ = (POLICY_DENY, harness::CEL_REQUEST_RATE_RULE, harness::REQUEST_RATE_DENY_THRESHOLD);
+        let _ = (
+            POLICY_DENY,
+            harness::CEL_REQUEST_RATE_RULE,
+            harness::REQUEST_RATE_DENY_THRESHOLD,
+        );
         // Arrange: bundle CEL deny rule `risk.request_rate_1m_per_caller > 100`; single caller JWT.
         // Act: send 101 tools/list within 60 s via gateway ingress.
         // Assert: 101st returns JSON-RPC error.code == POLICY_DENY (-32100).

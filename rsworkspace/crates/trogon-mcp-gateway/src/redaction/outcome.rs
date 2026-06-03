@@ -24,9 +24,7 @@ pub struct RedactionOutcome {
 impl RedactionOutcome {
     #[must_use]
     pub fn empty() -> Self {
-        Self {
-            rewrites: Vec::new(),
-        }
+        Self { rewrites: Vec::new() }
     }
 }
 

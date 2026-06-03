@@ -2,6 +2,7 @@
 //!
 //! See `docs/identity/agent-traffic.md` for schema, projector design, and SIEM format.
 
+pub mod chain_explorer;
 pub mod envelope;
 pub mod error;
 pub mod event;
@@ -9,17 +10,16 @@ pub mod indexer;
 pub mod projector;
 pub mod query;
 pub mod siem;
-pub mod chain_explorer;
 
 pub use envelope::AuditEnvelope;
 pub use error::{IndexerError, ProjectorError, TrafficViewError};
 pub use event::{ActChainHop, TrafficDecision, TrafficEvent, TrafficQueryFilter, TrafficSource};
-pub use indexer::postgres::PostgresIndexer;
 pub use indexer::TrafficIndex;
-pub use projector::consumer::{ensure_audit_stream, JetStreamAuditConsumer};
+pub use indexer::postgres::PostgresIndexer;
+pub use projector::consumer::{JetStreamAuditConsumer, ensure_audit_stream};
 pub use projector::{
-    normalize, AuditConsumer, AuditProjector, ProjectingConsumer, DURABLE_CONSUMER, DEFAULT_STREAM,
-    REGISTRY_FILTER, STS_FILTER,
+    AuditConsumer, AuditProjector, DEFAULT_STREAM, DURABLE_CONSUMER, ProjectingConsumer, REGISTRY_FILTER, STS_FILTER,
+    normalize,
 };
 pub use query::{parse_since, render_table};
 pub use siem::ocsf::{DefaultOcsfExporter, OcsfExporter, emit_ndjson};

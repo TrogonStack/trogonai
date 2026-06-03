@@ -87,8 +87,7 @@ impl Default for RateLimiter {
 impl RateLimiter {
     #[must_use]
     pub fn new(config: RateLimitConfig) -> Self {
-        let caller_budget =
-            CallerBudgetRegistry::new(config.caller_window, config.caller_budget);
+        let caller_budget = CallerBudgetRegistry::new(config.caller_window, config.caller_budget);
         Self {
             config,
             server_inflight: InflightRegistry::default(),
@@ -111,10 +110,13 @@ impl RateLimiter {
             tenant: tenant.to_string(),
             sub: sub.to_string(),
         };
-        self.caller_budget.try_consume(&key).err().map(|retry_after_ms| RateLimitDeny {
-            scope: RateLimitScope::Caller,
-            retry_after_ms,
-        })
+        self.caller_budget
+            .try_consume(&key)
+            .err()
+            .map(|retry_after_ms| RateLimitDeny {
+                scope: RateLimitScope::Caller,
+                retry_after_ms,
+            })
     }
 
     /// Acquire tenant then server inflight slots; releases tenant on server deny.
@@ -131,10 +133,10 @@ impl RateLimiter {
             });
         }
 
-        let tenant_key = match self.tenant_inflight.try_acquire(
-            tenant,
-            self.config.tenant_inflight_max,
-        ) {
+        let tenant_key = match self
+            .tenant_inflight
+            .try_acquire(tenant, self.config.tenant_inflight_max)
+        {
             Ok(key) => Some(key),
             Err(_) => {
                 return Err(RateLimitDeny {

@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode, jwk::JwkSet};
 use serde::{Deserialize, Serialize};
-use trogon_aauth_verify::{JwksResolver, TokenVerifier, jwk_thumbprint};
 use trogon_aauth_verify::time_source::TimeSource;
+use trogon_aauth_verify::{JwksResolver, TokenVerifier, jwk_thumbprint};
 use trogon_identity_types::aauth::{DWK_AGENT, TYP_AGENT, TYP_AUTH};
 
 use crate::policy::{ConsentContext, ConsentDecision, ConsentPolicy};
@@ -87,8 +87,7 @@ where
 {
     pub async fn bootstrap(&self, req: BootstrapRequest) -> Result<BootstrapResponse, PersonError> {
         // Derive `jkt` from the supplied JWK; reject malformed keys.
-        let jkt = jwk_thumbprint(&req.cnf_jwk)
-            .map_err(|e| PersonError::BadRequest(format!("cnf_jwk: {e}")))?;
+        let jkt = jwk_thumbprint(&req.cnf_jwk).map_err(|e| PersonError::BadRequest(format!("cnf_jwk: {e}")))?;
 
         let agent_id = req
             .agent_id_hint
@@ -125,8 +124,7 @@ where
             "ps": self.iss,
         });
 
-        let agent_jwt = encode(&header, &claims, &self.signing_key)
-            .map_err(|e| PersonError::Encode(e.to_string()))?;
+        let agent_jwt = encode(&header, &claims, &self.signing_key).map_err(|e| PersonError::Encode(e.to_string()))?;
 
         Ok(BootstrapResponse {
             agent_jwt,
@@ -181,7 +179,10 @@ where
             .await;
 
         let (granted_scope, ttl_secs) = match decision {
-            ConsentDecision::Allow { granted_scope, ttl_secs } => (granted_scope, ttl_secs),
+            ConsentDecision::Allow {
+                granted_scope,
+                ttl_secs,
+            } => (granted_scope, ttl_secs),
             ConsentDecision::Interaction { url, code } => {
                 return Err(PersonError::RequiresInteraction { url, code });
             }
@@ -223,8 +224,7 @@ where
             "resource": resource_claims.iss,
         });
 
-        let auth_jwt = encode(&header, &claims, &self.signing_key)
-            .map_err(|e| PersonError::Encode(e.to_string()))?;
+        let auth_jwt = encode(&header, &claims, &self.signing_key).map_err(|e| PersonError::Encode(e.to_string()))?;
 
         Ok(TokenResponse {
             auth_jwt,
@@ -249,4 +249,3 @@ fn short(s: &str) -> String {
 fn jti(iat: i64, jkt: &str) -> String {
     format!("ps-{:x}-{}", iat, short(jkt))
 }
-

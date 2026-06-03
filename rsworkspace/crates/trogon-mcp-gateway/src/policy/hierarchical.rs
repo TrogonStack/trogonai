@@ -40,13 +40,7 @@ pub enum PolicyLevel {
 }
 
 impl PolicyLevel {
-    pub const ORDER: [Self; 5] = [
-        Self::Org,
-        Self::Tenant,
-        Self::ServerGroup,
-        Self::Server,
-        Self::Method,
-    ];
+    pub const ORDER: [Self; 5] = [Self::Org, Self::Tenant, Self::ServerGroup, Self::Server, Self::Method];
 
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -295,11 +289,7 @@ impl MergeEngine {
         Ok(merged)
     }
 
-    pub fn evaluate(
-        &self,
-        ctx: &MergeRequestContext,
-        cel_ctx: &Context,
-    ) -> Result<HierarchicalDecision, MergeError> {
+    pub fn evaluate(&self, ctx: &MergeRequestContext, cel_ctx: &Context) -> Result<HierarchicalDecision, MergeError> {
         if !self.enforce && self.store.is_empty() {
             return Ok(HierarchicalDecision::Allow {
                 rules_fired: Vec::new(),
@@ -421,11 +411,7 @@ fn merge_config(target: &mut MergedConfig, overlay: &ScopeConfig) {
 
 fn compile_level_rules(level: PolicyLevel, rules: &[PolicyRule]) -> Result<Vec<CompiledRule>, MergeError> {
     let mut sorted = rules.to_vec();
-    sorted.sort_by(|a, b| {
-        b.priority
-            .cmp(&a.priority)
-            .then_with(|| a.policy_id.cmp(&b.policy_id))
-    });
+    sorted.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.policy_id.cmp(&b.policy_id)));
 
     let mut compiled = Vec::new();
     for rule in sorted {
@@ -456,14 +442,14 @@ fn canonical_expression_hash(
     for rule in allow_rules {
         canonical.push_str(&rule.contributor.policy_id);
         canonical.push(':');
-        canonical.push_str(&rule.contributor.level.as_str());
+        canonical.push_str(rule.contributor.level.as_str());
         canonical.push('|');
     }
     canonical.push_str(";deny:");
     for rule in deny_rules {
         canonical.push_str(&rule.contributor.policy_id);
         canonical.push(':');
-        canonical.push_str(&rule.contributor.level.as_str());
+        canonical.push_str(rule.contributor.level.as_str());
         canonical.push('|');
     }
     canonical.push_str(";config:");
@@ -495,17 +481,10 @@ fn evaluate_rule(rule: &CompiledRule, cel_ctx: &Context) -> Result<bool, MergeEr
 }
 
 fn rules_fired_ids(effective: &EffectivePolicy) -> Vec<String> {
-    effective
-        .contributors
-        .iter()
-        .map(|c| c.policy_id.clone())
-        .collect()
+    effective.contributors.iter().map(|c| c.policy_id.clone()).collect()
 }
 
-fn evaluate_effective(
-    effective: &EffectivePolicy,
-    cel_ctx: &Context,
-) -> Result<HierarchicalDecision, MergeError> {
+fn evaluate_effective(effective: &EffectivePolicy, cel_ctx: &Context) -> Result<HierarchicalDecision, MergeError> {
     let rules_fired = rules_fired_ids(effective);
     let expression_hash = effective.expression_hash.clone();
 
@@ -583,8 +562,8 @@ pub fn same_level_deny_wins(rules: &[PolicyRule], matches: &[(usize, bool)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authz::IdentitySource;
     use crate::authz::GatewayIdentity;
+    use crate::authz::IdentitySource;
     use crate::jwt::VerifiedJwtClaims;
     use crate::policy::configure_policy_cel_context;
 
@@ -883,9 +862,7 @@ mod tests {
             ScopeBundle {
                 rules: vec![],
                 config: ScopeConfig {
-                    spicedb_gate_cel: Some(
-                        r#"mcp.method == "tools/call" || mcp.method == "resources/read""#.into(),
-                    ),
+                    spicedb_gate_cel: Some(r#"mcp.method == "tools/call" || mcp.method == "resources/read""#.into()),
                     rate_max_requests: Some(20),
                     redaction_paths: vec!["/pii".into()],
                     audit_tags: vec!["server".into()],
@@ -966,7 +943,12 @@ mod tests {
 
         let third = engine.effective_policy(&ctx).unwrap();
         assert!(!Arc::ptr_eq(&first, &third));
-        assert!(third.deny_rules.iter().any(|r| r.contributor.policy_id == "tenant/acme-block-secrets"));
+        assert!(
+            third
+                .deny_rules
+                .iter()
+                .any(|r| r.contributor.policy_id == "tenant/acme-block-secrets")
+        );
     }
 
     #[test]
@@ -1034,7 +1016,9 @@ mod tests {
             HierarchicalDecision::Allow { .. }
         ));
         assert!(matches!(
-            engine.evaluate(&call_ctx, &cel_context("tools/call", Some("deploy"))).unwrap(),
+            engine
+                .evaluate(&call_ctx, &cel_context("tools/call", Some("deploy")))
+                .unwrap(),
             HierarchicalDecision::Allow { .. }
         ));
     }
