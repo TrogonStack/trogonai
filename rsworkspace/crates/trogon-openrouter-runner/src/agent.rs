@@ -1859,6 +1859,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             };
 
             let mut assembled_calls: Vec<AssembledToolCall> = Vec::new();
+            // OpenRouter (OpenAI include_usage protocol) sends the usage chunk
+            // AFTER the finish_reason chunk. Track that we saw the finish so we
+            // can keep draining until the trailing Usage event fires UsageUpdate
+            // instead of bailing out and dropping it.
+            let mut finished = false;
 
             loop {
                 if canceled {
@@ -1923,17 +1928,32 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             .notify(agent_client_protocol::SessionNotification::new(
                                 notification_session_id.clone(),
                                 SessionUpdate::UsageUpdate(UsageUpdate::new(
+                                    // `used` = current context occupancy: prompt/input tokens
+                                    // already cover system prompt + history + this turn.
                                     prompt_tokens,
-                                    completion_tokens,
+                                    // `size` = context window, NOT completion tokens. The prior
+                                    // arg (completion_tokens) made the meter render used/output
+                                    // (e.g. 3013/5 = 60260%); UsageUpdate::new is (used, size).
+                                    context_window_tokens(&model).unwrap_or(128_000),
                                 )),
                             ))
                             .await;
+                        // The usage chunk is the last thing we need once the
+                        // turn has already finished; exit now that UsageUpdate
+                        // has been delivered (don't wait on a possibly-absent
+                        // trailing [DONE]).
+                        if finished {
+                            drop(stream);
+                            break 'outer StopReason::EndTurn;
+                        }
                     }
                     OpenRouterEvent::Finished {
                         reason: crate::client::FinishReason::Stop | crate::client::FinishReason::Length,
                     } => {
-                        drop(stream);
-                        break 'outer StopReason::EndTurn;
+                        // Don't exit yet: the include_usage chunk arrives AFTER
+                        // this. Keep draining so the Usage event can fire
+                        // UsageUpdate; we then exit on Usage / Done / stream end.
+                        finished = true;
                     }
                     OpenRouterEvent::Finished { .. } => {}
                     OpenRouterEvent::Done => {
