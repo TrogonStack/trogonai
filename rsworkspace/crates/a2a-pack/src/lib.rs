@@ -31,6 +31,6 @@ pub use rate_limit::{
     RateLimitSkillKind, default_rate_limit_profiles, profile_for_skill_kind,
 };
 pub use resource_tuples::{
-    Tier1A2aMethodSlug, Tier1DeriveError, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple,
-    Tier1ResourceTupleRow, Tier1ResourceTupleTable, Tier1ResourceType, Tier1TupleResourceShape,
+    Tier1A2aMethodSlug, Tier1DeriveError, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple, Tier1ResourceTupleRow,
+    Tier1ResourceTupleTable, Tier1ResourceType, Tier1TupleResourceShape,
 };

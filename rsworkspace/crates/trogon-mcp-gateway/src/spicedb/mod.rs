@@ -13,9 +13,7 @@ use spicedb_rs_client::v1::{
 };
 use tokio::sync::Mutex;
 
-pub use zedtoken_cache::{
-    CacheKeyParams, ResourceKey, ZedTokenCache, ZedTokenCacheConfig, ZedTokenCacheMetrics,
-};
+pub use zedtoken_cache::{CacheKeyParams, ResourceKey, ZedTokenCache, ZedTokenCacheConfig, ZedTokenCacheMetrics};
 
 use crate::authz::{AuthzContext, AuthzError, PermissionChecker, ToolsListFilterContext};
 
@@ -116,11 +114,7 @@ impl SpicedbPermissionChecker {
         }
     }
 
-    fn subject_ref_from_parts(
-        &self,
-        caller_sub: Option<&str>,
-        tenant: Option<&str>,
-    ) -> SubjectReference {
+    fn subject_ref_from_parts(&self, caller_sub: Option<&str>, tenant: Option<&str>) -> SubjectReference {
         let raw_subject = caller_sub
             .or(tenant)
             .unwrap_or(self.inner.anonymous_subject_object_id.as_str());
@@ -283,9 +277,9 @@ impl SpicedbPermissionChecker {
             let Some(item) = pair.request else {
                 continue;
             };
-            let resource = item.resource.ok_or_else(|| {
-                AuthzError("SpiceDB CheckBulkPermissions pair missing resource".to_string())
-            })?;
+            let resource = item
+                .resource
+                .ok_or_else(|| AuthzError("SpiceDB CheckBulkPermissions pair missing resource".to_string()))?;
             let key = (resource.object_type.clone(), resource.object_id.clone());
             let allowed = match pair.response {
                 Some(check_bulk_permissions_pair::Response::Item(item)) => {
@@ -304,16 +298,10 @@ impl SpicedbPermissionChecker {
                 }
             };
             outcomes.insert(key.clone(), allowed);
-            cache_results.push((
-                ResourceKey::new(resource.object_type, resource.object_id),
-                allowed,
-            ));
+            cache_results.push((ResourceKey::new(resource.object_type, resource.object_id), allowed));
         }
 
-        if let (Some(zt), Some(session)) = (
-            checked_at.as_deref(),
-            session_id.filter(|s| !s.is_empty() && *s != "*"),
-        ) {
+        if let (Some(zt), Some(session)) = (checked_at.as_deref(), session_id.filter(|s| !s.is_empty() && *s != "*")) {
             let permission = targets[0].permission.as_str();
             let key_params = self.cache_key_params(session, caller_sub, tenant, permission);
             self.zed_token_cache
@@ -348,10 +336,7 @@ impl SpicedbPermissionChecker {
 
         for tool_name in tool_names {
             let resource_id = Self::tool_resource_id(ctx.server_id, tool_name);
-            let resource = ResourceKey::new(
-                self.inner.tool_resource_object_type.as_str(),
-                resource_id.clone(),
-            );
+            let resource = ResourceKey::new(self.inner.tool_resource_object_type.as_str(), resource_id.clone());
             if let Some(cached_zed) = cached_zed.as_deref()
                 && let Some(allowed) = self
                     .zed_token_cache

@@ -38,9 +38,7 @@ fn redact_value(value: &mut Value) {
 
 fn mask_emails(text: &str) -> String {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b").expect("email regex")
-    });
+    let re = RE.get_or_init(|| Regex::new(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b").expect("email regex"));
     re.replace_all(text, MASK).into_owned()
 }
 
@@ -53,7 +51,8 @@ fn mask_ssns(text: &str) -> String {
 fn mask_us_phones(text: &str) -> String {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
-        Regex::new(r"(?x)
+        Regex::new(
+            r"(?x)
             \b
             (?:
                 (?:\+1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}
@@ -61,7 +60,8 @@ fn mask_us_phones(text: &str) -> String {
                 \d{3}[\s.-]\d{3}[\s.-]\d{4}
             )
             \b
-        ")
+        ",
+        )
         .expect("phone regex")
     });
     re.replace_all(text, MASK).into_owned()
@@ -69,9 +69,7 @@ fn mask_us_phones(text: &str) -> String {
 
 fn mask_credit_cards(text: &str) -> String {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(r"(?x)\b(?:\d[\s-]?){13,19}\b").expect("card candidate regex")
-    });
+    let re = RE.get_or_init(|| Regex::new(r"(?x)\b(?:\d[\s-]?){13,19}\b").expect("card candidate regex"));
     let mut out = String::with_capacity(text.len());
     let mut last = 0usize;
     for mat in re.find_iter(text) {

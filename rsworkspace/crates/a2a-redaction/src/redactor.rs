@@ -46,7 +46,7 @@ pub(crate) fn redact_artifact_parts_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_types::{part, Role};
+    use a2a_types::{Role, part};
 
     struct DefaultRedactorByTrait;
 
@@ -77,8 +77,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let msg_out =
-            redact_message_parts_with(msg_in.clone(), |b| Ok(b.to_vec())).expect("identity json transform");
+        let msg_out = redact_message_parts_with(msg_in.clone(), |b| Ok(b.to_vec())).expect("identity json transform");
         assert_eq!(
             serde_json::to_value(&msg_out).unwrap(),
             serde_json::to_value(&msg_in).unwrap()

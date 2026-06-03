@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::catalog::import_gate::{ImportGate, ImportGateError, ImportedAccountName, SpiceDbPrincipal};
 use a2a_nats::catalog::store::{CatalogStoreError, KvCatalogStore};
-use a2a_nats::agent_id::A2aAgentId;
 
 use crate::operator_signature_gate::OperatorSignatureGate;
 use crate::signed_export::{SignedExportEnvelope, SignedExportError};
@@ -148,12 +148,12 @@ mod tests {
 
     use super::*;
     use crate::operator_signature_gate::{
-        AllowAllOperatorSignatureGate, RealOperatorSignatureGate, resolve_operator_signature_gate,
-        ENV_DISCOVERY_OPERATOR_KEYS,
+        AllowAllOperatorSignatureGate, ENV_DISCOVERY_OPERATOR_KEYS, RealOperatorSignatureGate,
+        resolve_operator_signature_gate,
     };
     use crate::signed_export::{
-        DEFAULT_SIGNATURE_MAX_AGE, Ed25519PublicKey, OperatorKeyId, SignatureVerificationConfig,
-        SignedExportEnvelope, sign_discovery_export,
+        DEFAULT_SIGNATURE_MAX_AGE, Ed25519PublicKey, OperatorKeyId, SignatureVerificationConfig, SignedExportEnvelope,
+        sign_discovery_export,
     };
 
     fn minimal_card(display_name: &str) -> a2a_types::AgentCard {
@@ -183,7 +183,12 @@ mod tests {
         }
     }
 
-    fn signed_binding(signing_key: &SigningKey, key_id: &OperatorKeyId, payload: &[u8], now: u64) -> FederatedExportBinding {
+    fn signed_binding(
+        signing_key: &SigningKey,
+        key_id: &OperatorKeyId,
+        payload: &[u8],
+        now: u64,
+    ) -> FederatedExportBinding {
         FederatedExportBinding {
             payload: payload.to_vec(),
             envelope: sign_discovery_export(signing_key, key_id.clone(), payload, now),

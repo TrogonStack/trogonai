@@ -37,14 +37,12 @@ pub fn compile_cel_source(source: &str) -> Result<CelProgramHandle, cel_interpre
 }
 
 pub fn compile_cel_file(path: &Path) -> Result<(CelProgramHandle, SystemTime), CelCompileError> {
-    let source = fs::read_to_string(path).map_err(|err| {
-        CelCompileError::for_path(path, format!("read failed: {err}"))
-    })?;
+    let source =
+        fs::read_to_string(path).map_err(|err| CelCompileError::for_path(path, format!("read failed: {err}")))?;
     let mtime = fs::metadata(path)
         .and_then(|meta| meta.modified())
         .map_err(|err| CelCompileError::for_path(path, format!("metadata failed: {err}")))?;
-    let program = Program::compile(&source).map_err(|err| {
-        CelCompileError::for_path(path, format!("compile failed: {err}"))
-    })?;
+    let program =
+        Program::compile(&source).map_err(|err| CelCompileError::for_path(path, format!("compile failed: {err}")))?;
     Ok((CelProgramHandle::new(Arc::new(program)), mtime))
 }

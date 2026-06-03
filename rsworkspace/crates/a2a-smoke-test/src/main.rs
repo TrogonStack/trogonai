@@ -1,24 +1,19 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use a2a_auth_callout::{
-    jwt::ExternalSubject, AccountName, CallerId, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims, UserJwtSubject,
-};
 use a2a_auth_callout::permissions::IssuedPermissions;
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+use a2a_auth_callout::{
+    AccountName, CallerId, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims, UserJwtSubject, jwt::ExternalSubject,
+};
 use a2a_nats::client::resubscribe::open_resubscribe_stream;
 use a2a_nats::client::unary::send_unary;
 use a2a_nats::client::{Client, ClientError};
-use a2a_nats::{
-    compose_gateway_ingress_subject, A2aAgentId, A2aPrefix, A2aTaskId, Config, NatsConfig, ReqId,
-};
+use a2a_nats::{A2aAgentId, A2aPrefix, A2aTaskId, Config, NatsConfig, ReqId, compose_gateway_ingress_subject};
 use a2a_nats_discovery::{
-    parse_operator_keys, resolve_operator_signature_gate, sign_discovery_export, OperatorKeyId,
-    OperatorSignatureGate,
+    OperatorKeyId, OperatorSignatureGate, parse_operator_keys, resolve_operator_signature_gate, sign_discovery_export,
 };
-use a2a_types::{
-    GetTaskRequest, Message, Part, Role, SendMessageRequest, TaskPushNotificationConfig, TaskState,
-};
+use a2a_types::{GetTaskRequest, Message, Part, Role, SendMessageRequest, TaskPushNotificationConfig, TaskState};
 use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use futures::StreamExt;
@@ -275,15 +270,12 @@ async fn build_context(
     };
 
     let nats_config = if let Ok(creds) = std::env::var("NATS_CREDS") {
-        NatsConfig::new(servers.clone(), trogon_nats::NatsAuth::Credentials(PathBuf::from(creds)))
-    } else if let (Ok(user), Ok(password)) = (
-        std::env::var("NATS_USER"),
-        std::env::var("NATS_PASSWORD"),
-    ) {
         NatsConfig::new(
             servers.clone(),
-            trogon_nats::NatsAuth::UserPassword { user, password },
+            trogon_nats::NatsAuth::Credentials(PathBuf::from(creds)),
         )
+    } else if let (Ok(user), Ok(password)) = (std::env::var("NATS_USER"), std::env::var("NATS_PASSWORD")) {
+        NatsConfig::new(servers.clone(), trogon_nats::NatsAuth::UserPassword { user, password })
     } else {
         NatsConfig::new(servers.clone(), trogon_nats::NatsAuth::Token(jwt.as_str().to_owned()))
     };
@@ -355,14 +347,10 @@ async fn run_smoke_jwt_path(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|_| "timed out waiting for gateway audit publish".to_string())?
         .ok_or("audit subscription ended".to_string())?;
 
-    let envelope: AuditEnvelopeWire =
-        serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
+    let envelope: AuditEnvelopeWire = serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
     assert_jwt_audit(&envelope, "tasks/get", &ctx.expected_caller)?;
 
-    println!(
-        "SMOKE_OK caller_id={} caller_source=jwt_header",
-        ctx.expected_caller
-    );
+    println!("SMOKE_OK caller_id={} caller_source=jwt_header", ctx.expected_caller);
     Ok(())
 }
 
@@ -373,9 +361,7 @@ async fn run_full_stack(ctx: &SmokeContext) -> Result<(), String> {
     let (caller_id, caller_source, rules) = assert_policy_allow_path(ctx).await?;
     assert_resubscribe_replay(ctx).await?;
     assert_push_dlq_envelope(ctx).await?;
-    println!(
-        "SMOKE_FULL_OK caller_id={caller_id} caller_source={caller_source} rules_fired={rules:?}"
-    );
+    println!("SMOKE_FULL_OK caller_id={caller_id} caller_source={caller_source} rules_fired={rules:?}");
     Ok(())
 }
 
@@ -419,8 +405,7 @@ fn assert_discovery_operator_signatures() -> Result<(), String> {
 }
 
 async fn assert_tier1_declarative_denied(ctx: &SmokeContext) -> Result<(), String> {
-    let subject =
-        compose_gateway_ingress_subject(&ctx.prefix, &ctx.agent, "agent.card").map_err(|e| e.to_string())?;
+    let subject = compose_gateway_ingress_subject(&ctx.prefix, &ctx.agent, "agent.card").map_err(|e| e.to_string())?;
     let req_id = ReqId::new();
     let params = serde_json::json!({});
     let err = tokio::time::timeout(
@@ -483,8 +468,7 @@ async fn assert_tier3_refusal(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|_| "timed out waiting for tier-3 refusal audit".to_string())?
         .ok_or("tier-3 refusal audit subscription ended".to_string())?;
 
-    let envelope: AuditEnvelopeWire =
-        serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
+    let envelope: AuditEnvelopeWire = serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
     if envelope.method != "message/send" {
         return Err(format!("unexpected audit method: {}", envelope.method));
     }
@@ -537,8 +521,7 @@ async fn assert_policy_allow_path(ctx: &SmokeContext) -> Result<(String, String,
         .map_err(|_| "timed out waiting for allow-path audit".to_string())?
         .ok_or("allow-path audit subscription ended".to_string())?;
 
-    let envelope: AuditEnvelopeWire =
-        serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
+    let envelope: AuditEnvelopeWire = serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
     assert_jwt_audit(&envelope, "message/send", &ctx.expected_caller)?;
 
     if envelope.tier1_decision.as_deref() != Some("allow") {
@@ -576,11 +559,7 @@ async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
     let config_id = format!("smoke-dlq-{}", uuid::Uuid::new_v4().simple());
     let target_url = "https://127.0.0.1:1/smoke-dlq-unreachable".to_string();
 
-    let dlq_subject = format!(
-        "{}.push.dlq.*.{}",
-        ctx.prefix.as_str(),
-        task_id.as_str()
-    );
+    let dlq_subject = format!("{}.push.dlq.*.{}", ctx.prefix.as_str(), task_id.as_str());
     let mut dlq_sub = ctx
         .nats
         .subscribe(async_nats::Subject::from(dlq_subject.as_str()))
@@ -623,8 +602,7 @@ async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|_| "timed out waiting for push DLQ envelope".to_string())?
         .ok_or("DLQ subscription ended".to_string())?;
 
-    let envelope: PushDlqEnvelope =
-        serde_json::from_slice(&dlq_msg.payload).map_err(|e| format!("DLQ json: {e}"))?;
+    let envelope: PushDlqEnvelope = serde_json::from_slice(&dlq_msg.payload).map_err(|e| format!("DLQ json: {e}"))?;
     if envelope.schema != PUSH_DLQ_SCHEMA_V1 {
         return Err(format!("DLQ schema {:?} != {PUSH_DLQ_SCHEMA_V1}", envelope.schema));
     }
@@ -632,16 +610,10 @@ async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
         return Err(format!("DLQ task_id {} != {}", envelope.task_id, task_id.as_str()));
     }
     if envelope.push_config_id != config_id {
-        return Err(format!(
-            "DLQ push_config_id {} != {config_id}",
-            envelope.push_config_id
-        ));
+        return Err(format!("DLQ push_config_id {} != {config_id}", envelope.push_config_id));
     }
     if envelope.target_url != target_url {
-        return Err(format!(
-            "DLQ target_url {} != {target_url}",
-            envelope.target_url
-        ));
+        return Err(format!("DLQ target_url {} != {target_url}", envelope.target_url));
     }
     if envelope.error.is_empty() {
         return Err("DLQ envelope missing error description".into());
@@ -725,16 +697,11 @@ async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
     match replayed.payload {
         Some(a2a_types::stream_response::Payload::Task(task)) => {
             if task.id != task_id_str {
-                return Err(format!(
-                    "replayed Task id {} != original {task_id_str}",
-                    task.id
-                ));
+                return Err(format!("replayed Task id {} != original {task_id_str}", task.id));
             }
         }
         other => {
-            return Err(format!(
-                "expected replayed completed Task event, got {other:?}"
-            ));
+            return Err(format!("expected replayed completed Task event, got {other:?}"));
         }
     }
 
@@ -750,10 +717,7 @@ async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
 }
 
 fn normalize_audit_caller_id(caller_id: &str) -> &str {
-    caller_id
-        .split_once('/')
-        .map(|(_, slug)| slug)
-        .unwrap_or(caller_id)
+    caller_id.split_once('/').map(|(_, slug)| slug).unwrap_or(caller_id)
 }
 
 fn assert_jwt_audit(envelope: &AuditEnvelopeWire, method: &str, expected_caller: &str) -> Result<(), String> {

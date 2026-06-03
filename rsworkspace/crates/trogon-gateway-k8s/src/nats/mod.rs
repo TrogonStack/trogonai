@@ -3,6 +3,5 @@
 mod kv;
 
 pub use kv::{
-    open_default_config_kv, ConfigKv, ConfigKvError, ConfigKvPutOutcome, MemoryConfigKv,
-    NatsConfigKv, PutOptions,
+    ConfigKv, ConfigKvError, ConfigKvPutOutcome, MemoryConfigKv, NatsConfigKv, PutOptions, open_default_config_kv,
 };

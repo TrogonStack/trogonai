@@ -5,7 +5,7 @@ use tracing::info;
 use crate::audit::AuditPublisher;
 use crate::config::ControllerConfig;
 use crate::kv::{ControllerStore, connect_nats};
-use crate::signer::{load_signer, verifying_key_from_pem, ManifestSigner, SignerKind};
+use crate::signer::{ManifestSigner, SignerKind, load_signer, verifying_key_from_pem};
 use crate::sync::{GitSyncConfig, SyncEngine, SyncError, SyncReport};
 
 type BoxError = Box<dyn Error + Send + Sync>;
@@ -97,10 +97,7 @@ impl ManifestSigner for VerifyOnlySigner {
         self.verifying_key
     }
 
-    fn sign_payload(
-        &self,
-        _payload: &[u8],
-    ) -> Result<crate::manifest::ManifestSignature, crate::signer::SignerError> {
+    fn sign_payload(&self, _payload: &[u8]) -> Result<crate::manifest::ManifestSignature, crate::signer::SignerError> {
         Err(crate::signer::SignerError::Unsupported(
             "verify-only signer cannot sign manifests".into(),
         ))

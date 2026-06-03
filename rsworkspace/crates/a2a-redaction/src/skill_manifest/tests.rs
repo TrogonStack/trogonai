@@ -5,8 +5,7 @@ use tempfile::TempDir;
 use crate::a2a_method::A2aMethod;
 use crate::skill_id::SkillId;
 use crate::skill_manifest::{
-    JsonPathExpr, SkillManifestError, SkillManifestRegistry, SkillManifestVersion,
-    SkillSelectionPlan,
+    JsonPathExpr, SkillManifestError, SkillManifestRegistry, SkillManifestVersion, SkillSelectionPlan,
 };
 
 fn bundled_skills_dir() -> PathBuf {
@@ -33,9 +32,7 @@ fn valid_manifest_parses() {
     let dir = TempDir::new().unwrap();
     write_manifest(&dir, "pii.email_mask.v1", VALID_MANIFEST);
     let registry = SkillManifestRegistry::load_from_dir(dir.path()).unwrap();
-    let manifest = registry
-        .lookup(&SkillId::new("pii.email_mask.v1"))
-        .unwrap();
+    let manifest = registry.lookup(&SkillId::new("pii.email_mask.v1")).unwrap();
     assert_eq!(manifest.skill_id().as_str(), "pii.email_mask.v1");
     assert_eq!(manifest.version().as_str(), "1.0.0");
 }
@@ -85,10 +82,7 @@ fn duplicate_skill_id_errors() {
     let dir = TempDir::new().unwrap();
     write_manifest(&dir, "pii.email_mask.v1", VALID_MANIFEST);
     let mut registry = SkillManifestRegistry::load_from_dir(dir.path()).unwrap();
-    let duplicate = registry
-        .lookup(&SkillId::new("pii.email_mask.v1"))
-        .unwrap()
-        .clone();
+    let duplicate = registry.lookup(&SkillId::new("pii.email_mask.v1")).unwrap().clone();
     let err = registry.insert(duplicate).unwrap_err();
     assert!(matches!(err, SkillManifestError::DuplicateSkillId { .. }));
 }
@@ -164,16 +158,8 @@ version = "1.0.0"
         JsonPathExpr::new("$.message.parts[*].text"),
         JsonPathExpr::new("$.message.metadata"),
     ];
-    let plan_a = SkillSelectionPlan::plan(
-        &registry,
-        &A2aMethod::MessageSend,
-        &payload_paths,
-    );
-    let plan_b = SkillSelectionPlan::plan(
-        &registry,
-        &A2aMethod::MessageSend,
-        &payload_paths,
-    );
+    let plan_a = SkillSelectionPlan::plan(&registry, &A2aMethod::MessageSend, &payload_paths);
+    let plan_b = SkillSelectionPlan::plan(&registry, &A2aMethod::MessageSend, &payload_paths);
 
     let ids_a: Vec<_> = plan_a
         .manifests()
@@ -201,11 +187,7 @@ fn reference_skills_in_a2a_pack_parse() {
     let dir = bundled_skills_dir();
     let registry = SkillManifestRegistry::load_from_dir(&dir).unwrap();
     assert!(registry.lookup(&SkillId::new("pii.email_mask.v1")).is_some());
-    assert!(
-        registry
-            .lookup(&SkillId::new("credentials.bearer_redact.v1"))
-            .is_some()
-    );
+    assert!(registry.lookup(&SkillId::new("credentials.bearer_redact.v1")).is_some());
     assert!(
         registry
             .lookup(&SkillId::new("internal_route.x_internal_strip.v1"))

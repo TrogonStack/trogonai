@@ -10,9 +10,7 @@ use trogon_mcp_gateway::gateway::{GatewaySettings, StepUpIngressBlock, evaluate_
 use trogon_mcp_gateway::jwt::JwtValidator;
 use trogon_mcp_gateway::rpc_codes;
 use trogon_mcp_gateway::schema_cache::{SchemaCacheConfig, SchemaCacheRuntime, ServerId, sniff_tools_list_reply};
-use trogon_mcp_gateway::stepup::{
-    ApprovalBridge, FreshnessClock, StepUpPolicy, StepUpRequestCtx, TestFreshnessClock,
-};
+use trogon_mcp_gateway::stepup::{ApprovalBridge, FreshnessClock, StepUpPolicy, StepUpRequestCtx, TestFreshnessClock};
 use trogon_nats::{NatsAuth, NatsConfig};
 
 struct RecordingBridge {
@@ -41,7 +39,10 @@ fn base_settings(
     stepup_bridge: Option<Arc<dyn ApprovalBridge>>,
 ) -> GatewaySettings {
     let prefix = McpPrefix::new("stepup.test.mcp").expect("prefix");
-    let mcp = McpConfig::new(prefix, NatsConfig::new(vec!["nats://127.0.0.1:4222".into()], NatsAuth::None));
+    let mcp = McpConfig::new(
+        prefix,
+        NatsConfig::new(vec!["nats://127.0.0.1:4222".into()], NatsAuth::None),
+    );
     GatewaySettings {
         queue_group: "stepup-test".into(),
         audit_stream_name: "MCP_AUDIT_STEPUP".into(),
@@ -169,7 +170,7 @@ async fn stepup_approval_routes_to_approval_envelope() {
     assert_eq!(parsed["error"]["message"], "approval_required");
     assert_eq!(
         parsed["error"]["data"]["approval_subject"],
-        "mcp.approvals.step-up.req-approval"
+        "stepup.test.mcp.approvals.step-up.req-approval"
     );
     assert_eq!(
         parsed["error"]["data"]["reason"],

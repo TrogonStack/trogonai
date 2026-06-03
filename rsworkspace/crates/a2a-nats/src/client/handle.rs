@@ -1,10 +1,10 @@
+use a2a_auth_callout::MintedUserJwt;
 use a2a_types::{
     AgentCard, CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest,
     ListTaskPushNotificationConfigsResponse, ListTasksRequest, ListTasksResponse, SendMessageRequest,
     SendMessageResponse, SubscribeToTaskRequest, Task, TaskPushNotificationConfig,
 };
-use a2a_auth_callout::MintedUserJwt;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
@@ -81,8 +81,10 @@ impl<N, J> Client<N, J> {
     fn outbound_rpc_subject(&self, agent_subject: String) -> Result<String, ClientError> {
         match &self.ingress {
             ClientIngressTarget::AgentSubjects => Ok(agent_subject),
-            ClientIngressTarget::GatewayIngress(_) => gateway_ingress_subject_from_agent_subject(&agent_subject, self.prefix())
-                .ok_or(ClientError::InvalidRpcSubjectOverlay),
+            ClientIngressTarget::GatewayIngress(_) => {
+                gateway_ingress_subject_from_agent_subject(&agent_subject, self.prefix())
+                    .ok_or(ClientError::InvalidRpcSubjectOverlay)
+            }
         }
     }
 

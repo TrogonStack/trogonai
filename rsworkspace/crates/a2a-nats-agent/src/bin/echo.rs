@@ -150,7 +150,10 @@ impl A2aHandler for EchoHandler {
 
     async fn tasks_get(&self, req: GetTaskRequest) -> Result<Task, A2aError> {
         let task_id = req.id;
-        let guard = self.tasks.lock().map_err(|_| A2aError::internal("task store lock poisoned"))?;
+        let guard = self
+            .tasks
+            .lock()
+            .map_err(|_| A2aError::internal("task store lock poisoned"))?;
         guard
             .get(&task_id)
             .cloned()

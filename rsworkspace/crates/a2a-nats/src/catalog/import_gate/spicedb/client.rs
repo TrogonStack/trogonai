@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 use authzed::v1::permissions_service_client::PermissionsServiceClient;
 use authzed::v1::{
-    CheckBulkPermissionsRequest, CheckBulkPermissionsResponse, WriteRelationshipsRequest,
-    WriteRelationshipsResponse,
+    CheckBulkPermissionsRequest, CheckBulkPermissionsResponse, WriteRelationshipsRequest, WriteRelationshipsResponse,
 };
 use tonic::metadata::MetadataValue;
 use tonic::service::Interceptor;
@@ -52,14 +51,10 @@ impl LiveBulkImportPermissionClient {
             .map_err(|e| SpiceDbImportGateBuildError::Connect(e.to_string()))?;
 
         let bearer = format!("Bearer {}", token.expose_secret());
-        let metadata = MetadataValue::try_from(bearer).map_err(|e| {
-            SpiceDbImportGateBuildError::InvalidToken(format!("authorization metadata invalid: {e}"))
-        })?;
+        let metadata = MetadataValue::try_from(bearer)
+            .map_err(|e| SpiceDbImportGateBuildError::InvalidToken(format!("authorization metadata invalid: {e}")))?;
 
-        let inner = PermissionsServiceClient::with_interceptor(
-            channel,
-            BearerTokenInterceptor { token: metadata },
-        );
+        let inner = PermissionsServiceClient::with_interceptor(channel, BearerTokenInterceptor { token: metadata });
 
         Ok(Self { inner })
     }

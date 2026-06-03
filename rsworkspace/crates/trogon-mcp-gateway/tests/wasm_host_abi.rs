@@ -49,12 +49,7 @@ mod host_engine {
     #[test]
     fn host_spicedb_check_callthrough_mock_host_eval_context() {
         let host = HostEvalContext::for_tests().with_spicedb(Arc::new(AllowBackend));
-        let mut state = WasmStoreState::new(
-            host,
-            PoolConfig::for_tests(),
-            Arc::from("demo"),
-            1,
-        );
+        let mut state = WasmStoreState::new(host, PoolConfig::for_tests(), Arc::from("demo"), 1);
         let allowed = state
             .with_host(|ctx| ctx.spicedb_check("user:alice", "view", "tool:demo"))
             .expect("host")
@@ -220,7 +215,7 @@ mod host_deadline {
 mod abi_versioning {
     //! ABI version negotiation: module declares `host_abi=1`; gateway accepts compatible versions.
 
-    use trogon_mcp_gateway::wasm::{contract_identity, PoolConfig, WasmEngine, WIT_PACKAGE, WIT_VERSION};
+    use trogon_mcp_gateway::wasm::{PoolConfig, WIT_PACKAGE, WIT_VERSION, WasmEngine, contract_identity};
 
     #[tokio::test]
     async fn wasm_module_host_abi_v1_accepted_by_gateway() {
@@ -236,10 +231,10 @@ mod abi_versioning {
     #[tokio::test]
     async fn wasm_gateway_rejects_unknown_target_wit_at_load() {
         use trogon_mcp_gateway::bundle::{
-            BundleManifest, BundleScope, ComponentEntry, LoadedBundle, LoadedComponent,
-            ManifestDigest, Signing, MANIFEST_FILENAME,
+            BundleManifest, BundleScope, ComponentEntry, LoadedBundle, LoadedComponent, MANIFEST_FILENAME,
+            ManifestDigest, Signing,
         };
-        use trogon_mcp_gateway::wasm::{WasmEngine, PoolConfig, WasmEngineError};
+        use trogon_mcp_gateway::wasm::{PoolConfig, WasmEngine, WasmEngineError};
 
         let engine = WasmEngine::new(PoolConfig::for_tests()).expect("engine");
         let bundle = LoadedBundle {

@@ -11,9 +11,9 @@ static ENV_DEV_WARN_COUNT: AtomicUsize = AtomicUsize::new(0);
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
+use super::SigningKeySource;
 use super::key_version::KeyVersion;
 use super::signing_key_handle::SigningKeyHandle;
-use super::SigningKeySource;
 
 static ENV_DEV_WARN_ONCE: Once = Once::new();
 
@@ -31,9 +31,7 @@ impl EnvSigningKeySource {
         ENV_DEV_WARN_ONCE.call_once(|| {
             #[cfg(test)]
             ENV_DEV_WARN_COUNT.fetch_add(1, Ordering::SeqCst);
-            warn!(
-                "AUTH_CALLOUT_SIGNING_SECRET env custody is dev-only; use file or vault in production"
-            );
+            warn!("AUTH_CALLOUT_SIGNING_SECRET env custody is dev-only; use file or vault in production");
         });
 
         let current_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET").map_err(|_| {

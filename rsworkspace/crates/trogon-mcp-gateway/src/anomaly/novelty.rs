@@ -51,14 +51,7 @@ impl NoveltyTracker {
     }
 
     /// Returns `true` when `(tenant_id, agent_id, purpose, target)` is novel for this window.
-    pub fn observe(
-        &mut self,
-        tenant_id: &str,
-        agent_id: &str,
-        purpose: &str,
-        target: &str,
-        ts_unix_ms: i64,
-    ) -> bool {
+    pub fn observe(&mut self, tenant_id: &str, agent_id: &str, purpose: &str, target: &str, ts_unix_ms: i64) -> bool {
         let key = NoveltyKey {
             tenant_id: tenant_id.to_string(),
             agent_id: agent_id.to_string(),

@@ -16,10 +16,7 @@ pub struct ChainTree {
 }
 
 impl ChainTree {
-    pub fn from_events(
-        root_request_id: &str,
-        events: Vec<TrafficEvent>,
-    ) -> Result<Self, ChainExplorerError> {
+    pub fn from_events(root_request_id: &str, events: Vec<TrafficEvent>) -> Result<Self, ChainExplorerError> {
         if events.is_empty() {
             return Err(ChainExplorerError::RootNotFound);
         }
@@ -45,18 +42,13 @@ impl ChainTree {
             Ok(root) => root,
             Err(ChainExplorerError::RootNotFound) => {
                 if let Some(orphan) = first_orphan(&events)? {
-                    return Err(ChainExplorerError::OrphanedEvent {
-                        request_id: orphan,
-                    });
+                    return Err(ChainExplorerError::OrphanedEvent { request_id: orphan });
                 }
                 return Err(ChainExplorerError::RootNotFound);
             }
             Err(error) => return Err(error),
         };
-        let root_request_id = root_event
-            .request_id
-            .as_deref()
-            .expect("root validated above");
+        let root_request_id = root_event.request_id.as_deref().expect("root validated above");
 
         let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
         for event in &events {
@@ -104,10 +96,7 @@ fn chain_prefix(event: &TrafficEvent) -> Option<&[ActChainHop]> {
     Some(&chain[..chain.len() - 1])
 }
 
-fn parent_request_id<'a>(
-    event: &TrafficEvent,
-    events: &'a [TrafficEvent],
-) -> Result<&'a str, ChainExplorerError> {
+fn parent_request_id<'a>(event: &TrafficEvent, events: &'a [TrafficEvent]) -> Result<&'a str, ChainExplorerError> {
     let request_id = event.request_id.as_deref().unwrap_or(&event.event_id);
     let Some(prefix) = chain_prefix(event) else {
         return Err(ChainExplorerError::MalformedChain {
@@ -134,10 +123,13 @@ fn parent_request_id<'a>(
         });
     }
 
-    parent.request_id.as_deref().ok_or_else(|| ChainExplorerError::MalformedChain {
-        request_id: request_id.to_owned(),
-        reason: "parent event missing request_id".into(),
-    })
+    parent
+        .request_id
+        .as_deref()
+        .ok_or_else(|| ChainExplorerError::MalformedChain {
+            request_id: request_id.to_owned(),
+            reason: "parent event missing request_id".into(),
+        })
 }
 
 fn first_orphan(events: &[TrafficEvent]) -> Result<Option<String>, ChainExplorerError> {
@@ -156,10 +148,7 @@ fn first_orphan(events: &[TrafficEvent]) -> Result<Option<String>, ChainExplorer
     Ok(None)
 }
 
-fn find_root<'a>(
-    root_request_id: &str,
-    events: &'a [TrafficEvent],
-) -> Result<&'a TrafficEvent, ChainExplorerError> {
+fn find_root<'a>(root_request_id: &str, events: &'a [TrafficEvent]) -> Result<&'a TrafficEvent, ChainExplorerError> {
     if let Some(root) = events
         .iter()
         .find(|event| event.request_id.as_deref() == Some(root_request_id))
@@ -207,11 +196,7 @@ fn max_depth(node: &ChainNode) -> usize {
 }
 
 fn count_nodes(node: &ChainNode) -> usize {
-    1 + node
-        .children
-        .iter()
-        .map(count_nodes)
-        .sum::<usize>()
+    1 + node.children.iter().map(count_nodes).sum::<usize>()
 }
 
 #[cfg(test)]
@@ -280,13 +265,7 @@ mod tests {
         let hop_a = hop("acme/agent-a");
         let hop_b = hop("acme/agent-b");
         let events = vec![
-            test_event(
-                "req-a",
-                Some(vec![]),
-                "acme/agent-a",
-                "urn:backend:a",
-                "allow",
-            ),
+            test_event("req-a", Some(vec![]), "acme/agent-a", "urn:backend:a", "allow"),
             test_event(
                 "req-b",
                 Some(vec![hop_a.clone()]),
@@ -311,13 +290,7 @@ mod tests {
     fn fanout_tree_has_four_nodes_and_depth_two() {
         let hop_a = hop("acme/agent-a");
         let events = vec![
-            test_event(
-                "req-a",
-                Some(vec![]),
-                "acme/agent-a",
-                "urn:backend:a",
-                "allow",
-            ),
+            test_event("req-a", Some(vec![]), "acme/agent-a", "urn:backend:a", "allow"),
             test_event(
                 "req-b",
                 Some(vec![hop_a.clone()]),
@@ -332,13 +305,7 @@ mod tests {
                 "urn:backend:c",
                 "allow",
             ),
-            test_event(
-                "req-d",
-                Some(vec![hop_a]),
-                "acme/agent-d",
-                "urn:backend:d",
-                "deny",
-            ),
+            test_event("req-d", Some(vec![hop_a]), "acme/agent-d", "urn:backend:d", "deny"),
         ];
         let tree = ChainTree::from_events("req-a", events).expect("tree");
         assert_eq!(tree.depth(), 2);

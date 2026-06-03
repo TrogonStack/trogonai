@@ -14,10 +14,22 @@ pub const TIER1_BUNDLE_EXTENSION: &str = "tier1.toml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tier1DeclarativeLoadError {
-    ReadDir { path: PathBuf, message: String },
-    ReadFile { path: PathBuf, message: String },
-    ParseToml { path: PathBuf, message: String },
-    Schema { path: PathBuf, error: Tier1DeclarativeSchemaError },
+    ReadDir {
+        path: PathBuf,
+        message: String,
+    },
+    ReadFile {
+        path: PathBuf,
+        message: String,
+    },
+    ParseToml {
+        path: PathBuf,
+        message: String,
+    },
+    Schema {
+        path: PathBuf,
+        error: Tier1DeclarativeSchemaError,
+    },
 }
 
 impl fmt::Display for Tier1DeclarativeLoadError {
@@ -102,17 +114,12 @@ fn parse_bundle_file(path: &Path) -> Result<Vec<Tier1DeclarativeRule>, Tier1Decl
         path: path.to_path_buf(),
         message: err.to_string(),
     })?;
-    let parsed: BundleFileToml =
-        toml::from_str(&raw).map_err(|err| Tier1DeclarativeLoadError::ParseToml {
-            path: path.to_path_buf(),
-            message: err.to_string(),
-        })?;
+    let parsed: BundleFileToml = toml::from_str(&raw).map_err(|err| Tier1DeclarativeLoadError::ParseToml {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
 
-    parsed
-        .rule
-        .into_iter()
-        .map(|rule| convert_rule(path, rule))
-        .collect()
+    parsed.rule.into_iter().map(|rule| convert_rule(path, rule)).collect()
 }
 
 fn convert_rule(path: &Path, rule: RuleToml) -> Result<Tier1DeclarativeRule, Tier1DeclarativeLoadError> {
@@ -129,12 +136,11 @@ fn convert_rule(path: &Path, rule: RuleToml) -> Result<Tier1DeclarativeRule, Tie
         .map(|item| convert_match(path, item))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let effect = Tier1DeclarativeEffect::parse(rule.effect.trim()).map_err(|error| {
-        Tier1DeclarativeLoadError::Schema {
+    let effect =
+        Tier1DeclarativeEffect::parse(rule.effect.trim()).map_err(|error| Tier1DeclarativeLoadError::Schema {
             path: path.to_path_buf(),
             error,
-        }
-    })?;
+        })?;
 
     Ok(Tier1DeclarativeRule {
         id: Tier1DeclarativeRuleId::new(rule.id),
@@ -152,19 +158,15 @@ fn convert_match(path: &Path, item: MatchToml) -> Result<Tier1DeclarativeMatch, 
         });
     }
 
-    let kind = Tier1ResourceKind::parse(item.kind.trim()).map_err(|error| {
-        Tier1DeclarativeLoadError::Schema {
-            path: path.to_path_buf(),
-            error,
-        }
+    let kind = Tier1ResourceKind::parse(item.kind.trim()).map_err(|error| Tier1DeclarativeLoadError::Schema {
+        path: path.to_path_buf(),
+        error,
     })?;
 
     if kind == Tier1ResourceKind::TimeOfDay {
-        TimeOfDayWindow::parse(item.pattern.trim()).map_err(|error| {
-            Tier1DeclarativeLoadError::Schema {
-                path: path.to_path_buf(),
-                error: Tier1DeclarativeSchemaError::InvalidTimeOfDayPattern(error.to_string()),
-            }
+        TimeOfDayWindow::parse(item.pattern.trim()).map_err(|error| Tier1DeclarativeLoadError::Schema {
+            path: path.to_path_buf(),
+            error: Tier1DeclarativeSchemaError::InvalidTimeOfDayPattern(error.to_string()),
         })?;
     }
 
@@ -200,11 +202,7 @@ effect = "deny"
         );
 
         let bundle = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load bundle");
-        let ids: Vec<_> = bundle
-            .rules()
-            .iter()
-            .map(|rule| rule.id.as_str())
-            .collect();
+        let ids: Vec<_> = bundle.rules().iter().map(|rule| rule.id.as_str()).collect();
         assert_eq!(ids, vec!["high", "low"]);
         assert_eq!(bundle.rules()[0].effect, Tier1DeclarativeEffect::Deny);
     }

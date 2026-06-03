@@ -69,7 +69,12 @@ impl MeshEgressCache {
 
     pub async fn store(&self, key: &CacheKeyParts, token: MintedMeshToken) {
         let now = now_unix();
-        let ttl = cache_entry_ttl(token.exp, now, self.config.mesh_token_ttl_secs, self.config.clock_skew_secs);
+        let ttl = cache_entry_ttl(
+            token.exp,
+            now,
+            self.config.mesh_token_ttl_secs,
+            self.config.clock_skew_secs,
+        );
         let serve_until = token.exp - self.config.clock_skew_secs;
         let refresh_at = now + i64::try_from(ttl.as_secs() / 2).unwrap_or(0);
         let entry = CachedMeshEntry {

@@ -78,7 +78,9 @@ pub fn parse_delivery_semantics_value(value: &Value) -> Result<DeliverySemantics
     }
 }
 
-fn parse_delivery_semantics_object(map: &serde_json::Map<String, Value>) -> Result<DeliverySemantics, DeliverySemanticsParseError> {
+fn parse_delivery_semantics_object(
+    map: &serde_json::Map<String, Value>,
+) -> Result<DeliverySemantics, DeliverySemanticsParseError> {
     if map.contains_key("atLeastOnce") || map.contains_key("at_least_once") {
         return Ok(DeliverySemantics::AtLeastOnce);
     }
@@ -89,11 +91,9 @@ fn parse_delivery_semantics_object(map: &serde_json::Map<String, Value>) -> Resu
         .ok_or(DeliverySemanticsParseError::UnknownShape)?;
 
     match exactly {
-        Value::Null | Value::Bool(true) => {
-            Ok(DeliverySemantics::ExactlyOnce {
-                idempotency_key_header: None,
-            })
-        }
+        Value::Null | Value::Bool(true) => Ok(DeliverySemantics::ExactlyOnce {
+            idempotency_key_header: None,
+        }),
         inner @ Value::Object(_) => {
             let inner: ExactlyOnceWire =
                 serde_json::from_value(inner.clone()).map_err(|_| DeliverySemanticsParseError::UnknownShape)?;
@@ -110,7 +110,10 @@ fn parse_delivery_semantics_object(map: &serde_json::Map<String, Value>) -> Resu
     }
 }
 
-pub fn upsert_delivery_semantics_on_push_config_json_object(map: &mut serde_json::Map<String, Value>, semantics: &DeliverySemantics) {
+pub fn upsert_delivery_semantics_on_push_config_json_object(
+    map: &mut serde_json::Map<String, Value>,
+    semantics: &DeliverySemantics,
+) {
     match semantics {
         DeliverySemantics::AtLeastOnce => {
             map.remove("deliverySemantics");
@@ -123,7 +126,10 @@ pub fn upsert_delivery_semantics_on_push_config_json_object(map: &mut serde_json
             };
             match serde_json::to_value(inner) {
                 Ok(body) => {
-                    map.insert("deliverySemantics".to_owned(), serde_json::json!({ "exactlyOnce": body }));
+                    map.insert(
+                        "deliverySemantics".to_owned(),
+                        serde_json::json!({ "exactlyOnce": body }),
+                    );
                 }
                 Err(_) => {
                     tracing::warn!("failed to serialize deliverySemantics; omitting extended field");
@@ -152,9 +158,7 @@ impl DeliverySemantics {
     pub fn webhook_idempotency_carrier(&self) -> Option<&reqwest::header::HeaderName> {
         match self {
             DeliverySemantics::AtLeastOnce => None,
-            DeliverySemantics::ExactlyOnce {
-                idempotency_key_header,
-            } => Some(
+            DeliverySemantics::ExactlyOnce { idempotency_key_header } => Some(
                 idempotency_key_header
                     .as_ref()
                     .map(IdempotencyKeyHeader::as_http)

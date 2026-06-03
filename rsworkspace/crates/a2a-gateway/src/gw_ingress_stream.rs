@@ -54,10 +54,7 @@ pub fn gateway_streaming_ingress_enabled<E: ReadEnv>(env: &E) -> bool {
     let Ok(flag) = env.var(ENV_GATEWAY_STREAMING_INGRESS) else {
         return false;
     };
-    matches!(
-        flag.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    matches!(flag.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,10 +218,7 @@ async fn run_streaming_ingress_pump(
             }
         };
 
-        if let Err(error) = client
-            .publish(spawn.reply.clone(), message.payload.clone())
-            .await
-        {
+        if let Err(error) = client.publish(spawn.reply.clone(), message.payload.clone()).await {
             warn!(
                 reply = %spawn.reply,
                 error = %error,
@@ -258,10 +252,7 @@ pub fn last_seq_from_resubscribe_params(params: &serde_json::Value) -> Option<u6
         .and_then(serde_json::Value::as_u64)
 }
 
-pub fn req_id_from_headers_or_payload(
-    headers: &async_nats::HeaderMap,
-    payload: &[u8],
-) -> Option<ReqId> {
+pub fn req_id_from_headers_or_payload(headers: &async_nats::HeaderMap, payload: &[u8]) -> Option<ReqId> {
     if let Some(value) = headers.get(a2a_nats::constants::REQ_ID_HEADER) {
         return Some(ReqId::from_header(value.as_str()));
     }

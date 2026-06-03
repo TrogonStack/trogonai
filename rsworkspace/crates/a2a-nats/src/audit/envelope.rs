@@ -47,8 +47,8 @@ pub fn gateway_forward_audit_extras(
     method_dots: &str,
 ) -> (Option<serde_json::Value>, Option<String>) {
     let rewrites = Some(AuditSubjectRewrite::new(ingress_subject, agent_subject).into_audit_json());
-    let stream_consumer = GatewayStreamConsumerName::for_sse_method(agent_id, method_dots)
-        .map(|name| name.as_str().to_owned());
+    let stream_consumer =
+        GatewayStreamConsumerName::for_sse_method(agent_id, method_dots).map(|name| name.as_str().to_owned());
     (rewrites, stream_consumer)
 }
 
@@ -309,7 +309,9 @@ mod tests {
         );
         assert_eq!(
             rewrites,
-            Some(serde_json::json!(["ingress:a2a.gateway.bot.message.stream -> agent:a2a.agent.bot.message.stream"]))
+            Some(serde_json::json!([
+                "ingress:a2a.gateway.bot.message.stream -> agent:a2a.agent.bot.message.stream"
+            ]))
         );
         assert_eq!(stream_consumer.as_deref(), Some("gateway.test-agent.message.stream"));
     }
@@ -325,7 +327,9 @@ mod tests {
         );
         assert_eq!(
             rewrites,
-            Some(serde_json::json!(["ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"]))
+            Some(serde_json::json!([
+                "ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"
+            ]))
         );
         assert!(stream_consumer.is_none());
     }

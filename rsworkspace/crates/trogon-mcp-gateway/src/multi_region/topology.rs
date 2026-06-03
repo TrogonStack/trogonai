@@ -102,7 +102,11 @@ mod tests {
         endpoints.insert(home.clone(), endpoint("nats://east"));
         endpoints.insert(west.clone(), endpoint("nats://west"));
         let topo = RegionTopology::new(home.clone(), vec![west.clone()], endpoints).unwrap();
-        let candidates: Vec<_> = topo.route_candidates().into_iter().map(|r| r.as_str().to_string()).collect();
+        let candidates: Vec<_> = topo
+            .route_candidates()
+            .into_iter()
+            .map(|r| r.as_str().to_string())
+            .collect();
         assert_eq!(candidates, vec!["us-east", "us-west"]);
     }
 

@@ -27,11 +27,7 @@ pub struct ControllerConfig {
     #[arg(long, env = "TROGON_REGISTRY_CONTROLLER_AGENTS_DIR", default_value = "agents")]
     pub agents_dir: PathBuf,
 
-    #[arg(
-        long,
-        env = "TROGON_REGISTRY_CONTROLLER_SYNC_INTERVAL_S",
-        default_value_t = 30
-    )]
+    #[arg(long, env = "TROGON_REGISTRY_CONTROLLER_SYNC_INTERVAL_S", default_value_t = 30)]
     pub sync_interval_secs: u64,
 
     #[arg(long, env = "TROGON_REGISTRY_CONTROLLER_SIGNER_SOURCE", default_value = "file")]

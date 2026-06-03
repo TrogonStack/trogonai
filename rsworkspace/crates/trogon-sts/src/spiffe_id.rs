@@ -23,12 +23,8 @@ pub enum SpiffeIdError {
 impl SpiffeId {
     pub fn parse(raw: &str) -> Result<Self, SpiffeIdError> {
         let trimmed = raw.trim();
-        let rest = trimmed
-            .strip_prefix("spiffe://")
-            .ok_or(SpiffeIdError::MissingScheme)?;
-        let (trust_domain, path) = rest
-            .split_once('/')
-            .ok_or(SpiffeIdError::MissingPath)?;
+        let rest = trimmed.strip_prefix("spiffe://").ok_or(SpiffeIdError::MissingScheme)?;
+        let (trust_domain, path) = rest.split_once('/').ok_or(SpiffeIdError::MissingPath)?;
         if trust_domain.is_empty() {
             return Err(SpiffeIdError::MissingTrustDomain);
         }

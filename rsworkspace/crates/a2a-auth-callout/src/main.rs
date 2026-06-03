@@ -3,14 +3,13 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
+use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
 use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier};
-use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
 use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
 use a2a_auth_callout::{
-    AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, SigningKey, StaticAccountResolver,
-    Subscriber, XkeyPublic,
+    AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
 };
 use a2a_auth_callout::{AccountResolver, StaticAccountResolver, Subscriber};
 
@@ -99,9 +98,7 @@ async fn main() {
     };
     let allowed_accounts = split_env_list("AUTH_CALLOUT_ALLOWED_ACCOUNTS");
     if allowed_accounts.is_empty() {
-        tracing::error!(
-            "AUTH_CALLOUT_ALLOWED_ACCOUNTS must list at least one tenant account"
-        );
+        tracing::error!("AUTH_CALLOUT_ALLOWED_ACCOUNTS must list at least one tenant account");
         std::process::exit(1);
     }
     let user_jwt_ttl = std::env::var("AUTH_CALLOUT_USER_JWT_TTL_SECS")
@@ -168,19 +165,13 @@ async fn main() {
     let mtls = build_mtls_verifier();
 
     if oidc.is_none() && mtls.is_none() {
-        warn!(
-            "no credential verifiers configured; all dispatch attempts will be denied"
-        );
+        warn!("no credential verifiers configured; all dispatch attempts will be denied");
     }
 
     info!(nats_url = %nats_url, accounts = ?allowed_accounts, "connecting to NATS for auth callout");
 
-    let connect_opts = match (
-        std::env::var("NATS_USER").ok(),
-        std::env::var("NATS_PASSWORD").ok(),
-    ) {
-        (Some(user), Some(password)) => async_nats::ConnectOptions::new()
-            .user_and_password(user, password),
+    let connect_opts = match (std::env::var("NATS_USER").ok(), std::env::var("NATS_PASSWORD").ok()) {
+        (Some(user), Some(password)) => async_nats::ConnectOptions::new().user_and_password(user, password),
         _ => async_nats::ConnectOptions::new(),
     };
     let client = connect_opts.connect(&nats_url).await.unwrap_or_else(|e| {

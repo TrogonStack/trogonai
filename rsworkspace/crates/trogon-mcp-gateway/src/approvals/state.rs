@@ -2,7 +2,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use moka::future::Cache;
 
-use crate::approvals::types::{ApprovalDecisionKind, ApprovalDecisionMessage, ApprovalWaitOutcome, ArgsHash, RequestId};
+use crate::approvals::types::{
+    ApprovalDecisionKind, ApprovalDecisionMessage, ApprovalWaitOutcome, ArgsHash, RequestId,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct ApprovalCacheKey {
@@ -122,9 +124,7 @@ mod tests {
         let cache = ApprovalCache::new(100);
         let request_id = RequestId::new("req-cache").unwrap();
         let args_hash = ArgsHash::from_json(&serde_json::json!({"tool": "deploy"}));
-        cache
-            .store(&request_id, &args_hash, now_unix() + 60)
-            .await;
+        cache.store(&request_id, &args_hash, now_unix() + 60).await;
         assert!(cache.is_approved(&request_id, &args_hash).await);
     }
 
@@ -133,9 +133,7 @@ mod tests {
         let cache = ApprovalCache::new(100);
         let request_id = RequestId::new("req-cache2").unwrap();
         let args_hash = ArgsHash::from_json(&serde_json::json!({"tool": "deploy"}));
-        cache
-            .store(&request_id, &args_hash, now_unix() + 60)
-            .await;
+        cache.store(&request_id, &args_hash, now_unix() + 60).await;
         let other = ArgsHash::from_json(&serde_json::json!({"tool": "delete"}));
         assert!(!cache.is_approved(&request_id, &other).await);
     }

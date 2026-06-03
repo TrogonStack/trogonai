@@ -72,10 +72,7 @@ impl PolicyCache {
         ttl: Duration,
     ) -> bool {
         let scoped = PolicyCacheInner::scoped_key(tenant_id, bundle_revision, key);
-        self.0
-            .lock()
-            .expect("policy cache lock")
-            .set(scoped, value, ttl)
+        self.0.lock().expect("policy cache lock").set(scoped, value, ttl)
     }
 }
 
@@ -214,12 +211,7 @@ impl HostEvalContext {
         Ok(self.cache.get(&self.tenant_id, &self.bundle_revision, key))
     }
 
-    pub fn cache_set(
-        &self,
-        key: &str,
-        value: serde_json::Value,
-        ttl_secs: u64,
-    ) -> Result<bool, CelBuiltinsError> {
+    pub fn cache_set(&self, key: &str, value: serde_json::Value, ttl_secs: u64) -> Result<bool, CelBuiltinsError> {
         if key.len() > CACHE_MAX_KEY_LEN {
             return Err(CelBuiltinsError::policy_fault(
                 super::cache::SET_NAME,
@@ -227,9 +219,8 @@ impl HostEvalContext {
             ));
         }
         let ttl_secs = ttl_secs.clamp(CACHE_TTL_MIN_SECS, CACHE_TTL_MAX_SECS);
-        let serialized = serde_json::to_vec(&value).map_err(|err| {
-            CelBuiltinsError::policy_fault(super::cache::SET_NAME, err.to_string())
-        })?;
+        let serialized = serde_json::to_vec(&value)
+            .map_err(|err| CelBuiltinsError::policy_fault(super::cache::SET_NAME, err.to_string()))?;
         if serialized.len() > CACHE_MAX_VALUE_BYTES {
             return Ok(false);
         }
@@ -268,10 +259,7 @@ impl HostEvalContext {
         }
     }
 
-    pub fn audit_emit(
-        &self,
-        fields: BTreeMap<String, serde_json::Value>,
-    ) -> Result<bool, CelBuiltinsError> {
+    pub fn audit_emit(&self, fields: BTreeMap<String, serde_json::Value>) -> Result<bool, CelBuiltinsError> {
         for key in fields.keys() {
             if super::audit::RESERVED_AUDIT_KEYS.contains(&key.as_str()) {
                 return Err(CelBuiltinsError::policy_fault(
@@ -287,12 +275,7 @@ impl HostEvalContext {
         Ok(true)
     }
 
-    pub fn spicedb_check(
-        &self,
-        subject: &str,
-        permission: &str,
-        resource: &str,
-    ) -> Result<bool, CelBuiltinsError> {
+    pub fn spicedb_check(&self, subject: &str, permission: &str, resource: &str) -> Result<bool, CelBuiltinsError> {
         let Some(backend) = self.spicedb.as_ref() else {
             return Err(CelBuiltinsError::authz_unreachable(
                 super::spicedb::BUILTIN_NAME,

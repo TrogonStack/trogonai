@@ -30,7 +30,10 @@ fn mesh_signer() -> (EncodingKey, String) {
         .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
         .expect("pem")
         .to_string();
-    (EncodingKey::from_rsa_pem(pem.as_bytes()).expect("enc"), "urn:trogon:sts:mesh".into())
+    (
+        EncodingKey::from_rsa_pem(pem.as_bytes()).expect("enc"),
+        "urn:trogon:sts:mesh".into(),
+    )
 }
 
 fn mint_mesh_jwt(enc: &EncodingKey, mesh_iss: &str, aud: &str, sub: &str, gateway_wkl: &str) -> String {
@@ -51,12 +54,7 @@ fn mint_mesh_jwt(enc: &EncodingKey, mesh_iss: &str, aud: &str, sub: &str, gatewa
             {"sub": sub, "agent_id": null, "wkl": gateway_wkl, "iat": now}
         ]
     });
-    encode(
-        &Header::new(Algorithm::RS256),
-        &claims,
-        enc,
-    )
-    .expect("sign mesh jwt")
+    encode(&Header::new(Algorithm::RS256), &claims, enc).expect("sign mesh jwt")
 }
 
 fn bootstrap_jwt(sub: &str) -> String {
@@ -85,17 +83,17 @@ fn bootstrap_jwt(sub: &str) -> String {
 
 fn jwt_validator() -> Arc<JwtValidator> {
     JwtValidator::try_new(JwtIngressConfig {
-            mode: JwtMode::Require,
-            agent_identity_mode: AgentIdentityMode::Enforce,
-            issuers: [HS_ISSUER.to_string()].into(),
-            trusted_mint_issuers: [HS_ISSUER.to_string()].into(),
-            audience: GATEWAY_AUD.into(),
-            leeway_secs: 60,
-            tenant_claim_key: "https://trogon.ai/tenant".into(),
-            bearer_header_name: "authorization".into(),
-            hs256_secret: Some(HS_SECRET.to_vec()),
-            rsa_public_key_pem: None,
-            jwks_uri: None,
+        mode: JwtMode::Require,
+        agent_identity_mode: AgentIdentityMode::Enforce,
+        issuers: [HS_ISSUER.to_string()].into(),
+        trusted_mint_issuers: [HS_ISSUER.to_string()].into(),
+        audience: GATEWAY_AUD.into(),
+        leeway_secs: 60,
+        tenant_claim_key: "https://trogon.ai/tenant".into(),
+        bearer_header_name: "authorization".into(),
+        hs256_secret: Some(HS_SECRET.to_vec()),
+        rsa_public_key_pem: None,
+        jwks_uri: None,
     })
     .expect("jwt validator")
 }
@@ -130,8 +128,7 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
         let mut sub = nats_sts.subscribe(sts_subject.clone()).await.expect("sts sub");
         tokio::spawn(async move {
             while let Some(msg) = sub.next().await {
-                let req: serde_json::Value =
-                    serde_json::from_slice(&msg.payload).expect("sts request json");
+                let req: serde_json::Value = serde_json::from_slice(&msg.payload).expect("sts request json");
                 assert_eq!(req["subject_token"].as_str(), Some(inbound_for_assert.as_str()));
                 assert_eq!(req["audience"].as_str(), Some(backend_aud.as_str()));
                 assert_eq!(req["actor_token"].as_str(), Some(gateway_wkl));
@@ -236,18 +233,18 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
     let ingress = format!("{}.gateway.request.{server_id}.tools.list", prefix.as_str());
     let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
     let response = nats
-        .request_with_headers(
-            ingress,
-            headers,
-            serde_json::to_vec(&payload).unwrap().into(),
-        )
+        .request_with_headers(ingress, headers, serde_json::to_vec(&payload).unwrap().into())
         .await
         .expect("gateway request");
 
     let body: serde_json::Value = serde_json::from_slice(&response.payload).expect("json-rpc");
     assert!(body.get("result").is_some(), "expected success, got {body}");
 
-    let captured = captured.lock().await.take().expect("backend should have received request");
+    let captured = captured
+        .lock()
+        .await
+        .take()
+        .expect("backend should have received request");
     let auth = captured.0;
     assert!(
         auth.contains("Bearer"),
@@ -268,7 +265,9 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
     assert_eq!(claims["iss"].as_str(), Some(mesh_iss.as_str()));
     let chain = claims["act_chain"].as_array().expect("act_chain array");
     assert!(
-        chain.iter().any(|e| e.get("wkl").and_then(|v| v.as_str()) == Some(gateway_wkl)),
+        chain
+            .iter()
+            .any(|e| e.get("wkl").and_then(|v| v.as_str()) == Some(gateway_wkl)),
         "act_chain should include gateway workload hop"
     );
 
@@ -340,11 +339,7 @@ async fn sts_timeout_returns_structured_error() {
     let ingress = format!("{}.gateway.request.github.tools.list", prefix.as_str());
     let payload = json!({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{}});
     let response = nats
-        .request_with_headers(
-            ingress,
-            headers,
-            serde_json::to_vec(&payload).unwrap().into(),
-        )
+        .request_with_headers(ingress, headers, serde_json::to_vec(&payload).unwrap().into())
         .await
         .expect("gateway reply");
 

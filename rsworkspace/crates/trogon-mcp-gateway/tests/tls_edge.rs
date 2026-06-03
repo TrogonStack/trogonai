@@ -35,8 +35,7 @@ mod harness {
     use std::time::Duration;
 
     #[allow(dead_code)]
-    pub const TLS_EDGE_IGNORE: &str =
-        "scaffold; implement when TLS edge hardening per Block G lands";
+    pub const TLS_EDGE_IGNORE: &str = "scaffold; implement when TLS edge hardening per Block G lands";
 
     #[allow(dead_code)]
     pub const ERR_TLS_REQUIRED: &str = "tls_required";

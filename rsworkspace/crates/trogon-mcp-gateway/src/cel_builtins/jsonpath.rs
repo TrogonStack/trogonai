@@ -20,10 +20,7 @@ pub fn query(doc: Value, path: Value) -> Result<Value, CelBuiltinsError> {
     let doc = value_to_json(&doc)?;
     let path = expect_string(path, QUERY_NAME, 1)?;
     let matches = eval_jsonpath(&doc, path.as_str())?;
-    let values = matches
-        .into_iter()
-        .map(json_to_value)
-        .collect::<Result<Vec<_>, _>>()?;
+    let values = matches.into_iter().map(json_to_value).collect::<Result<Vec<_>, _>>()?;
     Ok(Value::List(Arc::new(values)))
 }
 
@@ -32,10 +29,7 @@ pub fn extract(doc: Value, path: Value) -> Result<Value, CelBuiltinsError> {
     match matches.len() {
         0 => Err(CelBuiltinsError::policy_fault(EXTRACT_NAME, "jsonpath no match")),
         1 => json_to_value(matches.into_iter().next().expect("one match")),
-        _ => Err(CelBuiltinsError::policy_fault(
-            EXTRACT_NAME,
-            "jsonpath_ambiguous",
-        )),
+        _ => Err(CelBuiltinsError::policy_fault(EXTRACT_NAME, "jsonpath_ambiguous")),
     }
 }
 
@@ -56,11 +50,7 @@ pub fn delete(_doc: Value, _path: Value) -> Result<Value, CelBuiltinsError> {
     Err(CelBuiltinsError::NotImplemented(DELETE_NAME))
 }
 
-fn query_matches(
-    doc: Value,
-    path: Value,
-    name: &'static str,
-) -> Result<Vec<serde_json::Value>, CelBuiltinsError> {
+fn query_matches(doc: Value, path: Value, name: &'static str) -> Result<Vec<serde_json::Value>, CelBuiltinsError> {
     let doc = value_to_json(&doc)?;
     let path = expect_string(path, name, 1)?;
     eval_jsonpath(&doc, path.as_str())
@@ -68,21 +58,14 @@ fn query_matches(
 
 fn eval_jsonpath(doc: &serde_json::Value, path: &str) -> Result<Vec<serde_json::Value>, CelBuiltinsError> {
     if !path.starts_with('$') {
-        return Err(CelBuiltinsError::policy_fault(
-            QUERY_NAME,
-            "jsonpath must start with $",
-        ));
+        return Err(CelBuiltinsError::policy_fault(QUERY_NAME, "jsonpath must start with $"));
     }
     if path == "$" {
         return Ok(vec![doc.clone()]);
     }
-    let pointer = to_json_pointer(path).ok_or_else(|| {
-        CelBuiltinsError::policy_fault(QUERY_NAME, "invalid jsonpath")
-    })?;
-    Ok(value_at_pointer(doc, &pointer)
-        .into_iter()
-        .cloned()
-        .collect())
+    let pointer =
+        to_json_pointer(path).ok_or_else(|| CelBuiltinsError::policy_fault(QUERY_NAME, "invalid jsonpath"))?;
+    Ok(value_at_pointer(doc, &pointer).into_iter().cloned().collect())
 }
 
 fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
@@ -155,8 +138,8 @@ mod tests {
 
     use cel_interpreter::Value;
 
-    use super::{extract, get, has, query, EXTRACT_NAME, QUERY_NAME};
-    use crate::cel_builtins::context::{with_host_eval, HostEvalContext};
+    use super::{EXTRACT_NAME, QUERY_NAME, extract, get, has, query};
+    use crate::cel_builtins::context::{HostEvalContext, with_host_eval};
     use crate::cel_builtins::errors::HostFailure;
     use crate::cel_builtins::value::json_to_value;
 
@@ -185,8 +168,7 @@ mod tests {
     #[test]
     fn query_zero_matches_returns_empty_list() {
         let host = HostEvalContext::for_tests();
-        let out =
-            with_host_eval(&host, || query(doc(), s("$.missing"))).unwrap();
+        let out = with_host_eval(&host, || query(doc(), s("$.missing"))).unwrap();
         assert_eq!(out, Value::List(Arc::new(vec![])));
     }
 
@@ -232,11 +214,7 @@ mod tests {
     #[test]
     fn bracket_index_path_works() {
         let host = HostEvalContext::for_tests();
-        let out = with_host_eval(
-            &host,
-            || get(doc(), s("$.items[0].id")),
-        )
-        .unwrap();
+        let out = with_host_eval(&host, || get(doc(), s("$.items[0].id"))).unwrap();
         assert_eq!(out, s("a"));
     }
 }

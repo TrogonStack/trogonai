@@ -44,7 +44,10 @@ struct SyncArgs {
     #[arg(long, help = "Ed25519 public or private key PEM used to verify manifest signatures")]
     verify_key: PathBuf,
 
-    #[arg(long, help = "Optional Ed25519 private key PEM to re-sign manifests after validation")]
+    #[arg(
+        long,
+        help = "Optional Ed25519 private key PEM to re-sign manifests after validation"
+    )]
     signer_key: Option<PathBuf>,
 }
 

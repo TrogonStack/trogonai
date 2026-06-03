@@ -113,7 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-async fn run_kms_source(args: &Args) -> Result<tokio::sync::watch::Receiver<trogon_jwks_publisher::Jwks>, Box<dyn std::error::Error + Send + Sync>> {
+async fn run_kms_source(
+    args: &Args,
+) -> Result<tokio::sync::watch::Receiver<trogon_jwks_publisher::Jwks>, Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "kms-aws")]
     {
         use trogon_jwks_publisher::keys::kms::KmsKeySource;
@@ -157,7 +159,9 @@ fn spawn_kms_refresh(source: Arc<trogon_jwks_publisher::keys::kms::KmsKeySource>
     });
 }
 
-async fn run_vault_source(args: &Args) -> Result<tokio::sync::watch::Receiver<trogon_jwks_publisher::Jwks>, Box<dyn std::error::Error + Send + Sync>> {
+async fn run_vault_source(
+    args: &Args,
+) -> Result<tokio::sync::watch::Receiver<trogon_jwks_publisher::Jwks>, Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "vault")]
     {
         use trogon_jwks_publisher::keys::vault::VaultKeySource;

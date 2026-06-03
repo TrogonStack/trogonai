@@ -14,6 +14,10 @@ pub use noop::NoopRedactor;
 pub use redactor::Redactor;
 pub use signed_bundle::{Ed25519PublicKey, SignatureVerificationError, SignedBundleManifest, verify_signed_bundle};
 pub use skill_id::SkillId;
-pub use tier3_sentinel::{output_is_tier3_refusal, tier3_refusal_reason_tag, TIER3_REFUSE_SENTINEL};
+pub use skill_manifest::{
+    JsonPathExpr, SkillCategory, SkillManifest, SkillManifestError, SkillManifestRegistry, SkillManifestVersion,
+    SkillMethodMatcher, SkillSelectionPlan,
+};
+pub use tier3_sentinel::{TIER3_REFUSE_SENTINEL, output_is_tier3_refusal, tier3_refusal_reason_tag};
 pub use wasm::WasmRedactorHost;
 pub use wasm_bundle_path::WasmBundlePath;

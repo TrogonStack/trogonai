@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use ed25519_dalek::{Signer, SigningKey};
 
-use a2a_redaction::signed_bundle::{
-    Ed25519Signature, Sha256Digest, SignedBundleManifest, sign_bundle_digest,
-};
 use a2a_redaction::SkillId;
+use a2a_redaction::signed_bundle::{Ed25519Signature, Sha256Digest, SignedBundleManifest, sign_bundle_digest};
 
 #[derive(Debug, Parser)]
 #[command(name = "a2a-sign-bundle", about = "Sign Tier-3 WASM policy bundles")]
@@ -73,8 +71,7 @@ fn sign_skill_bundle(dir: &Path, skill: &SkillId, signing_key: &SigningKey) -> R
     let wasm_path = dir.join(format!("{}.wasm", skill.as_str()));
     let manifest_path = dir.join(format!("{}.manifest.json", skill.as_str()));
     let wasm_bytes = fs::read(&wasm_path).map_err(|err| format!("read {}: {err}", wasm_path.display()))?;
-    let manifest_bytes =
-        fs::read(&manifest_path).map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
+    let manifest_bytes = fs::read(&manifest_path).map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
 
     let manifest_digest = Sha256Digest::hash(&manifest_bytes);
     let wasm_digest = Sha256Digest::hash(&wasm_bytes);

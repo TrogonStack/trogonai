@@ -4,8 +4,8 @@
 #[tokio::test]
 #[ignore = "requires live Vault at TROGON_JWKS_VAULT_ADDR with transit key configured"]
 async fn vault_transit_sign_and_publish_jwks() {
-    use trogon_jwks_publisher::keys::vault::VaultKeySource;
     use trogon_jwks_publisher::keys::KeySource;
+    use trogon_jwks_publisher::keys::vault::VaultKeySource;
 
     let addr = std::env::var("TROGON_JWKS_VAULT_ADDR").unwrap_or_else(|_| "http://127.0.0.1:8200".into());
     let key = std::env::var("TROGON_JWKS_VAULT_TRANSIT_KEY").expect("TROGON_JWKS_VAULT_TRANSIT_KEY");

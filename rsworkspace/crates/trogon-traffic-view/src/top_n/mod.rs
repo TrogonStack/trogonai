@@ -2,9 +2,7 @@ mod aggregates;
 mod errors;
 mod types;
 
-pub use aggregates::{
-    deepest_chains, longest_chain_by_tenant, most_active_agents, most_denied_agents,
-};
+pub use aggregates::{deepest_chains, longest_chain_by_tenant, most_active_agents, most_denied_agents};
 pub use errors::TopNError;
 pub use types::{DeepestChain, LongestChainByTenant, MostActiveAgent, MostDeniedAgent};
 

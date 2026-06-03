@@ -20,7 +20,8 @@ pub use types::{
     ActChainEntry, AgentId, AgentRecord, Audience, Caller, ExchangeRequest, ExchangeResponse, Purpose, SdkError,
 };
 
-const _: () = assert!(std::mem::size_of::<ActChainEntry>() == std::mem::size_of::<trogon_identity_types::ActChainEntry>());
+const _: () =
+    assert!(std::mem::size_of::<ActChainEntry>() == std::mem::size_of::<trogon_identity_types::ActChainEntry>());
 
 #[cfg(feature = "nats")]
 pub use registry::NatsRegistry;

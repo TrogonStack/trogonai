@@ -13,10 +13,7 @@ fn target_binary() -> PathBuf {
         .and_then(|deps| deps.parent())
         .map(|debug| debug.join("trogon-gateway-ctl"))
         .filter(|path| path.exists())
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/debug/trogon-gateway-ctl")
-        })
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/trogon-gateway-ctl"))
 }
 
 fn bin() -> Command {

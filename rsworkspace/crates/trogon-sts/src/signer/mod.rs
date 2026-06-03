@@ -32,14 +32,18 @@ pub trait Signer: Send + Sync {
 pub type DynSigner = Arc<dyn Signer>;
 
 #[cfg(any(feature = "kms-aws", feature = "vault"))]
-pub(crate) fn jwt_signing_input(algorithm: Algorithm, kid: &str, claims: &HashMap<String, Value>) -> Result<String, StsError> {
+pub(crate) fn jwt_signing_input(
+    algorithm: Algorithm,
+    kid: &str,
+    claims: &HashMap<String, Value>,
+) -> Result<String, StsError> {
     let mut header = Header::new(algorithm);
     header.kid = Some(kid.to_string());
     header.typ = Some("JWT".into());
-    let header_json = serde_json::to_vec(&header)
-        .map_err(|e| StsError::ServerError(format!("jwt header json: {e}")))?;
-    let payload_json = serde_json::to_vec(claims)
-        .map_err(|e| StsError::ServerError(format!("jwt payload json: {e}")))?;
+    let header_json =
+        serde_json::to_vec(&header).map_err(|e| StsError::ServerError(format!("jwt header json: {e}")))?;
+    let payload_json =
+        serde_json::to_vec(claims).map_err(|e| StsError::ServerError(format!("jwt payload json: {e}")))?;
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     Ok(format!(
         "{}.{}",

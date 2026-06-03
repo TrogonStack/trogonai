@@ -1,7 +1,7 @@
 //! Per-session ZedToken and bulk permission result cache (ADR 0014).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use moka::future::Cache;
@@ -143,7 +143,9 @@ impl ZedTokenCache {
     pub fn new(config: ZedTokenCacheConfig) -> Self {
         Self {
             zed_tokens: Cache::builder().max_capacity(config.max_entries).build(),
-            results: Cache::builder().max_capacity(config.max_entries.saturating_mul(4)).build(),
+            results: Cache::builder()
+                .max_capacity(config.max_entries.saturating_mul(4))
+                .build(),
             config,
             metrics: Arc::new(ZedTokenCacheMetrics::default()),
         }
@@ -206,12 +208,7 @@ impl ZedTokenCache {
         }
     }
 
-    pub async fn insert_zed_token(
-        &self,
-        params: &CacheKeyParams,
-        token: String,
-        zed_expiration: Option<Duration>,
-    ) {
+    pub async fn insert_zed_token(&self, params: &CacheKeyParams, token: String, zed_expiration: Option<Duration>) {
         if !self.config.enabled || token.trim().is_empty() {
             return;
         }
@@ -294,17 +291,13 @@ impl ZedTokenCache {
         let prefix_result = format!("v1|result|{session_id}|");
         self.invalidate_keys_with_prefix(&prefix_zed).await;
         self.invalidate_keys_with_prefix(&prefix_result).await;
-        self.metrics
-            .evictions_invalidation
-            .fetch_add(1, Ordering::Relaxed);
+        self.metrics.evictions_invalidation.fetch_add(1, Ordering::Relaxed);
     }
 
     pub async fn invalidate_server(&self, server_id: &str) {
         let needle = format!("|{server_id}|");
         self.invalidate_result_keys_containing(&needle).await;
-        self.metrics
-            .evictions_invalidation
-            .fetch_add(1, Ordering::Relaxed);
+        self.metrics.evictions_invalidation.fetch_add(1, Ordering::Relaxed);
     }
 
     async fn invalidate_keys_with_prefix(&self, prefix: &str) {
@@ -399,9 +392,7 @@ mod tests {
         let params_a = sample_params("sess-shared", "trogon/principal:alice");
         let params_b = sample_params("sess-shared", "trogon/principal:bob");
 
-        cache
-            .insert_zed_token(&params_a, "token-a".into(), None)
-            .await;
+        cache.insert_zed_token(&params_a, "token-a".into(), None).await;
 
         assert_eq!(cache.get_zed_token(&params_a).await.as_deref(), Some("token-a"));
         assert!(cache.get_zed_token(&params_b).await.is_none());
@@ -414,17 +405,13 @@ mod tests {
         let params_b = sample_params("sess-shared", "trogon/principal:bob");
         let resource = sample_resource("filesystem", "deploy");
 
-        cache
-            .insert_zed_token(&params_a, "tok-shared".into(), None)
-            .await;
+        cache.insert_zed_token(&params_a, "tok-shared".into(), None).await;
         cache
             .insert_results(&params_a, "tok-shared", &[(resource.clone(), true)], None)
             .await;
 
         assert_eq!(
-            cache
-                .get_result(&params_a, &resource, Some("tok-shared"))
-                .await,
+            cache.get_result(&params_a, &resource, Some("tok-shared")).await,
             Some(true)
         );
         assert!(
@@ -440,14 +427,10 @@ mod tests {
         let cache = ZedTokenCache::default();
         let params = sample_params("sess-1", "trogon/principal:alice");
 
-        cache
-            .insert_zed_token(&params, "tok-first".into(), None)
-            .await;
+        cache.insert_zed_token(&params, "tok-first".into(), None).await;
         assert_eq!(cache.get_zed_token(&params).await.as_deref(), Some("tok-first"));
 
-        cache
-            .insert_zed_token(&params, "tok-second".into(), None)
-            .await;
+        cache.insert_zed_token(&params, "tok-second".into(), None).await;
         assert_eq!(cache.get_zed_token(&params).await.as_deref(), Some("tok-second"));
     }
 
@@ -458,9 +441,7 @@ mod tests {
         let cache = ZedTokenCache::new(cfg);
         let params = sample_params("sess-ttl", "trogon/principal:alice");
 
-        cache
-            .insert_zed_token(&params, "tok-expire".into(), None)
-            .await;
+        cache.insert_zed_token(&params, "tok-expire".into(), None).await;
         tokio::time::sleep(Duration::from_millis(5)).await;
         assert!(cache.get_zed_token(&params).await.is_none());
         assert!(cache.metrics().evictions_ttl.load(Ordering::Relaxed) >= 1);
@@ -472,9 +453,7 @@ mod tests {
         let params = sample_params("sess-drop", "trogon/principal:alice");
         let resource = sample_resource("srv", "tool");
 
-        cache
-            .insert_zed_token(&params, "tok-drop".into(), None)
-            .await;
+        cache.insert_zed_token(&params, "tok-drop".into(), None).await;
         cache
             .insert_results(&params, "tok-drop", &[(resource.clone(), false)], None)
             .await;
@@ -482,12 +461,7 @@ mod tests {
         cache.invalidate_session("sess-drop").await;
 
         assert!(cache.get_zed_token(&params).await.is_none());
-        assert!(
-            cache
-                .get_result(&params, &resource, Some("tok-drop"))
-                .await
-                .is_none()
-        );
+        assert!(cache.get_result(&params, &resource, Some("tok-drop")).await.is_none());
     }
 
     #[tokio::test]
@@ -498,31 +472,20 @@ mod tests {
         let resource_a = sample_resource("server-a", "tool");
         let resource_b = sample_resource("server-b", "tool");
 
-        cache
-            .insert_zed_token(&params_a, "tok-a".into(), None)
-            .await;
+        cache.insert_zed_token(&params_a, "tok-a".into(), None).await;
         cache
             .insert_results(&params_a, "tok-a", &[(resource_a.clone(), true)], None)
             .await;
-        cache
-            .insert_zed_token(&params_b, "tok-b".into(), None)
-            .await;
+        cache.insert_zed_token(&params_b, "tok-b".into(), None).await;
         cache
             .insert_results(&params_b, "tok-b", &[(resource_b.clone(), true)], None)
             .await;
 
         cache.invalidate_server("server-a").await;
 
-        assert!(
-            cache
-                .get_result(&params_a, &resource_a, Some("tok-a"))
-                .await
-                .is_none()
-        );
+        assert!(cache.get_result(&params_a, &resource_a, Some("tok-a")).await.is_none());
         assert_eq!(
-            cache
-                .get_result(&params_b, &resource_b, Some("tok-b"))
-                .await,
+            cache.get_result(&params_b, &resource_b, Some("tok-b")).await,
             Some(true)
         );
     }

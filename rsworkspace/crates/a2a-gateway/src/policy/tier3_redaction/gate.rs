@@ -10,8 +10,6 @@ pub struct NoopTier3RedactionGate;
 
 impl Tier3RedactionGate for NoopTier3RedactionGate {
     fn redact(&self, _ctx: &mut Tier3EvaluationContext) -> Tier3RedactionDecision {
-        Tier3RedactionDecision::Allow {
-            rewrites: Vec::new(),
-        }
+        Tier3RedactionDecision::Allow { rewrites: Vec::new() }
     }
 }

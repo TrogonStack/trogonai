@@ -39,13 +39,7 @@ impl RedactionRegistry {
         SHARED.get().cloned()
     }
 
-    pub fn register(
-        &self,
-        server_id: &str,
-        tool_name: &str,
-        direction: RedactionDirection,
-        ruleset: RedactionRuleset,
-    ) {
+    pub fn register(&self, server_id: &str, tool_name: &str, direction: RedactionDirection, ruleset: RedactionRuleset) {
         let key = RegistryKey {
             server_id: server_id.to_string(),
             tool_name: tool_name.to_string(),
@@ -102,8 +96,10 @@ mod tests {
             registry.lookup("github", "create_issue", RedactionDirection::Request),
             Some(ruleset)
         );
-        assert!(registry
-            .lookup("github", "create_issue", RedactionDirection::Response)
-            .is_none());
+        assert!(
+            registry
+                .lookup("github", "create_issue", RedactionDirection::Response)
+                .is_none()
+        );
     }
 }

@@ -31,8 +31,7 @@
 /// Shared harness notes (see `tests/e2e_nats_forward.rs`).
 mod harness {
     #[allow(dead_code)]
-    pub const CONFIG_RELOAD_IGNORE: &str =
-        "scaffold; implement when config hot reload lands";
+    pub const CONFIG_RELOAD_IGNORE: &str = "scaffold; implement when config hot reload lands";
     #[allow(dead_code)]
     pub const METRIC_RELOAD_TOTAL: &str = "config.reload_total";
     #[allow(dead_code)]

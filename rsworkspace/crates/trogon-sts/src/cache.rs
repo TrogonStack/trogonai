@@ -96,11 +96,7 @@ impl TrustBundleCache {
         bundles
             .get(trust_domain)
             .cloned()
-            .ok_or_else(|| {
-                StsError::ServerError(format!(
-                    "no trust bundle for trust domain {trust_domain}"
-                ))
-            })
+            .ok_or_else(|| StsError::ServerError(format!("no trust bundle for trust domain {trust_domain}")))
     }
 
     pub async fn upsert_domain(&self, trust_domain: String, pem: String) {
@@ -139,8 +135,8 @@ pub async fn load_trust_bundle_from_kv(
         .await
         .map_err(|e| StsError::ServerError(format!("kv get {key}: {e}")))?
         .ok_or_else(|| StsError::ServerError(format!("kv key {key} missing")))?;
-    let pem = String::from_utf8(value.to_vec())
-        .map_err(|e| StsError::ServerError(format!("trust bundle utf8: {e}")))?;
+    let pem =
+        String::from_utf8(value.to_vec()).map_err(|e| StsError::ServerError(format!("trust bundle utf8: {e}")))?;
     let trust_domain = key
         .rsplit('/')
         .next()
@@ -150,11 +146,7 @@ pub async fn load_trust_bundle_from_kv(
     Ok((trust_domain, pem))
 }
 
-pub fn spawn_trust_bundle_watch(
-    nats: async_nats::Client,
-    cache: TrustBundleCache,
-    bucket: &'static str,
-) {
+pub fn spawn_trust_bundle_watch(nats: async_nats::Client, cache: TrustBundleCache, bucket: &'static str) {
     tokio::spawn(async move {
         loop {
             match watch_trust_bundles(&nats, cache.clone(), bucket).await {
@@ -168,11 +160,7 @@ pub fn spawn_trust_bundle_watch(
     });
 }
 
-async fn watch_trust_bundles(
-    nats: &async_nats::Client,
-    cache: TrustBundleCache,
-    bucket: &str,
-) -> Result<(), StsError> {
+async fn watch_trust_bundles(nats: &async_nats::Client, cache: TrustBundleCache, bucket: &str) -> Result<(), StsError> {
     use futures::StreamExt;
 
     let js = async_nats::jetstream::new(nats.clone());
@@ -223,13 +211,8 @@ mod trust_bundle_tests {
     #[tokio::test]
     async fn upsert_and_read_by_domain() {
         let cache = TrustBundleCache::from_pem_for_domain("acme.local", "ca-pem".into());
-        cache
-            .upsert_domain("other.local".into(), "other-pem".into())
-            .await;
-        assert_eq!(
-            cache.pem_for_domain("other.local").await.expect("get"),
-            "other-pem"
-        );
+        cache.upsert_domain("other.local".into(), "other-pem".into()).await;
+        assert_eq!(cache.pem_for_domain("other.local").await.expect("get"), "other-pem");
     }
 }
 

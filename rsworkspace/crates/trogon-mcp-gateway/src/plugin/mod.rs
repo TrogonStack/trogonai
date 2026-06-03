@@ -47,7 +47,7 @@ pub mod dispatcher;
 pub mod errors;
 pub mod registry;
 
-pub use dispatcher::{PluginDispatcher, PluginDispatcherConfig, DEFAULT_CALLOUT_TIMEOUT_MS};
+pub use dispatcher::{DEFAULT_CALLOUT_TIMEOUT_MS, PluginDispatcher, PluginDispatcherConfig};
 pub use errors::{PluginCalloutError, PluginFailureClass};
 pub use registry::{PluginChainSpec, PluginRegistry};
 

@@ -9,9 +9,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::{Config as McpConfig, McpPrefix};
 use serde_json::Value;
-use trogon_mcp_gateway::approvals::{
-    ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest,
-};
+use trogon_mcp_gateway::approvals::{ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest};
 use trogon_mcp_gateway::authz::{AllowAllPermissionChecker, AuthzContext, AuthzError, PermissionChecker};
 use trogon_mcp_gateway::gateway::GatewaySettings;
 use trogon_mcp_gateway::policy::{MeshGatewayConfig, RiskThresholds};
@@ -30,10 +28,7 @@ enum ApprovalGateOutcome {
 
 #[async_trait]
 impl ApprovalGate for StubApprovalGate {
-    async fn request_approval(
-        &self,
-        _request_ctx: &ApprovalRequest,
-    ) -> Result<ApprovalDecision, ApprovalError> {
+    async fn request_approval(&self, _request_ctx: &ApprovalRequest) -> Result<ApprovalDecision, ApprovalError> {
         match self.outcome {
             ApprovalGateOutcome::Pending => Err(ApprovalError::Timeout),
             ApprovalGateOutcome::Granted => Ok(ApprovalDecision::Granted {
@@ -189,11 +184,15 @@ impl ApprovalIngressHarness {
 
     async fn shutdown(self) {
         self.shutdown_tx.send(()).ok();
-        self.join.await.expect("gateway task panic").expect("gateway run failure");
+        self.join
+            .await
+            .expect("gateway task panic")
+            .expect("gateway run failure");
     }
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn pending_gate_emits_approval_required_envelope() {
     let harness = ApprovalIngressHarness::start(Some(Arc::new(StubApprovalGate {
         outcome: ApprovalGateOutcome::Pending,
@@ -207,17 +206,23 @@ async fn pending_gate_emits_approval_required_envelope() {
         Some(i64::from(rpc_codes::APPROVAL_REQUIRED))
     );
     assert_eq!(body["error"]["message"], "approval_required");
-    assert!(body["error"]["data"]["approval_subject"]
-        .as_str()
-        .unwrap()
-        .starts_with("mcp.approvals."));
+    assert!(
+        body["error"]["data"]["approval_subject"]
+            .as_str()
+            .unwrap()
+            .starts_with("mcp.approvals.")
+    );
     assert_eq!(body["error"]["data"]["request_id"], "42");
-    assert!(!harness.backend_hit.load(Ordering::SeqCst), "backend must not be called");
+    assert!(
+        !harness.backend_hit.load(Ordering::SeqCst),
+        "backend must not be called"
+    );
 
     harness.shutdown().await;
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn granted_gate_forwards_to_backend_and_authz() {
     let harness = ApprovalIngressHarness::start(Some(Arc::new(StubApprovalGate {
         outcome: ApprovalGateOutcome::Granted,
@@ -227,12 +232,16 @@ async fn granted_gate_forwards_to_backend_and_authz() {
     let body = harness.tools_call().await;
     assert_eq!(body.get("id"), Some(&serde_json::json!(42)));
     body.get("result").expect("expected tools/call success envelope");
-    assert!(harness.backend_hit.load(Ordering::SeqCst), "backend should receive forwarded call");
+    assert!(
+        harness.backend_hit.load(Ordering::SeqCst),
+        "backend should receive forwarded call"
+    );
 
     harness.shutdown().await;
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn absent_gate_skips_hitl_even_when_risk_would_require_approval() {
     let harness = ApprovalIngressHarness::start(None).await;
 

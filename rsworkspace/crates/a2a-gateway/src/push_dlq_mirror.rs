@@ -2,10 +2,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use a2a_nats::push::{PushDlqDedupGate, PushIdempotencyKey};
 use a2a_nats::A2aPrefix;
 use a2a_nats::constants::NATS_MSG_ID_HEADER;
 use a2a_nats::nats::subjects::A2aStream;
+use a2a_nats::push::{PushDlqDedupGate, PushIdempotencyKey};
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
@@ -114,12 +114,7 @@ pub fn push_dlq_mirror_subject(prefix: &A2aPrefix, source_subject: &str) -> Opti
         return None;
     }
 
-    Some(format!(
-        "{}.push.dlq.mirror.{}.{}",
-        prefix.as_str(),
-        caller_id,
-        task_id
-    ))
+    Some(format!("{}.push.dlq.mirror.{}.{}", prefix.as_str(), caller_id, task_id))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,10 +253,7 @@ pub async fn run_push_dlq_mirror(
     };
 
     let consumer_config = push_dlq_mirror_pull_config(&prefix, &durable);
-    let consumer = match stream
-        .get_or_create_consumer(durable.as_str(), consumer_config)
-        .await
-    {
+    let consumer = match stream.get_or_create_consumer(durable.as_str(), consumer_config).await {
         Ok(consumer) => consumer,
         Err(error) => {
             warn!(
@@ -449,10 +441,7 @@ mod tests {
 
     #[test]
     fn skip_mirror_loop_markers() {
-        assert!(should_skip_push_dlq_mirror(
-            "a2a.push.dlq.mirror.c1.task-9",
-            None
-        ));
+        assert!(should_skip_push_dlq_mirror("a2a.push.dlq.mirror.c1.task-9", None));
         let mut headers = HeaderMap::new();
         headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
         assert!(should_skip_push_dlq_mirror("a2a.push.dlq.c1.task-9", Some(&headers)));
@@ -462,10 +451,7 @@ mod tests {
     fn pull_consumer_filter_uses_prefix_wildcard() {
         let config = push_dlq_mirror_pull_config(&prefix(), &PushDlqMirrorDurable::default_durable());
         assert_eq!(config.filter_subject, "a2a.push.dlq.>");
-        assert_eq!(
-            config.durable_name.as_deref(),
-            Some(PushDlqMirrorDurable::DEFAULT)
-        );
+        assert_eq!(config.durable_name.as_deref(), Some(PushDlqMirrorDurable::DEFAULT));
     }
 
     #[tokio::test]
@@ -474,15 +460,8 @@ mod tests {
         js.fail_next_n(2);
         let dedup = PushDlqDedupGate::with_capacity(32);
         let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
-        let outcome = mirror_push_dlq_envelope(
-            &js,
-            &prefix(),
-            "a2a.push.dlq.alice.task-1",
-            None,
-            payload,
-            &dedup,
-        )
-        .await;
+        let outcome =
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup).await;
         assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
         let published = js.publishes.lock().unwrap();
         assert_eq!(published.len(), 1);
@@ -518,27 +497,11 @@ mod tests {
         let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
 
         assert_eq!(
-            mirror_push_dlq_envelope(
-                &js,
-                &prefix(),
-                "a2a.push.dlq.alice.task-1",
-                None,
-                payload,
-                &dedup,
-            )
-            .await,
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup,).await,
             MirrorDispatchOutcome::Mirrored
         );
         assert_eq!(
-            mirror_push_dlq_envelope(
-                &js,
-                &prefix(),
-                "a2a.push.dlq.alice.task-1",
-                None,
-                payload,
-                &dedup,
-            )
-            .await,
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup,).await,
             MirrorDispatchOutcome::Skipped
         );
         assert_eq!(js.publishes.lock().unwrap().len(), 1);

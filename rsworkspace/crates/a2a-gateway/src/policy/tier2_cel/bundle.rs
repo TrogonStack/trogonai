@@ -41,12 +41,11 @@ impl Tier2CompiledBundle {
         let tier2_dir = tier2_dir.into();
         let mut rules = BTreeMap::new();
         if tier2_dir.is_dir() {
-            for entry in fs::read_dir(&tier2_dir).map_err(|err| {
-                CelCompileError::for_path(&tier2_dir, format!("read_dir failed: {err}"))
-            })? {
-                let entry = entry.map_err(|err| {
-                    CelCompileError::for_path(&tier2_dir, format!("read_dir entry failed: {err}"))
-                })?;
+            for entry in fs::read_dir(&tier2_dir)
+                .map_err(|err| CelCompileError::for_path(&tier2_dir, format!("read_dir failed: {err}")))?
+            {
+                let entry = entry
+                    .map_err(|err| CelCompileError::for_path(&tier2_dir, format!("read_dir entry failed: {err}")))?;
                 let path = entry.path();
                 if path.extension().and_then(|ext| ext.to_str()) != Some("cel") {
                     continue;
@@ -55,14 +54,7 @@ impl Tier2CompiledBundle {
                     continue;
                 };
                 let (program, mtime) = compiler::compile_cel_file(&path)?;
-                rules.insert(
-                    RuleName::new(stem),
-                    CachedRule {
-                        path,
-                        mtime,
-                        program,
-                    },
-                );
+                rules.insert(RuleName::new(stem), CachedRule { path, mtime, program });
             }
         }
         Ok(Self { tier2_dir, rules })
@@ -72,9 +64,7 @@ impl Tier2CompiledBundle {
         for cached in self.rules.values_mut() {
             let current_mtime = fs::metadata(&cached.path)
                 .and_then(|meta| meta.modified())
-                .map_err(|err| {
-                    CelCompileError::for_path(&cached.path, format!("metadata failed: {err}"))
-                })?;
+                .map_err(|err| CelCompileError::for_path(&cached.path, format!("metadata failed: {err}")))?;
             if current_mtime != cached.mtime {
                 let (program, mtime) = compiler::compile_cel_file(&cached.path)?;
                 cached.program = program;
@@ -86,9 +76,7 @@ impl Tier2CompiledBundle {
     }
 
     pub fn rules(&self) -> impl Iterator<Item = (&RuleName, &CelProgramHandle)> {
-        self.rules
-            .iter()
-            .map(|(name, cached)| (name, &cached.program))
+        self.rules.iter().map(|(name, cached)| (name, &cached.program))
     }
 
     pub fn tier2_dir(&self) -> &Path {
@@ -99,12 +87,11 @@ impl Tier2CompiledBundle {
         if !self.tier2_dir.is_dir() {
             return Ok(());
         }
-        for entry in fs::read_dir(&self.tier2_dir).map_err(|err| {
-            CelCompileError::for_path(&self.tier2_dir, format!("read_dir failed: {err}"))
-        })? {
-            let entry = entry.map_err(|err| {
-                CelCompileError::for_path(&self.tier2_dir, format!("read_dir entry failed: {err}"))
-            })?;
+        for entry in fs::read_dir(&self.tier2_dir)
+            .map_err(|err| CelCompileError::for_path(&self.tier2_dir, format!("read_dir failed: {err}")))?
+        {
+            let entry = entry
+                .map_err(|err| CelCompileError::for_path(&self.tier2_dir, format!("read_dir entry failed: {err}")))?;
             let path = entry.path();
             if path.extension().and_then(|ext| ext.to_str()) != Some("cel") {
                 continue;
@@ -117,14 +104,7 @@ impl Tier2CompiledBundle {
                 continue;
             }
             let (program, mtime) = compiler::compile_cel_file(&path)?;
-            self.rules.insert(
-                rule,
-                CachedRule {
-                    path,
-                    mtime,
-                    program,
-                },
-            );
+            self.rules.insert(rule, CachedRule { path, mtime, program });
         }
         Ok(())
     }

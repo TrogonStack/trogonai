@@ -2,8 +2,8 @@
 
 #![allow(dead_code)]
 
-use std::sync::{Arc, LazyLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -183,10 +183,8 @@ pub fn bootstrap_claims(keys: &'static TestKeys) -> Value {
 }
 
 pub fn test_spiffe_svid_pem(trust_domain: &str, path: &str) -> (String, String) {
-    use rcgen::{
-        BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType,
-    };
     use rcgen::Ia5String;
+    use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType};
     let spiffe_uri: Ia5String = format!("spiffe://{trust_domain}/{path}")
         .try_into()
         .expect("spiffe uri");

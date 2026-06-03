@@ -45,8 +45,11 @@ impl StsError {
             Self::ActChainLoopDetected => "act_chain_loop_detected",
             Self::ActChainEntryRevoked { .. } => "act_chain_entry_revoked",
             Self::RateLimited(_) => "rate_limited",
-            Self::RegistryUnavailable(_) | Self::SpiceDbUnavailable(_) | Self::DependencyUnavailable(_)
-            | Self::SignerUnavailable(_) | Self::ServerError(_) => "server_error",
+            Self::RegistryUnavailable(_)
+            | Self::SpiceDbUnavailable(_)
+            | Self::DependencyUnavailable(_)
+            | Self::SignerUnavailable(_)
+            | Self::ServerError(_) => "server_error",
         }
     }
 

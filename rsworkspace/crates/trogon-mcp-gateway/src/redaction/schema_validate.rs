@@ -32,7 +32,10 @@ fn schema_field<'a>(schema: &'a serde_json::Value, name: &str) -> Option<&'a ser
     if let Some(props) = schema.get("properties").and_then(|p| p.get(name)) {
         return Some(props);
     }
-    if schema.get("additionalProperties").is_some_and(|v| !v.is_boolean() || v.as_bool() == Some(true)) {
+    if schema
+        .get("additionalProperties")
+        .is_some_and(|v| !v.is_boolean() || v.as_bool() == Some(true))
+    {
         return schema.get("additionalProperties").filter(|v| !v.is_boolean());
     }
     if schema.get("type").and_then(|t| t.as_str()) == Some("object") {

@@ -54,11 +54,7 @@ impl<A: RegionAuditSink> RegionRouter<A> {
     }
 
     pub fn session_pin(&self, session_id: &str) -> Option<RegionId> {
-        self.session_pins
-            .read()
-            .expect("pin lock")
-            .get(session_id)
-            .cloned()
+        self.session_pins.read().expect("pin lock").get(session_id).cloned()
     }
 
     pub fn clear_session_pin(&self, session_id: &str) -> bool {
@@ -79,13 +75,13 @@ impl<A: RegionAuditSink> RegionRouter<A> {
             .cloned()
             .or_else(|| session_key.and_then(|id| self.session_pin(id)));
 
-        if let Some(region) = pinned {
-            if self.health.is_healthy(&region) {
-                return Ok(RouteDecision {
-                    region,
-                    reason: RouteReason::SessionPin,
-                });
-            }
+        if let Some(region) = pinned
+            && self.health.is_healthy(&region)
+        {
+            return Ok(RouteDecision {
+                region,
+                reason: RouteReason::SessionPin,
+            });
         }
 
         let home = self.topology.home_region().clone();
@@ -100,11 +96,8 @@ impl<A: RegionAuditSink> RegionRouter<A> {
                 } else {
                     let from = last_unhealthy.clone().unwrap_or_else(|| home.clone());
                     if from != candidate {
-                        self.audit.region_failed_over(
-                            &from,
-                            &candidate,
-                            "home_or_pin_unreachable",
-                        );
+                        self.audit
+                            .region_failed_over(&from, &candidate, "home_or_pin_unreachable");
                     }
                     RouteReason::Failover { from }
                 };
@@ -114,7 +107,10 @@ impl<A: RegionAuditSink> RegionRouter<A> {
                         .expect("pin lock")
                         .insert(session_id.to_string(), candidate.clone());
                 }
-                return Ok(RouteDecision { region: candidate, reason });
+                return Ok(RouteDecision {
+                    region: candidate,
+                    reason,
+                });
             }
             last_unhealthy = Some(candidate);
         }
@@ -173,9 +169,7 @@ mod tests {
     #[test]
     fn happy_path_selects_home() {
         let router = router();
-        let decision = router
-            .route(None, &RequestContext::default())
-            .expect("route");
+        let decision = router.route(None, &RequestContext::default()).expect("route");
         assert_eq!(decision.region.as_str(), "us-east");
         assert_eq!(decision.reason, RouteReason::HomeRegion);
     }
@@ -185,9 +179,7 @@ mod tests {
         let router = router();
         let home = RegionId::new("us-east").unwrap();
         router.health.force_unreachable(&home);
-        let decision = router
-            .route(None, &RequestContext::default())
-            .expect("route");
+        let decision = router.route(None, &RequestContext::default()).expect("route");
         assert_eq!(decision.region.as_str(), "us-west");
         assert!(matches!(decision.reason, RouteReason::Failover { .. }));
         let events = router.audit.failed_overs.lock().expect("lock");
@@ -201,9 +193,7 @@ mod tests {
         let router = router();
         router.health.force_unreachable(&RegionId::new("us-east").unwrap());
         router.health.force_unreachable(&RegionId::new("us-west").unwrap());
-        let err = router
-            .route(None, &RequestContext::default())
-            .expect_err("route");
+        let err = router.route(None, &RequestContext::default()).expect_err("route");
         assert_eq!(err.kind, RegionRouteErrorKind::AllRegionsUnreachable);
         assert_eq!(err.attempted.len(), 2);
     }

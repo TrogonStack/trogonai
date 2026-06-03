@@ -13,20 +13,15 @@ pub(crate) fn new_engine() -> Result<Engine, RedactionError> {
     Engine::new(&config).map_err(|e| RedactionError::WasmEngine(e.to_string()))
 }
 
-pub(crate) fn redact_part_guest(
-    engine: &Engine,
-    module: &Module,
-    payload: &[u8],
-) -> Result<Vec<u8>, RedactionError> {
+pub(crate) fn redact_part_guest(engine: &Engine, module: &Module, payload: &[u8]) -> Result<Vec<u8>, RedactionError> {
     if SCRATCH_OFFSET.saturating_add(payload.len()) > GUEST_PAGE_BYTES {
         return Err(RedactionError::WasmMemory(
             "redaction payload does not fit in one wasm guest page".into(),
         ));
     }
 
-    let in_len = i32::try_from(payload.len()).map_err(|_| {
-        RedactionError::WasmMemory("payload length does not fit in wasm i32 bounds".into())
-    })?;
+    let in_len = i32::try_from(payload.len())
+        .map_err(|_| RedactionError::WasmMemory("payload length does not fit in wasm i32 bounds".into()))?;
 
     let mut store = Store::new(engine, ());
     let linker: Linker<()> = Linker::new(engine);
@@ -52,9 +47,8 @@ pub(crate) fn redact_part_guest(
         .call(&mut store, (SCRATCH_OFFSET as i32, in_len))
         .map_err(|e| RedactionError::WasmCall(e.to_string()))?;
 
-    let out_base = usize::try_from(out_base).map_err(|_| {
-        RedactionError::WasmAbi("wasm redact_part returned negative output pointer".into())
-    })?;
+    let out_base = usize::try_from(out_base)
+        .map_err(|_| RedactionError::WasmAbi("wasm redact_part returned negative output pointer".into()))?;
     let out_len = usize::try_from(out_len)
         .map_err(|_| RedactionError::WasmAbi("wasm redact_part returned negative output length".into()))?;
 

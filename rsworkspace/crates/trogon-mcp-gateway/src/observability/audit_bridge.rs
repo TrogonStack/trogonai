@@ -71,9 +71,8 @@ pub fn reshape_audit_message(
 }
 
 fn reshape_raw(payload: &[u8], trace_context: &TraceContext) -> Result<ReshapedAuditEvent, ObservabilityError> {
-    serde_json::from_slice::<serde_json::Value>(payload).map_err(|error| {
-        ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}"))
-    })?;
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .map_err(|error| ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}")))?;
 
     let mut headers = HeaderMap::new();
     apply_trace_headers(&mut headers, trace_context);
@@ -92,9 +91,8 @@ fn reshape_splunk_hec(
     payload: &[u8],
     trace_context: &TraceContext,
 ) -> Result<ReshapedAuditEvent, ObservabilityError> {
-    let event: serde_json::Value = serde_json::from_slice(payload).map_err(|error| {
-        ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}"))
-    })?;
+    let event: serde_json::Value = serde_json::from_slice(payload)
+        .map_err(|error| ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}")))?;
 
     let mut fields = serde_json::Map::new();
     fields.insert("subject".into(), serde_json::Value::String(audit_subject.to_string()));
@@ -117,7 +115,10 @@ fn reshape_splunk_hec(
     let mut headers = HeaderMap::new();
     apply_trace_headers(&mut headers, trace_context);
     headers.insert("content-type", "application/json");
-    Ok(ReshapedAuditEvent { body: Bytes::from(body), headers })
+    Ok(ReshapedAuditEvent {
+        body: Bytes::from(body),
+        headers,
+    })
 }
 
 /// Elastic ECS document (https://www.elastic.co/guide/en/ecs/current).
@@ -127,9 +128,8 @@ fn reshape_elastic_ecs(
     payload: &[u8],
     trace_context: &TraceContext,
 ) -> Result<ReshapedAuditEvent, ObservabilityError> {
-    let original: serde_json::Value = serde_json::from_slice(payload).map_err(|error| {
-        ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}"))
-    })?;
+    let original: serde_json::Value = serde_json::from_slice(payload)
+        .map_err(|error| ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}")))?;
 
     let outcome = original
         .get("outcome")
@@ -140,7 +140,10 @@ fn reshape_elastic_ecs(
     event_block.insert("kind".into(), "event".into());
     event_block.insert("module".into(), "trogon-mcp-gateway".into());
     event_block.insert("dataset".into(), "trogon.mcp.audit".into());
-    event_block.insert("category".into(), serde_json::json!(["authentication", "authorization"]));
+    event_block.insert(
+        "category".into(),
+        serde_json::json!(["authentication", "authorization"]),
+    );
     if let Some(outcome) = outcome {
         event_block.insert("outcome".into(), serde_json::Value::String(outcome));
     }
@@ -148,10 +151,7 @@ fn reshape_elastic_ecs(
     let mut doc = serde_json::Map::new();
     doc.insert("@timestamp".into(), iso8601_now().into());
     doc.insert("event".into(), serde_json::Value::Object(event_block));
-    doc.insert(
-        "labels".into(),
-        serde_json::json!({ "subject": audit_subject }),
-    );
+    doc.insert("labels".into(), serde_json::json!({ "subject": audit_subject }));
     doc.insert("trogon".into(), original);
     if let Some(trace_id) = &trace_context.trace_id {
         doc.insert("trace".into(), serde_json::json!({ "id": trace_id }));
@@ -166,14 +166,15 @@ fn reshape_elastic_ecs(
     let mut headers = HeaderMap::new();
     apply_trace_headers(&mut headers, trace_context);
     headers.insert("content-type", "application/json");
-    Ok(ReshapedAuditEvent { body: Bytes::from(body), headers })
+    Ok(ReshapedAuditEvent {
+        body: Bytes::from(body),
+        headers,
+    })
 }
 
 fn iso8601_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs() as i64;
     let millis = now.subsec_millis();
     format_iso8601(secs, millis)
@@ -187,9 +188,7 @@ fn format_iso8601(secs: i64, millis: u32) -> String {
     let hour = time_of_day / 3600;
     let minute = (time_of_day % 3600) / 60;
     let second = time_of_day % 60;
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
 }
 
 fn days_to_ymd(mut days: i64) -> (i32, u32, u32) {
@@ -219,22 +218,16 @@ fn extract_trace_context(headers: Option<&HeaderMap>) -> TraceContext {
         return TraceContext::default();
     };
 
-    let traceparent = headers
-        .get(TRACEPARENT_HEADER)
-        .map(|value| value.as_str().to_string());
+    let traceparent = headers.get(TRACEPARENT_HEADER).map(|value| value.as_str().to_string());
 
-    let mut trace_id = headers
-        .get(TRACE_ID_HEADER)
-        .map(|value| value.as_str().to_string());
-    let mut span_id = headers
-        .get(SPAN_ID_HEADER)
-        .map(|value| value.as_str().to_string());
+    let mut trace_id = headers.get(TRACE_ID_HEADER).map(|value| value.as_str().to_string());
+    let mut span_id = headers.get(SPAN_ID_HEADER).map(|value| value.as_str().to_string());
 
-    if let Some(parent) = traceparent.as_deref() {
-        if let Some(parsed) = parse_traceparent(parent) {
-            trace_id.get_or_insert(parsed.trace_id);
-            span_id.get_or_insert(parsed.span_id);
-        }
+    if let Some(parent) = traceparent.as_deref()
+        && let Some(parsed) = parse_traceparent(parent)
+    {
+        trace_id.get_or_insert(parsed.trace_id);
+        span_id.get_or_insert(parsed.span_id);
     }
 
     TraceContext {
@@ -302,13 +295,9 @@ async fn run_bridge(
     mut shutdown: oneshot::Receiver<()>,
 ) -> Result<(), ObservabilityError> {
     let jetstream = jetstream::new(nats.clone());
-    ensure_audit_stream(
-        &jetstream,
-        &config.audit_stream_name,
-        &config.mcp_prefix,
-    )
-    .await
-    .map_err(|error| ObservabilityError::AuditBridge(error.to_string()))?;
+    ensure_audit_stream(&jetstream, &config.audit_stream_name, &config.mcp_prefix)
+        .await
+        .map_err(|error| ObservabilityError::AuditBridge(error.to_string()))?;
 
     let stream = jetstream
         .get_stream(&config.audit_stream_name)
@@ -369,9 +358,8 @@ async fn forward_message(
     if config.siem_dry_run_stdout() {
         let line = String::from_utf8_lossy(&reshaped.body);
         let mut stdout = io::stdout().lock();
-        writeln!(stdout, "{audit_subject}\t{line}").map_err(|error| {
-            ObservabilityError::AuditBridge(format!("stdout dry-run write failed: {error}"))
-        })?;
+        writeln!(stdout, "{audit_subject}\t{line}")
+            .map_err(|error| ObservabilityError::AuditBridge(format!("stdout dry-run write failed: {error}")))?;
         stdout.flush().ok();
         return Ok(());
     }
@@ -385,7 +373,9 @@ async fn forward_message(
     nats.publish_with_headers(siem_subject.to_string(), reshaped.headers, reshaped.body)
         .await
         .map_err(|error| ObservabilityError::AuditBridge(error.to_string()))?;
-    nats.flush().await.map_err(|error| ObservabilityError::AuditBridge(error.to_string()))?;
+    nats.flush()
+        .await
+        .map_err(|error| ObservabilityError::AuditBridge(error.to_string()))?;
     Ok(())
 }
 
@@ -437,13 +427,8 @@ mod tests {
     #[test]
     fn splunk_hec_wraps_payload_under_event_key() {
         let payload = sample_payload();
-        let reshaped = reshape_audit_message(
-            "mcp.audit.allow.request.tools",
-            &payload,
-            None,
-            SiemFormat::SplunkHec,
-        )
-        .expect("reshape");
+        let reshaped = reshape_audit_message("mcp.audit.allow.request.tools", &payload, None, SiemFormat::SplunkHec)
+            .expect("reshape");
         let v: serde_json::Value = serde_json::from_slice(&reshaped.body).expect("json");
         assert_eq!(v["source"], "trogon-mcp-gateway");
         assert_eq!(v["sourcetype"], "trogon:mcp:audit");
@@ -454,13 +439,8 @@ mod tests {
     #[test]
     fn elastic_ecs_nests_original_under_trogon_key() {
         let payload = sample_payload();
-        let reshaped = reshape_audit_message(
-            "mcp.audit.deny.request.tools",
-            &payload,
-            None,
-            SiemFormat::ElasticEcs,
-        )
-        .expect("reshape");
+        let reshaped = reshape_audit_message("mcp.audit.deny.request.tools", &payload, None, SiemFormat::ElasticEcs)
+            .expect("reshape");
         let v: serde_json::Value = serde_json::from_slice(&reshaped.body).expect("json");
         assert_eq!(v["event"]["module"], "trogon-mcp-gateway");
         assert_eq!(v["event"]["dataset"], "trogon.mcp.audit");

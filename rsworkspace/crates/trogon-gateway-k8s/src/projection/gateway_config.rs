@@ -83,12 +83,8 @@ pub struct McpGatewayConfigProjection {
     pub content_hash: String,
 }
 
-pub fn project_mcp_gateway_config(
-    resource: &MCPGatewayConfig,
-) -> Result<McpGatewayConfigProjection, ProjectionError> {
-    let namespace = resource
-        .namespace()
-        .ok_or(ProjectionError::MissingNamespace)?;
+pub fn project_mcp_gateway_config(resource: &MCPGatewayConfig) -> Result<McpGatewayConfigProjection, ProjectionError> {
+    let namespace = resource.namespace().ok_or(ProjectionError::MissingNamespace)?;
     let name = resource.name_any();
     if name.is_empty() {
         return Err(ProjectionError::MissingName);
@@ -102,11 +98,7 @@ pub fn project_mcp_gateway_config(
     };
 
     let generation = resource.metadata.generation.unwrap_or(0);
-    let uid = resource
-        .metadata
-        .uid
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+    let uid = resource.metadata.uid.clone().unwrap_or_else(|| "unknown".to_string());
 
     let config = GatewayConfigKvValue {
         tenant_id: resource.spec.tenant_id.clone(),
@@ -210,9 +202,9 @@ fn parse_bundle_scope(bundle_ref: &str) -> Result<BundleScope, ProjectionError> 
         components: vec![],
         schemas: vec![],
     };
-    manifest.scope().map_err(|error| {
-        ProjectionError::InvalidBundleRef(format!("{bundle_ref}: {error}"))
-    })
+    manifest
+        .scope()
+        .map_err(|error| ProjectionError::InvalidBundleRef(format!("{bundle_ref}: {error}")))
 }
 
 fn chrono_like_now() -> String {
@@ -250,10 +242,7 @@ mod tests {
     fn mcp_gateway_config_projection_round_trip() {
         let resource = sample_config();
         let projection = project_mcp_gateway_config(&resource).expect("project");
-        assert_eq!(
-            projection.key,
-            "mcp.gateway.config.tenant-acme.edge"
-        );
+        assert_eq!(projection.key, "mcp.gateway.config.tenant-acme.edge");
         assert_eq!(projection.config.tenant_id, "acme");
         assert_eq!(projection.config.bundle_scope.tenant, "acme");
         assert_eq!(projection.config.bundle_scope.slug, "github-smoke");

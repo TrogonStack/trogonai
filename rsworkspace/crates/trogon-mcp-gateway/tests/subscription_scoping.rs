@@ -286,10 +286,7 @@ mod audit {
         // Arrange: metrics registry / Prometheus scrape hook on gateway callout path.
         // Act: successful subscribe to harness::client_notifications_wildcard(TEST_CLIENT_ID).
         // Assert: mcp_subscribe_total{outcome="allow"} increases by 1.
-        unimplemented!(
-            "metric {} outcome=allow",
-            harness::METRIC_SUBSCRIBE_TOTAL
-        );
+        unimplemented!("metric {} outcome=allow", harness::METRIC_SUBSCRIBE_TOTAL);
     }
 
     #[tokio::test]
@@ -297,10 +294,7 @@ mod audit {
     async fn denied_subscribe_increments_mcp_subscribe_total_deny() {
         // Act: denied subscribe to harness::client_notifications_wildcard(OTHER_CLIENT_ID).
         // Assert: mcp_subscribe_total{outcome="deny"} increases by 1.
-        unimplemented!(
-            "metric {} outcome=deny",
-            harness::METRIC_SUBSCRIBE_TOTAL
-        );
+        unimplemented!("metric {} outcome=deny", harness::METRIC_SUBSCRIBE_TOTAL);
     }
 
     #[tokio::test]

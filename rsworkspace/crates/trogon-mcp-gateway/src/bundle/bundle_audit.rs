@@ -82,12 +82,7 @@ impl BundleAuditPublisher {
                 audit::publish_audit(jetstream, subject, &envelope, Duration::from_secs(5)).await;
             }
             BundleAuditBackend::Recording(sink) => {
-                sink.lock()
-                    .await
-                    .push(RecordedBundleAudit {
-                        event,
-                        fields,
-                    });
+                sink.lock().await.push(RecordedBundleAudit { event, fields });
             }
         }
     }
@@ -112,12 +107,7 @@ impl BundleAuditPublisher {
         .await;
     }
 
-    pub async fn load_failed(
-        &self,
-        bundle_id: &str,
-        revision: u64,
-        error: &BundleLoadError,
-    ) {
+    pub async fn load_failed(&self, bundle_id: &str, revision: u64, error: &BundleLoadError) {
         self.emit(
             EVENT_LOAD_FAILED,
             BundleAuditFields {
@@ -131,13 +121,7 @@ impl BundleAuditPublisher {
         .await;
     }
 
-    pub async fn hot_swapped(
-        &self,
-        bundle_id: &str,
-        revision: u64,
-        digest_hex: &str,
-        previous_digest: &str,
-    ) {
+    pub async fn hot_swapped(&self, bundle_id: &str, revision: u64, digest_hex: &str, previous_digest: &str) {
         self.emit(
             EVENT_HOT_SWAPPED,
             BundleAuditFields {
@@ -151,13 +135,7 @@ impl BundleAuditPublisher {
         .await;
     }
 
-    pub async fn rolled_back(
-        &self,
-        bundle_id: &str,
-        revision: u64,
-        restored_digest: &str,
-        superseded_digest: &str,
-    ) {
+    pub async fn rolled_back(&self, bundle_id: &str, revision: u64, restored_digest: &str, superseded_digest: &str) {
         self.emit(
             EVENT_ROLLED_BACK,
             BundleAuditFields {
@@ -206,9 +184,7 @@ pub fn error_class(error: &BundleLoadError) -> String {
         | BundleLoadError::MemberTooLarge { .. }
         | BundleLoadError::Archive(_)
         | BundleLoadError::ArchiveTooLarge { .. } => "archive".into(),
-        BundleLoadError::UnsupportedTargetWit { .. } | BundleLoadError::GatewayTooOld { .. } => {
-            "compatibility".into()
-        }
+        BundleLoadError::UnsupportedTargetWit { .. } | BundleLoadError::GatewayTooOld { .. } => "compatibility".into(),
         BundleLoadError::KvEmpty { .. }
         | BundleLoadError::KvFetch(_)
         | BundleLoadError::KvWatch(_)

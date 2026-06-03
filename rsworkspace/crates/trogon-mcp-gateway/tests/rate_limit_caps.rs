@@ -86,10 +86,7 @@ mod harness {
         pub join: tokio::task::JoinHandle<Result<(), trogon_mcp_gateway::GatewayError>>,
     }
 
-    pub async fn start_gateway(
-        rate_limit: Arc<RateLimiter>,
-        init_audit_stream: bool,
-    ) -> GatewayHarness {
+    pub async fn start_gateway(rate_limit: Arc<RateLimiter>, init_audit_stream: bool) -> GatewayHarness {
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
         let connect_timeout = Duration::from_secs(15);
         let nats_conf = NatsConfig::new(vec![url], NatsAuth::None);
@@ -108,14 +105,17 @@ mod harness {
             egress: None,
             chain_resolver: None,
             rate_limit: Some(rate_limit),
-        stepup_policy: None,
-        stepup_bridge: None,
-        freshness_clock: None,
+            approval_gate: None,
+            mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
+            context_throttle: None,
+            anomaly_emitter: None,
+            stepup_policy: None,
+            stepup_bridge: None,
+            freshness_clock: None,
         };
 
         let nats = Arc::new(connect(&nats_conf, connect_timeout).await.expect("nats connect"));
-        let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> =
-            Arc::new(AllowAllPermissionChecker);
+        let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = Arc::new(AllowAllPermissionChecker);
         let traces = trogon_mcp_gateway::trace::TraceStore::default();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let run_nats = nats.clone();
@@ -135,11 +135,7 @@ mod harness {
         }
     }
 
-    pub async fn spawn_slow_backend(
-        nats: Arc<async_nats::Client>,
-        subject_out: String,
-        hold: Duration,
-    ) {
+    pub async fn spawn_slow_backend(nats: Arc<async_nats::Client>, subject_out: String, hold: Duration) {
         tokio::spawn(async move {
             let mut sub = nats.subscribe(subject_out).await.expect("backend sub");
             while let Some(msg) = sub.next().await {
@@ -183,13 +179,9 @@ mod harness {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("authorization", format!("Bearer {token}").as_str());
         let payload = json!({"jsonrpc":"2.0","id":request_id,"method":"tools/list","params":{}});
-        nats.request_with_headers(
-            ingress,
-            headers,
-            serde_json::to_vec(&payload).unwrap().into(),
-        )
-        .await
-        .expect("ingress request")
+        nats.request_with_headers(ingress, headers, serde_json::to_vec(&payload).unwrap().into())
+            .await
+            .expect("ingress request")
     }
 
     pub fn assert_rate_limited(body: &Value, scope: &str) -> u64 {
@@ -208,8 +200,8 @@ mod harness {
 }
 
 mod unit {
-    use super::harness::{TEST_CALLER_BUDGET, TEST_CALLER_WINDOW, test_rate_limiter};
     use super::Duration;
+    use super::harness::{TEST_CALLER_BUDGET, TEST_CALLER_WINDOW, test_rate_limiter};
     use trogon_mcp_gateway::throttle::RateLimitScope;
 
     #[test]
@@ -257,8 +249,8 @@ mod unit {
 
 mod per_server_inflight {
     use super::harness::{
-        BACKEND_HOLD, assert_rate_limited, spawn_fast_backend, spawn_slow_backend, start_gateway,
-        test_rate_limiter, tools_list,
+        BACKEND_HOLD, assert_rate_limited, spawn_fast_backend, spawn_slow_backend, start_gateway, test_rate_limiter,
+        tools_list,
     };
     use super::{Duration, Value};
 
@@ -272,15 +264,11 @@ mod per_server_inflight {
         let nats = h.nats.clone();
         let prefix = h.prefix.clone();
         let server_id = h.server_id.clone();
-        let f1 = tokio::spawn(async move {
-            tools_list(&nats, &prefix, &server_id, "user:a", "acme", 1).await
-        });
+        let f1 = tokio::spawn(async move { tools_list(&nats, &prefix, &server_id, "user:a", "acme", 1).await });
         let nats = h.nats.clone();
         let prefix = h.prefix.clone();
         let server_id = h.server_id.clone();
-        let f2 = tokio::spawn(async move {
-            tools_list(&nats, &prefix, &server_id, "user:b", "acme", 2).await
-        });
+        let f2 = tokio::spawn(async move { tools_list(&nats, &prefix, &server_id, "user:b", "acme", 2).await });
         tokio::time::sleep(Duration::from_millis(200)).await;
         let third = tools_list(&h.nats, &h.prefix, &h.server_id, "user:c", "acme", 3).await;
         let body: Value = serde_json::from_slice(&third.payload).expect("json");
@@ -301,26 +289,27 @@ mod per_server_inflight {
         let nats = h.nats.clone();
         let prefix = h.prefix.clone();
         let server_id = h.server_id.clone();
-        let slow1 = tokio::spawn(async move {
-            tools_list(&nats, &prefix, &server_id, "user:a", "acme", 1).await
-        });
+        let slow1 = tokio::spawn(async move { tools_list(&nats, &prefix, &server_id, "user:a", "acme", 1).await });
         let nats = h.nats.clone();
         let prefix = h.prefix.clone();
         let server_id = h.server_id.clone();
-        let slow2 = tokio::spawn(async move {
-            tools_list(&nats, &prefix, &server_id, "user:b", "acme", 2).await
-        });
+        let slow2 = tokio::spawn(async move { tools_list(&nats, &prefix, &server_id, "user:b", "acme", 2).await });
         tokio::time::sleep(Duration::from_millis(150)).await;
-        assert!(tools_list(&h.nats, &h.prefix, &h.server_id, "user:c", "acme", 3)
-            .await
-            .payload
-            .starts_with(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"error\""));
+        assert!(
+            tools_list(&h.nats, &h.prefix, &h.server_id, "user:c", "acme", 3)
+                .await
+                .payload
+                .starts_with(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"error\"")
+        );
 
         let _ = slow1.await;
         tokio::time::sleep(Duration::from_millis(400)).await;
         let third = tools_list(&h.nats, &h.prefix, &h.server_id, "user:d", "acme", 4).await;
         let body: Value = serde_json::from_slice(&third.payload).expect("json");
-        assert!(body.get("result").is_some(), "expected success after slot release, got {body}");
+        assert!(
+            body.get("result").is_some(),
+            "expected success after slot release, got {body}"
+        );
         let _ = slow2.await;
         h.shutdown_tx.send(()).ok();
         h.join.await.expect("join").expect("gateway run");
@@ -345,8 +334,7 @@ mod per_server_inflight {
 
 mod per_tenant_inflight {
     use super::harness::{
-        BACKEND_HOLD, assert_rate_limited, spawn_slow_backend, start_gateway, test_rate_limiter,
-        tools_list,
+        BACKEND_HOLD, assert_rate_limited, spawn_slow_backend, start_gateway, test_rate_limiter, tools_list,
     };
     use super::{Duration, Value};
 
@@ -361,14 +349,10 @@ mod per_tenant_inflight {
 
         let nats = h.nats.clone();
         let prefix = h.prefix.clone();
-        tokio::spawn(async move {
-            tools_list(&nats, &prefix, "srv-a", "user:a", "acme", 1).await
-        });
+        tokio::spawn(async move { tools_list(&nats, &prefix, "srv-a", "user:a", "acme", 1).await });
         let nats = h.nats.clone();
         let prefix = h.prefix.clone();
-        tokio::spawn(async move {
-            tools_list(&nats, &prefix, "srv-b", "user:b", "acme", 2).await
-        });
+        tokio::spawn(async move { tools_list(&nats, &prefix, "srv-b", "user:b", "acme", 2).await });
         tokio::time::sleep(Duration::from_millis(200)).await;
         let third = tools_list(&h.nats, &h.prefix, "srv-c", "user:c", "acme", 3).await;
         let body: Value = serde_json::from_slice(&third.payload).expect("json");
@@ -393,8 +377,7 @@ mod per_tenant_inflight {
         tokio::spawn(async move { tools_list(&nats, &prefix, "beta", "u2", "acme", 2).await });
         tokio::time::sleep(Duration::from_millis(200)).await;
         let body: Value =
-            serde_json::from_slice(&tools_list(&h.nats, &h.prefix, "gamma", "u3", "acme", 3).await.payload)
-                .unwrap();
+            serde_json::from_slice(&tools_list(&h.nats, &h.prefix, "gamma", "u3", "acme", 3).await.payload).unwrap();
         assert_rate_limited(&body, "tenant");
         h.shutdown_tx.send(()).ok();
         h.join.await.expect("join").expect("gateway run");
@@ -425,11 +408,10 @@ mod per_tenant_inflight {
 }
 
 mod per_caller_rate_budget {
-    use super::harness::{
-        TEST_CALLER_BUDGET, assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter,
-        tools_list,
-    };
     use super::Value;
+    use super::harness::{
+        TEST_CALLER_BUDGET, assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter, tools_list,
+    };
 
     #[tokio::test]
     #[ignore = "needs NATS (set NATS_URL, default nats://127.0.0.1:4222). Run: cargo test -p trogon-mcp-gateway --test rate_limit_caps -- --ignored"]
@@ -475,7 +457,9 @@ mod per_caller_rate_budget {
         spawn_fast_backend(h.nats.clone(), subject).await;
         for id in 1..=3 {
             let body: Value = serde_json::from_slice(
-                &tools_list(&h.nats, &h.prefix, &h.server_id, "user:alice", "acme", id).await.payload,
+                &tools_list(&h.nats, &h.prefix, &h.server_id, "user:alice", "acme", id)
+                    .await
+                    .payload,
             )
             .unwrap();
             assert!(body.get("result").is_some());
@@ -486,8 +470,8 @@ mod per_caller_rate_budget {
 }
 
 mod caller_isolation {
-    use super::harness::{assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter, tools_list};
     use super::Value;
+    use super::harness::{assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter, tools_list};
 
     #[tokio::test]
     #[ignore = "needs NATS (set NATS_URL, default nats://127.0.0.1:4222). Run: cargo test -p trogon-mcp-gateway --test rate_limit_caps -- --ignored"]
@@ -542,8 +526,8 @@ mod caller_isolation {
 }
 
 mod retry_after_header {
-    use super::harness::{assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter, tools_list};
     use super::Value;
+    use super::harness::{assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter, tools_list};
 
     #[tokio::test]
     #[ignore = "needs NATS (set NATS_URL, default nats://127.0.0.1:4222). Run: cargo test -p trogon-mcp-gateway --test rate_limit_caps -- --ignored"]
@@ -590,8 +574,7 @@ mod retry_after_header {
 
 mod window_recovery {
     use super::harness::{
-        TEST_CALLER_WINDOW, assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter,
-        tools_list,
+        TEST_CALLER_WINDOW, assert_rate_limited, spawn_fast_backend, start_gateway, test_rate_limiter, tools_list,
     };
     use super::{Duration, Value};
 
@@ -650,8 +633,8 @@ mod window_recovery {
 }
 
 mod audit_rate_limited {
-    use super::harness::{spawn_slow_backend, start_gateway, test_rate_limiter, tools_list, BACKEND_HOLD};
     use super::Duration;
+    use super::harness::{BACKEND_HOLD, spawn_slow_backend, start_gateway, test_rate_limiter, tools_list};
     use futures::StreamExt;
     use trogon_mcp_gateway::audit::audit_publish_subject;
 
@@ -712,7 +695,10 @@ mod audit_rate_limited {
             .expect("timeout")
             .expect("audit");
         let envelope: serde_json::Value = serde_json::from_slice(&audit_msg.payload).unwrap();
-        assert_eq!(envelope.get("rate_limit_scope").and_then(|v| v.as_str()), Some("tenant"));
+        assert_eq!(
+            envelope.get("rate_limit_scope").and_then(|v| v.as_str()),
+            Some("tenant")
+        );
         h.shutdown_tx.send(()).ok();
         h.join.await.expect("join").expect("gateway run");
     }

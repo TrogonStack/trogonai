@@ -8,9 +8,9 @@ use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome
 use a2a_nats::constants::DEFAULT_OPERATION_TIMEOUT;
 use a2a_nats::push::PushDlqDedupGate;
 use a2a_nats::{
-    gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
+    NatsConfig, gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
     ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
-    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes, NatsConfig,
+    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
 };
 use a2a_redaction::wasm_bundle_path::WasmBundlePath;
 use a2a_redaction::{Ed25519PublicKey, SkillId};
@@ -32,8 +32,8 @@ use crate::gw_pull_backpressure;
 use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
 
 use crate::jwt_caller_identity::{
-    gateway_audit_caller_attribution, gateway_caller_identity_policy, gateway_jwt_audience,
-    resolve_gateway_caller_identity, JwtHeaderCallerIdentitySource,
+    JwtHeaderCallerIdentitySource, gateway_audit_caller_attribution, gateway_caller_identity_policy,
+    gateway_jwt_audience, resolve_gateway_caller_identity,
 };
 use crate::policy::spicedb_tier1::{
     OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1SpiceDbBuildError, Tier1SpiceDbConfig,
@@ -45,13 +45,11 @@ use crate::policy::tier1_declarative::{
     Tier1DeclarativeGate, tier1_declarative_audit_rule_fired,
 };
 use crate::policy::tier2::Tier2Decision;
-use crate::policy::tier2_cel::{
-    tier2_evaluation_context_from_ingress, RealTier2CelEvaluator, Tier2CompiledBundle,
-};
+use crate::policy::tier2_cel::{RealTier2CelEvaluator, Tier2CompiledBundle, tier2_evaluation_context_from_ingress};
 use crate::policy::tier3_redaction::{
+    NoopTier3RedactionGate, RealTier3RedactionGate, Tier3EvaluationContext, Tier3RedactionDecision, Tier3RedactionGate,
     gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle, merge_forward_audit_rewrites,
-    NoopTier3RedactionGate, RealTier3RedactionGate, Tier3EvaluationContext, Tier3RedactionDecision,
-    Tier3RedactionGate, tier3_redaction_audit_rewrites,
+    tier3_redaction_audit_rewrites,
 };
 use crate::policy::wasmtime_substrate::WasmtimeSubstrate;
 
@@ -135,8 +133,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
     let caller_identity_policy = gateway_caller_identity_policy(env);
     let signing_key_source = signing_key_source_from_process_env().map_err(RuntimeError::SigningKeySource)?;
     let jwt_audience = gateway_jwt_audience(env, config.a2a_prefix.as_str());
-    let message_caller_identity =
-        JwtHeaderCallerIdentitySource::new(signing_key_source, jwt_audience);
+    let message_caller_identity = JwtHeaderCallerIdentitySource::new(signing_key_source, jwt_audience);
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
 
@@ -202,13 +199,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         let pull_config = gw_pull_backpressure::GatewayEventsPullConfig::from_env(env);
         let pull_shutdown = shutdown.clone();
         tokio::spawn(async move {
-            gw_pull_backpressure::run_gateway_events_pull(
-                pull_client,
-                pull_prefix,
-                pull_config,
-                pull_shutdown,
-            )
-            .await;
+            gw_pull_backpressure::run_gateway_events_pull(pull_client, pull_prefix, pull_config, pull_shutdown).await;
         });
         info!(
             prefix = %config.a2a_prefix,
@@ -340,9 +331,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                         .map(|(_, id)| id)
                         .unwrap_or(audit_caller_id.as_str());
                     let principal = tier1_principal_from_caller(caller_slug, publisher_account.as_str());
-                    let Some(session) =
-                        tier1_session_from_principal(&principal, publisher_account.as_str())
-                    else {
+                    let Some(session) = tier1_session_from_principal(&principal, publisher_account.as_str()) else {
                         tracing::Span::current().record("routing_outcome", "tier1_denied");
                         deny_tier1(
                             client,
@@ -420,8 +409,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                             tier1_zed_token = zed_token;
                             if method_dots == "message.send"
                                 && let Some(owner_emitter) = tier1_owner
-                                && let Some(owner) =
-                                    owner_tuple_for_message_send(&agent_id, &params, &principal)
+                                && let Some(owner) = owner_tuple_for_message_send(&agent_id, &params, &principal)
                                 && let Err(error) = owner_emitter.emit_owner(&owner).await
                             {
                                 warn!(
@@ -640,11 +628,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                         method_slashes.clone(),
                                         json_rpc_audit_req_id(payload.as_ref()),
                                         started_wall_ms,
-                                        started_mono
-                                            .elapsed()
-                                            .as_millis()
-                                            .min(u128::from(u64::MAX))
-                                            as u64,
+                                        started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
                                         AuditOutcome::Err {
                                             code: -32_801,
                                             message: "tier-3 redaction engine error".into(),
@@ -866,9 +850,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                         rewrites,
                                         stream_consumer,
                                         zed_token_snapshot: tier1_zed_token.clone(),
-                                        tier1_decision: tier1
-                                            .is_enabled()
-                                            .then_some(Tier1Decision::Allow),
+                                        tier1_decision: tier1.is_enabled().then_some(Tier1Decision::Allow),
                                         tier3_decision: gateway_tier3_redaction_enabled(env)
                                             .then_some(Tier3Decision::Allow),
                                         ..Default::default()
@@ -1060,12 +1042,7 @@ fn enrich_audit_caller(
     fields
 }
 
-async fn deny_tier1(
-    client: &async_nats::Client,
-    reply: async_nats::Subject,
-    ctx: Tier1DenialCtx<'_>,
-    message: &str,
-) {
+async fn deny_tier1(client: &async_nats::Client, reply: async_nats::Subject, ctx: Tier1DenialCtx<'_>, message: &str) {
     warn!(
         agent_id = %ctx.agent_id,
         method = %ctx.method_slashes,
@@ -1086,10 +1063,7 @@ async fn deny_tier1(
             ctx.method_slashes,
             json_rpc_audit_req_id(ctx.payload.as_ref()),
             ctx.started_wall_ms,
-            ctx.started_mono
-                .elapsed()
-                .as_millis()
-                .min(u128::from(u64::MAX)) as u64,
+            ctx.started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             AuditOutcome::Err {
                 code: -32_801,
                 message: message.into(),
@@ -1158,12 +1132,7 @@ fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack {
         Box::new(crate::policy::NoopTier2Evaluator)
     };
 
-    match WasmtimeSubstrate::try_new_with_tier2(
-        bundle_path.clone(),
-        tier2,
-        tier2_cel_active,
-        tier3_signing_pubkey,
-    ) {
+    match WasmtimeSubstrate::try_new_with_tier2(bundle_path.clone(), tier2, tier2_cel_active, tier3_signing_pubkey) {
         Err(err) => {
             warn!(
                 error = %err,
@@ -1212,10 +1181,7 @@ fn gateway_tier2_cel_enabled<E: ReadEnv>(env: &E) -> bool {
     let Ok(flag) = env.var("A2A_GATEWAY_TIER2_CEL_ENABLED") else {
         return false;
     };
-    matches!(
-        flag.to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    matches!(flag.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 fn gateway_tier3_signing_pubkey<E: ReadEnv>(env: &E) -> Option<Ed25519PublicKey> {
@@ -1239,10 +1205,7 @@ fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {
     let Ok(flag) = env.var("A2A_GATEWAY_AUDIT_PUBLISH") else {
         return false;
     };
-    matches!(
-        flag.to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    matches!(flag.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 fn unary_deadline_for_method<E: ReadEnv>(env: &E, method_dots: &str) -> Option<Duration> {
@@ -1269,10 +1232,7 @@ fn tier1_declarative_context_from_ingress(
 ) -> Option<Tier1DeclarativeContext> {
     let method = a2a_method_from_dots(method_dots)?;
     let raw_slug = caller_slug.unwrap_or("_");
-    let slug = raw_slug
-        .split_once('/')
-        .map(|(_, id)| id)
-        .unwrap_or(raw_slug);
+    let slug = raw_slug.split_once('/').map(|(_, id)| id).unwrap_or(raw_slug);
     let principal = tier1_principal_from_caller(slug, account);
     let caller_subject = principal.spicedb_subject();
     Some(Tier1DeclarativeContext::new(
@@ -1282,7 +1242,6 @@ fn tier1_declarative_context_from_ingress(
         nats_subject,
     ))
 }
-
 
 fn unix_epoch_ms() -> u64 {
     SystemTime::now()
@@ -1377,16 +1336,16 @@ mod gateway_dispatch_tests {
     use async_nats::HeaderMap;
     use trogon_std::env::InMemoryEnv;
 
-    use super::{config_from_args, tier1_declarative_context_from_ingress, unary_deadline_for_method, Args, Config};
-    use std::time::Duration;
+    use super::{Args, Config, config_from_args, tier1_declarative_context_from_ingress, unary_deadline_for_method};
+    use crate::policy::RuleName;
     use crate::policy::tier1_declarative::{
         RealTier1DeclarativeGate, Tier1DeclarativeBundle, Tier1DeclarativeDecision, Tier1DeclarativeGate,
         tier1_declarative_audit_rule_fired,
     };
     use crate::policy::tier2::{Tier2CelEvaluator, Tier2Decision};
     use crate::policy::tier2_cel::tier2_evaluation_context_from_ingress;
-    use crate::policy::RuleName;
     use crate::policy::tier2_cel::{RealTier2CelEvaluator, Tier2CompiledBundle};
+    use std::time::Duration;
 
     fn test_config(prefix: &str) -> Config {
         let env = InMemoryEnv::new();
@@ -1444,16 +1403,7 @@ mod gateway_dispatch_tests {
         let ingress = "a2a.gateway.planner.message.send";
         let agent_subject = "a2a.agent.planner.message.send";
         let extras = forward_audit_fields(ingress, agent_subject, &agent, "message.send");
-        let envelope = AuditEnvelope::new(
-            &agent,
-            "message/send",
-            None,
-            0,
-            0,
-            AuditOutcome::Ok,
-            None,
-            extras,
-        );
+        let envelope = AuditEnvelope::new(&agent, "message/send", None, 0, 0, AuditOutcome::Ok, None, extras);
         let json = serde_json::to_value(envelope).unwrap();
         assert_eq!(
             json["rewrites"],
@@ -1468,16 +1418,7 @@ mod gateway_dispatch_tests {
         let ingress = "a2a.gateway.planner.message.stream";
         let agent_subject = "a2a.agent.planner.message.stream";
         let extras = forward_audit_fields(ingress, agent_subject, &agent, "message.stream");
-        let envelope = AuditEnvelope::new(
-            &agent,
-            "message/stream",
-            None,
-            0,
-            0,
-            AuditOutcome::Ok,
-            None,
-            extras,
-        );
+        let envelope = AuditEnvelope::new(&agent, "message/stream", None, 0, 0, AuditOutcome::Ok, None, extras);
         let json = serde_json::to_value(envelope).unwrap();
         assert_eq!(json["stream_consumer"], "gateway.planner.message.stream");
         assert!(json["rewrites"].is_array());
@@ -1506,7 +1447,9 @@ mod gateway_dispatch_tests {
         assert_eq!(json["stream_consumer"], "gateway.planner.tasks.resubscribe");
         assert_eq!(
             json["rewrites"],
-            serde_json::json!(["ingress:a2a.gateway.planner.tasks.resubscribe -> agent:a2a.agent.planner.tasks.resubscribe"])
+            serde_json::json!([
+                "ingress:a2a.gateway.planner.tasks.resubscribe -> agent:a2a.agent.planner.tasks.resubscribe"
+            ])
         );
     }
 
@@ -1546,14 +1489,10 @@ mod gateway_dispatch_tests {
         let evaluator = RealTier2CelEvaluator::new(bundle);
         let _keep_dir = dir;
         let agent = test_agent();
-        let payload = br#"{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"role":"guest","parts":[]}}}"#;
-        let ctx = tier2_evaluation_context_from_ingress(
-            "message/send",
-            &agent,
-            Some("caller-1"),
-            &HeaderMap::new(),
-            payload,
-        );
+        let payload =
+            br#"{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"role":"guest","parts":[]}}}"#;
+        let ctx =
+            tier2_evaluation_context_from_ingress("message/send", &agent, Some("caller-1"), &HeaderMap::new(), payload);
         let decision = evaluator.evaluate(&ctx);
         assert_eq!(
             decision,
@@ -1564,8 +1503,7 @@ mod gateway_dispatch_tests {
 
         let denied_body = ingress_gateway_policy_denied_response_bytes(payload, "tier-2 predicate rejected envelope")
             .expect("deny response");
-        let denied_json: serde_json::Value =
-            serde_json::from_slice(&denied_body).expect("deny json");
+        let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
         assert_eq!(denied_json["error"]["code"], -32_801);
 
         let envelope = AuditEnvelope::new(
@@ -1626,11 +1564,9 @@ pattern = "planner"
             }
         );
 
-        let denied_body = ingress_gateway_declarative_denied_response_bytes(
-            payload,
-            "tier-1 declarative policy rejected envelope",
-        )
-        .expect("deny response");
+        let denied_body =
+            ingress_gateway_declarative_denied_response_bytes(payload, "tier-1 declarative policy rejected envelope")
+                .expect("deny response");
         let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
         assert_eq!(denied_json["error"]["code"], -32_803);
 

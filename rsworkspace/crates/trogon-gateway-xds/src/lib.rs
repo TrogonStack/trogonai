@@ -8,8 +8,7 @@ pub mod state;
 pub mod type_urls;
 
 pub use config::{
-    BackendEndpoint, BackendTarget, GatewayConfigSnapshot, HttpRoute, IngressPort, PolicyRule,
-    PolicyEffect,
+    BackendEndpoint, BackendTarget, GatewayConfigSnapshot, HttpRoute, IngressPort, PolicyEffect, PolicyRule,
 };
 pub use server::{AdsServer, AdsServerOpts};
 pub use state::{ConfigStore, ConfigWatcher, NodeSnapshot, SnapshotError};

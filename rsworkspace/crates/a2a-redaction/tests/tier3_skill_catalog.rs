@@ -1,5 +1,5 @@
 use a2a_redaction::{Redactor, SkillId, WasmBundlePath, WasmRedactorHost};
-use a2a_types::{part, Message, Part, Role};
+use a2a_types::{Message, Part, Role, part};
 
 fn bundled_wasm(name: &str) -> &'static [u8] {
     match name {

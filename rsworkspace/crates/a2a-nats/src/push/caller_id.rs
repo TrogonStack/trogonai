@@ -136,10 +136,7 @@ mod tests {
     #[test]
     fn resolve_push_dlq_caller_id_absent_principal_uses_fallback() {
         let fallback = CallerId::from("env-seg");
-        assert_eq!(
-            resolve_push_dlq_caller_id(None, &fallback).as_str(),
-            "env-seg"
-        );
+        assert_eq!(resolve_push_dlq_caller_id(None, &fallback).as_str(), "env-seg");
     }
 
     #[test]

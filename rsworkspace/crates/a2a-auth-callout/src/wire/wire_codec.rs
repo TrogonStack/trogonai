@@ -1,8 +1,7 @@
 use nkeys::{KeyPair, XKey};
 
 use super::{
-    CalloutAuthResponseClaims, NkeyPublic, NkeySeed, ServerAuthRequestClaims,
-    ServerAuthRequestEnvelope, XkeyPublic,
+    CalloutAuthResponseClaims, NkeyPublic, NkeySeed, ServerAuthRequestClaims, ServerAuthRequestEnvelope, XkeyPublic,
 };
 use crate::error::AuthCalloutError;
 use crate::jwt::MintedUserJwt;
@@ -24,10 +23,7 @@ impl AuthCalloutWireCodec {
         server_xkey_public: Option<XkeyPublic>,
     ) -> Result<Self, AuthCalloutError> {
         let callout_issuer = callout_issuer_seed.to_signing_keypair()?;
-        let account_xkey = account_xkey_seed
-            .as_ref()
-            .map(NkeySeed::to_xkey)
-            .transpose()?;
+        let account_xkey = account_xkey_seed.as_ref().map(NkeySeed::to_xkey).transpose()?;
         Ok(Self {
             server_issuer,
             callout_issuer,
@@ -56,8 +52,7 @@ impl AuthCalloutWireCodec {
         request: &ServerAuthRequestClaims,
         user_jwt: MintedUserJwt,
     ) -> Result<Vec<u8>, AuthCalloutError> {
-        let response =
-            CalloutAuthResponseClaims::success(request, &user_jwt, &self.callout_issuer)?;
+        let response = CalloutAuthResponseClaims::success(request, &user_jwt, &self.callout_issuer)?;
         response.into_wire_bytes(request, self.account_xkey.as_ref())
     }
 
@@ -66,8 +61,7 @@ impl AuthCalloutWireCodec {
         request: &ServerAuthRequestClaims,
         message: impl Into<String>,
     ) -> Result<Vec<u8>, AuthCalloutError> {
-        let response =
-            CalloutAuthResponseClaims::denial(request, message, &self.callout_issuer)?;
+        let response = CalloutAuthResponseClaims::denial(request, message, &self.callout_issuer)?;
         response.into_wire_bytes(request, self.account_xkey.as_ref())
     }
 }

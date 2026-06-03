@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::sync::Once;
 
 use a2a_auth_callout::{
-    caller_jwt_header::CallerJwtHeaderValue, AccountName, AudienceAccount, SigningKeySource, SpiceDbPrincipal,
-    UserJwtClaims, CALLER_JWT_HEADER_NAME,
+    AccountName, AudienceAccount, CALLER_JWT_HEADER_NAME, SigningKeySource, SpiceDbPrincipal, UserJwtClaims,
+    caller_jwt_header::CallerJwtHeaderValue,
 };
 use async_nats::HeaderMap;
 use tracing::warn;
@@ -48,9 +48,7 @@ pub fn gateway_caller_identity_policy<E: ReadEnv>(env: &E) -> GatewayCallerIdent
             );
         });
     }
-    GatewayCallerIdentityPolicy {
-        trust_caller_headers,
-    }
+    GatewayCallerIdentityPolicy { trust_caller_headers }
 }
 
 fn gateway_trust_caller_headers_enabled<E: ReadEnv>(env: &E) -> bool {
@@ -189,10 +187,7 @@ pub fn resolve_gateway_caller_identity(
     })
 }
 
-fn identity_from_verified(
-    verified: VerifiedCallerIdentity,
-    source: CallerIdentitySource,
-) -> Option<JwtCallerIdentity> {
+fn identity_from_verified(verified: VerifiedCallerIdentity, source: CallerIdentitySource) -> Option<JwtCallerIdentity> {
     let subject = verified.principal.spicedb_subject()?;
     Some(JwtCallerIdentity {
         spicedb_subject: subject,
@@ -240,7 +235,7 @@ fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
 mod tests {
     use super::*;
     use a2a_auth_callout::{
-        jwt::ExternalSubject, CallerId, IssuedPermissions, KeyVersion, StaticSigningKeySource, UserJwtSubject,
+        CallerId, IssuedPermissions, KeyVersion, StaticSigningKeySource, UserJwtSubject, jwt::ExternalSubject,
     };
     use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER};
     use async_nats::HeaderMap;
@@ -298,8 +293,8 @@ mod tests {
         let headers = principal_headers("header-user");
         let msg = empty_message();
 
-        let identity = resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on())
-            .expect("identity");
+        let identity =
+            resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on()).expect("identity");
         assert_eq!(identity.spicedb_subject.as_str(), "msg-user");
         assert_eq!(identity.source, CallerIdentitySource::MessageCallerJwtHeader);
     }
@@ -311,13 +306,7 @@ mod tests {
         headers.insert(GATEWAY_CALLER_ID_HEADER, "legacy-caller");
         let msg = empty_message();
 
-        assert!(resolve_gateway_caller_identity(
-            &message_identity,
-            &msg,
-            &headers,
-            trust_headers_off()
-        )
-        .is_none());
+        assert!(resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_off()).is_none());
     }
 
     #[test]
@@ -327,8 +316,8 @@ mod tests {
         headers.insert(GATEWAY_CALLER_ID_HEADER, "legacy-caller");
         let msg = empty_message();
 
-        let identity = resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on())
-            .expect("identity");
+        let identity =
+            resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on()).expect("identity");
         assert_eq!(identity.spicedb_subject.as_str(), "spicedb-user-1");
         assert_eq!(identity.source, CallerIdentitySource::HeaderPrincipal);
         assert_eq!(identity.audience.as_deref(), Some("tenant-acme"));
@@ -345,8 +334,8 @@ mod tests {
         headers.insert(GATEWAY_CALLER_ID_HEADER, "bridge-caller");
         let msg = empty_message();
 
-        let identity = resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on())
-            .expect("identity");
+        let identity =
+            resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on()).expect("identity");
         assert_eq!(identity.spicedb_subject.as_str(), "bridge-caller");
         assert_eq!(identity.source, CallerIdentitySource::HeaderCallerId);
 
@@ -360,13 +349,7 @@ mod tests {
         let message_identity = TestMessageIdentity { verified: None };
         let headers = HeaderMap::new();
         let msg = empty_message();
-        assert!(resolve_gateway_caller_identity(
-            &message_identity,
-            &msg,
-            &headers,
-            trust_headers_off()
-        )
-        .is_none());
+        assert!(resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_off()).is_none());
 
         let (caller_id, source) = gateway_audit_caller_attribution(None);
         assert_eq!(caller_id, "_");
@@ -381,9 +364,11 @@ mod tests {
                 Err(std::env::VarError::NotPresent)
             }
         }
-        assert!(!gateway_caller_identity_policy(&EmptyEnv)
-            .trust_caller_headers
-            .is_enabled());
+        assert!(
+            !gateway_caller_identity_policy(&EmptyEnv)
+                .trust_caller_headers
+                .is_enabled()
+        );
     }
 
     #[test]
@@ -392,11 +377,8 @@ mod tests {
         let user = KeyPair::new_user();
         let issuer_seed = issuer.seed().expect("issuer seed");
         let source = Arc::new(
-            StaticSigningKeySource::new(
-                issuer_seed.as_str(),
-                KeyVersion::new("current").expect("version"),
-            )
-            .expect("static source"),
+            StaticSigningKeySource::new(issuer_seed.as_str(), KeyVersion::new("current").expect("version"))
+                .expect("static source"),
         );
         let caller_id = CallerId::new("caller1").expect("caller");
         let claims = UserJwtClaims {
@@ -407,8 +389,7 @@ mod tests {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
-        let subject =
-            UserJwtSubject::from_user_nkey(a2a_auth_callout::NkeyPublic::parse(user.public_key()).unwrap());
+        let subject = UserJwtSubject::from_user_nkey(a2a_auth_callout::NkeyPublic::parse(user.public_key()).unwrap());
         let handle = source.current();
         let issued_at = SystemTime::now();
         let token = claims
@@ -428,8 +409,7 @@ mod tests {
         let mut msg = empty_message();
         msg.headers = Some(headers);
 
-        let identity_source =
-            JwtHeaderCallerIdentitySource::new(source, AccountName::new("tenant-acme"));
+        let identity_source = JwtHeaderCallerIdentitySource::new(source, AccountName::new("tenant-acme"));
         let verified = identity_source.verified_caller_identity(&msg).expect("verified");
         assert_eq!(
             verified.principal().spicedb_subject().unwrap().as_str(),

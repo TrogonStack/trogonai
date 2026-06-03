@@ -3,9 +3,9 @@ use std::path::Path;
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
+use super::SigningKeySource;
 use super::key_version::KeyVersion;
 use super::signing_key_handle::SigningKeyHandle;
-use super::SigningKeySource;
 
 const VERSION_CURRENT: &str = "current";
 const VERSION_PREVIOUS: &str = "previous";

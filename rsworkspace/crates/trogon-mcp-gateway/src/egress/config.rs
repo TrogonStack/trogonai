@@ -29,9 +29,13 @@ impl EgressMintConfig {
             .ok()
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(DEFAULT_CACHE_MAX_ENTRIES);
-        let actor_token = env.var(ENV_ACTOR_TOKEN).map_err(|e| format!("reading {ENV_ACTOR_TOKEN}: {e}"))?;
+        let actor_token = env
+            .var(ENV_ACTOR_TOKEN)
+            .map_err(|e| format!("reading {ENV_ACTOR_TOKEN}: {e}"))?;
         if actor_token.trim().is_empty() {
-            return Err(format!("{ENV_ACTOR_TOKEN} must be non-empty when mesh egress is enabled"));
+            return Err(format!(
+                "{ENV_ACTOR_TOKEN} must be non-empty when mesh egress is enabled"
+            ));
         }
         Ok(Self {
             mesh_token_ttl_secs,

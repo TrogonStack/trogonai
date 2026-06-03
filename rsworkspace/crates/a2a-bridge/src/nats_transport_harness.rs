@@ -6,15 +6,14 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use serde_json::json;
 
+use a2a_auth_callout::CALLER_JWT_HEADER_NAME;
+use a2a_nats::A2aPrefix;
+use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditOutcome};
-use a2a_nats::agent_id::A2aAgentId;
-use a2a_auth_callout::CALLER_JWT_HEADER_NAME;
-use a2a_nats::{A2aPrefix};
 
 use crate::auth::{
-    AuthCalloutJsonMintClient, BridgeTenantAccount, InProcessCalloutDispatcherMintWire,
-    harness_callout_dispatcher,
+    AuthCalloutJsonMintClient, BridgeTenantAccount, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher,
 };
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
@@ -38,11 +37,7 @@ pub struct HarnessGatewayUnary {
 
 impl HarnessGatewayUnary {
     #[must_use]
-    pub fn new(
-        nats: trogon_nats::AdvancedMockNatsClient,
-        prefix: A2aPrefix,
-        agent_id: A2aAgentId,
-    ) -> Self {
+    pub fn new(nats: trogon_nats::AdvancedMockNatsClient, prefix: A2aPrefix, agent_id: A2aAgentId) -> Self {
         Self {
             nats,
             prefix,
@@ -54,10 +49,7 @@ impl HarnessGatewayUnary {
 
     #[must_use]
     pub fn last_caller_jwt_present(&self) -> bool {
-        self.last_caller_jwt_present
-            .lock()
-            .ok()
-            .is_some_and(|g| *g)
+        self.last_caller_jwt_present.lock().ok().is_some_and(|g| *g)
     }
 
     #[must_use]
@@ -84,9 +76,7 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         }
 
         let gateway_prefix = format!("{}.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
-        let method_dots = subject
-            .strip_prefix(&gateway_prefix)
-            .unwrap_or("message.send");
+        let method_dots = subject.strip_prefix(&gateway_prefix).unwrap_or("message.send");
         let method_slashes = method_dots.replace('.', "/");
         let envelope = AuditEnvelope::new(
             &self.agent_id,

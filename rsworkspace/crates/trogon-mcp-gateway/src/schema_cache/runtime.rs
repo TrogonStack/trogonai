@@ -163,10 +163,7 @@ pub async fn ensure_tool_schema(
     runtime.cache.lookup_tool(server_id, tool_name).await
 }
 
-pub fn schema_cache_key_for_tool(
-    server_id: &ServerId,
-    schema: &serde_json::Value,
-) -> SchemaCacheKey {
+pub fn schema_cache_key_for_tool(server_id: &ServerId, schema: &serde_json::Value) -> SchemaCacheKey {
     SchemaCacheKey {
         server_id: server_id.clone(),
         schema_hash: hash_schema(schema),

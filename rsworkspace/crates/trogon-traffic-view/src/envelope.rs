@@ -47,11 +47,9 @@ mod tests {
 
     #[test]
     fn envelope_honors_embedded_event_id() {
-        let envelope = AuditEnvelope::from_message(
-            "mcp.audit.sts.success",
-            br#"{"event_id":"evt-1","outcome":"success"}"#,
-        )
-        .expect("parse");
+        let envelope =
+            AuditEnvelope::from_message("mcp.audit.sts.success", br#"{"event_id":"evt-1","outcome":"success"}"#)
+                .expect("parse");
         assert_eq!(envelope.event_id, "evt-1");
     }
 }

@@ -42,8 +42,10 @@ mod tests {
 
     #[test]
     fn schema_hash_is_stable_across_key_order() {
-        let first = serde_json::json!({"type": "object", "properties": {"b": {"type": "string"}, "a": {"type": "integer"}}});
-        let second = serde_json::json!({"properties": {"a": {"type": "integer"}, "b": {"type": "string"}}, "type": "object"});
+        let first =
+            serde_json::json!({"type": "object", "properties": {"b": {"type": "string"}, "a": {"type": "integer"}}});
+        let second =
+            serde_json::json!({"properties": {"a": {"type": "integer"}, "b": {"type": "string"}}, "type": "object"});
         assert_eq!(hash_schema(&first), hash_schema(&second));
     }
 

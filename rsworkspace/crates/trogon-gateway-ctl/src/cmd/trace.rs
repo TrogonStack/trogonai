@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream;
+use async_nats::jetstream::consumer::pull;
 use futures::StreamExt;
 use serde::Serialize;
 use serde_json::Value;
@@ -23,12 +23,7 @@ pub struct TraceResult {
     pub events: Vec<TraceEvent>,
 }
 
-pub async fn run(
-    settings: &CtlSettings,
-    request_id: &str,
-    limit: usize,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(settings: &CtlSettings, request_id: &str, limit: usize, pretty: bool) -> Result<(), String> {
     let client = connect(settings, Duration::from_secs(15)).await?;
     let jetstream = jetstream::new(client);
     let stream = jetstream
@@ -53,14 +48,11 @@ pub async fn run(
     let mut events = Vec::new();
     while let Some(message) = messages.next().await {
         let message = message.map_err(|error| format!("audit message: {error}"))?;
-        let payload: Value = serde_json::from_slice(&message.payload)
-            .map_err(|error| format!("audit envelope JSON: {error}"))?;
+        let payload: Value =
+            serde_json::from_slice(&message.payload).map_err(|error| format!("audit envelope JSON: {error}"))?;
         if envelope_matches_request_id(&payload, request_id) {
             events.push(TraceEvent {
-                sequence: message
-                    .info()
-                    .map(|info| info.stream_sequence)
-                    .unwrap_or(0),
+                sequence: message.info().map(|info| info.stream_sequence).unwrap_or(0),
                 subject: message.subject.to_string(),
                 envelope: payload,
             });

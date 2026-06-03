@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use trogon_mcp_gateway::approvals::{
-    ApprovalAuditSink, ApprovalCoordinator, ApprovalDecision, ApprovalDecisionKind,
-    ApprovalDecisionMessage, ApprovalError, ApprovalGate, ApprovalNatsListener, ApprovalRequest,
-    ApprovalSubject, CoordinatorApprovalGate, RequestId,
+    ApprovalAuditSink, ApprovalCoordinator, ApprovalDecision, ApprovalDecisionKind, ApprovalDecisionMessage,
+    ApprovalError, ApprovalGate, ApprovalNatsListener, ApprovalRequest, ApprovalSubject, CoordinatorApprovalGate,
+    RequestId,
 };
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 
@@ -76,11 +76,7 @@ impl ApprovalHarness {
             .await
             .expect("connect nats");
         let coordinator = Arc::new(ApprovalCoordinator::new());
-        let listener = ApprovalNatsListener::start(
-            client.clone(),
-            "mcp.approvals",
-            Arc::clone(&coordinator),
-        );
+        let listener = ApprovalNatsListener::start(client.clone(), "mcp.approvals", Arc::clone(&coordinator));
         tokio::time::sleep(Duration::from_millis(250)).await;
         Self {
             client,
@@ -121,6 +117,7 @@ async fn request_with_audit(
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn approval_decision_resolves_awaiter() {
     let harness = ApprovalHarness::connect().await;
     let request_id = RequestId::new(format!("req-{}", uuid::Uuid::now_v7())).expect("request id");
@@ -130,9 +127,7 @@ async fn approval_decision_resolves_awaiter() {
     let gate = harness.gate();
     let audit_events = audit.events_arc();
 
-    let waiter = tokio::spawn(async move {
-        request_with_audit(&gate, &audit, &request).await
-    });
+    let waiter = tokio::spawn(async move { request_with_audit(&gate, &audit, &request).await });
 
     tokio::time::sleep(Duration::from_millis(250)).await;
     let decision = ApprovalDecisionMessage {
@@ -155,12 +150,15 @@ async fn approval_decision_resolves_awaiter() {
         .expect("waiter join")
         .expect("approved");
     assert!(matches!(outcome, ApprovalDecision::Granted { .. }));
-    assert!(RecordingAudit::snapshot(&audit_events)
-        .iter()
-        .any(|event| event.starts_with("approval.granted:")));
+    assert!(
+        RecordingAudit::snapshot(&audit_events)
+            .iter()
+            .any(|event| event.starts_with("approval.granted:"))
+    );
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn approval_decision_denies_awaiter() {
     let harness = ApprovalHarness::connect().await;
     let request_id = RequestId::new(format!("req-deny-{}", uuid::Uuid::now_v7())).expect("request id");
@@ -170,9 +168,7 @@ async fn approval_decision_denies_awaiter() {
     let gate = harness.gate();
     let audit_events = audit.events_arc();
 
-    let waiter = tokio::spawn(async move {
-        request_with_audit(&gate, &audit, &request).await
-    });
+    let waiter = tokio::spawn(async move { request_with_audit(&gate, &audit, &request).await });
 
     tokio::time::sleep(Duration::from_millis(250)).await;
     let decision = ApprovalDecisionMessage {
@@ -195,16 +191,18 @@ async fn approval_decision_denies_awaiter() {
         .expect("waiter join")
         .expect("denied");
     assert!(matches!(outcome, ApprovalDecision::Denied { .. }));
-    assert!(RecordingAudit::snapshot(&audit_events)
-        .iter()
-        .any(|event| event.starts_with("approval.denied:")));
+    assert!(
+        RecordingAudit::snapshot(&audit_events)
+            .iter()
+            .any(|event| event.starts_with("approval.denied:"))
+    );
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn approval_ttl_expiry_emits_expired_audit() {
     let harness = ApprovalHarness::connect().await;
-    let request_id =
-        RequestId::new(format!("req-expire-{}", uuid::Uuid::now_v7())).expect("request id");
+    let request_id = RequestId::new(format!("req-expire-{}", uuid::Uuid::now_v7())).expect("request id");
     let request = ApprovalRequest::new("mcp", request_id.clone(), Duration::from_millis(150), None);
     let audit = RecordingAudit::new();
     let gate = harness.gate();
@@ -213,17 +211,17 @@ async fn approval_ttl_expiry_emits_expired_audit() {
 
     let outcome = request_with_audit(&gate, &audit, &request).await;
     assert_eq!(outcome, Err(ApprovalError::Timeout));
-    assert!(RecordingAudit::snapshot(&audit_events)
-        .iter()
-        .any(|event| event == &format!("approval.expired:{}", request_id.as_str())));
+    assert!(
+        RecordingAudit::snapshot(&audit_events)
+            .iter()
+            .any(|event| event == &format!("approval.expired:{}", request_id.as_str()))
+    );
 }
 
 #[tokio::test]
 #[ignore = "needs NATS (set NATS_URL, default nats://127.0.0.1:4222). Run: cargo test -p trogon-mcp-gateway -- --ignored"]
 async fn legacy_approval_client_cache_hit() {
-    use trogon_mcp_gateway::approvals::{
-        ApprovalCache, ApprovalClient, ApprovalWaitOutcome, ArgsHash,
-    };
+    use trogon_mcp_gateway::approvals::{ApprovalCache, ApprovalClient, ApprovalWaitOutcome, ArgsHash};
 
     let harness = ApprovalHarness::connect().await;
     let request_id = RequestId::new(format!("req-cache-{}", uuid::Uuid::now_v7())).expect("request id");
