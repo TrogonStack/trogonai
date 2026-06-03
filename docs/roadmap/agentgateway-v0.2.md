@@ -69,6 +69,105 @@ the default install (PENDING_TODO §7.1) until v0.2.
 
 ---
 
+## AAuth post-v0
+
+v0 ships identity-based and PS-managed 3-party flows (see
+[`docs/identity/aauth-handshake.md`](../identity/aauth-handshake.md) and
+[`docs/identity/aauth-design.md`](../identity/aauth-design.md) — those are
+the permanent homes for the shipped surface). The items below are
+intentionally not in v0.
+
+### 2-party flow (resource-managed consent)
+
+Agent presents an `aa-auth+jwt` minted by its own Agent Provider, and the
+resource enforces consent locally without a Person-Server exchange. v0
+intentionally only ships PS-managed 3-party because it keeps the consent
+substrate centralized while we iterate on policy.
+
+**Deferred because:** requires a resource-side consent store and a second
+challenge envelope path; not needed until we have non-Trogon Agent
+Providers calling Trogon resources.
+
+### 4-party federation
+
+Separate Agent Provider and Person Server with cross-issuer trust
+(`iss` chains and JWKS discovery between issuers).
+
+**Deferred because:** v0 collapses AP and PS into `PersonCore`; federation
+needs an issuer trust list, a discovery doc format, and rotation rules.
+Treat as a follow-up once we have a real second issuer.
+
+### Mission tokens
+
+The `mission` claim is already serialized by `trogon-identity-types`, but
+`PersonCore` does not broker mission approvers — exchanges with a
+`mission` requirement currently fall through to the standard consent
+policy.
+
+**Deferred because:** mission-scoped delegation needs a per-mission
+approver registry and a UX for staging mission grants; the on-wire
+format is ready but the runtime is not.
+
+### Interaction-relay UI
+
+`PersonCore::exchange` already returns `ConsentDecision::Interaction` with
+`{requirement: "interaction", url, code}` and the SDK surfaces it as
+`SdkError::Interaction`. The browser-side redirect page that closes the
+loop with the user is not shipped.
+
+**Deferred because:** v0 audience is service-to-service; the consent
+screen is a discrete frontend deliverable that does not block any
+production flow today.
+
+### NATS KV-backed `ReplayStore`
+
+`InMemoryReplayStore` ships for single-process deployments. The trait +
+KV layout are documented in
+[`aauth-design.md` §D6 / §D9](../identity/aauth-design.md#d6-storage).
+
+**Deferred because:** v0 deploys a single Person Server replica; KV
+backing is required only for HA and is a straightforward port once we
+own the KV layout in production.
+
+### Python AAuth SDK
+
+`pyworkspace/packages/a2a-sdk` currently speaks A2A only. The Rust SDK
+(`trogon-aauth-sdk`) covers the bootstrap → sign → 401 → exchange → retry
+loop end-to-end; a Python sibling is on the v0.2 deliverables list so
+existing demo agents can adopt AAuth via a client switch.
+
+**Deferred because:** the Rust SDK is the reference and the contract is
+not frozen yet — we want to land the 2-party variant first so the Python
+surface lands once rather than twice.
+
+### A2A gateway AAuth coverage
+
+`trogon-mcp-gateway::aauth` is wired; `a2a-gateway` enforces JWT-based
+identity today but does not yet run `trogon-aauth-verify` on its ingress
+path.
+
+**Deferred because:** the AAuth ingress shape needs an A2A-side decision
+on where token / PoP headers ride (callout vs. inline) — tracked
+alongside the `$SYS` auth callout item above and lands together.
+
+### Hardening pass
+
+Key rotation cadence for the Person Server signing key, JWKS cache TTLs
++ negative caching, per-(`iss`, `sub`) rate limits on `/aauth/token`, and
+a threat-model review (`docs/security/threat-model.md`).
+
+**Deferred because:** v0 covers the protocol surface and the tests prove
+the loop; the operational hardening items are a separate cut and depend
+on production deployment data.
+
+### Out of scope (won't ship in v0.x)
+
+- Cross–Person-Server federation / trust chains.
+- Hardware-bound agent keys (TPM / TEE attestation).
+- Human-in-the-loop step-up auth beyond the basic consent screen.
+
+---
+
 ## Optional crates
 
 ### `a2a-pack` version bump
