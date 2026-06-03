@@ -2,7 +2,7 @@ name: trogonai
 
 services:
   nats:
-    image: nats:2.11-alpine
+    image: nats:2.14.2-alpine
     command:
       - "--jetstream"
       - "--store_dir=/data"
@@ -46,7 +46,7 @@ services:
       retries: 3
 
   ngrok:
-    image: ngrok/ngrok:alpine
+    image: ngrok/ngrok:3.39.6-alpine
     env_file:
       - path: .env
         required: false
