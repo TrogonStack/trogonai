@@ -39,7 +39,7 @@ impl Notifier for NoopNotifier {
 /// Implemented by `reqwest::Client` for production; unit tests use
 /// [`MockSlackHttpClient`] defined in the test module.
 #[cfg(feature = "slack")]
-pub(crate) trait SlackHttpClient: Send + Sync + 'static {
+pub trait SlackHttpClient: Send + Sync + 'static {
     fn post_json<'a>(
         &'a self,
         url: &'a str,
@@ -49,20 +49,18 @@ pub(crate) trait SlackHttpClient: Send + Sync + 'static {
 
 #[cfg(feature = "slack")]
 impl SlackHttpClient for reqwest::Client {
-    fn post_json<'a>(
+    async fn post_json<'a>(
         &'a self,
         url: &'a str,
         body: &'a serde_json::Value,
-    ) -> impl std::future::Future<Output = Result<u16, String>> + Send + 'a {
-        async move {
-            let resp = self
-                .post(url)
-                .json(body)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-            Ok(resp.status().as_u16())
-        }
+    ) -> Result<u16, String> {
+        let resp = self
+            .post(url)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(resp.status().as_u16())
     }
 }
 

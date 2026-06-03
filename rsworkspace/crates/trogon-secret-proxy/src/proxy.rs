@@ -129,7 +129,7 @@ where
         .nats
         .subscribe(reply_subject.clone())
         .await
-        .map_err(|e| ProxyError::NatsSubscribe(e))?;
+        .map_err(ProxyError::NatsSubscribe)?;
 
     // Publish OutboundHttpRequest to JetStream, injecting the current trace context
     // into NATS headers so the worker can continue the distributed trace.
@@ -147,7 +147,7 @@ where
         .jetstream
         .publish_with_headers(state.outbound_subject.clone(), nats_headers, payload.into())
         .await
-        .map_err(|e| ProxyError::NatsPublish(e))?;
+        .map_err(ProxyError::NatsPublish)?;
 
     tracing::debug!(
         correlation_id = %correlation_id,
@@ -169,7 +169,7 @@ where
             .map_err(|_| ProxyError::Timeout {
                 correlation_id: correlation_id.clone(),
             })?
-            .ok_or_else(|| ProxyError::ReplyChannelClosed)?;
+            .ok_or(ProxyError::ReplyChannelClosed)?;
 
         let start_frame: StreamFrame = serde_json::from_slice(&start_msg.payload)
             .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
@@ -248,7 +248,7 @@ where
         .map_err(|_| ProxyError::Timeout {
             correlation_id: correlation_id.clone(),
         })?
-        .ok_or_else(|| ProxyError::ReplyChannelClosed)?;
+        .ok_or(ProxyError::ReplyChannelClosed)?;
 
     let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
         .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
