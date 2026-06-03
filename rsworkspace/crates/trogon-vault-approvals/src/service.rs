@@ -417,7 +417,7 @@ where
 
             let response = match this.proposals.get(&proposal_id) {
                 None    => StatusResponse::not_found(proposal_id),
-                Some(p) => StatusResponse::from_proposal(&*p),
+                Some(p) => StatusResponse::from_proposal(&p),
             };
 
             let payload = match serde_json::to_vec(&response) {

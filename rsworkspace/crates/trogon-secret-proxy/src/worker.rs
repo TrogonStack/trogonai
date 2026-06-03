@@ -302,46 +302,46 @@ where
 
     // Fallback-on-401: if upstream rejects the current key during a rotation grace period,
     // retry once with the previous key before surfacing the 401 to the caller.
-    if resp.status == 401 {
-        if let Some(prev) = previous_key {
-            tracing::warn!(
-                url = %request.url,
-                "Current key rejected (401), retrying with previous key during rotation grace period"
-            );
-            let mut fallback_headers: Vec<(String, String)> = request
-                .headers
-                .iter()
-                .filter(|(k, _)| {
-                    !k.eq_ignore_ascii_case("authorization")
-                        && !k.eq_ignore_ascii_case("x-api-key")
-                        && !k.eq_ignore_ascii_case("x-request-id")
-                })
-                .cloned()
-                .collect();
-            let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &prev);
-            fallback_headers.push((auth_name, auth_val));
-            fallback_headers
-                .push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
-            return match forward_request(http_client, request, &fallback_headers).await {
-                Ok(mut r) => {
-                    r.headers.retain(|(_, v)| !v.contains(prev.as_str()));
-                    r
+    if resp.status == 401
+        && let Some(prev) = previous_key
+    {
+        tracing::warn!(
+            url = %request.url,
+            "Current key rejected (401), retrying with previous key during rotation grace period"
+        );
+        let mut fallback_headers: Vec<(String, String)> = request
+            .headers
+            .iter()
+            .filter(|(k, _)| {
+                !k.eq_ignore_ascii_case("authorization")
+                    && !k.eq_ignore_ascii_case("x-api-key")
+                    && !k.eq_ignore_ascii_case("x-request-id")
+            })
+            .cloned()
+            .collect();
+        let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &prev);
+        fallback_headers.push((auth_name, auth_val));
+        fallback_headers
+            .push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
+        return match forward_request(http_client, request, &fallback_headers).await {
+            Ok(mut r) => {
+                r.headers.retain(|(_, v)| !v.contains(prev.as_str()));
+                r
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    url = %request.url,
+                    "Fallback request with previous key failed"
+                );
+                OutboundHttpResponse {
+                    status: 502,
+                    headers: vec![],
+                    body: vec![],
+                    error: Some(e),
                 }
-                Err(e) => {
-                    tracing::error!(
-                        error = %e,
-                        url = %request.url,
-                        "Fallback request with previous key failed"
-                    );
-                    OutboundHttpResponse {
-                        status: 502,
-                        headers: vec![],
-                        body: vec![],
-                        error: Some(e),
-                    }
-                }
-            };
-        }
+            }
+        };
     }
 
     // Strip any response header whose value contains the real API key.

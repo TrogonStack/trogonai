@@ -173,7 +173,7 @@ mod tests {
         assert!(out.contains('…'));
         // The formatted line must not exceed MAX_CONTENT_CHARS + some overhead
         let line = out.lines().find(|l| l.contains("user:")).unwrap();
-        let content_part = line.splitn(2, "user: ").nth(1).unwrap();
+        let content_part = line.split_once("user: ").unwrap().1;
         assert!(content_part.chars().count() <= MAX_CONTENT_CHARS);
     }
 
@@ -184,7 +184,7 @@ mod tests {
         let out = format_history(&entries).unwrap();
         assert!(!out.contains('…'), "content at exact limit must not be truncated");
         let line = out.lines().find(|l| l.contains("user:")).unwrap();
-        let content_part = line.splitn(2, "user: ").nth(1).unwrap();
+        let content_part = line.split_once("user: ").unwrap().1;
         assert_eq!(content_part.chars().count(), MAX_CONTENT_CHARS);
     }
 
