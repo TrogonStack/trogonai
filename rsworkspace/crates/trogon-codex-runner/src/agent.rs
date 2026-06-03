@@ -65,6 +65,10 @@ fn is_valid_mode(mode: &str) -> bool {
     VALID_MODES.contains(&mode)
 }
 
+fn invalid_params(msg: impl Into<String>) -> Error {
+    Error::new(ErrorCode::InvalidParams.into(), msg.into())
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -517,7 +521,7 @@ where
             .iter()
             .any(|m| m.model_id.0.as_ref() == model_id)
         {
-            return Err(internal_error(format!("unknown model: {model_id}")));
+            return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
         let mut sessions = self.sessions.lock().await;
@@ -561,7 +565,7 @@ where
             );
         }
 
-        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn) = {
+        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn, first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -569,18 +573,20 @@ where
             let orig_first_turn = s.first_turn;
             let prepend_trogon = s.first_turn || s.pending_history.is_some();
             let ph = s.pending_history.take();
+            let ft = s.first_turn;
+            let cwd = s.cwd.clone();
             s.first_turn = false;
-            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                role: "user".into(),
-                text: user_input.clone(),
-            });
+            s.history.push(trogon_runner_tools::portable_session::PortableMessage::text_only(
+                "user", user_input.clone(),
+            ));
             (
                 s.thread_id.clone(),
-                s.model.clone(),
+                s.model.clone().or_else(|| Some(self.default_model.clone())),
                 ph,
-                s.cwd.clone(),
+                cwd,
                 prepend_trogon,
                 orig_first_turn,
+                ft,
             )
         };
 
@@ -594,6 +600,11 @@ where
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("Prior conversation:\n{formatted}\n\n---\n\n{user_input}")
+        } else if first_turn {
+            match trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
+                Some(md) => format!("{md}\n\n{user_input}"),
+                None => user_input,
+            }
         } else {
             user_input
         };
@@ -634,6 +645,8 @@ where
 
         // Stream Codex events → ACP SessionNotifications.
         let mut assistant_text = String::new();
+        let mut tool_call_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
+        let mut tool_result_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
         let stop_reason = loop {
             let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
                 Err(_elapsed) => {
@@ -673,7 +686,7 @@ where
                 CodexEvent::ToolStarted { id, name, input } => {
                     let tool_call = ToolCall::new(id.clone(), name.clone())
                         .status(ToolCallStatus::InProgress)
-                        .raw_input(input)
+                        .raw_input(input.clone())
                         .kind(ToolKind::Execute);
                     let notif = SessionNotification::new(
                         session_id.clone(),
@@ -682,14 +695,21 @@ where
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool start notification");
                     }
+                    tool_call_blocks.push(
+                        trogon_runner_tools::portable_session::PortableBlock::ToolUse {
+                            id,
+                            name,
+                            input_summary: input.to_string(),
+                        },
+                    );
                 }
 
                 CodexEvent::ToolCompleted { id, output } => {
                     let update = ToolCallUpdate::new(
-                        id,
+                        id.clone(),
                         ToolCallUpdateFields::new()
                             .status(ToolCallStatus::Completed)
-                            .raw_output(serde_json::Value::String(output)),
+                            .raw_output(serde_json::Value::String(output.clone())),
                     );
                     let notif = SessionNotification::new(
                         session_id.clone(),
@@ -698,15 +718,39 @@ where
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool complete notification");
                     }
+                    tool_result_blocks.push(
+                        trogon_runner_tools::portable_session::PortableBlock::ToolResult {
+                            id,
+                            output_summary: output,
+                        },
+                    );
                 }
 
                 CodexEvent::TurnCompleted => {
+                    let text = std::mem::take(&mut assistant_text);
+                    let tool_calls = std::mem::take(&mut tool_call_blocks);
+                    let tool_results = std::mem::take(&mut tool_result_blocks);
                     let mut sessions = self.sessions.lock().await;
                     if let Some(s) = sessions.get_mut(&session_id) {
-                        s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                            role: "assistant".into(),
-                            text: std::mem::take(&mut assistant_text),
-                        });
+                        if !tool_calls.is_empty() {
+                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                role: "assistant".to_string(),
+                                text: "[tool call]".to_string(),
+                                blocks: tool_calls,
+                            });
+                        }
+                        if !tool_results.is_empty() {
+                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                role: "user".to_string(),
+                                text: String::new(),
+                                blocks: tool_results,
+                            });
+                        }
+                        s.history.push(
+                            trogon_runner_tools::portable_session::PortableMessage::text_only(
+                                "assistant", text,
+                            ),
+                        );
                     }
                     break StopReason::EndTurn;
                 }
@@ -1716,8 +1760,8 @@ mod tests {
         {
             let mut sessions = agent.sessions.lock().await;
             let h = &mut sessions.get_mut("e1").unwrap().history;
-            h.push(PortableMessage { role: "user".into(), text: "hello".into() });
-            h.push(PortableMessage { role: "assistant".into(), text: "hi there".into() });
+            h.push(PortableMessage::text_only("user", "hello"));
+            h.push(PortableMessage::text_only("assistant", "hi there"));
         }
 
         let raw_params = serde_json::value::RawValue::from_string(
@@ -1742,9 +1786,9 @@ mod tests {
         {
             let mut sessions = agent.sessions.lock().await;
             let h = &mut sessions.get_mut("e2").unwrap().history;
-            h.push(PortableMessage { role: "user".into(), text: "q1".into() });
-            h.push(PortableMessage { role: "assistant".into(), text: "a1".into() });
-            h.push(PortableMessage { role: "user".into(), text: "in-progress".into() });
+            h.push(PortableMessage::text_only("user", "q1"));
+            h.push(PortableMessage::text_only("assistant", "a1"));
+            h.push(PortableMessage::text_only("user", "in-progress"));
         }
         let raw_params = serde_json::value::RawValue::from_string(
             serde_json::json!({ "sessionId": "e2" }).to_string(),
@@ -1879,14 +1923,8 @@ mod tests {
         {
             let mut sessions = agent.sessions.lock().await;
             let src = sessions.get_mut("src").unwrap();
-            src.history.push(PortableMessage {
-                role: "user".into(),
-                text: "q".into(),
-            });
-            src.history.push(PortableMessage {
-                role: "assistant".into(),
-                text: "a".into(),
-            });
+            src.history.push(PortableMessage::text_only("user", "q"));
+            src.history.push(PortableMessage::text_only("assistant", "a"));
         }
 
         // Export from src.

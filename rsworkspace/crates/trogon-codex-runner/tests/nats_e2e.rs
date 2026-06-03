@@ -209,3 +209,252 @@ async fn codex_runner_registers_with_correct_acp_prefix_metadata() {
         "nats_subject must be derived from ACP_PREFIX"
     );
 }
+
+/// Verifies the full capabilities+models registration contract that codex main.rs uses:
+/// capabilities must be ["chat", "code_edit"] (not "explore"/"plan"), and
+/// metadata.models must contain the parsed model IDs from CODEX_MODELS.
+#[tokio::test]
+async fn codex_runner_registers_with_code_edit_capability_and_model_ids() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let prefix = "acp.codex";
+    let agent_type = "codex";
+    // Replicate main.rs CODEX_MODELS parsing: "o4-mini,o3" → ["o4-mini", "o3"]
+    let codex_models_env = "o4-mini,o3";
+    let model_ids: Vec<String> = codex_models_env
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix, "models": model_ids }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    assert!(
+        entry.capabilities.contains(&"code_edit".to_string()),
+        "codex runner must have 'code_edit' capability; got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        entry.capabilities.contains(&"chat".to_string()),
+        "codex runner must have 'chat' capability; got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        !entry.capabilities.contains(&"explore".to_string()),
+        "codex runner must NOT have 'explore' (unlike xai/or); got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        !entry.capabilities.contains(&"plan".to_string()),
+        "codex runner must NOT have 'plan' (unlike xai/or); got: {:?}",
+        entry.capabilities
+    );
+
+    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        model_strings.contains(&"o4-mini"),
+        "metadata.models must contain 'o4-mini'; got: {model_strings:?}"
+    );
+    assert!(
+        model_strings.contains(&"o3"),
+        "metadata.models must contain 'o3'; got: {model_strings:?}"
+    );
+}
+
+/// Sending a prompt to an existing codex session via NATS returns `end_turn`.
+///
+/// This is the most important gap in the codex NATS coverage: all other tests
+/// only verify `session/new` and `initialize`. This test closes the entire
+/// NATS routing path: `session/new` → `session.{id}.agent.prompt` →
+/// mock_codex_server `turn/start` → `turn/completed` → NATS `end_turn`.
+#[tokio::test]
+async fn e2e_nats_prompt_returns_end_turn() {
+    let _lock = bin_env_lock().lock().await;
+    // SAFETY: serialized by BIN_ENV_LOCK; single-process test binary.
+    unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    // ── Step 1: create a session ──────────────────────────────────────────────
+    let new_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/tmp",
+        "mcpServers": []
+    }))
+    .unwrap();
+    let new_msg = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", new_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for session/new")
+    .expect("NATS request failed");
+
+    let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
+    let session_id = new_resp["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id.is_empty(), "session/new must return a non-empty sessionId");
+
+    // ── Step 2: send a prompt to the session ─────────────────────────────────
+    let prompt_subject = format!("acp.session.{session_id}.agent.prompt");
+    let prompt_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{"type": "text", "text": "write a hello world program"}]
+    }))
+    .unwrap();
+
+    let prompt_msg = tokio::time::timeout(
+        Duration::from_secs(15),
+        nats.request(prompt_subject, prompt_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for prompt response")
+    .expect("NATS prompt request failed");
+
+    let prompt_resp: Value = serde_json::from_slice(&prompt_msg.payload).unwrap();
+    assert_eq!(
+        prompt_resp["stopReason"].as_str(),
+        Some("end_turn"),
+        "prompt must complete with end_turn; got: {prompt_resp}"
+    );
+}
+
+/// `/clear` in the codex-runner is modelled as calling `session/new` again,
+/// which spawns a fresh Codex subprocess and returns a distinct session ID.
+///
+/// Verifies the real scenario: after a user issues `/clear`, the next prompt
+/// starts with a completely fresh context by sending two sequential
+/// `session/new` requests and asserting that the returned IDs differ.
+#[tokio::test]
+async fn clear_creates_distinct_session_id_in_codex_runner() {
+    let _lock = bin_env_lock().lock().await;
+    // SAFETY: serialized by BIN_ENV_LOCK; single-process test binary.
+    unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/tmp",
+        "mcpServers": []
+    }))
+    .unwrap();
+
+    let msg1 = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", payload.clone().into()),
+    )
+    .await
+    .expect("timed out waiting for first session/new")
+    .expect("NATS request failed");
+
+    let resp1: Value = serde_json::from_slice(&msg1.payload).unwrap();
+    let session_id_1 = resp1["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id_1.is_empty(), "first session/new must return a non-empty sessionId");
+
+    let msg2 = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", payload.into()),
+    )
+    .await
+    .expect("timed out waiting for second session/new")
+    .expect("NATS request failed");
+
+    let resp2: Value = serde_json::from_slice(&msg2.payload).unwrap();
+    let session_id_2 = resp2["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id_2.is_empty(), "second session/new must return a non-empty sessionId");
+
+    assert_ne!(
+        session_id_1, session_id_2,
+        "/clear (second session/new) must produce a distinct session ID; both got: {session_id_1:?}"
+    );
+}
+
+/// Validates that the codex runner sends JSON-RPC messages conforming to the
+/// Codex CLI protocol schema when `MOCK_VALIDATE_SCHEMA` is set.
+///
+/// The mock rejects `turn/start` messages that have a missing or empty
+/// `params.threadId`, or a missing `params.userInput`. A rejection causes the
+/// runner to propagate an error, which would cause the test to fail before
+/// the `stopReason: end_turn` assertion is reached.
+///
+/// Passing this test proves the runner sends structurally valid JSON-RPC to the
+/// Codex subprocess — no real Codex CLI or API key needed.
+#[tokio::test]
+async fn codex_turn_start_request_has_valid_jsonrpc_schema() {
+    let _lock = bin_env_lock().lock().await;
+    // SAFETY: serialized by BIN_ENV_LOCK; single-process test binary.
+    unsafe {
+        std::env::set_var("CODEX_BIN", MOCK_BIN);
+        std::env::set_var("MOCK_VALIDATE_SCHEMA", "1");
+    }
+
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    // Create session.
+    let new_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/tmp",
+        "mcpServers": []
+    }))
+    .unwrap();
+    let new_msg = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", new_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for session/new")
+    .expect("NATS request failed");
+
+    let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
+    let session_id = new_resp["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id.is_empty(), "session/new must return a non-empty sessionId");
+
+    // Send prompt — mock validates JSON-RPC schema of turn/start.
+    // If the runner sends a malformed message the mock returns an error and
+    // the runner propagates it; the test would time-out or get an error response.
+    let prompt_subject = format!("acp.session.{session_id}.agent.prompt");
+    let prompt_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{"type": "text", "text": "validate schema"}]
+    }))
+    .unwrap();
+
+    let prompt_msg = tokio::time::timeout(
+        Duration::from_secs(15),
+        nats.request(prompt_subject, prompt_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for prompt response")
+    .expect("NATS prompt request failed");
+
+    let prompt_resp: Value = serde_json::from_slice(&prompt_msg.payload).unwrap();
+    assert_eq!(
+        prompt_resp["stopReason"].as_str(),
+        Some("end_turn"),
+        "turn/start must pass schema validation and return end_turn; got: {prompt_resp}"
+    );
+
+    // Clean up env var so other tests in the same binary are not affected.
+    unsafe { std::env::remove_var("MOCK_VALIDATE_SCHEMA") };
+}

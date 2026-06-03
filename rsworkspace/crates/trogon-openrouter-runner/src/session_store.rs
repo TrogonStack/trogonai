@@ -17,7 +17,7 @@ pub struct SessionSnapshot {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Same-provider compaction model override. Persisted so it survives reload.
+    /// Per-session context-compaction model override. Persisted like `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compactor_model: Option<String>,
     #[serde(default)]
@@ -36,6 +36,14 @@ pub struct SessionSnapshot {
     /// Per-session HTTP MCP servers captured at session creation; restored on reload.
     #[serde(default)]
     pub mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_output_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_read_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_creation_tokens: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -49,6 +57,10 @@ pub struct MessageUsage {
 }
 
 fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
@@ -334,6 +346,10 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v.get("model").is_none());
@@ -360,6 +376,10 @@ mod tests {
             parent_session_id: Some("parent-id".to_string()),
             branched_at_index: Some(3),
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert_eq!(v["model"], "gpt-4");
@@ -387,6 +407,10 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v["tools"].is_array(), "tools must always be serialized");
@@ -419,6 +443,10 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         let msgs = v["messages"].as_array().unwrap();

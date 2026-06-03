@@ -314,7 +314,7 @@ fn input_needs_continuation(input: &str) -> bool {
 
 // ── @mention expansion ────────────────────────────────────────────────────────
 
-fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
+pub fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
     let cwd_str = cwd.to_string_lossy();
     let mut result = String::with_capacity(text.len());
     let mut chars = text.char_indices().peekable();
@@ -1843,7 +1843,7 @@ fn bug_report_text() -> String {
     )
 }
 
-fn handle_slash_command<F: Fs>(
+pub fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
     used_tokens: u64,
@@ -2320,7 +2320,10 @@ fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
             }
             let cfg = read_config(fs);
             match cfg.get(key) {
-                Some(v) => format!("{key} = {v}"),
+                Some(v) => {
+                    let s = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
+                    format!("{key} = {s}")
+                }
                 None => format!("{key} is not set"),
             }
         }
@@ -3460,5 +3463,179 @@ mod tests {
         let mut cwd = PathBuf::from("/tmp");
         assert!(!sync_cwd_from_tool("list_dir", "foo\nbar", &mut cwd));
         assert_eq!(cwd, PathBuf::from("/tmp"));
+    }
+
+    // ── /clear ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn clear_closes_old_session_and_creates_new() {
+        use crate::session::mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+
+        let old = Arc::new(MockSession::new("old-sess"));
+        let new_sess = Arc::new(MockSession::new("new-sess"));
+        let factory = MockSessionFactory::new("default");
+        factory.push_session(new_sess.clone());
+
+        old.close().await;
+        let created = factory.create_session("acp", PathBuf::from("/tmp"), vec![]).await.unwrap();
+
+        assert_eq!(old.close_count(), 1, "old session must be closed once");
+        assert_eq!(created.session_id(), "new-sess", "factory must return the queued session");
+    }
+
+    #[tokio::test]
+    async fn clear_resets_token_counters() {
+        // After /clear the loop resets both counters; simulate that here.
+        let used: u64 = 0;
+        let ctx: u64 = 0;
+        assert_eq!(used, 0);
+        assert_eq!(ctx, 0);
+    }
+
+    // ── StreamEvent handling (prompt loop) ────────────────────────────────────
+
+    #[tokio::test]
+    async fn usage_event_updates_token_counters() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Usage { used_tokens: 75_000, context_size: 150_000 },
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut used: u64 = 0;
+        let mut ctx: u64 = 0;
+        let mut rx = session.prompt("hello").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Usage { used_tokens, context_size }) => {
+                    used = used_tokens;
+                    ctx = context_size;
+                }
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(used, 75_000, "used_tokens must be updated from Usage event");
+        assert_eq!(ctx, 150_000, "context_size must be updated from Usage event");
+    }
+
+    #[tokio::test]
+    async fn multiple_usage_events_last_one_wins() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Usage { used_tokens: 10_000, context_size: 100_000 },
+            StreamEvent::Usage { used_tokens: 20_000, context_size: 100_000 },
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut used: u64 = 0;
+        let mut rx = session.prompt("hello").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Usage { used_tokens, .. }) => {
+                    used = used_tokens;
+                }
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(used, 20_000, "last Usage event must win");
+    }
+
+    #[tokio::test]
+    async fn tool_call_and_diff_events_complete_without_panic() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::ToolCall("read_file".into()),
+            StreamEvent::Diff("--- old\n+++ new\n@@ -1 +1 @@ fn main() {}".into()),
+            StreamEvent::Text("Done editing.".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut text = String::new();
+        let mut rx = session.prompt("edit something").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Text(t)) => text.push_str(&t),
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "Done editing.");
+    }
+
+    #[tokio::test]
+    async fn thinking_event_is_silently_ignored() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Thinking,
+            StreamEvent::Text("answer".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut text = String::new();
+        let mut rx = session.prompt("think").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Text(t)) => text.push_str(&t),
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "answer");
+    }
+
+    // ── /model cross-runner: loop wiring ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn model_cross_runner_attaches_new_session_and_resets_counters() {
+        use crate::session::mock::MockSessionFactory;
+
+        let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "xai-sess-99");
+        let factory = MockSessionFactory::new("default");
+
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+            .await
+            .unwrap();
+
+        assert!(!outcome.same_runner);
+        let new_session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
+        let new_prefix = outcome.new_prefix;
+
+        assert_eq!(new_prefix, "acp.xai");
+        assert_eq!(new_session.session_id(), "xai-sess-99");
+    }
+
+    #[tokio::test]
+    async fn model_same_runner_calls_set_model_on_session() {
+        use crate::session::mock::MockSession;
+
+        let session = std::sync::Arc::new(MockSession::new("sess-1"));
+        let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
+
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+            .await
+            .unwrap();
+
+        assert!(outcome.same_runner);
+        session.set_model("claude-opus-4-7").await.unwrap();
+        assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
     }
 }

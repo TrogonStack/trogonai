@@ -223,11 +223,9 @@ async fn main() -> anyhow::Result<()> {
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let nats_for_perm = nats.clone();
     let nats_for_elic = nats.clone();
+    let nats_for_spawn = nats.clone();
     let prefix_for_perm = prefix.clone();
     let prefix_for_elic = prefix.clone();
-
-    // Clones for the spawn_agent handler (created before `nats` is moved below).
-    let nats_for_spawn = nats.clone();
     let acp_prefix_for_spawn = acp_prefix.clone();
 
     let js_client = NatsJetStreamClient::new(js);

@@ -34,9 +34,10 @@ use trogon_acp_runner::{SessionNotifier, SessionStore};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsMessageOf, JsRequestMessage};
 use trogon_runner_tools::portable_session::{
     export_json_from_wire, parse_export_json, v1_to_messages, v2_to_messages, ParsedExport,
+    PortableBlock, PortableMessage,
 };
 use trogon_std::time::GetElapsed;
-use trogon_tools::Message;
+use trogon_tools::{ContentBlock, Message};
 
 use crate::agent::TrogonAcpAgent;
 
@@ -181,13 +182,23 @@ where
             Ok(resp) => {
                 // The runner emits wire JSON (V1 array or versioned V2 object) via
                 // `export_json_from_wire`; parse it back the same way the runners do.
+                // Fall back to a legacy portable JSON array when wire parsing fails.
                 match parse_export_json(resp.0.get()) {
                     Ok(ParsedExport::V1(msgs)) => Some(v1_to_messages(&msgs)),
                     Ok(ParsedExport::V2(exp)) => Some(v2_to_messages(&exp)),
-                    Err(e) => {
-                        warn!(error = %e, prefix, "multi-runner: session/export parse failed");
-                        None
-                    }
+                    Err(wire_err) => match serde_json::from_str::<Vec<PortableMessage>>(resp.0.get())
+                    {
+                        Ok(portable) => Some(messages_from_portable(&portable)),
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                wire_error = %wire_err,
+                                prefix,
+                                "multi-runner: session/export parse failed"
+                            );
+                            None
+                        }
+                    },
                 }
             }
             Err(e) => {
@@ -204,12 +215,20 @@ where
         };
         // Serialize to the same wire JSON the runner's `session/import` expects
         // (V1 array or versioned V2 object), produced by `export_json_from_wire`.
+        // Fall back to a legacy portable JSON array when wire serialization fails.
         let messages_json = match export_json_from_wire(history) {
             Ok(j) => j,
-            Err(e) => {
-                warn!(error = %e, "multi-runner: failed to serialize history for import");
-                return;
-            }
+            Err(wire_err) => match serde_json::to_string(&portable_from_messages(history)) {
+                Ok(j) => j,
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        wire_error = %wire_err,
+                        "multi-runner: failed to serialize history for import"
+                    );
+                    return;
+                }
+            },
         };
         let Ok(params) = serde_json::value::RawValue::from_string(format!(
             r#"{{"sessionId":"{session_id}","messages":{messages_json}}}"#
@@ -335,6 +354,60 @@ where
     }
 }
 
+// ── Portable↔Native message converters ──────────────────────────────────────
+
+fn messages_from_portable(history: &[PortableMessage]) -> Vec<Message> {
+    history.iter().map(|pm| {
+        let content = if pm.blocks.is_empty() {
+            vec![ContentBlock::Text { text: pm.text.clone() }]
+        } else {
+            pm.blocks.iter().filter_map(|b| match b {
+                PortableBlock::Text { text } =>
+                    Some(ContentBlock::Text { text: text.clone() }),
+                PortableBlock::ToolUse { id, name, input_summary } =>
+                    Some(ContentBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        // V2 stores a textual summary, not the raw input; parse back to
+                        // JSON when possible, otherwise carry the summary as a string.
+                        input: serde_json::from_str(input_summary)
+                            .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone())),
+                        parent_tool_use_id: None,
+                    }),
+                PortableBlock::ToolResult { id, output_summary } =>
+                    Some(ContentBlock::ToolResult {
+                        tool_use_id: id.clone(), content: output_summary.clone(),
+                    }),
+                PortableBlock::Thinking { .. } => None,
+            }).collect()
+        };
+        Message { role: pm.role.clone(), content }
+    }).collect()
+}
+
+fn portable_from_messages(messages: &[Message]) -> Vec<PortableMessage> {
+    messages.iter().map(|m| {
+        let blocks: Vec<PortableBlock> = m.content.iter().filter_map(|b| match b {
+            ContentBlock::Text { text } =>
+                Some(PortableBlock::Text { text: text.clone() }),
+            ContentBlock::ToolUse { id, name, input, .. } =>
+                Some(PortableBlock::ToolUse {
+                    id: id.clone(), name: name.clone(), input_summary: input.to_string(),
+                }),
+            ContentBlock::ToolResult { tool_use_id, content } =>
+                Some(PortableBlock::ToolResult {
+                    id: tool_use_id.clone(), output_summary: content.clone(),
+                }),
+            ContentBlock::Thinking { .. } | ContentBlock::Image { .. } => None,
+        }).collect();
+        let text = blocks.iter().filter_map(|b| match b {
+            PortableBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        }).collect::<Vec<_>>().join("\n");
+        PortableMessage { role: m.role.clone(), text, blocks }
+    }).collect()
+}
+
 #[async_trait::async_trait(?Send)]
 impl<N, C, J, S, Notif, R> Agent for MultiRunnerAgent<N, C, J, S, Notif, R>
 where
@@ -352,9 +425,35 @@ where
         // Capture cwd so a runner session can be opened on model selection.
         let cwd = args.cwd.to_string_lossy().to_string();
         let resp = self.inner.new_session(args).await?;
+        let acp_sid = resp.session_id.0.to_string();
         self.session_cwd
             .borrow_mut()
-            .insert(resp.session_id.0.to_string(), cwd);
+            .insert(acp_sid.clone(), cwd.clone());
+
+        // If the deploy-time default model (AGENT_MODEL) is served by an external runner,
+        // establish routing now so the FIRST prompt reaches that runner. Without this the
+        // first prompt falls through to the embedded bridge, whose JetStream streams
+        // trogon-acp never provisions → "get notifications stream: stream not found".
+        // Best-effort: if the runner is unavailable the session still succeeds and the
+        // user can select a model later (set_session_model sets up routing then).
+        let default_model = self.inner.default_model.clone();
+        if let Some(prefix) = self.resolve_external_prefix(&default_model).await
+            && let Some(runner_sid) = self.open_runner_session(&prefix, &cwd, &default_model).await
+        {
+            self.active_sessions
+                .borrow_mut()
+                .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
+            self.id_remap.borrow_mut().insert(runner_sid, acp_sid.clone());
+            // Persist the chosen model to KV so load_session / fork_session / resume_session
+            // and a process restart re-route correctly via the lazy path in prompt().
+            if let Ok(mut state) = self.store.load(&acp_sid).await
+                && state.model.is_none()
+            {
+                state.model = Some(default_model);
+                let _ = self.store.save(&acp_sid, &state).await;
+            }
+        }
+
         // Replace inner's Claude-only model list with the full multi-runner list.
         let current = resp
             .models
@@ -463,12 +562,12 @@ where
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
         let acp_sid = args.session_id.0.to_string();
         // Fast path: already routed to an external runner.
-        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid)
-            && let Some(bridge) = self.get_or_create_bridge(&prefix)
-        {
-            let resp = bridge.prompt_to(args, &runner_sid).await?;
-            self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
-            return Ok(resp);
+        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
+            if let Some(bridge) = self.get_or_create_bridge(&prefix) {
+                let resp = bridge.prompt_to(args, &runner_sid).await?;
+                self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
+                return Ok(resp);
+            }
         }
         // One-time lazy re-init for sessions not seen in this process lifetime:
         // process restart, fork_session, load_session, or resume_session all produce
@@ -476,30 +575,33 @@ where
         // state once, re-open the external runner session if the model requires it, and
         // register routing — subsequent prompts hit the fast path above.
         let known = self.session_cwd.borrow().contains_key(&acp_sid);
-        if !known
-            && let Ok(state) = self.store.load(&acp_sid).await
-        {
-            self.session_cwd
-                .borrow_mut()
-                .insert(acp_sid.clone(), state.cwd.clone());
-            if let Some(ref model) = state.model
-                && let Some(prefix) = self.resolve_external_prefix(model).await
-            {
-                let cwd = state.cwd.clone();
-                if let Some(runner_sid) = self.open_runner_session(&prefix, &cwd, model).await {
-                    if !state.messages.is_empty() {
-                        self.import_history(&prefix, &runner_sid, &state.messages).await;
-                    }
-                    self.active_sessions
-                        .borrow_mut()
-                        .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
-                    self.id_remap
-                        .borrow_mut()
-                        .insert(runner_sid.clone(), acp_sid.clone());
-                    if let Some(bridge) = self.get_or_create_bridge(&prefix) {
-                        let resp = bridge.prompt_to(args, &runner_sid).await?;
-                        self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
-                        return Ok(resp);
+        if !known {
+            if let Ok(state) = self.store.load(&acp_sid).await {
+                self.session_cwd
+                    .borrow_mut()
+                    .insert(acp_sid.clone(), state.cwd.clone());
+                if let Some(ref model) = state.model {
+                    if let Some(prefix) = self.resolve_external_prefix(model).await {
+                        let cwd = state.cwd.clone();
+                        if let Some(runner_sid) =
+                            self.open_runner_session(&prefix, &cwd, model).await
+                        {
+                            if !state.messages.is_empty() {
+                                self.import_history(&prefix, &runner_sid, &state.messages)
+                                    .await;
+                            }
+                            self.active_sessions
+                                .borrow_mut()
+                                .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
+                            self.id_remap
+                                .borrow_mut()
+                                .insert(runner_sid.clone(), acp_sid.clone());
+                            if let Some(bridge) = self.get_or_create_bridge(&prefix) {
+                                let resp = bridge.prompt_to(args, &runner_sid).await?;
+                                self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
+                                return Ok(resp);
+                            }
+                        }
                     }
                 }
             }
@@ -509,10 +611,10 @@ where
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
         let acp_sid = args.session_id.0.to_string();
-        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid)
-            && let Some(bridge) = self.get_or_create_bridge(&prefix)
-        {
-            return bridge.cancel_to(args, &runner_sid).await;
+        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
+            if let Some(bridge) = self.get_or_create_bridge(&prefix) {
+                return bridge.cancel_to(args, &runner_sid).await;
+            }
         }
         self.inner.cancel(args).await
     }
@@ -574,6 +676,33 @@ where
             // config_options — the notification is the authoritative update path.
             return Ok(SetSessionConfigOptionResponse::new(vec![]));
         }
+
+        // Forward "compactor_model" to the active external runner so its in-memory
+        // session state is updated. The shared KV (written by inner below) only reaches
+        // the embedded acp-runner; xai-runner and openrouter-runner keep compactor_model
+        // keyed by runner_sid. Pattern mirrors open_runner_session: try the bridge first;
+        // if the runner is temporarily down, fall through to inner (best-effort).
+        if args.config_id.0.as_ref() == "compactor_model" {
+            let acp_sid = args.session_id.0.to_string();
+            if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
+                if prefix != self.embedded_prefix {
+                    if let Some(bridge) = self.get_or_create_bridge(&prefix) {
+                        let mut ext_args = args.clone();
+                        ext_args.session_id = runner_sid.into();
+                        match bridge.set_session_config_option(ext_args).await {
+                            Ok(resp) => return Ok(resp),
+                            Err(e) => warn!(
+                                error = %e, prefix,
+                                "multi-runner: compactor_model forward failed — falling to inner"
+                            ),
+                        }
+                    }
+                    // Bridge unavailable: fall through to inner (same best-effort
+                    // pattern as open_runner_session returning None → caller uses inner).
+                }
+            }
+        }
+
         self.inner.set_session_config_option(args).await
     }
 
@@ -1999,11 +2128,15 @@ mod tests {
                 .unwrap();
 
             assert!(
-                export_rx.is_terminated() || export_rx.try_recv().is_ok() || export_rx.try_recv().is_err(),
+                export_rx.is_terminated()
+                    || export_rx.try_recv().is_ok()
+                    || matches!(export_rx.try_recv(), Err(_)),
                 "session/export must have been called on the source runner (xai) during migration"
             );
             assert!(
-                import_rx.is_terminated() || import_rx.try_recv().is_ok() || import_rx.try_recv().is_err(),
+                import_rx.is_terminated()
+                    || import_rx.try_recv().is_ok()
+                    || matches!(import_rx.try_recv(), Err(_)),
                 "session/import must have been called on the target runner (openrouter) during migration"
             );
 

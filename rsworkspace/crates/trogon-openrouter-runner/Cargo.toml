@@ -6,6 +6,18 @@ edition = "2024"
 [features]
 test-helpers = []
 
+[[test]]
+name = "agent_nats_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "tool_dispatch_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "perm_integration"
+required-features = ["test-helpers"]
+
 [lints]
 workspace = true
 
@@ -46,5 +58,7 @@ uuid            = { workspace = true }
 axum                    = { workspace = true }
 futures                 = { workspace = true }
 httpmock                = "0.7"
+tempfile                = { workspace = true }
 testcontainers-modules  = { version = "0.15", features = ["nats"] }
 trogon-nats             = { workspace = true, features = ["test-support"] }
+trogon-registry         = { workspace = true, features = ["test-support"] }
