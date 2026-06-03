@@ -1,0 +1,50 @@
+# =============================================================================
+# A2A Account User — Registrar / discovery (subject ACL template for nsc-derived provisioning)
+#
+# Role: Registrar service User (`a2a-nats-discovery`). Owns `{prefix}.catalog.register.>`
+#       ingress and `{prefix}.discover.>` KV-backed discover handling; MUST NOT impersonate
+#       gateway ingress callers.
+#
+# Bounded subject set:
+#   Subscribe: `{prefix}.catalog.register.>`, `{prefix}.discover.>`
+#   Publish: catalog/discover RR replies (`--allow-pub-response`), plus KV data-plane
+#            writes — JetStream KV uses `$KV.<bucket>.>` (substitute `{catalog_kv_bucket}`,
+#            default JetStream KV name `A2A_AGENT_CARDS` documented in-repo).
+#
+# NSC / JWT semantics — “deny outside scope”:
+#   Narrow allowlists plus `--allow-pub-response` constrain reply traffic. KV puts land
+#   on `$KV.{catalog_kv_bucket}.>` explicitly. Explicit denies remove gateway ingress / core
+#   data planes this role must never hold.
+#
+# NSC flags (repeat --allow-* / --deny-* per line):
+#   --allow-pub    for each "# allow-pub" subject literal (below; includes KV bucket tier)
+#   --allow-sub    for each "# allow-sub" subject (below)
+#   --allow-pub-response    (recommended; replies on `.catalog.register*` and `.discover*`)
+#   --deny-pub     for each "# deny-pub" subject (below)
+#   --deny-sub     for each "# deny-sub" subject (below)
+#
+# JetStream caveat: KV and core clients commonly need `_INBOX.>` for correlation; add an
+# extra `--allow-sub "_INBOX.>"` in your fleet if tooling rejects KV traffic after push.
+#
+# References: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §Subject ACL templates,
+#             docs/A2A_SUBJECT_ACL_QUICKREF.md · docs/catalog-kv-watch.md §Catalog write path
+# =============================================================================
+
+# allow-pub — JetStream KV data-plane publishes for AgentCard values (trogon/async-nats)
+$KV.{catalog_kv_bucket}.>
+
+# allow-sub — registrar-owned application subjects (CatalogRegistrarService + DiscoverService)
+{prefix}.catalog.register.>
+{prefix}.discover.>
+
+# deny-pub — hard stop on gateway impersonation plus transport planes owned by callee/gateway
+{prefix}.gateway.>
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.push.>
+
+# deny-sub — block gateway/data-plane listeners outside registrar scope (`_INBOX.>` MAY be added per NSC / JetStream caveat)
+{prefix}.gateway.>
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.push.>

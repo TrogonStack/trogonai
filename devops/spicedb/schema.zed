@@ -1,0 +1,58 @@
+/**
+ * Trogon agentgateway SpiceDB schema (v0.1).
+ *
+ * Reference deployment shape consumed by `trogon-mcp-gateway` and
+ * `a2a-gateway` Tier-1 authorization checks. Adapt relations to your
+ * tenant model (org/team/role membership) before applying with:
+ *
+ *     zed import --insecure --endpoint=$SPICEDB_ENDPOINT \
+ *                --token=$SPICEDB_PRESHARED_KEY \
+ *                devops/spicedb/schema.zed
+ *
+ * Env wiring (see trogon-mcp-gateway/README.md):
+ *   MCP_GATEWAY_SPICEDB_TOOL_OBJECT_TYPE     = trogon/mcp_tool
+ *   MCP_GATEWAY_SPICEDB_RESOURCE_OBJECT_TYPE = trogon/mcp_resource
+ *   MCP_GATEWAY_SPICEDB_SUBJECT_OBJECT_TYPE  = trogon/principal
+ *   MCP_GATEWAY_SPICEDB_PERMISSION           = call
+ *   MCP_GATEWAY_SPICEDB_READ_PERMISSION      = read
+ */
+
+definition trogon/principal {}
+
+definition trogon/group {
+  relation member: trogon/principal | trogon/group#member
+  permission membership = member
+}
+
+definition trogon/mcp_tool {
+  relation caller: trogon/principal | trogon/group#member
+  relation owner:  trogon/principal
+
+  // Permission referenced by MCP_GATEWAY_SPICEDB_PERMISSION (default `call`).
+  permission call = caller + owner
+}
+
+definition trogon/mcp_resource {
+  relation reader: trogon/principal | trogon/group#member
+  relation owner:  trogon/principal
+
+  // Permission referenced by MCP_GATEWAY_SPICEDB_READ_PERMISSION (default `read`).
+  permission read = reader + owner
+}
+
+definition trogon/a2a_agent {
+  relation invoker: trogon/principal | trogon/group#member
+  relation owner:   trogon/principal
+
+  // Used by a2a-gateway Tier-1 message/send and message/stream gates.
+  permission send   = invoker + owner
+  permission stream = invoker + owner
+}
+
+definition trogon/a2a_task {
+  relation owner: trogon/principal
+
+  // Lifecycle ops on an existing task: get / list / cancel / resubscribe.
+  permission read   = owner
+  permission cancel = owner
+}
