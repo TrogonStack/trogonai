@@ -1,0 +1,9 @@
+{
+  "bucket": "mcp-trust-bundles",
+  "description": "Federation trust bundles per ADR 0010. Keys are trust domain identifiers; values contain JWK Sets and SPIFFE X.509 bundle anchors.",
+  "history": 5,
+  "ttl": 0,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}

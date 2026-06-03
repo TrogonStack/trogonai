@@ -1,0 +1,9 @@
+{
+  "bucket": "a2a-catalog",
+  "description": "Agent Card catalog bucket (a2a-nats::catalog::nats_kv). One key per agent_id holds the published A2A Agent Card JSON.",
+  "history": 5,
+  "ttl": 0,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}
