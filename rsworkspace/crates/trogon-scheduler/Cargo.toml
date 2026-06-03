@@ -11,7 +11,7 @@ workspace = true
 buffa = { workspace = true }
 chrono = { version = "0.4" }
 chrono-tz = "0.10"
-cron = "0.15"
+cron = "0.16"
 rrule = "0.14"
 trogon-decider-runtime = { workspace = true }
 trogon-nats = { workspace = true }
