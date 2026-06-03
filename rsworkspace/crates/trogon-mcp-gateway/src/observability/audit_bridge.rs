@@ -84,30 +84,127 @@ fn reshape_raw(payload: &[u8], trace_context: &TraceContext) -> Result<ReshapedA
     })
 }
 
-/// Splunk HEC JSON envelope — transform belongs in `reshape_splunk_hec` once HEC auth/index
-/// metadata is operator-configurable.
+/// Splunk HEC JSON envelope (`{event, source, sourcetype, fields}`).
+/// The Splunk HEC ingest URL/token belong on the operator side (curl/forwarder);
+/// here we emit the JSON event body and let the operator publish it.
 fn reshape_splunk_hec(
-    _audit_subject: &str,
-    _payload: &[u8],
-    _trace_context: &TraceContext,
+    audit_subject: &str,
+    payload: &[u8],
+    trace_context: &TraceContext,
 ) -> Result<ReshapedAuditEvent, ObservabilityError> {
-    Err(ObservabilityError::Reshape(
-        "siem_format=splunk-hec is not implemented; add HEC envelope in reshape_splunk_hec"
-            .into(),
-    ))
+    let event: serde_json::Value = serde_json::from_slice(payload).map_err(|error| {
+        ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}"))
+    })?;
+
+    let mut fields = serde_json::Map::new();
+    fields.insert("subject".into(), serde_json::Value::String(audit_subject.to_string()));
+    if let Some(trace_id) = &trace_context.trace_id {
+        fields.insert("trace_id".into(), serde_json::Value::String(trace_id.clone()));
+    }
+    if let Some(span_id) = &trace_context.span_id {
+        fields.insert("span_id".into(), serde_json::Value::String(span_id.clone()));
+    }
+
+    let envelope = serde_json::json!({
+        "event": event,
+        "source": "trogon-mcp-gateway",
+        "sourcetype": "trogon:mcp:audit",
+        "fields": fields,
+    });
+    let body = serde_json::to_vec(&envelope)
+        .map_err(|error| ObservabilityError::Reshape(format!("encode HEC envelope: {error}")))?;
+
+    let mut headers = HeaderMap::new();
+    apply_trace_headers(&mut headers, trace_context);
+    headers.insert("content-type", "application/json");
+    Ok(ReshapedAuditEvent { body: Bytes::from(body), headers })
 }
 
-/// Elastic ECS document — transform belongs in `reshape_elastic_ecs` (see trogon-traffic-view OCSF
-/// exporter for field mapping reference).
+/// Elastic ECS document (https://www.elastic.co/guide/en/ecs/current).
+/// Original audit fields are nested under `trogon.*` to avoid colliding with ECS reserved keys.
 fn reshape_elastic_ecs(
-    _audit_subject: &str,
-    _payload: &[u8],
-    _trace_context: &TraceContext,
+    audit_subject: &str,
+    payload: &[u8],
+    trace_context: &TraceContext,
 ) -> Result<ReshapedAuditEvent, ObservabilityError> {
-    Err(ObservabilityError::Reshape(
-        "siem_format=elastic-ecs is not implemented; add ECS mapping in reshape_elastic_ecs"
-            .into(),
-    ))
+    let original: serde_json::Value = serde_json::from_slice(payload).map_err(|error| {
+        ObservabilityError::Reshape(format!("audit payload is not valid JSON: {error}"))
+    })?;
+
+    let outcome = original
+        .get("outcome")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+
+    let mut event_block = serde_json::Map::new();
+    event_block.insert("kind".into(), "event".into());
+    event_block.insert("module".into(), "trogon-mcp-gateway".into());
+    event_block.insert("dataset".into(), "trogon.mcp.audit".into());
+    event_block.insert("category".into(), serde_json::json!(["authentication", "authorization"]));
+    if let Some(outcome) = outcome {
+        event_block.insert("outcome".into(), serde_json::Value::String(outcome));
+    }
+
+    let mut doc = serde_json::Map::new();
+    doc.insert("@timestamp".into(), iso8601_now().into());
+    doc.insert("event".into(), serde_json::Value::Object(event_block));
+    doc.insert(
+        "labels".into(),
+        serde_json::json!({ "subject": audit_subject }),
+    );
+    doc.insert("trogon".into(), original);
+    if let Some(trace_id) = &trace_context.trace_id {
+        doc.insert("trace".into(), serde_json::json!({ "id": trace_id }));
+    }
+    if let Some(span_id) = &trace_context.span_id {
+        doc.insert("span".into(), serde_json::json!({ "id": span_id }));
+    }
+
+    let body = serde_json::to_vec(&serde_json::Value::Object(doc))
+        .map_err(|error| ObservabilityError::Reshape(format!("encode ECS document: {error}")))?;
+
+    let mut headers = HeaderMap::new();
+    apply_trace_headers(&mut headers, trace_context);
+    headers.insert("content-type", "application/json");
+    Ok(ReshapedAuditEvent { body: Bytes::from(body), headers })
+}
+
+fn iso8601_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() as i64;
+    let millis = now.subsec_millis();
+    format_iso8601(secs, millis)
+}
+
+fn format_iso8601(secs: i64, millis: u32) -> String {
+    // Minimal ISO-8601 in UTC without pulling chrono. Days since 1970-01-01.
+    let days = secs.div_euclid(86_400);
+    let time_of_day = secs.rem_euclid(86_400);
+    let (year, month, day) = days_to_ymd(days);
+    let hour = time_of_day / 3600;
+    let minute = (time_of_day % 3600) / 60;
+    let second = time_of_day % 60;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+    )
+}
+
+fn days_to_ymd(mut days: i64) -> (i32, u32, u32) {
+    // Algorithm from Howard Hinnant (https://howardhinnant.github.io/date_algorithms.html)
+    days += 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let doe = (days - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m, d)
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -338,10 +435,47 @@ mod tests {
     }
 
     #[test]
-    fn splunk_and_ecs_formats_are_stubbed() {
+    fn splunk_hec_wraps_payload_under_event_key() {
         let payload = sample_payload();
-        assert!(reshape_audit_message("mcp.audit.allow.request.tools", &payload, None, SiemFormat::SplunkHec).is_err());
-        assert!(reshape_audit_message("mcp.audit.allow.request.tools", &payload, None, SiemFormat::ElasticEcs).is_err());
+        let reshaped = reshape_audit_message(
+            "mcp.audit.allow.request.tools",
+            &payload,
+            None,
+            SiemFormat::SplunkHec,
+        )
+        .expect("reshape");
+        let v: serde_json::Value = serde_json::from_slice(&reshaped.body).expect("json");
+        assert_eq!(v["source"], "trogon-mcp-gateway");
+        assert_eq!(v["sourcetype"], "trogon:mcp:audit");
+        assert_eq!(v["event"]["outcome"], "allow");
+        assert_eq!(v["fields"]["subject"], "mcp.audit.allow.request.tools");
+    }
+
+    #[test]
+    fn elastic_ecs_nests_original_under_trogon_key() {
+        let payload = sample_payload();
+        let reshaped = reshape_audit_message(
+            "mcp.audit.deny.request.tools",
+            &payload,
+            None,
+            SiemFormat::ElasticEcs,
+        )
+        .expect("reshape");
+        let v: serde_json::Value = serde_json::from_slice(&reshaped.body).expect("json");
+        assert_eq!(v["event"]["module"], "trogon-mcp-gateway");
+        assert_eq!(v["event"]["dataset"], "trogon.mcp.audit");
+        assert_eq!(v["event"]["outcome"], "allow");
+        assert_eq!(v["trogon"]["subject_in"], "mcp.gateway.request.fs.tools.call");
+        assert_eq!(v["labels"]["subject"], "mcp.audit.deny.request.tools");
+        assert!(v["@timestamp"].is_string());
+    }
+
+    #[test]
+    fn iso8601_format_known_epoch() {
+        // 2024-01-02T03:04:05.006Z
+        let secs = 1_704_164_645_i64;
+        let s = format_iso8601(secs, 6);
+        assert_eq!(s, "2024-01-02T03:04:05.006Z");
     }
 
     #[test]
