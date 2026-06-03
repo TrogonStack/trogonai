@@ -1,0 +1,38 @@
+[package]
+name = "trogon-aauth-person"
+version = "0.0.1"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trogon-aauth-person"
+path = "src/main.rs"
+
+[lib]
+name = "trogon_aauth_person"
+path = "src/lib.rs"
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = "=2.0.18"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tracing = { workspace = true }
+trogon-identity-types = { workspace = true }
+trogon-aauth-verify = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
+rand_core = { version = "=0.6.4" }
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }

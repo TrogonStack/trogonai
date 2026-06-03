@@ -7350,6 +7350,74 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-aauth-person"
+version = "0.0.1"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "jsonwebtoken 10.4.0",
+ "p256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-aauth-sdk"
+version = "0.0.1"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "http 1.4.1",
+ "jsonwebtoken 10.4.0",
+ "p256",
+ "rand_core 0.6.4",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "trogon-aauth-person",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-aauth-verify"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "jsonwebtoken 10.4.0",
+ "p256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "trogon-identity-types",
+]
+
+[[package]]
 name = "trogon-agent-registry"
 version = "0.1.0"
 dependencies = [
@@ -7607,6 +7675,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-opentelemetry",
+ "trogon-aauth-verify",
  "trogon-identity-types",
  "trogon-nats",
  "trogon-std",

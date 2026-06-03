@@ -1,5 +1,6 @@
 //! MCP gateway queue-group worker: ingress `{prefix}.gateway.request.*`, egress `{prefix}.server.*`.
 
+pub mod aauth;
 pub mod act_chain;
 pub mod audience_shadow;
 pub mod agent_identity;
