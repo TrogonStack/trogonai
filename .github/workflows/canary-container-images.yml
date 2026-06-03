@@ -23,7 +23,7 @@ jobs:
         service:
           - trogon-gateway
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
 
       - name: Resolve service config
         id: service_config
