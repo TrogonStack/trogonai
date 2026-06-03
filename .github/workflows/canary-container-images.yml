@@ -10,7 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: write
   contents: read
+  id-token: write
   packages: write
 
 jobs:
@@ -66,9 +68,9 @@ jobs:
           provenance: mode=max
 
       - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.32.0
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
         with:
-          image-ref: ${{ steps.image.outputs.name }}:canary
+          image-ref: ${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}
           scanners: vuln
           format: table
           output: trivy-results.txt
@@ -76,9 +78,9 @@ jobs:
           exit-code: 0
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0.20.6
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
         with:
-          image: ${{ steps.image.outputs.name }}:canary
+          image: ${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}
           artifact-name: sbom-${{ matrix.service }}-spdx
           format: spdx-json
 
@@ -88,7 +90,7 @@ jobs:
           {
             echo "## Image security audit: \`${{ matrix.service }}\`"
             echo ""
-            echo "- Image: \`${{ steps.image.outputs.name }}:canary\`"
+            echo "- Image: \`${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}\`"
             echo "- Runtime base: \`debian:bookworm-20260518-slim\`"
             echo "- SBOM artifact: \`sbom-${{ matrix.service }}-spdx\` (SPDX JSON)"
             echo ""
