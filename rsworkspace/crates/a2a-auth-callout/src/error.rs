@@ -46,12 +46,20 @@ mod tests {
 
     #[test]
     fn display_connect() {
-        assert!(AuthCalloutError::Connect("refused".into()).to_string().contains("NATS connect failed"));
+        assert!(
+            AuthCalloutError::Connect("refused".into())
+                .to_string()
+                .contains("NATS connect failed")
+        );
     }
 
     #[test]
     fn display_subscribe() {
-        assert!(AuthCalloutError::Subscribe("denied".into()).to_string().contains("auth callout subject"));
+        assert!(
+            AuthCalloutError::Subscribe("denied".into())
+                .to_string()
+                .contains("auth callout subject")
+        );
     }
 
     #[test]
@@ -65,7 +73,11 @@ mod tests {
 
     #[test]
     fn display_jwt_mint() {
-        assert!(AuthCalloutError::JwtMint("key missing".into()).to_string().contains("JWT mint"));
+        assert!(
+            AuthCalloutError::JwtMint("key missing".into())
+                .to_string()
+                .contains("JWT mint")
+        );
     }
 
     #[test]

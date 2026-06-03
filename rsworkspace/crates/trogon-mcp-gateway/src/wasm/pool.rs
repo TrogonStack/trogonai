@@ -106,10 +106,7 @@ impl ComponentPool {
         Ok(())
     }
 
-    fn create_instance(
-        &self,
-        host: HostEvalContext,
-    ) -> Result<PooledInstance, WasmEngineError> {
+    fn create_instance(&self, host: HostEvalContext) -> Result<PooledInstance, WasmEngineError> {
         if self.inner.shutting_down.load(Ordering::Acquire) {
             return Err(WasmEngineError::PoolShutDown);
         }
@@ -131,8 +128,8 @@ impl ComponentPool {
             .set_fuel(self.inner.config.fuel_init)
             .map_err(|err| WasmEngineError::Internal(err.to_string()))?;
 
-        let guest = PolicyBundle::instantiate(&mut store, &self.inner.component, &self.inner.linker)
-            .map_err(|err| {
+        let guest =
+            PolicyBundle::instantiate(&mut store, &self.inner.component, &self.inner.linker).map_err(|err| {
                 self.inner.live.fetch_sub(1, Ordering::AcqRel);
                 WasmEngineError::Link {
                     component_id: self.inner.component_id.to_string(),
@@ -205,10 +202,7 @@ impl ComponentPool {
         Ok(outcome)
     }
 
-    async fn checkout_instance(
-        &self,
-        host: HostEvalContext,
-    ) -> Result<PooledInstance, WasmEngineError> {
+    async fn checkout_instance(&self, host: HostEvalContext) -> Result<PooledInstance, WasmEngineError> {
         if let Some(mut instance) = self.inner.idle.lock().await.pop() {
             instance.store.data_mut().host = host;
             instance.store.data_mut().reset_import_calls();
@@ -271,10 +265,7 @@ impl ComponentPool {
     }
 }
 
-fn store_reset_fuel(
-    store: &mut wasmtime::Store<WasmStoreState>,
-    fuel: u64,
-) -> Result<(), WasmEngineError> {
+fn store_reset_fuel(store: &mut wasmtime::Store<WasmStoreState>, fuel: u64) -> Result<(), WasmEngineError> {
     store
         .set_fuel(fuel)
         .map_err(|err| WasmEngineError::Internal(err.to_string()))
@@ -339,13 +330,7 @@ mod tests {
         let engine = Engine::new(&wasm_config).expect("engine");
         let component = empty_component(&engine);
         let linker = Linker::new(&engine);
-        ComponentPool::new_without_prewarm(
-            engine,
-            linker,
-            component,
-            config,
-            Arc::from("policy"),
-        )
+        ComponentPool::new_without_prewarm(engine, linker, component, config, Arc::from("policy"))
     }
 
     #[tokio::test]

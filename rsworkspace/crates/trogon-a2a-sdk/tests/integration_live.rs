@@ -18,9 +18,7 @@ use trogon_a2a_sdk::constants::CALLER_JWT_HEADER;
 use trogon_a2a_sdk::registry::NatsRegistry;
 use trogon_a2a_sdk::sts::NatsSts;
 use trogon_a2a_sdk::traits::{MessageTransport, SubjectTokenSource, SvidSource};
-use trogon_a2a_sdk::{
-    AgentId, Audience, Caller, Client, Handler, Purpose, Rs256Jwks, SdkError, serve,
-};
+use trogon_a2a_sdk::{AgentId, Audience, Caller, Client, Handler, Purpose, Rs256Jwks, SdkError, serve};
 use trogon_agent_registry::{AgentRecord, LOOKUP_SUBJECT, LookupRequest, LookupResponse, QUEUE_GROUP};
 use trogon_sts::EXCHANGE_SUBJECT;
 use trogon_sts::types::StsExchangeRequest;
@@ -76,10 +74,12 @@ impl MessageTransport for CapturingTransport {
 
 async fn spawn_sts_consumer(
     nats: async_nats::Client,
-    service: Arc<trogon_sts::exchange::ExchangeService<
-        trogon_sts::registry::InMemoryRegistry,
-        trogon_sts::audit::RecordingAuditPublisher,
-    >>,
+    service: Arc<
+        trogon_sts::exchange::ExchangeService<
+            trogon_sts::registry::InMemoryRegistry,
+            trogon_sts::audit::RecordingAuditPublisher,
+        >,
+    >,
 ) {
     tokio::spawn(async move {
         let mut sub = nats
@@ -135,19 +135,11 @@ async fn client_call_and_serve_round_trip_over_live_nats() {
     let mut registry_records = HashMap::new();
     registry_records.insert(
         AGENT1.to_string(),
-        kv_agent_record(
-            AGENT1,
-            WKLA,
-            vec!["urn:trogon:a2a:agent:acme:agent2".into()],
-        ),
+        kv_agent_record(AGENT1, WKLA, vec!["urn:trogon:a2a:agent:acme:agent2".into()]),
     );
     registry_records.insert(
         AGENT2.to_string(),
-        kv_agent_record(
-            AGENT2,
-            WKLB,
-            vec!["urn:trogon:a2a:agent:acme:agent2".into()],
-        ),
+        kv_agent_record(AGENT2, WKLB, vec!["urn:trogon:a2a:agent:acme:agent2".into()]),
     );
     spawn_registry_lookup_responder(nats.clone(), registry_records).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -165,9 +157,7 @@ async fn client_call_and_serve_round_trip_over_live_nats() {
     let jwks = Rs256Jwks::new(keys.mesh_jwks.clone());
     let serve_nats = nats.clone();
     let serve_agent2 = agent2.clone();
-    let serve_task = tokio::spawn(async move {
-        serve(serve_nats, serve_agent2, jwks, handler).await
-    });
+    let serve_task = tokio::spawn(async move { serve(serve_nats, serve_agent2, jwks, handler).await });
 
     let captured_jwt = Arc::new(Mutex::new(None));
     let bootstrap = mint_bootstrap_token(keys, bootstrap_claims(keys, AGENT1));
@@ -198,10 +188,7 @@ async fn client_call_and_serve_round_trip_over_live_nats() {
         claims.get("aud").and_then(|v| v.as_str()),
         Some(Audience::for_agent(&target).as_str())
     );
-    let chain = claims
-        .get("act_chain")
-        .and_then(|v| v.as_array())
-        .expect("act_chain");
+    let chain = claims.get("act_chain").and_then(|v| v.as_array()).expect("act_chain");
     assert_eq!(
         chain.last().and_then(|e| e.get("agent_id")).and_then(|v| v.as_str()),
         Some(AGENT1)

@@ -13,8 +13,7 @@ pub use error::ImportGateError;
 pub use gate::ImportGate;
 pub use principal::{ImportedAccountName, SpiceDbPrincipal};
 pub use spicedb::{
-    ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, BulkImportPermissionCheck,
+    BulkImportPermissionCheck, ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS,
     LiveBulkImportPermissionClient, SpiceDbEndpoint, SpiceDbImportGate, SpiceDbImportGateBuildError, SpiceDbToken,
-    ZedTokenSnapshot, ZedTokenTtl, parse_subject_reference, resolve_import_gate,
-    spicedb_subject_from_principal,
+    ZedTokenSnapshot, ZedTokenTtl, parse_subject_reference, resolve_import_gate, spicedb_subject_from_principal,
 };

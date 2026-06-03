@@ -1,20 +1,19 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use data_encoding::BASE32_NOPAD;
+use nats_jwt_rs::ClaimType;
 use nats_jwt_rs::types::{GenericFields, NatsLimits};
 use nats_jwt_rs::user::User;
-use nats_jwt_rs::ClaimType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha512_256};
 
-use super::{
-    AccountName, CallerId, ExternalSubject, JwtError, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims,
-    UserJwtSubject,
-};
 use super::nats_permission_claims::NatsPermissionClaims;
+use super::{
+    AccountName, CallerId, ExternalSubject, JwtError, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims, UserJwtSubject,
+};
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{MintingMaterial, SigningKeyHandle, SigningKeySource};
 
@@ -153,10 +152,7 @@ pub(crate) fn mint_nats_user_jwt(
     Ok(MintedUserJwt::new(format!("{signing_input}.{signature}")))
 }
 
-pub(crate) fn verify_nats_user_jwt(
-    token: &str,
-    handles: &[SigningKeyHandle],
-) -> Result<UserJwtClaims, JwtError> {
+pub(crate) fn verify_nats_user_jwt(token: &str, handles: &[SigningKeyHandle]) -> Result<UserJwtClaims, JwtError> {
     if handles.is_empty() {
         return Err(JwtError::NoSigningKeyForKid);
     }
@@ -217,9 +213,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
         .map(|s| ExternalSubject::new(s.as_str()))
         .transpose()
         .map_err(|e| JwtError::Decode(e.to_string()))?
-        .ok_or_else(|| {
-            JwtError::Decode("minted user JWT data missing spicedb_subject".into())
-        })?;
+        .ok_or_else(|| JwtError::Decode("minted user JWT data missing spicedb_subject".into()))?;
     let caller_id = CallerId::new(payload.caller_id)?;
     let aud = AccountName::new(
         payload
@@ -227,8 +221,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .filter(|s| !s.is_empty())
             .ok_or_else(|| JwtError::Decode("user JWT missing aud".into()))?,
     );
-    let kid = crate::signing_key_source::KeyVersion::new(payload.kid)
-        .map_err(|e| JwtError::Decode(e.to_string()))?;
+    let kid = crate::signing_key_source::KeyVersion::new(payload.kid).map_err(|e| JwtError::Decode(e.to_string()))?;
 
     let nats_permissions = IssuedPermissions {
         publish_allow: payload
@@ -284,10 +277,7 @@ fn decode_segment<T: for<'de> Deserialize<'de>>(input: &str) -> Result<T, JwtErr
 }
 
 fn secs_since_unix(t: SystemTime) -> Result<i64, JwtError> {
-    let secs = t
-        .duration_since(UNIX_EPOCH)
-        .map_err(JwtError::SystemTime)?
-        .as_secs();
+    let secs = t.duration_since(UNIX_EPOCH).map_err(JwtError::SystemTime)?.as_secs();
     i64::try_from(secs).map_err(|_| JwtError::IssuedAtOutOfRange)
 }
 
@@ -330,9 +320,7 @@ mod tests {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
-        let subject = UserJwtSubject::from_user_nkey(
-            crate::wire::NkeyPublic::parse(user.public_key()).unwrap(),
-        );
+        let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
         let token = mint_nats_user_jwt(
             &claims,
             &material,

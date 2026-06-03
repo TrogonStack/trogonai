@@ -60,9 +60,15 @@ async fn lookup_returns_found_record_and_emits_audit_event() {
     let consumer_prefix = prefix.clone();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let consumer = tokio::spawn(async move {
-        run_lookup_consumer(consumer_client, consumer_store, consumer_cache, consumer_prefix, async {
-            shutdown_rx.await.ok();
-        })
+        run_lookup_consumer(
+            consumer_client,
+            consumer_store,
+            consumer_cache,
+            consumer_prefix,
+            async {
+                shutdown_rx.await.ok();
+            },
+        )
         .await
         .expect("consumer run");
     });

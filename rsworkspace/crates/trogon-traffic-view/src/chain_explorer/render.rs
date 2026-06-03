@@ -40,13 +40,7 @@ fn render_node(node: &ChainNode, prefix: &str, is_last: bool, opts: &RenderOpts,
     };
     let child_count = node.children.len();
     for (index, child) in node.children.iter().enumerate() {
-        render_node(
-            child,
-            &child_prefix,
-            index + 1 == child_count,
-            opts,
-            lines,
-        );
+        render_node(child, &child_prefix, index + 1 == child_count, opts, lines);
     }
 }
 
@@ -105,20 +99,8 @@ mod tests {
     fn render_includes_caller_target_and_outcome() {
         let hop_a = hop("acme/agent-a");
         let events = vec![
-            test_event(
-                "req-a",
-                Some(vec![]),
-                "acme/router",
-                "urn:agent:oncall",
-                "allow",
-            ),
-            test_event(
-                "req-b",
-                Some(vec![hop_a]),
-                "acme/oncall",
-                "urn:tool:db_query",
-                "deny",
-            ),
+            test_event("req-a", Some(vec![]), "acme/router", "urn:agent:oncall", "allow"),
+            test_event("req-b", Some(vec![hop_a]), "acme/oncall", "urn:tool:db_query", "deny"),
         ];
         let tree = ChainTree::from_events("req-a", events).expect("tree");
         let rendered = render_tree(&tree, &RenderOpts::default());

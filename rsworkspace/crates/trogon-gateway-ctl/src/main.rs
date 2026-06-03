@@ -21,11 +21,7 @@ mod exit_codes {
 }
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "trogon-gateway-ctl",
-    about = "Operator CLI for the MCP gateway",
-    version
-)]
+#[command(name = "trogon-gateway-ctl", about = "Operator CLI for the MCP gateway", version)]
 struct Cli {
     #[arg(long, global = true, help = "Gateway/NATS settings TOML overlay")]
     config: Option<PathBuf>,

@@ -38,11 +38,7 @@ impl FreshnessClock for Arc<dyn FreshnessClock> {
 
 /// Returns true when `auth_time` is within `max_age_seconds` of `clock.now_unix()`.
 #[must_use]
-pub fn is_auth_time_fresh(
-    clock: &impl FreshnessClock,
-    auth_time: i64,
-    max_age_seconds: u64,
-) -> bool {
+pub fn is_auth_time_fresh(clock: &impl FreshnessClock, auth_time: i64, max_age_seconds: u64) -> bool {
     let age = clock.now_unix().saturating_sub(auth_time);
     age <= i64::try_from(max_age_seconds).unwrap_or(i64::MAX)
 }

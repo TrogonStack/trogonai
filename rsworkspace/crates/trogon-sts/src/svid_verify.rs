@@ -40,8 +40,7 @@ pub fn verify_leaf_against_bundle(leaf_der: &[u8], trust_bundle_pem: &str) -> Re
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let asn1_now = ASN1Time::from_timestamp(now)
-        .map_err(|e| StsError::ServerError(format!("clock: {e}")))?;
+    let asn1_now = ASN1Time::from_timestamp(now).map_err(|e| StsError::ServerError(format!("clock: {e}")))?;
     if !leaf.validity().is_valid_at(asn1_now) {
         return Err(StsError::InvalidGrant(
             "SVID certificate is outside its validity window".into(),
@@ -51,8 +50,8 @@ pub fn verify_leaf_against_bundle(leaf_der: &[u8], trust_bundle_pem: &str) -> Re
     let ca_ders = parse_trust_anchor_ders(trust_bundle_pem)?;
     let mut trusted = false;
     for ca_der in &ca_ders {
-        let (_, ca) = X509Certificate::from_der(ca_der)
-            .map_err(|e| StsError::ServerError(format!("trust anchor: {e}")))?;
+        let (_, ca) =
+            X509Certificate::from_der(ca_der).map_err(|e| StsError::ServerError(format!("trust anchor: {e}")))?;
         if leaf.issuer() != ca.subject() {
             continue;
         }
@@ -73,11 +72,7 @@ pub fn workload_svid_from_pem(actor_token: &str, trust_bundle_pem: &str) -> Resu
     let leaf_der = leaf_der_from_actor_token(actor_token)?;
     verify_leaf_against_bundle(&leaf_der, trust_bundle_pem)?;
     let spiffe_id = spiffe_id_from_leaf_der(&leaf_der)?;
-    Ok(WorkloadSvid::new(
-        spiffe_id,
-        leaf_der,
-        actor_token.trim().to_string(),
-    ))
+    Ok(WorkloadSvid::new(spiffe_id, leaf_der, actor_token.trim().to_string()))
 }
 
 fn parse_trust_anchor_ders(bundle_pem: &str) -> Result<Vec<Vec<u8>>, StsError> {
@@ -92,9 +87,7 @@ fn parse_trust_anchor_ders(bundle_pem: &str) -> Result<Vec<Vec<u8>>, StsError> {
         cas.push(pem.contents);
     }
     if cas.is_empty() {
-        return Err(StsError::ServerError(
-            "trust bundle contained no certificates".into(),
-        ));
+        return Err(StsError::ServerError("trust bundle contained no certificates".into()));
     }
     Ok(cas)
 }
@@ -103,11 +96,7 @@ fn extract_spiffe_id(leaf: &X509Certificate<'_>) -> Result<SpiffeId, StsError> {
     let san = leaf
         .subject_alternative_name()
         .map_err(|e| StsError::InvalidGrant(format!("SVID SAN parse: {e}")))?
-        .ok_or_else(|| {
-            StsError::InvalidGrant(
-                "SVID certificate has no Subject Alternative Name extension".into(),
-            )
-        })?;
+        .ok_or_else(|| StsError::InvalidGrant("SVID certificate has no Subject Alternative Name extension".into()))?;
     for name in san.value.general_names.iter() {
         if let GeneralName::URI(uri) = name
             && uri.starts_with("spiffe://")
@@ -128,10 +117,7 @@ fn map_spiffe_err(e: SpiffeIdError) -> StsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rcgen::{
-        BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
-        SanType,
-    };
+    use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType};
 
     fn spiffe_svid_pem(trust_domain: &str, path: &str) -> (String, String) {
         use rcgen::Ia5String;
@@ -157,10 +143,7 @@ mod tests {
     fn verifies_rcgen_svid_and_extracts_spiffe_id() {
         let (leaf, anchors) = spiffe_svid_pem("acme.local", "ns/prod/sa/oncall-agent");
         let svid = workload_svid_from_pem(&leaf, &anchors).expect("verify");
-        assert_eq!(
-            svid.spiffe_id.as_str(),
-            "spiffe://acme.local/ns/prod/sa/oncall-agent"
-        );
+        assert_eq!(svid.spiffe_id.as_str(), "spiffe://acme.local/ns/prod/sa/oncall-agent");
         assert_eq!(svid.wkl(), "spiffe://acme.local/ns/prod/sa/oncall-agent");
     }
 

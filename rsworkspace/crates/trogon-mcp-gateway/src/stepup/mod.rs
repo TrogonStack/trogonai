@@ -16,9 +16,7 @@ mod policy;
 pub use bridge::{ApprovalBridge, NoopApprovalBridge};
 pub use errors::StepUpError;
 pub use freshness::{FreshnessClock, SystemFreshnessClock, TestFreshnessClock, is_auth_time_fresh};
-pub use policy::{
-    StepUpDemand, StepUpPolicy, StepUpRequestCtx, ToolAnnotations, DEFAULT_MAX_AUTH_AGE_SECS,
-};
+pub use policy::{DEFAULT_MAX_AUTH_AGE_SECS, StepUpDemand, StepUpPolicy, StepUpRequestCtx, ToolAnnotations};
 
 use crate::rpc_codes;
 
@@ -67,17 +65,13 @@ mod tests {
 
     #[test]
     fn outcome_maps_reauth_to_auth_expired_code() {
-        let outcome = StepUpOutcome::from_demand(StepUpDemand::Reauth {
-            max_age_seconds: 300,
-        });
+        let outcome = StepUpOutcome::from_demand(StepUpDemand::Reauth { max_age_seconds: 300 });
         assert_eq!(outcome.jsonrpc_code(), Some(rpc_codes::AUTH_EXPIRED));
     }
 
     #[test]
     fn outcome_maps_approval_to_approval_required_code() {
-        let outcome = StepUpOutcome::from_demand(StepUpDemand::Approval {
-            reason: "test".into(),
-        });
+        let outcome = StepUpOutcome::from_demand(StepUpDemand::Approval { reason: "test".into() });
         assert_eq!(outcome.jsonrpc_code(), Some(rpc_codes::APPROVAL_REQUIRED));
     }
 

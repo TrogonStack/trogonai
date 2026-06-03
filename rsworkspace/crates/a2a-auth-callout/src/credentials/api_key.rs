@@ -6,7 +6,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 use crate::error::AuthCalloutError;
-use crate::jwt::{derive_caller_id, AudienceAccount, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
+use crate::jwt::{AudienceAccount, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, derive_caller_id};
 
 #[derive(Debug)]
 pub enum ApiKeyError {
@@ -53,8 +53,7 @@ pub struct ApiKeyDigest([u8; 32]);
 
 impl ApiKeyDigest {
     fn compute(api_key: &ApiKey, hmac_secret: &[u8]) -> Self {
-        let mut mac = Hmac::<Sha256>::new_from_slice(hmac_secret)
-            .expect("HMAC accepts any key length");
+        let mut mac = Hmac::<Sha256>::new_from_slice(hmac_secret).expect("HMAC accepts any key length");
         mac.update(api_key.as_str().as_bytes());
         Self(mac.finalize().into_bytes().into())
     }

@@ -50,8 +50,8 @@ impl ActChainValidationHarness {
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
         let nats_conf = NatsConfig::new(vec![url], NatsAuth::None);
         let prefix = McpPrefix::new(prefix_token).expect("test prefix shape");
-        let mcp_conf = McpConfig::new(prefix.clone(), nats_conf.clone())
-            .with_operation_timeout(Duration::from_secs(15));
+        let mcp_conf =
+            McpConfig::new(prefix.clone(), nats_conf.clone()).with_operation_timeout(Duration::from_secs(15));
         let settings = GatewaySettings {
             queue_group: queue_group.into(),
             audit_stream_name: "MCP_AUDIT_ACT_CHAIN_SCAFFOLD".into(),
@@ -65,9 +65,9 @@ impl ActChainValidationHarness {
             mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
             context_throttle: None,
             anomaly_emitter: None,
-        stepup_policy: None,
-        stepup_bridge: None,
-        freshness_clock: None,
+            stepup_policy: None,
+            stepup_bridge: None,
+            freshness_clock: None,
         };
         Self {
             nats_conf,
@@ -216,9 +216,7 @@ mod depth {
         // Act: gateway ingress before backend forward.
         // Assert: error.code == rpc_codes::POLICY_DENY (-32100).
         let _max = MAX_ACT_CHAIN_DEPTH;
-        unimplemented!(
-            "policy_deny -32100 when len > max_chain_depth; data.rule_fired act_chain_depth"
-        );
+        unimplemented!("policy_deny -32100 when len > max_chain_depth; data.rule_fired act_chain_depth");
     }
 
     #[tokio::test]

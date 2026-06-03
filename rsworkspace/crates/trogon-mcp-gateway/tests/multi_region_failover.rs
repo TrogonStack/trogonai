@@ -282,9 +282,8 @@ mod router_failover {
     //! Full gateway/NATS harness cases below remain scaffolded until `gateway.rs` wiring lands.
 
     use trogon_mcp_gateway::multi_region::{
-        MultiRegionConfig, MultiRegionConfigError, NoopRegionAuditSink, RegionHealth,
-        RegionHealthConfig, RegionRouter, RegionRouteErrorKind, RequestContext, RouteReason,
-        TopologyBuildError,
+        MultiRegionConfig, MultiRegionConfigError, NoopRegionAuditSink, RegionHealth, RegionHealthConfig,
+        RegionRouteErrorKind, RegionRouter, RequestContext, RouteReason, TopologyBuildError,
     };
 
     fn router_from_json(json: &str) -> RegionRouter<NoopRegionAuditSink> {
@@ -308,9 +307,7 @@ mod router_failover {
     #[test]
     fn home_region_happy_path() {
         let router = router_from_json(TWO_REGION_JSON);
-        let decision = router
-            .route(None, &RequestContext::default())
-            .expect("route");
+        let decision = router.route(None, &RequestContext::default()).expect("route");
         assert_eq!(decision.region.as_str(), "us-east");
         assert_eq!(decision.reason, RouteReason::HomeRegion);
     }
@@ -320,9 +317,7 @@ mod router_failover {
         let router = router_from_json(TWO_REGION_JSON);
         let home = router.topology().home_region().clone();
         router.health().force_unreachable(&home);
-        let decision = router
-            .route(None, &RequestContext::default())
-            .expect("route");
+        let decision = router.route(None, &RequestContext::default()).expect("route");
         assert_eq!(decision.region.as_str(), "us-west");
         assert!(matches!(decision.reason, RouteReason::Failover { .. }));
     }
@@ -333,9 +328,7 @@ mod router_failover {
         for region in router.topology().route_candidates() {
             router.health().force_unreachable(&region);
         }
-        let err = router
-            .route(None, &RequestContext::default())
-            .expect_err("route");
+        let err = router.route(None, &RequestContext::default()).expect_err("route");
         assert_eq!(err.kind, RegionRouteErrorKind::AllRegionsUnreachable);
         assert_eq!(err.attempted.len(), 2);
         assert_eq!(err.attempted[0].as_str(), "us-east");

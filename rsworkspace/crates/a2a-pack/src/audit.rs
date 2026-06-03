@@ -88,16 +88,10 @@ impl AuditEnvelopeExtensions {
             map.insert("tenant".into(), serde_json::Value::String(tenant.as_str().to_owned()));
         }
         if let Some(via) = &self.caller_via {
-            map.insert(
-                "caller_via".into(),
-                serde_json::Value::String(via.as_str().to_owned()),
-            );
+            map.insert("caller_via".into(), serde_json::Value::String(via.as_str().to_owned()));
         }
         if let Some(task_id) = &self.task_id {
-            map.insert(
-                "task_id".into(),
-                serde_json::Value::String(task_id.as_str().to_owned()),
-            );
+            map.insert("task_id".into(), serde_json::Value::String(task_id.as_str().to_owned()));
         }
         if let Some(before) = &self.task_state_before {
             map.insert(

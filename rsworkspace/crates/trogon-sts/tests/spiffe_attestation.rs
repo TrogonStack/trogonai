@@ -24,8 +24,7 @@ fn nats_server_available() -> bool {
 
 #[tokio::test]
 async fn x509_svid_actor_token_mints_attested_wkl() {
-    let (leaf_pem, anchor_pem) =
-        test_spiffe_svid_pem("acme.local", "ns/prod/sa/oncall-agent");
+    let (leaf_pem, anchor_pem) = test_spiffe_svid_pem("acme.local", "ns/prod/sa/oncall-agent");
     let keys = shared_test_keys();
     let trust = TrustBundleCache::from_pem_for_domain("acme.local", anchor_pem);
     let attestor = Arc::new(X509SvidAttestor::new(trust.clone()));
@@ -85,8 +84,7 @@ async fn kv_trust_bundle_load_enables_exchange() {
         return;
     };
 
-    let (leaf_pem, anchor_pem) =
-        test_spiffe_svid_pem("acme.local", "ns/prod/sa/oncall-agent");
+    let (leaf_pem, anchor_pem) = test_spiffe_svid_pem("acme.local", "ns/prod/sa/oncall-agent");
 
     let js = async_nats::jetstream::new(nats.clone());
     let store = js
@@ -96,10 +94,7 @@ async fn kv_trust_bundle_load_enables_exchange() {
         })
         .await
         .expect("kv");
-    store
-        .put("acme.local", anchor_pem.into())
-        .await
-        .expect("put bundle");
+    store.put("acme.local", anchor_pem.into()).await.expect("put bundle");
 
     let (domain, pem) = load_trust_bundle_from_kv(&nats, TRUST_BUNDLES_KV_BUCKET, "acme.local")
         .await

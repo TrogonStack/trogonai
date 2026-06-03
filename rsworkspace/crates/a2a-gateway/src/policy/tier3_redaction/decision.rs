@@ -46,17 +46,9 @@ impl Tier3EngineError {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tier3RedactionDecision {
-    Allow {
-        rewrites: Vec<RedactionRewrite>,
-    },
-    Refuse {
-        reason: Tier3RefusalReason,
-        rule: SkillId,
-    },
-    Error {
-        rule: SkillId,
-        kind: Tier3EngineError,
-    },
+    Allow { rewrites: Vec<RedactionRewrite> },
+    Refuse { reason: Tier3RefusalReason, rule: SkillId },
+    Error { rule: SkillId, kind: Tier3EngineError },
 }
 
 impl Tier3RedactionDecision {

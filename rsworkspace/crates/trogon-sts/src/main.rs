@@ -103,9 +103,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let trust_pem = tokio::fs::read_to_string(&args.trust_bundle_path).await?;
     let trust_bundle = TrustBundleCache::from_pem_for_domain(&args.trust_domain, trust_pem);
     spawn_trust_bundle_watch(nats.clone(), trust_bundle.clone(), TRUST_BUNDLES_KV_BUCKET);
-    if let Ok((domain, pem)) =
-        load_trust_bundle_from_kv(&nats, TRUST_BUNDLES_KV_BUCKET, &args.trust_domain).await
-    {
+    if let Ok((domain, pem)) = load_trust_bundle_from_kv(&nats, TRUST_BUNDLES_KV_BUCKET, &args.trust_domain).await {
         trust_bundle.upsert_domain(domain, pem).await;
     }
 
@@ -165,7 +163,12 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_message(service: Arc<StsExchangeService>, nats: async_nats::Client, payload: bytes::Bytes, reply: async_nats::Subject) {
+async fn handle_message(
+    service: Arc<StsExchangeService>,
+    nats: async_nats::Client,
+    payload: bytes::Bytes,
+    reply: async_nats::Subject,
+) {
     let request: StsExchangeRequest = match serde_json::from_slice(&payload) {
         Ok(r) => r,
         Err(e) => {

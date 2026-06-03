@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::crd::{Gateway, HTTPRoute};
 
+use super::gateway_config::{ProjectionError, content_hash_hex};
 use super::keys::{gateway_kv_key, http_route_kv_key};
-use super::gateway_config::{content_hash_hex, ProjectionError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,9 +54,7 @@ pub struct HttpRouteProjection {
 }
 
 pub fn project_gateway(resource: &Gateway) -> Result<GatewayProjection, ProjectionError> {
-    let namespace = resource
-        .namespace()
-        .ok_or(ProjectionError::MissingNamespace)?;
+    let namespace = resource.namespace().ok_or(ProjectionError::MissingNamespace)?;
     let name = resource.name_any();
     if name.is_empty() {
         return Err(ProjectionError::MissingName);
@@ -80,11 +78,7 @@ pub fn project_gateway(resource: &Gateway) -> Result<GatewayProjection, Projecti
         gateway_class_name: resource.spec.gateway_class_name.clone(),
         listeners,
         source: "k8s".to_string(),
-        source_uid: resource
-            .metadata
-            .uid
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string()),
+        source_uid: resource.metadata.uid.clone().unwrap_or_else(|| "unknown".to_string()),
         source_generation: resource.metadata.generation.unwrap_or(0),
         server_bindings_stub: true,
     };
@@ -98,9 +92,7 @@ pub fn project_gateway(resource: &Gateway) -> Result<GatewayProjection, Projecti
 }
 
 pub fn project_http_route(resource: &HTTPRoute) -> Result<HttpRouteProjection, ProjectionError> {
-    let namespace = resource
-        .namespace()
-        .ok_or(ProjectionError::MissingNamespace)?;
+    let namespace = resource.namespace().ok_or(ProjectionError::MissingNamespace)?;
     let name = resource.name_any();
     if name.is_empty() {
         return Err(ProjectionError::MissingName);
@@ -132,11 +124,7 @@ pub fn project_http_route(resource: &HTTPRoute) -> Result<HttpRouteProjection, P
         hostnames,
         backend_server_ids,
         source: "k8s".to_string(),
-        source_uid: resource
-            .metadata
-            .uid
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string()),
+        source_uid: resource.metadata.uid.clone().unwrap_or_else(|| "unknown".to_string()),
         source_generation: resource.metadata.generation.unwrap_or(0),
         path_rules_stub: true,
     };

@@ -2,23 +2,11 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignatureVerificationError {
-    MissingSignatureFile {
-        skill_id: String,
-        path: String,
-    },
-    MalformedSignatureFile {
-        skill_id: String,
-        detail: String,
-    },
-    ManifestSha256Mismatch {
-        skill_id: String,
-    },
-    WasmSha256Mismatch {
-        skill_id: String,
-    },
-    SignatureVerificationFailed {
-        skill_id: String,
-    },
+    MissingSignatureFile { skill_id: String, path: String },
+    MalformedSignatureFile { skill_id: String, detail: String },
+    ManifestSha256Mismatch { skill_id: String },
+    WasmSha256Mismatch { skill_id: String },
+    SignatureVerificationFailed { skill_id: String },
 }
 
 impl fmt::Display for SignatureVerificationError {

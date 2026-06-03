@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use base64::Engine;
 use jsonwebtoken::Algorithm;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
 

@@ -3,8 +3,7 @@ use std::path::Path;
 
 use serde::Serialize;
 use trogon_mcp_gateway::bundle::{
-    build_tar, load_bundle, BundleArchive, BundleLoadError, LoadedBundle, TrustedKeys,
-    MANIFEST_FILENAME,
+    BundleArchive, BundleLoadError, LoadedBundle, MANIFEST_FILENAME, TrustedKeys, build_tar, load_bundle,
 };
 
 use crate::output::emit_json;
@@ -177,8 +176,8 @@ fn tar_from_directory(path: &Path) -> Result<Vec<u8>, BundleOutcome> {
 pub mod fixtures {
     use nkeys::KeyPair;
     use trogon_mcp_gateway::bundle::{
-        build_tar, hash_member, manifest_digest_bytes, signature_path, BundleArchive, HOST_TARGET_WIT,
-        MANIFEST_FILENAME,
+        BundleArchive, HOST_TARGET_WIT, MANIFEST_FILENAME, build_tar, hash_member, manifest_digest_bytes,
+        signature_path,
     };
 
     pub fn signed_tar(kp: &KeyPair, cel_body: &[u8]) -> Vec<u8> {

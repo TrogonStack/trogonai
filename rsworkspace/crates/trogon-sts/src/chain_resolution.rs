@@ -52,11 +52,7 @@ impl<R: RegistryLookup + Clone> ChainResolver<R> {
             .time_to_live(DEFAULT_CHAIN_CACHE_TTL)
             .max_capacity(10_000)
             .build();
-        Self {
-            registry,
-            cache,
-            mode,
-        }
+        Self { registry, cache, mode }
     }
 
     pub async fn verify_inbound_chain(&self, chain: &[ActChainEntry]) -> Result<(), StsError> {

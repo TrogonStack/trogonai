@@ -21,7 +21,9 @@ fn classify_subject(subject: &str) -> Result<TrafficSource, ProjectorError> {
     } else if subject.contains(".audit.") {
         Ok(TrafficSource::Gateway)
     } else {
-        Err(ProjectorError::Normalize(format!("unsupported audit subject: {subject}")))
+        Err(ProjectorError::Normalize(format!(
+            "unsupported audit subject: {subject}"
+        )))
     }
 }
 
@@ -32,7 +34,11 @@ fn normalize_sts(envelope: &AuditEnvelope) -> Result<TrafficEvent, ProjectorErro
         .unwrap_or_else(|| "unknown".into());
     let request = payload.get("request");
     let minted = payload.get("minted");
-    let act_chain = parse_act_chain(payload.get("act_chain").or_else(|| minted.and_then(|m| m.get("act_chain"))));
+    let act_chain = parse_act_chain(
+        payload
+            .get("act_chain")
+            .or_else(|| minted.and_then(|m| m.get("act_chain"))),
+    );
     Ok(TrafficEvent {
         event_id: envelope.event_id.clone(),
         ts: parse_ts(payload)?,
@@ -128,10 +134,7 @@ fn parse_ts(payload: &serde_json::Value) -> Result<DateTime<Utc>, ProjectorError
 }
 
 fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|field| field.as_str())
-        .map(str::to_owned)
+    value.get(key).and_then(|field| field.as_str()).map(str::to_owned)
 }
 
 fn nested_string_field(value: Option<&serde_json::Value>, key: &str) -> Option<String> {
@@ -195,7 +198,10 @@ mod tests {
         };
         let event = normalize_envelope(&envelope).expect("normalize");
         assert_eq!(event.outcome, "allow");
-        assert_eq!(event.target_aud.as_deref(), Some("urn:trogon:a2a:agent:acme:oncall-agent"));
+        assert_eq!(
+            event.target_aud.as_deref(),
+            Some("urn:trogon:a2a:agent:acme:oncall-agent")
+        );
         assert_eq!(event.session_id.as_deref(), Some("sess-1"));
     }
 }

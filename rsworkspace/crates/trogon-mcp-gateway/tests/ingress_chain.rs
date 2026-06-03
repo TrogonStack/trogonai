@@ -58,12 +58,7 @@ async fn cache_mode_logs_but_allows_unknown_wkl() {
         wkl: Some("spiffe://acme.local/ns/prod/sa/other".into()),
         iat: 1,
     }];
-    assert!(
-        resolver
-            .resolve_inbound_chain(Some(chain.as_slice()))
-            .await
-            .is_none()
-    );
+    assert!(resolver.resolve_inbound_chain(Some(chain.as_slice())).await.is_none());
 }
 
 #[tokio::test]
@@ -88,12 +83,7 @@ async fn human_wkl_skips_registry_lookup() {
         wkl: Some("human".into()),
         iat: 1,
     }];
-    assert!(
-        resolver
-            .resolve_inbound_chain(Some(chain.as_slice()))
-            .await
-            .is_none()
-    );
+    assert!(resolver.resolve_inbound_chain(Some(chain.as_slice())).await.is_none());
 }
 
 #[test]
@@ -101,10 +91,7 @@ fn mesh_gateway_config_parses_chain_mode() {
     struct Env(std::collections::HashMap<String, String>);
     impl trogon_std::env::ReadEnv for Env {
         fn var(&self, key: &str) -> Result<String, std::env::VarError> {
-            self.0
-                .get(key)
-                .cloned()
-                .ok_or(std::env::VarError::NotPresent)
+            self.0.get(key).cloned().ok_or(std::env::VarError::NotPresent)
         }
     }
     let mut map = std::collections::HashMap::new();

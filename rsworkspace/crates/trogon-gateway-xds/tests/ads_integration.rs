@@ -5,13 +5,11 @@ use std::time::Duration;
 use futures::StreamExt;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::{Endpoint, Server};
 use tonic::Request;
+use tonic::transport::{Endpoint, Server};
 
 use trogon_gateway_xds::config::fixtures::sample_snapshot;
-use trogon_gateway_xds::proto::{
-    AggregatedDiscoveryServiceClient, AggregatedDiscoveryServiceServer, DiscoveryRequest,
-};
+use trogon_gateway_xds::proto::{AggregatedDiscoveryServiceClient, AggregatedDiscoveryServiceServer, DiscoveryRequest};
 use trogon_gateway_xds::state::{ConfigStore, NodeSnapshot};
 use trogon_gateway_xds::type_urls;
 use trogon_gateway_xds::{AdsServer, AdsServerOpts};

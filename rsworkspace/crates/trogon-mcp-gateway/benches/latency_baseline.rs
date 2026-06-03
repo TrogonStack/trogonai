@@ -31,8 +31,7 @@ use trogon_mcp_gateway::redaction::{
     JsonPath, RedactionAction, RedactionDirection, RedactionRegistry, RedactionRule, RedactionRuleset,
 };
 use trogon_mcp_gateway::schema_cache::{
-    CachedSchema, SchemaCache, SchemaCacheConfig, SchemaCacheRuntime, SchemaSource, ServerId,
-    schema_cache_key_for_tool,
+    CachedSchema, SchemaCache, SchemaCacheConfig, SchemaCacheRuntime, SchemaSource, ServerId, schema_cache_key_for_tool,
 };
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 use uuid::Uuid;
@@ -53,12 +52,7 @@ enum BenchMethod {
 }
 
 impl BenchMethod {
-    const ALL: [Self; 4] = [
-        Self::Initialize,
-        Self::ToolsList,
-        Self::ToolsCall,
-        Self::ResourcesRead,
-    ];
+    const ALL: [Self; 4] = [Self::Initialize, Self::ToolsList, Self::ToolsCall, Self::ResourcesRead];
 
     fn jsonrpc_method(self) -> &'static str {
         match self {
@@ -150,8 +144,8 @@ impl PhaseCollector {
 
     fn snapshot_and_reset(&self) -> HashMap<String, Vec<u64>> {
         let mut guard = self.durations_ns.lock().expect("phase durations lock");
-        let snap = std::mem::take(&mut *guard);
-        snap
+
+        std::mem::take(&mut *guard)
     }
 }
 
@@ -339,11 +333,9 @@ impl NatsFixture {
             return Ok(Self { url, _child: None });
         }
         if !nats_server_on_path() {
-            return Err(
-                "nats-server not found on PATH and NATS_URL is unset. \
+            return Err("nats-server not found on PATH and NATS_URL is unset. \
                  Install nats-server or set NATS_URL to an existing broker."
-                    .into(),
-            );
+                .into());
         }
         let port = 16000 + (std::process::id() as u16 % 20000);
         let url = format!("nats://127.0.0.1:{port}");
@@ -487,15 +479,9 @@ fn lane_from_subject(subject: &str, prefix: &str) -> Option<BenchMethod> {
     }
 }
 
-async fn spawn_echo_backend(
-    client: Arc<async_nats::Client>,
-    prefix: &str,
-) -> Result<(), String> {
+async fn spawn_echo_backend(client: Arc<async_nats::Client>, prefix: &str) -> Result<(), String> {
     let subject = format!("{prefix}.server.{SERVER_ID}.>");
-    let mut subscription = client
-        .subscribe(subject.clone())
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut subscription = client.subscribe(subject.clone()).await.map_err(|e| e.to_string())?;
     let backend = client.clone();
     let prefix_owned = prefix.to_string();
     tokio::spawn(async move {
@@ -693,8 +679,14 @@ async fn spawn_gateway(
     prefix_segment: &str,
     mode: GatewayMode,
     traces: trogon_mcp_gateway::trace::TraceStore,
-) -> Result<(Arc<async_nats::Client>, oneshot::Sender<()>, tokio::task::JoinHandle<Result<(), trogon_mcp_gateway::GatewayError>>), String>
-{
+) -> Result<
+    (
+        Arc<async_nats::Client>,
+        oneshot::Sender<()>,
+        tokio::task::JoinHandle<Result<(), trogon_mcp_gateway::GatewayError>>,
+    ),
+    String,
+> {
     let connect_timeout = std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS);
     let mcp_conf = McpConfig::new(prefix.clone(), nats_conf.clone())
         .with_operation_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS));
@@ -827,8 +819,7 @@ async fn run_direct_only_benchmark(
 
     for i in 0..total {
         let (payload, _) = request_payload(method, i as u64 + 1);
-        let direct_ns =
-            measure_request(&client, &direct_subject(prefix, method), &payload, &phase_collector).await?;
+        let direct_ns = measure_request(&client, &direct_subject(prefix, method), &payload, &phase_collector).await?;
         if i >= warmup {
             direct_samples.push(direct_ns);
         }
@@ -857,7 +848,10 @@ fn results_path() -> PathBuf {
 
 fn print_summary(results: &[MethodModeResult]) {
     eprintln!("\nlatency_baseline summary (p50/p99 ms):");
-    eprintln!("{:<18} {:<22} {:>8} {:>8} {:>10}", "method", "mode", "p50", "p99", "metric");
+    eprintln!(
+        "{:<18} {:<22} {:>8} {:>8} {:>10}",
+        "method", "mode", "p50", "p99", "metric"
+    );
     for row in results {
         if row.mode == "direct" {
             eprintln!(
@@ -877,11 +871,7 @@ async fn async_main(args: Args) -> Result<(), String> {
     let nats = NatsFixture::start(args.nats_url.clone()).await?;
     let connect_timeout = std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS);
     let nats_conf = NatsConfig::new(vec![nats.url.clone()], NatsAuth::None);
-    let client = Arc::new(
-        connect(&nats_conf, connect_timeout)
-            .await
-            .map_err(|e| e.to_string())?,
-    );
+    let client = Arc::new(connect(&nats_conf, connect_timeout).await.map_err(|e| e.to_string())?);
 
     let prefix_segment = format!("{}", Uuid::now_v7().as_simple());
     let prefix_token = format!("{prefix_segment}.mcp");
@@ -958,9 +948,7 @@ async fn async_main(args: Args) -> Result<(), String> {
 }
 
 fn parse_args() -> Args {
-    let filtered: Vec<String> = std::env::args()
-        .filter(|arg| arg != "--bench")
-        .collect();
+    let filtered: Vec<String> = std::env::args().filter(|arg| arg != "--bench").collect();
     Args::parse_from(filtered)
 }
 

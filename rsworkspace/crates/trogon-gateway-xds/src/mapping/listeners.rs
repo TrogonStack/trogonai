@@ -4,7 +4,7 @@ use prost::Message;
 
 use crate::config::GatewayConfigSnapshot;
 use crate::mapping::rbac::RbacMapping;
-use crate::proto::envoy::config::core::v3::{address, socket_address, Address, SocketAddress};
+use crate::proto::envoy::config::core::v3::{Address, SocketAddress, address, socket_address};
 use crate::proto::envoy::config::listener::v3::filter;
 use crate::proto::envoy::config::listener::v3::{Filter, FilterChain, Listener};
 use crate::proto::envoy::extensions::filters::network::http_connection_manager::v3::http_connection_manager;
@@ -110,10 +110,7 @@ mod tests {
         match socket {
             address::Address::SocketAddress(sa) => {
                 assert_eq!(sa.address, "0.0.0.0");
-                assert_eq!(
-                    sa.port_specifier,
-                    Some(socket_address::PortSpecifier::PortValue(8080))
-                );
+                assert_eq!(sa.port_specifier, Some(socket_address::PortSpecifier::PortValue(8080)));
             }
             address::Address::Pipe(_) | address::Address::EnvoyInternalAddress(_) => {
                 panic!("expected socket address")

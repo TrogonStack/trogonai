@@ -53,8 +53,8 @@ impl StsExchangeHarness {
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
         let nats_conf = NatsConfig::new(vec![url], NatsAuth::None);
         let prefix = McpPrefix::new(prefix_token).expect("test prefix shape");
-        let mcp_conf = McpConfig::new(prefix.clone(), nats_conf.clone())
-            .with_operation_timeout(Duration::from_secs(15));
+        let mcp_conf =
+            McpConfig::new(prefix.clone(), nats_conf.clone()).with_operation_timeout(Duration::from_secs(15));
         let settings = GatewaySettings {
             queue_group: queue_group.into(),
             audit_stream_name: "MCP_AUDIT_STS_EXCHANGE_SCAFFOLD".into(),
@@ -68,9 +68,9 @@ impl StsExchangeHarness {
             mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
             context_throttle: None,
             anomaly_emitter: None,
-        stepup_policy: None,
-        stepup_bridge: None,
-        freshness_clock: None,
+            stepup_policy: None,
+            stepup_bridge: None,
+            freshness_clock: None,
         };
         Self {
             nats_conf,
@@ -119,7 +119,9 @@ mod happy_path {
         // Arrange: distinct bootstrap inbound JWT and STS-minted mesh token (see `egress_mint.rs`).
         // Act: gateway forwards to `{prefix}.server.{server_id}.tools.list`.
         // Assert: backend Authorization bearer != inbound JWT; A2a-Caller-Jwt stripped.
-        unimplemented!("capture backend headers; mirror egress_mint::backend_receives_mesh_token_not_inbound_bootstrap");
+        unimplemented!(
+            "capture backend headers; mirror egress_mint::backend_receives_mesh_token_not_inbound_bootstrap"
+        );
     }
 }
 

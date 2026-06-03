@@ -8,10 +8,7 @@ use crate::approvals::types::{ApprovalDecision, ApprovalRequest};
 
 #[async_trait]
 pub trait ApprovalGate: Send + Sync {
-    async fn request_approval(
-        &self,
-        request_ctx: &ApprovalRequest,
-    ) -> Result<ApprovalDecision, ApprovalError>;
+    async fn request_approval(&self, request_ctx: &ApprovalRequest) -> Result<ApprovalDecision, ApprovalError>;
 }
 
 pub struct CoordinatorApprovalGate {
@@ -27,10 +24,7 @@ impl CoordinatorApprovalGate {
 
 #[async_trait]
 impl ApprovalGate for CoordinatorApprovalGate {
-    async fn request_approval(
-        &self,
-        request_ctx: &ApprovalRequest,
-    ) -> Result<ApprovalDecision, ApprovalError> {
+    async fn request_approval(&self, request_ctx: &ApprovalRequest) -> Result<ApprovalDecision, ApprovalError> {
         self.coordinator
             .wait_for_decision(&request_ctx.request_id, request_ctx.ttl)
             .await

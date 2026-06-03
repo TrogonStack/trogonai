@@ -15,7 +15,10 @@ pub struct SystemTimeSource;
 
 impl TimeSource for SystemTimeSource {
     fn now(&self) -> i64 {
-        let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         i64::try_from(secs).unwrap_or(i64::MAX)
     }
 }

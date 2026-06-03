@@ -123,16 +123,13 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         shutdown_for_task.cancel();
     });
 
-    let view_gate = AgentViewGateLayer::from_env(env).await.map_err(RuntimeError::ViewGate)?;
+    let view_gate = AgentViewGateLayer::from_env(env)
+        .await
+        .map_err(RuntimeError::ViewGate)?;
 
     let (discover_res, registrar_res) = tokio::join!(
-        DiscoverService::with_view_gate(
-            prefix.clone(),
-            catalog.clone(),
-            nats_client.clone(),
-            view_gate.gate,
-        )
-        .run(shutdown.clone()),
+        DiscoverService::with_view_gate(prefix.clone(), catalog.clone(), nats_client.clone(), view_gate.gate,)
+            .run(shutdown.clone()),
         CatalogRegistrarService::new(prefix.clone(), catalog, nats_client).run(shutdown.clone()),
     );
     discover_res.map_err(RuntimeError::Discover)?;

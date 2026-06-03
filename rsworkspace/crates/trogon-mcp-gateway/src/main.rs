@@ -81,8 +81,7 @@ async fn main() -> Result<(), BoxError> {
     let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = Arc::new(mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?);
 
-    let mesh_gateway_cfg =
-        trogon_mcp_gateway::ingress::MeshGatewayConfig::from_env(&SystemEnv);
+    let mesh_gateway_cfg = trogon_mcp_gateway::ingress::MeshGatewayConfig::from_env(&SystemEnv);
     let registry_subject = SystemEnv
         .var("MCP_GATEWAY_REGISTRY_SUBJECT")
         .unwrap_or_else(|_| trogon_sts::DEFAULT_REGISTRY_SUBJECT.to_string());
@@ -91,23 +90,21 @@ async fn main() -> Result<(), BoxError> {
         trogon_sts::circuit_breaker::CircuitBreaker::default(),
     );
     let registry_cache = trogon_sts::cache::RegistryCache::new(registry_client);
-    let chain_resolver = if mesh_gateway_cfg.chain_resolution_mode
-        == trogon_sts::chain_resolution::ChainResolutionMode::Off
-    {
-        None
-    } else {
-        Some(trogon_mcp_gateway::ingress::chain_resolver_boxed(
-            registry_cache,
-            mesh_gateway_cfg.chain_resolution_mode,
-        ))
-    };
+    let chain_resolver =
+        if mesh_gateway_cfg.chain_resolution_mode == trogon_sts::chain_resolution::ChainResolutionMode::Off {
+            None
+        } else {
+            Some(trogon_mcp_gateway::ingress::chain_resolver_boxed(
+                registry_cache,
+                mesh_gateway_cfg.chain_resolution_mode,
+            ))
+        };
 
     let egress = if jwt.agent_identity_mode() == trogon_mcp_gateway::agent_identity::AgentIdentityMode::Off {
         None
     } else {
-        let egress_cfg =
-            trogon_mcp_gateway::egress::EgressMintConfig::from_env(&SystemEnv, mcp.prefix_str())
-                .map_err(config_err_box)?;
+        let egress_cfg = trogon_mcp_gateway::egress::EgressMintConfig::from_env(&SystemEnv, mcp.prefix_str())
+            .map_err(config_err_box)?;
         let sts_cfg = trogon_sts_client::StsClientConfig::from_env(&SystemEnv);
         let sts = trogon_sts_client::StsClient::from_arc(nats_client.clone(), sts_cfg);
         Some(trogon_mcp_gateway::egress::EgressMinter::from_parts(
@@ -162,7 +159,9 @@ async fn main() -> Result<(), BoxError> {
             info!(addr = %probe_addr, "MCP gateway health probe listener bound");
             let probe_state = health.clone();
             tokio::spawn(async move {
-                if let Err(error) = trogon_mcp_gateway::health::serve_health(listener, probe_state, shutdown_signal()).await {
+                if let Err(error) =
+                    trogon_mcp_gateway::health::serve_health(listener, probe_state, shutdown_signal()).await
+                {
                     error!(%error, "health probe listener exited with error");
                 }
             });

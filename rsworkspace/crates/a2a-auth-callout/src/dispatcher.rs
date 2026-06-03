@@ -23,10 +23,7 @@ pub enum AuthScheme {
 
 #[async_trait::async_trait]
 pub trait AuthDispatcher: Send + Sync + 'static {
-    async fn dispatch(
-        &self,
-        request: ServerAuthRequestClaims,
-    ) -> Result<MintedUserJwt, AuthCalloutError>;
+    async fn dispatch(&self, request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError>;
 }
 
 pub struct CalloutDispatcherConfig {
@@ -71,65 +68,57 @@ impl AuthDispatcher for CalloutDispatcher {
         let account = self.config.account_resolver.resolve(&requested)?;
 
         let scheme = self.select_scheme(&request)?;
-        let claims = match scheme {
-            AuthScheme::Oidc => {
-                let verifier = self.config.oidc.as_ref().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification("OIDC verifier not configured".into())
-                })?;
-                let token = request
-                    .connect_opts_jwt()
-                    .or_else(|| request.connect_opts_opaque_pass())
-                    .ok_or_else(|| {
+        let claims =
+            match scheme {
+                AuthScheme::Oidc => {
+                    let verifier = self.config.oidc.as_ref().ok_or_else(|| {
+                        AuthCalloutError::CredentialVerification("OIDC verifier not configured".into())
+                    })?;
+                    let token = request
+                        .connect_opts_jwt()
+                        .or_else(|| request.connect_opts_opaque_pass())
+                        .ok_or_else(|| {
+                            AuthCalloutError::CredentialVerification(
+                                "OIDC scheme but connect_opts.jwt and connect_opts.pass missing".into(),
+                            )
+                        })?;
+                    verifier.verify(&BearerToken::new(token.to_owned()), &account).await?
+                }
+                AuthScheme::MTls => {
+                    let verifier = self.config.mtls.as_ref().ok_or_else(|| {
+                        AuthCalloutError::CredentialVerification("mTLS verifier not configured".into())
+                    })?;
+                    let pem = request.primary_client_cert().ok_or_else(|| {
+                        AuthCalloutError::CredentialVerification("mTLS scheme but client_tls certs missing".into())
+                    })?;
+                    verifier.verify(&pem, &account).await?
+                }
+                AuthScheme::ApiKey => {
+                    #[allow(deprecated)]
+                    let verifier = self.config.api_key.as_ref().ok_or_else(|| {
+                        AuthCalloutError::CredentialVerification("API-key verifier not configured".into())
+                    })?;
+                    let key = request.connect_opts_auth_token().ok_or_else(|| {
                         AuthCalloutError::CredentialVerification(
-                            "OIDC scheme but connect_opts.jwt and connect_opts.pass missing".into(),
+                            "API-key scheme but connect_opts.auth_token missing".into(),
                         )
                     })?;
-                verifier
-                    .verify(&BearerToken::new(token.to_owned()), &account)
-                    .await?
-            }
-            AuthScheme::MTls => {
-                let verifier = self.config.mtls.as_ref().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification("mTLS verifier not configured".into())
-                })?;
-                let pem = request.primary_client_cert().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification(
-                        "mTLS scheme but client_tls certs missing".into(),
-                    )
-                })?;
-                verifier.verify(&pem, &account).await?
-            }
-            AuthScheme::ApiKey => {
-                #[allow(deprecated)]
-                let verifier = self.config.api_key.as_ref().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification("API-key verifier not configured".into())
-                })?;
-                let key = request.connect_opts_auth_token().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification(
-                        "API-key scheme but connect_opts.auth_token missing".into(),
-                    )
-                })?;
-                #[allow(deprecated)]
-                let verified = verifier.verify(key).await?;
-                if verified.aud != account {
-                    return Err(AuthCalloutError::CredentialVerification(
-                        "API-key audience does not match resolved account".into(),
-                    ));
+                    #[allow(deprecated)]
+                    let verified = verifier.verify(key).await?;
+                    if verified.aud != account {
+                        return Err(AuthCalloutError::CredentialVerification(
+                            "API-key audience does not match resolved account".into(),
+                        ));
+                    }
+                    verified
                 }
-                verified
-            }
-        };
+            };
 
         let user_nkey = request.user_nkey()?;
         let user_subject = UserJwtSubject::from_user_nkey(user_nkey);
         let material = self.config.signing_key_source.current().minting_material();
         claims
-            .mint(
-                &material,
-                &user_subject,
-                SystemTime::now(),
-                self.config.user_jwt_ttl,
-            )
+            .mint(&material, &user_subject, SystemTime::now(), self.config.user_jwt_ttl)
             .map_err(AuthCalloutError::from)
     }
 }
@@ -142,15 +131,13 @@ pub(crate) mod tests {
     use crate::credentials::api_key::{ApiKey, ApiKeyEntry, ApiKeyRegistry, HmacApiKeyVerifier};
     use crate::credentials::mtls::ClientCertPem;
     use crate::credentials::oidc::BearerToken;
-    use crate::jwt::{
-        AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims,
-    };
+    use crate::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
     use crate::permissions::IssuedPermissions;
     use crate::signing_key_source::{KeyVersion, StaticSigningKeySource};
     use crate::wire::test_encode::signed_auth_request;
     use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
-    use nats_jwt_rs::authorization::AuthRequest;
     use nats_jwt_rs::Claims;
+    use nats_jwt_rs::authorization::AuthRequest;
     use nkeys::KeyPair;
     use serde_json::json;
 
@@ -170,10 +157,7 @@ pub(crate) mod tests {
 
     #[async_trait::async_trait]
     impl AuthDispatcher for AlwaysDenyDispatcher {
-        async fn dispatch(
-            &self,
-            _request: ServerAuthRequestClaims,
-        ) -> Result<MintedUserJwt, AuthCalloutError> {
+        async fn dispatch(&self, _request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
             Err(AuthCalloutError::CredentialVerification("stub: always deny".into()))
         }
     }
@@ -235,17 +219,13 @@ pub(crate) mod tests {
         api_key: Option<Arc<dyn ApiKeyVerifier>>,
         allowed: &[&str],
     ) -> CalloutDispatcher {
-        let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(
-            allowed.iter().map(|s| s.to_string()),
-        ));
+        let resolver: Arc<dyn AccountResolver> =
+            Arc::new(StaticAccountResolver::new(allowed.iter().map(|s| s.to_string())));
         let account = KeyPair::new_account();
         let account_seed = account.seed().expect("account seed");
         let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(
-            StaticSigningKeySource::new(
-                &account_seed,
-                KeyVersion::new("test").expect("test key version"),
-            )
-            .expect("static signing source"),
+            StaticSigningKeySource::new(&account_seed, KeyVersion::new("test").expect("test key version"))
+                .expect("static signing source"),
         );
         CalloutDispatcher::new(CalloutDispatcherConfig {
             signing_key_source,
@@ -355,12 +335,7 @@ pub(crate) mod tests {
             },
         );
         let verifier: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
-        let d = dispatcher_with(
-            None,
-            None,
-            Some(verifier),
-            &["tenant-acme", "tenant-foo"],
-        );
+        let d = dispatcher_with(None, None, Some(verifier), &["tenant-acme", "tenant-foo"]);
         let req = encode_fixture_request(&server, |c| {
             c.nats.connect_opts.jwt = None;
             c.nats.connect_opts.auth_token = Some("k_live_demo".into());

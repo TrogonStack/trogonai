@@ -208,13 +208,7 @@ pub fn ingress_gateway_tier3_refused_response_bytes(
     rule: &str,
 ) -> Result<bytes::Bytes, serde_json::Error> {
     let id = crate::extract_request_id(request_payload_hint);
-    JsonRpcErrorResponse::with_data(
-        id,
-        -32_802,
-        message.into(),
-        Some(serde_json::json!({ "rule": rule })),
-    )
-    .to_bytes()
+    JsonRpcErrorResponse::with_data(id, -32_802, message.into(), Some(serde_json::json!({ "rule": rule }))).to_bytes()
 }
 
 /// Serialize an upstream-gateway deadline overrun (-32800 — reserved for `{prefix}.gateway>` deadlines).

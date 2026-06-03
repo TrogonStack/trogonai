@@ -8,7 +8,7 @@ use trogon_mcp_gateway::act_chain::ActChainEntry;
 use trogon_mcp_gateway::authz::{GatewayIdentity, IdentitySource};
 use trogon_mcp_gateway::cel_builtins::HostEvalContext;
 use trogon_mcp_gateway::jwt::VerifiedJwtClaims;
-use trogon_mcp_gateway::policy::{configure_policy_cel_context, evaluate_cel_with_host, PolicyError};
+use trogon_mcp_gateway::policy::{PolicyError, configure_policy_cel_context, evaluate_cel_with_host};
 
 use crate::output::emit_json;
 
@@ -148,9 +148,7 @@ impl PolicyOutcome {
     }
 
     pub fn emit_error_json(&self, pretty: bool) -> Result<(), String> {
-        let payload = PolicyDryRunError {
-            error: self.message(),
-        };
+        let payload = PolicyDryRunError { error: self.message() };
         emit_json(&payload, pretty).map_err(|error| error.to_string())
     }
 }

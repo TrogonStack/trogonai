@@ -40,25 +40,17 @@ impl ContextThrottle {
         }
     }
 
-    pub fn acquire(
-        &self,
-        key: &ContextThrottleKey,
-        cost: u32,
-    ) -> Result<ContextThrottleOutcome, ContextThrottleError> {
+    pub fn acquire(&self, key: &ContextThrottleKey, cost: u32) -> Result<ContextThrottleOutcome, ContextThrottleError> {
         let budget = self.config.budget_for(key);
         let now = self.clock.now();
         let mut map = self.buckets.lock().expect("context throttle map lock");
-        let bucket = map
-            .entry(key.clone())
-            .or_insert_with(|| TokenBucket::new(budget, now));
+        let bucket = map.entry(key.clone()).or_insert_with(|| TokenBucket::new(budget, now));
         if bucket.budget != budget {
             *bucket = TokenBucket::new(budget, now);
         }
         match bucket.try_acquire(now, cost)? {
             AcquireResult::Allowed => Ok(ContextThrottleOutcome::Allowed),
-            AcquireResult::Throttled { retry_after_ms } => {
-                Ok(ContextThrottleOutcome::Throttled { retry_after_ms })
-            }
+            AcquireResult::Throttled { retry_after_ms } => Ok(ContextThrottleOutcome::Throttled { retry_after_ms }),
         }
     }
 
@@ -87,10 +79,7 @@ mod tests {
     #[test]
     fn first_acquire_allowed_and_consumes_token() {
         let clock = TestClock::new(Instant::now());
-        let throttle = ContextThrottle::with_clock(
-            super::super::ContextThrottleConfig::default(),
-            clock,
-        );
+        let throttle = ContextThrottle::with_clock(super::super::ContextThrottleConfig::default(), clock);
         let k = key("deploy");
         assert_eq!(
             throttle.acquire(&k, 1).expect("acquire"),
@@ -120,10 +109,7 @@ mod tests {
         };
         let throttle = ContextThrottle::with_clock(config, clock);
         let k = key("burst");
-        assert_eq!(
-            throttle.acquire(&k, 1).expect("first"),
-            ContextThrottleOutcome::Allowed
-        );
+        assert_eq!(throttle.acquire(&k, 1).expect("first"), ContextThrottleOutcome::Allowed);
         assert_eq!(
             throttle.acquire(&k, 1).expect("second"),
             ContextThrottleOutcome::Allowed
@@ -196,10 +182,7 @@ mod tests {
     #[test]
     fn evict_idle_removes_stale_bucket_keeps_active() {
         let clock = TestClock::new(Instant::now());
-        let throttle = ContextThrottle::with_clock(
-            super::super::ContextThrottleConfig::default(),
-            clock.clone(),
-        );
+        let throttle = ContextThrottle::with_clock(super::super::ContextThrottleConfig::default(), clock.clone());
         let stale = key("stale");
         let active = key("active");
         let _ = throttle.acquire(&stale, 1);
@@ -232,9 +215,7 @@ mod tests {
         for i in 0..10 {
             let t = std::sync::Arc::clone(&throttle);
             let k = if i % 2 == 0 { key_a.clone() } else { key_b.clone() };
-            handles.push(tokio::spawn(async move {
-                t.acquire(&k, 1).expect("acquire")
-            }));
+            handles.push(tokio::spawn(async move { t.acquire(&k, 1).expect("acquire") }));
         }
         let mut allowed_a = 0;
         let mut allowed_b = 0;

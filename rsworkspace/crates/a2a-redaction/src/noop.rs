@@ -24,10 +24,7 @@ mod tests {
             ..Default::default()
         };
         let out = r.redact_message(msg.clone(), &SkillId::new("skill")).unwrap();
-        assert_eq!(
-            serde_json::to_value(out).unwrap(),
-            serde_json::to_value(msg).unwrap()
-        );
+        assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(msg).unwrap());
     }
 
     #[test]
@@ -38,9 +35,6 @@ mod tests {
             ..Default::default()
         };
         let out = r.redact_artifact(art.clone(), &SkillId::new("skill")).unwrap();
-        assert_eq!(
-            serde_json::to_value(out).unwrap(),
-            serde_json::to_value(art).unwrap()
-        );
+        assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(art).unwrap());
     }
 }

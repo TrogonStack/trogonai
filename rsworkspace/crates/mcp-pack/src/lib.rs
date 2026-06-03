@@ -14,10 +14,10 @@ use std::path::Path;
 use nkeys::KeyPair;
 use trogon_mcp_gateway::bundle::BundleLoadError;
 
-pub use build::{assemble_archive, assemble_manifest, default_members, BundleMember};
+pub use build::{BundleMember, assemble_archive, assemble_manifest, default_members};
 pub use cel::{
-    AUDIT_ID, AUDIT_PATH, CATALOG_FILTER_ID, CATALOG_FILTER_PATH, DEFAULT_AUDIT,
-    DEFAULT_CATALOG_FILTER, DEFAULT_RESOURCE_TUPLE, RESOURCE_TUPLE_ID, RESOURCE_TUPLE_PATH,
+    AUDIT_ID, AUDIT_PATH, CATALOG_FILTER_ID, CATALOG_FILTER_PATH, DEFAULT_AUDIT, DEFAULT_CATALOG_FILTER,
+    DEFAULT_RESOURCE_TUPLE, RESOURCE_TUPLE_ID, RESOURCE_TUPLE_PATH,
 };
 pub use components::{SCHEMA_LEARNER_ID, SCHEMA_LEARNER_PATH, SCHEMA_LEARNER_STUB};
 
@@ -48,7 +48,9 @@ impl McpPackSpec {
             cel_version: "0.10".into(),
             author: "trogonstack/platform".into(),
             created_at: "2026-05-29T00:00:00Z".into(),
-            description: "First-party MCP pack: catalog shaping, resource-tuple derivation, audit enrich, schema-learner stub".into(),
+            description:
+                "First-party MCP pack: catalog shaping, resource-tuple derivation, audit enrich, schema-learner stub"
+                    .into(),
             signer,
             include_schema_learner: true,
         }
@@ -112,7 +114,7 @@ impl From<BundleLoadError> for McpPackError {
 
 #[cfg(test)]
 mod tests {
-    use trogon_mcp_gateway::bundle::{load_bundle, TrustedKeys};
+    use trogon_mcp_gateway::bundle::{TrustedKeys, load_bundle};
 
     use super::*;
 
@@ -135,8 +137,7 @@ mod tests {
         let mut spec = McpPackSpec::with_ephemeral_signer();
         spec.include_schema_learner = false;
         let trusted = TrustedKeys::from_allowlist([spec.signer.public_key()]);
-        let loaded = load_bundle(&McpPack::new(spec).build().expect("build"), &trusted)
-            .expect("load");
+        let loaded = load_bundle(&McpPack::new(spec).build().expect("build"), &trusted).expect("load");
         assert!(loaded.components.is_empty());
         assert_eq!(loaded.programs.len(), 3);
     }

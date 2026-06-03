@@ -65,7 +65,9 @@ impl<'a> NatsRequestSigner<'a> {
         nonce: &str,
     ) -> SignedNatsRequest {
         let content_digest = content_digest_sha256(payload);
-        let sig_input = "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")".to_string();
+        let sig_input =
+            "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")"
+                .to_string();
 
         let envelope = NatsSignatureEnvelope {
             token: self.agent_jwt.to_string(),

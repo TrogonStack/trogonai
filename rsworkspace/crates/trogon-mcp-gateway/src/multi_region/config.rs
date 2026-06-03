@@ -95,13 +95,15 @@ impl MultiRegionConfig {
         let mut endpoints = BTreeMap::new();
         for (id, wire) in self.regions {
             let region_id = RegionId::new(id.clone()).map_err(MultiRegionConfigError::RegionId)?;
-            if endpoints.insert(
-                region_id,
-                RegionEndpoint {
-                    nats_url: wire.nats_url,
-                    creds_ref: wire.creds_ref,
-                },
-            ).is_some()
+            if endpoints
+                .insert(
+                    region_id,
+                    RegionEndpoint {
+                        nats_url: wire.nats_url,
+                        creds_ref: wire.creds_ref,
+                    },
+                )
+                .is_some()
             {
                 return Err(MultiRegionConfigError::DuplicateRegion { id });
             }
@@ -127,20 +129,12 @@ fn parse_minimal_toml(raw: &str) -> Result<MultiRegionConfig, MultiRegionConfigE
         creds_ref: Option<String>,
     ) -> Result<(), MultiRegionConfigError> {
         let Some(nats_url) = nats_url else {
-            return Err(MultiRegionConfigError::Toml(format!(
-                "region {id} missing nats_url"
-            )));
+            return Err(MultiRegionConfigError::Toml(format!("region {id} missing nats_url")));
         };
         if regions.contains_key(id) {
             return Err(MultiRegionConfigError::DuplicateRegion { id: id.to_string() });
         }
-        regions.insert(
-            id.to_string(),
-            RegionEndpointWire {
-                nats_url,
-                creds_ref,
-            },
-        );
+        regions.insert(id.to_string(), RegionEndpointWire { nats_url, creds_ref });
         Ok(())
     }
 
@@ -164,9 +158,7 @@ fn parse_minimal_toml(raw: &str) -> Result<MultiRegionConfig, MultiRegionConfigE
                 pending_creds_ref = None;
                 continue;
             }
-            return Err(MultiRegionConfigError::Toml(format!(
-                "unsupported table [{header}]"
-            )));
+            return Err(MultiRegionConfigError::Toml(format!("unsupported table [{header}]")));
         }
         let Some((key, raw_value)) = trimmed.split_once('=') else {
             return Err(MultiRegionConfigError::Toml(format!("invalid line: {trimmed}")));
@@ -179,9 +171,7 @@ fn parse_minimal_toml(raw: &str) -> Result<MultiRegionConfig, MultiRegionConfigE
                 "nats_url" => pending_nats_url = Some(value),
                 "creds_ref" => pending_creds_ref = Some(value),
                 other => {
-                    return Err(MultiRegionConfigError::Toml(format!(
-                        "unknown region field {other}"
-                    )));
+                    return Err(MultiRegionConfigError::Toml(format!("unknown region field {other}")));
                 }
             }
         } else {
@@ -189,9 +179,7 @@ fn parse_minimal_toml(raw: &str) -> Result<MultiRegionConfig, MultiRegionConfigE
                 "home_region" => home_region = Some(parse_toml_string_value(raw_value)?),
                 "failover" => failover = parse_toml_string_array(raw_value)?,
                 other => {
-                    return Err(MultiRegionConfigError::Toml(format!(
-                        "unknown top-level field {other}"
-                    )));
+                    return Err(MultiRegionConfigError::Toml(format!("unknown top-level field {other}")));
                 }
             }
         }
@@ -199,9 +187,7 @@ fn parse_minimal_toml(raw: &str) -> Result<MultiRegionConfig, MultiRegionConfigE
     if let Some(id) = current_region.take() {
         flush_region(&mut regions, &id, pending_nats_url.take(), pending_creds_ref.take())?;
     }
-    let home_region = home_region.ok_or_else(|| {
-        MultiRegionConfigError::Toml("missing home_region".to_string())
-    })?;
+    let home_region = home_region.ok_or_else(|| MultiRegionConfigError::Toml("missing home_region".to_string()))?;
     Ok(MultiRegionConfig {
         home_region,
         failover,

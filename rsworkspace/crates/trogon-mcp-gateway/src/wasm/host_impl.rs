@@ -21,10 +21,7 @@ impl HostWithStore for StoreHost {
             .map_err(map_cel_error)
     }
 
-    fn cache_get<T>(
-        mut host: wasmtime::component::Access<T, Self>,
-        key: String,
-    ) -> Option<Vec<u8>> {
+    fn cache_get<T>(mut host: wasmtime::component::Access<T, Self>, key: String) -> Option<Vec<u8>> {
         let state = host.get();
         state
             .with_host(|ctx| {
@@ -48,8 +45,7 @@ impl HostWithStore for StoreHost {
             .with_host(|ctx| {
                 let json = serde_json::from_slice::<serde_json::Value>(&value)
                     .map_err(|err| cel_policy_fault("cache.set", err.to_string()))?;
-                ctx.cache_set(&key, json, u64::from(ttl_secs))
-                    .map(|_| ())
+                ctx.cache_set(&key, json, u64::from(ttl_secs)).map(|_| ())
             })
             .map_err(map_host_failure)?
             .map_err(map_cel_error)
@@ -65,9 +61,10 @@ impl HostWithStore for StoreHost {
             .with_host(|ctx| {
                 let value: serde_json::Value = serde_json::from_str(&fields_json)
                     .map_err(|err| cel_policy_fault("audit.emit", err.to_string()))?;
-                let map = value.as_object().cloned().ok_or_else(|| {
-                    cel_policy_fault("audit.emit", "fields-json must be a JSON object")
-                })?;
+                let map = value
+                    .as_object()
+                    .cloned()
+                    .ok_or_else(|| cel_policy_fault("audit.emit", "fields-json must be a JSON object"))?;
                 let mut fields = std::collections::BTreeMap::new();
                 fields.insert("category".into(), serde_json::Value::String(category));
                 for (key, val) in map {
@@ -81,9 +78,7 @@ impl HostWithStore for StoreHost {
 
     fn time_now<T>(mut host: wasmtime::component::Access<T, Self>) -> u64 {
         let state = host.get();
-        state
-            .with_host(|ctx| ctx.now_unix_ms().max(0) as u64)
-            .unwrap_or(0)
+        state.with_host(|ctx| ctx.now_unix_ms().max(0) as u64).unwrap_or(0)
     }
 
     fn rate_acquire<T>(
@@ -173,12 +168,7 @@ impl HostWithStore for StoreHost {
     }
 }
 
-fn emit_guest_log(
-    level: tracing::Level,
-    component_id: &str,
-    instance_id: u64,
-    message: &str,
-) {
+fn emit_guest_log(level: tracing::Level, component_id: &str, instance_id: u64, message: &str) {
     match level {
         tracing::Level::TRACE => tracing::event!(
             target: "trogon_mcp_gateway::wasm",
@@ -368,10 +358,7 @@ mod tests {
 
     #[test]
     fn host_log_level_maps_to_tracing_level() {
-        assert_eq!(
-            tracing_level_from_log(LogLevel::Warn),
-            tracing::Level::WARN
-        );
+        assert_eq!(tracing_level_from_log(LogLevel::Warn), tracing::Level::WARN);
     }
 
     #[test]

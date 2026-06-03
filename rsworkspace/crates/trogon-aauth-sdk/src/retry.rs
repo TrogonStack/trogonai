@@ -25,9 +25,7 @@ pub enum ChallengeOutcome {
 /// Inspect a response header (HTTP `WWW-Authenticate`-equivalent or NATS reply
 /// header) and return the next-step instruction.
 #[must_use]
-pub fn parse_challenge_headers(
-    aauth_requirement: Option<&str>,
-) -> ChallengeOutcome {
+pub fn parse_challenge_headers(aauth_requirement: Option<&str>) -> ChallengeOutcome {
     let Some(raw) = aauth_requirement else {
         return ChallengeOutcome::NoChallenge;
     };
@@ -45,9 +43,7 @@ impl ChallengeOutcome {
     pub fn into_resource_jwt(self) -> Result<String, SdkError> {
         match self {
             ChallengeOutcome::NeedsExchange { resource_jwt } => Ok(resource_jwt),
-            ChallengeOutcome::Interaction { url, code } => {
-                Err(SdkError::Interaction { url, code })
-            }
+            ChallengeOutcome::Interaction { url, code } => Err(SdkError::Interaction { url, code }),
             ChallengeOutcome::Unsupported(req) => Err(SdkError::UnsupportedRequirement(req)),
             ChallengeOutcome::NoChallenge => Err(SdkError::InvalidResponse(
                 "denied response missing AAuth-Requirement".into(),
@@ -68,9 +64,7 @@ mod tests {
 
     #[test]
     fn parses_auth_token_challenge() {
-        let outcome = parse_challenge_headers(Some(
-            "requirement=auth-token; resource-token=\"eyJ.AAA\"",
-        ));
+        let outcome = parse_challenge_headers(Some("requirement=auth-token; resource-token=\"eyJ.AAA\""));
         match outcome {
             ChallengeOutcome::NeedsExchange { resource_jwt } => {
                 assert_eq!(resource_jwt, "eyJ.AAA");
@@ -81,9 +75,7 @@ mod tests {
 
     #[test]
     fn parses_interaction_challenge() {
-        let outcome = parse_challenge_headers(Some(
-            "requirement=interaction; url=\"https://ps/i/1\"",
-        ));
+        let outcome = parse_challenge_headers(Some("requirement=interaction; url=\"https://ps/i/1\""));
         match outcome {
             ChallengeOutcome::Interaction { url, code } => {
                 assert_eq!(url, "https://ps/i/1");

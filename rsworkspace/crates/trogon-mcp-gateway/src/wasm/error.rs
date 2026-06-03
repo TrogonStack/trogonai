@@ -41,10 +41,7 @@ impl WasmFaultCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvaluateOutcome {
     Decision(PolicyDecision),
-    Fault {
-        code: WasmFaultCode,
-        message: String,
-    },
+    Fault { code: WasmFaultCode, message: String },
 }
 
 /// Errors surfaced while loading or managing pools.

@@ -25,19 +25,10 @@ pub use state::{Clock, SystemClock, TestClock};
 pub use throttle::{ContextThrottle, ContextThrottleOutcome};
 
 /// Configuration for per-context budgets (defaults plus per-`(tenant_id, agent_id)` overrides).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ContextThrottleConfig {
     pub default_budget: ContextBudget,
     pub overrides: HashMap<(String, String), ContextBudget>,
-}
-
-impl Default for ContextThrottleConfig {
-    fn default() -> Self {
-        Self {
-            default_budget: ContextBudget::from_pin9_defaults(),
-            overrides: HashMap::new(),
-        }
-    }
 }
 
 impl ContextThrottleConfig {

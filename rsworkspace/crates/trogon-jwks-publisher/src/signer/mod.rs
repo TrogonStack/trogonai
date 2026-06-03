@@ -29,7 +29,11 @@ pub trait MeshSigner: Send + Sync {
     async fn active_jwks(&self) -> Result<Jwks, KeyError>;
 }
 
-pub fn assemble_rs256_jwt(header: &Header, claims: &HashMap<String, Value>, signature: &[u8]) -> Result<String, KeyError> {
+pub fn assemble_rs256_jwt(
+    header: &Header,
+    claims: &HashMap<String, Value>,
+    signature: &[u8],
+) -> Result<String, KeyError> {
     let header_json = serde_json::to_vec(header).map_err(|e| KeyError::Sign(format!("jwt header: {e}")))?;
     let claims_json = serde_json::to_vec(claims).map_err(|e| KeyError::Sign(format!("jwt claims: {e}")))?;
     let signing_input = format!(
@@ -37,11 +41,7 @@ pub fn assemble_rs256_jwt(header: &Header, claims: &HashMap<String, Value>, sign
         URL_SAFE_NO_PAD.encode(header_json),
         URL_SAFE_NO_PAD.encode(claims_json)
     );
-    Ok(format!(
-        "{}.{}",
-        signing_input,
-        URL_SAFE_NO_PAD.encode(signature)
-    ))
+    Ok(format!("{}.{}", signing_input, URL_SAFE_NO_PAD.encode(signature)))
 }
 
 pub fn rs256_signing_input(header: &Header, claims: &HashMap<String, Value>) -> Result<Vec<u8>, KeyError> {

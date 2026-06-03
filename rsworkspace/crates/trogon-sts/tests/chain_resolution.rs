@@ -52,11 +52,7 @@ async fn four_entry_chain_all_resolved_exchange_succeeds() {
         chain_agent("acme/worker", "spiffe://acme.local/ns/prod/sa/worker"),
         sample_registry_record(),
     ];
-    let (service, _) = build_counting_service(
-        keys,
-        CountingRegistry::new(records),
-        ChainResolutionMode::Strict,
-    );
+    let (service, _) = build_counting_service(keys, CountingRegistry::new(records), ChainResolutionMode::Strict);
 
     let mut claims = bootstrap_claims(keys);
     claims["act_chain"] = serde_json::to_value(inbound_chain_before_append()).unwrap();
@@ -78,11 +74,7 @@ async fn mid_chain_revocation_denies_with_offending_index() {
         revoked,
         sample_registry_record(),
     ];
-    let (service, audit) = build_counting_service(
-        keys,
-        CountingRegistry::new(records),
-        ChainResolutionMode::Strict,
-    );
+    let (service, audit) = build_counting_service(keys, CountingRegistry::new(records), ChainResolutionMode::Strict);
 
     let mut claims = bootstrap_claims(keys);
     claims["act_chain"] = serde_json::to_value(inbound_chain_before_append()).unwrap();
@@ -127,8 +119,5 @@ async fn second_exchange_with_same_chain_uses_chain_cache() {
     service.handle(request, None).await.expect("second");
     let after_second = registry.lookup_count();
 
-    assert_eq!(
-        after_first, after_second,
-        "expected chain cache hit on second exchange"
-    );
+    assert_eq!(after_first, after_second, "expected chain cache hit on second exchange");
 }

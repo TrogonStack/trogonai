@@ -37,10 +37,7 @@ mod compiler_tests {
         refreshed.refresh_if_stale().expect("refresh");
         let mut ctx = cel_interpreter::Context::default();
         let (_, program) = refreshed.rules().next().expect("rule");
-        let value = program
-            .program()
-            .execute(&ctx)
-            .expect("execute refreshed program");
+        let value = program.program().execute(&ctx).expect("execute refreshed program");
         assert_eq!(value, cel_interpreter::Value::Bool(false));
 
         let (_, program_before) = compile_cel_file(&path).expect("compile file");
@@ -56,8 +53,8 @@ mod evaluator_tests {
 
     use a2a_nats::A2aAgentId;
 
-    use crate::policy::tier2::{Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext};
     use crate::policy::RuleName;
+    use crate::policy::tier2::{Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext};
     use crate::policy::tier2_cel::bundle::Tier2CompiledBundle;
     use crate::policy::tier2_cel::compiler::compile_cel_source;
     use crate::policy::tier2_cel::evaluator::{MockCelEngine, RealTier2CelEvaluator};
@@ -85,10 +82,7 @@ mod evaluator_tests {
     fn evaluator_allow_path() {
         let (_dir, bundle) = bundle_with_rule("allow_all", "true");
         let evaluator = RealTier2CelEvaluator::new(bundle);
-        assert_eq!(
-            evaluator.evaluate(&sample_ctx("message/send")),
-            Tier2Decision::Allow
-        );
+        assert_eq!(evaluator.evaluate(&sample_ctx("message/send")), Tier2Decision::Allow);
     }
 
     #[test]
@@ -120,10 +114,7 @@ mod evaluator_tests {
         let mut outcomes = BTreeMap::new();
         outcomes.insert(RuleName::new("block_rule"), Ok(false));
         let (_dir, bundle) = bundle_with_rule("block_rule", "true");
-        let evaluator = RealTier2CelEvaluator::with_engine(
-            bundle,
-            Arc::new(MockCelEngine::new(outcomes)),
-        );
+        let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
         assert_eq!(
             evaluator.evaluate(&sample_ctx("message/send")),
             Tier2Decision::Deny {

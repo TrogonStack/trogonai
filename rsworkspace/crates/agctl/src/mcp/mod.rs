@@ -140,8 +140,7 @@ mod tests {
     }
 
     fn parse_mcp(args: &[&str]) -> McpCommand {
-        let cli = TestCli::try_parse_from(std::iter::once("agctl").chain(args.iter().copied()))
-            .expect("parse");
+        let cli = TestCli::try_parse_from(std::iter::once("agctl").chain(args.iter().copied())).expect("parse");
         let TestCommand::Mcp(mcp) = cli.command;
         mcp
     }

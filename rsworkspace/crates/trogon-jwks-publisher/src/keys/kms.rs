@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use super::{KeyError, KeySource};
 use crate::jwks::Jwks;
-use crate::signer::kms::KmsSigner;
 use crate::signer::MeshSigner;
+use crate::signer::kms::KmsSigner;
 
 pub struct KmsKeySource {
     signer: Arc<KmsSigner>,

@@ -14,10 +14,10 @@ pub mod streaming;
 pub mod unary;
 pub(crate) mod wire;
 
+pub use crate::catalog::{AgentCardWatchError, AgentCardWatchEvent, AgentCardWatchStream};
+pub use a2a_auth_callout::{MintedUserJwt, caller_jwt_header::CALLER_JWT_HEADER_NAME};
 pub use error::ClientError;
 pub use event_stream::TypedEventStream;
-pub use crate::catalog::{AgentCardWatchError, AgentCardWatchEvent, AgentCardWatchStream};
-pub use a2a_auth_callout::{caller_jwt_header::CALLER_JWT_HEADER_NAME, MintedUserJwt};
 pub use handle::Client;
 
 pub use a2a_types::{

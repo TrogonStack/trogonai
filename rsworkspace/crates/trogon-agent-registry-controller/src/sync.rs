@@ -86,11 +86,12 @@ impl<'a> SyncEngine<'a> {
                 path: path.clone(),
                 error,
             })?;
-            verify_manifest_signature(&manifest.record, &manifest.signature, &self.signer.verifying_key())
-                .map_err(|error| SyncError::Manifest {
+            verify_manifest_signature(&manifest.record, &manifest.signature, &self.signer.verifying_key()).map_err(
+                |error| SyncError::Manifest {
                     path: path.clone(),
                     error,
-                })?;
+                },
+            )?;
             manifests.push((path, manifest));
         }
 
@@ -103,11 +104,12 @@ impl<'a> SyncEngine<'a> {
                 continue;
             }
             let Some(store) = self.store else {
-                return Err(SyncError::Signer(
-                    "KV store is required when dry_run=false".into(),
-                ));
+                return Err(SyncError::Signer("KV store is required when dry_run=false".into()));
             };
-            let prior = store.get_latest(&manifest.record.agent_id).await.map_err(SyncError::Kv)?;
+            let prior = store
+                .get_latest(&manifest.record.agent_id)
+                .await
+                .map_err(SyncError::Kv)?;
             if let Some(existing) = &prior {
                 monotonic_version(
                     &manifest.record.agent_id,
@@ -159,10 +161,7 @@ impl<'a> SyncEngine<'a> {
 pub fn pull_latest_commit(config: &GitSyncConfig) -> Result<String, SyncError> {
     if config.git_remote.is_some() {
         run_git(&config.repo_path, &["fetch", "--all", "--prune"])?;
-        run_git(
-            &config.repo_path,
-            &["checkout", config.git_ref.as_str()],
-        )?;
+        run_git(&config.repo_path, &["checkout", config.git_ref.as_str()])?;
         run_git(
             &config.repo_path,
             &["pull", "--ff-only", "origin", config.git_ref.as_str()],
@@ -200,10 +199,7 @@ fn validate_repo_monotonic_versions(manifests: &[(PathBuf, SignedManifest)]) -> 
     for (path, manifest) in manifests {
         let agent_id = manifest.record.agent_id.as_str();
         if let Some((existing_path, existing)) = latest_by_agent.get(agent_id) {
-            if !crate::manifest::version_gt(
-                &manifest.record.agent_version,
-                &existing.record.agent_version,
-            ) {
+            if !crate::manifest::version_gt(&manifest.record.agent_version, &existing.record.agent_version) {
                 return Err(SyncError::Validation {
                     path: path.clone(),
                     error: ValidationError::MonotonicVersion {
@@ -272,7 +268,7 @@ mod tests {
     use ed25519_dalek::pkcs8::EncodePrivateKey;
     use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 
-    use crate::manifest::{ManifestRecord, SignedManifest, MANIFEST_VERSION, signing_payload};
+    use crate::manifest::{MANIFEST_VERSION, ManifestRecord, SignedManifest, signing_payload};
     use crate::signer::FileManifestSigner;
 
     use super::*;
@@ -283,16 +279,18 @@ mod tests {
             &["config", "user.email", "agent@example.com"],
             &["config", "user.name", "agent"],
         ] {
-            assert!(Command::new("git").current_dir(root).args(args).status().unwrap().success());
+            assert!(
+                Command::new("git")
+                    .current_dir(root)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
         }
     }
 
-    fn write_signed_manifest(
-        root: &Path,
-        relative: &str,
-        record: ManifestRecord,
-        signer: &FileManifestSigner,
-    ) {
+    fn write_signed_manifest(root: &Path, relative: &str, record: ManifestRecord, signer: &FileManifestSigner) {
         let payload = signing_payload(&record).expect("payload");
         let signature = signer.sign_payload(&payload).expect("sign");
         let manifest = SignedManifest {
@@ -337,18 +335,22 @@ mod tests {
             &signer,
         );
 
-        assert!(Command::new("git")
-            .current_dir(temp.path())
-            .args(["add", "."])
-            .status()
-            .unwrap()
-            .success());
-        assert!(Command::new("git")
-            .current_dir(temp.path())
-            .args(["commit", "-m", "seed"])
-            .status()
-            .unwrap()
-            .success());
+        assert!(
+            Command::new("git")
+                .current_dir(temp.path())
+                .args(["add", "."])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .current_dir(temp.path())
+                .args(["commit", "-m", "seed"])
+                .status()
+                .unwrap()
+                .success()
+        );
 
         let engine = SyncEngine {
             signer: &signer,

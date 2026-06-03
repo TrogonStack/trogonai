@@ -28,9 +28,7 @@ pub fn span_context_from_current() -> SpanContext {
     let mut headers = HeaderMap::new();
     inject_trace_context(&mut headers);
     let traceparent = extract_traceparent_from_headers(&headers).unwrap_or_default();
-    let tracestate = headers
-        .get("tracestate")
-        .map(|value| value.as_str().to_string());
+    let tracestate = headers.get("tracestate").map(|value| value.as_str().to_string());
     let trace_id = extract_trace_id(&traceparent).unwrap_or_else(mint_trace_id);
     SpanContext {
         trace_id,
@@ -47,8 +45,7 @@ pub fn populate_request_span(request: &mut RequestCtx) {
         request.span.trace_id = injected.trace_id;
         request.span.tracestate = injected.tracestate;
     } else if request.span.trace_id.is_empty() {
-        request.span.trace_id = extract_trace_id(&request.span.traceparent)
-            .unwrap_or_else(mint_trace_id);
+        request.span.trace_id = extract_trace_id(&request.span.traceparent).unwrap_or_else(mint_trace_id);
     }
 }
 
@@ -121,9 +118,7 @@ pub fn set_guest_span_event(name: &str, attributes_json: &str) -> Result<(), Hos
 }
 
 fn extract_traceparent_from_headers(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("traceparent")
-        .map(|value| value.as_str().to_string())
+    headers.get("traceparent").map(|value| value.as_str().to_string())
 }
 
 fn parse_traceparent(traceparent: &str) -> Option<ParsedTraceParent> {
@@ -144,13 +139,12 @@ fn parse_traceparent(traceparent: &str) -> Option<ParsedTraceParent> {
 }
 
 fn mint_trace_id() -> String {
-    format!(
-        "{:032x}",
+    format!("{:032x}", {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as u128
-    )
+            .as_nanos()
+    })
 }
 
 fn validate_guest_attribute(key: &str, value: &str) -> Result<(), HostFailure> {
@@ -252,8 +246,7 @@ mod tests {
 
     #[test]
     fn span_attribute_set_rejects_non_wasm_prefix() {
-        let err = set_guest_span_attribute("policy.tier", "wasm")
-            .expect_err("rejected");
+        let err = set_guest_span_attribute("policy.tier", "wasm").expect_err("rejected");
         assert_eq!(err.code, "span_attribute_rejected");
     }
 

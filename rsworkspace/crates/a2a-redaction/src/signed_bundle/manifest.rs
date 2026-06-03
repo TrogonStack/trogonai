@@ -40,9 +40,11 @@ impl SignedBundleManifest {
     }
 
     pub fn manifest_digest(&self, skill_id: &SkillId) -> Result<Sha256Digest, SignatureVerificationError> {
-        Sha256Digest::from_hex(&self.manifest_sha256).map_err(|err| SignatureVerificationError::MalformedSignatureFile {
-            skill_id: skill_id.to_string(),
-            detail: format!("manifest_sha256: {err}"),
+        Sha256Digest::from_hex(&self.manifest_sha256).map_err(|err| {
+            SignatureVerificationError::MalformedSignatureFile {
+                skill_id: skill_id.to_string(),
+                detail: format!("manifest_sha256: {err}"),
+            }
         })
     }
 

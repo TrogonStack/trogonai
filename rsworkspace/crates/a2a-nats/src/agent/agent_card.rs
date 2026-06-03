@@ -70,12 +70,8 @@ async fn parse_and_call<H: A2aHandler>(
     (id, handler.agent_card(params).await)
 }
 
-async fn publish_error<N>(
-    id: Option<JsonRpcId>,
-    reply: String,
-    nats: &N,
-    error: A2aError,
-) where
+async fn publish_error<N>(id: Option<JsonRpcId>, reply: String, nats: &N, error: A2aError)
+where
     N: trogon_nats::PublishClient,
 {
     let bytes = match JsonRpcErrorResponse::new(id, error.code, error.message).to_bytes() {

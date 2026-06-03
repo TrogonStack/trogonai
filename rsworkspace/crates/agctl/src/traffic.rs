@@ -1,9 +1,9 @@
 use std::process::ExitCode;
 
 use clap::{Args, Subcommand};
-use trogon_traffic_view::indexer::postgres::PostgresIndexer;
 use trogon_traffic_view::indexer::TrafficIndex;
-use trogon_traffic_view::{parse_since, render_table, TrafficQueryFilter};
+use trogon_traffic_view::indexer::postgres::PostgresIndexer;
+use trogon_traffic_view::{TrafficQueryFilter, parse_since, render_table};
 
 #[derive(Args, Debug)]
 pub struct TrafficCommand {

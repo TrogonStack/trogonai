@@ -68,15 +68,8 @@ impl fmt::Display for CelBuiltinsError {
                 name,
                 position,
                 expected,
-            } => write!(
-                f,
-                "{name}: argument {position} has wrong type (expected {expected})"
-            ),
-            Self::Host {
-                name,
-                failure,
-                detail,
-            } => match failure {
+            } => write!(f, "{name}: argument {position} has wrong type (expected {expected})"),
+            Self::Host { name, failure, detail } => match failure {
                 HostFailure::Transient => write!(f, "{name}: authz_unreachable: {detail}"),
                 HostFailure::Permanent => write!(f, "{name}: policy_fault: {detail}"),
                 HostFailure::NotApplicable => write!(f, "{name}: {detail}"),

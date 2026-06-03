@@ -62,15 +62,11 @@ impl CircuitBreaker {
             let mut guard = self.inner.lock().await;
             match guard.state {
                 BreakerState::Open => {
-                    let opened_at = guard
-                        .opened_at
-                        .expect("open breaker must have opened_at");
+                    let opened_at = guard.opened_at.expect("open breaker must have opened_at");
                     if opened_at.elapsed() >= self.cooldown {
                         guard.state = BreakerState::HalfOpen;
                     } else {
-                        return Err(StsError::DependencyUnavailable(
-                            "circuit breaker open".into(),
-                        ));
+                        return Err(StsError::DependencyUnavailable("circuit breaker open".into()));
                     }
                 }
                 BreakerState::Closed | BreakerState::HalfOpen => {}
@@ -109,10 +105,7 @@ impl CircuitBreaker {
 }
 
 pub fn is_dependency_failure(err: &StsError) -> bool {
-    matches!(
-        err,
-        StsError::RegistryUnavailable(_) | StsError::SpiceDbUnavailable(_)
-    )
+    matches!(err, StsError::RegistryUnavailable(_) | StsError::SpiceDbUnavailable(_))
 }
 
 #[cfg(test)]
@@ -131,9 +124,7 @@ mod tests {
         assert!(breaker.call(|| async { Ok(()) }).await.is_ok());
 
         for _ in 0..3 {
-            let _ = breaker
-                .call(|| async { Err::<(), _>(err.clone()) })
-                .await;
+            let _ = breaker.call(|| async { Err::<(), _>(err.clone()) }).await;
         }
         assert!(matches!(
             breaker.call(|| async { Ok(()) }).await,
@@ -145,9 +136,7 @@ mod tests {
     async fn half_open_probe_success_closes_breaker() {
         let breaker = CircuitBreaker::new(1, Duration::from_millis(10));
         let err = StsError::RegistryUnavailable("down".into());
-        let _ = breaker
-            .call(|| async { Err::<(), _>(err.clone()) })
-            .await;
+        let _ = breaker.call(|| async { Err::<(), _>(err.clone()) }).await;
         tokio::time::sleep(Duration::from_millis(15)).await;
         assert!(breaker.call(|| async { Ok(()) }).await.is_ok());
         assert!(breaker.call(|| async { Ok(()) }).await.is_ok());
@@ -157,13 +146,9 @@ mod tests {
     async fn half_open_probe_failure_reopens_breaker() {
         let breaker = CircuitBreaker::new(1, Duration::from_millis(10));
         let err = StsError::RegistryUnavailable("down".into());
-        let _ = breaker
-            .call(|| async { Err::<(), _>(err.clone()) })
-            .await;
+        let _ = breaker.call(|| async { Err::<(), _>(err.clone()) }).await;
         tokio::time::sleep(Duration::from_millis(15)).await;
-        let _ = breaker
-            .call(|| async { Err::<(), _>(err.clone()) })
-            .await;
+        let _ = breaker.call(|| async { Err::<(), _>(err.clone()) }).await;
         assert!(matches!(
             breaker.call(|| async { Ok(()) }).await,
             Err(StsError::DependencyUnavailable(_))

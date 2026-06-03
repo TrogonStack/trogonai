@@ -236,9 +236,7 @@ fn parse_scope(name: &str) -> Result<BundleScope, BundleLoadError> {
 
 fn require_non_empty(field: &str, value: &str) -> Result<(), BundleLoadError> {
     if value.trim().is_empty() {
-        return Err(BundleLoadError::ManifestInvalid(format!(
-            "{field} must not be empty"
-        )));
+        return Err(BundleLoadError::ManifestInvalid(format!("{field} must not be empty")));
     }
     Ok(())
 }

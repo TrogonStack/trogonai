@@ -26,7 +26,7 @@ use a2a_nats::jetstream::consumers::{resubscribe_consumer, stream_events_consume
 use a2a_nats::jetstream::streams::events_stream_name;
 use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 
-use a2a_auth_callout::{CallerJwtHeaderValue, MintedUserJwt, CALLER_JWT_HEADER_NAME};
+use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::auth::AuthCalloutClient;
 use crate::error::BridgeError;
@@ -332,13 +332,10 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
             .await
             .map_err(|e| BridgeError::JetStreamConsume(format!("get_stream {stream_name}: {e}")))?;
         let pull_cfg = match plan {
-            SseConsumePlan::MessageStreamBootstrap { ref req_id } => {
-                stream_events_consumer(prefix, req_id)
+            SseConsumePlan::MessageStreamBootstrap { ref req_id } => stream_events_consumer(prefix, req_id),
+            SseConsumePlan::TasksResubscribe { ref task_id, last_seq } => {
+                resubscribe_consumer(prefix, task_id, last_seq)
             }
-            SseConsumePlan::TasksResubscribe {
-                ref task_id,
-                last_seq,
-            } => resubscribe_consumer(prefix, task_id, last_seq),
         };
         let consumer = stream
             .create_consumer(pull_cfg)
@@ -377,9 +374,7 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
     }
 }
 
-struct RxPollStream(
-    tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BridgeError>>,
-);
+struct RxPollStream(tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BridgeError>>);
 
 impl Stream for RxPollStream {
     type Item = Result<Bytes, BridgeError>;
@@ -418,9 +413,7 @@ impl TaskJetStreamPort for ScriptedTaskJetstream {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, BridgeError>> + Send>>, BridgeError> {
         let drained: VecDeque<_> = {
             let Ok(mut guard) = self.queue.lock() else {
-                return Err(BridgeError::JetStreamConsume(
-                    "scripted mutex poisoned".into(),
-                ));
+                return Err(BridgeError::JetStreamConsume("scripted mutex poisoned".into()));
             };
             std::mem::take(&mut (*guard))
         };
@@ -463,10 +456,7 @@ fn sse_from_bootstrap_and_payloads(
 fn gateway_req_headers(correlation: ReqId) -> Result<async_nats::HeaderMap, BridgeError> {
     let mut map = async_nats::HeaderMap::new();
     let value = correlation.as_str();
-    map.insert(
-        REQ_ID_HEADER,
-        async_nats::header::HeaderValue::from(value),
-    );
+    map.insert(REQ_ID_HEADER, async_nats::header::HeaderValue::from(value));
 
     Ok(map)
 }
@@ -480,10 +470,7 @@ pub fn gateway_publish_headers(
     let minted = MintedUserJwt::new(caller_jwt.as_str());
     let header_value = CallerJwtHeaderValue::from_minted(&minted);
     let nats_name = async_nats::header::HeaderName::from_static(CALLER_JWT_HEADER_NAME);
-    map.insert(
-        nats_name,
-        async_nats::header::HeaderValue::from(header_value.as_str()),
-    );
+    map.insert(nats_name, async_nats::header::HeaderValue::from(header_value.as_str()));
     Ok(map)
 }
 
@@ -539,9 +526,9 @@ fn extract_last_sequence(params: &Value) -> Option<u64> {
 }
 
 fn resub_task_and_seq(body: &Value) -> Result<(A2aTaskId, u64), BridgeError> {
-    let params = body.get("params").ok_or_else(|| {
-        BridgeError::StreamingParams("tasks/resubscribe expects params envelope".into())
-    })?;
+    let params = body
+        .get("params")
+        .ok_or_else(|| BridgeError::StreamingParams("tasks/resubscribe expects params envelope".into()))?;
     let tid = params
         .get("id")
         .and_then(Value::as_str)
@@ -568,8 +555,7 @@ fn sse_plan(method: &str, body: &Value) -> Result<SseConsumePlan, BridgeError> {
 }
 
 fn assert_jsonrpc_gateway_ok(slice: &[u8]) -> Result<(), BridgeError> {
-    let v: Value =
-        serde_json::from_slice(slice).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
+    let v: Value = serde_json::from_slice(slice).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
     if v.get("error").is_some() {
         let detail = serde_json::to_string(&v["error"]).unwrap_or_else(|_| "{}".into());
         return Err(BridgeError::JsonRpcUpstream(detail));
@@ -598,8 +584,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let caller_auth = caller_auth_from(&headers)?;
     let agent_id = agent_header_parse(&headers)?;
     let jwt = state.auth.mint(&caller_auth).await?;
-    let v: Value =
-        serde_json::from_slice(&body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
+    let v: Value = serde_json::from_slice(&body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
     let Some(method) = v.get("method").and_then(Value::as_str) else {
         return Err(BridgeError::MissingJsonRpcMethod);
     };

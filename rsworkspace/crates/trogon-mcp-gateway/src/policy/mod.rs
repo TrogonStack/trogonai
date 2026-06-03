@@ -11,7 +11,9 @@ use serde_json::Value as JsonValue;
 use crate::act_chain::ActChainEntry;
 use crate::approvals::{build_approval_required, build_approval_required_step_up};
 use crate::authz::GatewayIdentity;
-use crate::cel_builtins::{classify_list_filter_host_error, register_all, with_host_eval, HostEvalContext, HostFailure};
+use crate::cel_builtins::{
+    HostEvalContext, HostFailure, classify_list_filter_host_error, register_all, with_host_eval,
+};
 use crate::jwt::VerifiedJwtClaims;
 use crate::rpc_codes;
 use crate::throttle::{ContextThrottler, ThrottleConfig, ThrottleKey};
@@ -318,11 +320,7 @@ pub fn evaluate_cel_with_host(
 ) -> Result<Value, PolicyError> {
     let mut ctx = Context::default();
     configure(&mut ctx)?;
-    with_host_eval(host, || {
-        program
-            .execute(&ctx)
-            .map_err(|e| PolicyError(e.to_string()))
-    })
+    with_host_eval(host, || program.execute(&ctx).map_err(|e| PolicyError(e.to_string())))
 }
 
 /// Outcome of host-aware CEL evaluation for per-tool list filtering.
@@ -346,10 +344,9 @@ pub fn evaluate_cel_with_host_classified(
 
     match with_host_eval(host, || program.execute(&ctx)) {
         Ok(Value::Bool(value)) => CelHostEvalOutcome::Bool(value),
-        Ok(other) => CelHostEvalOutcome::Runtime(format!(
-            "policy expression must yield bool, got {:?}",
-            other.type_of()
-        )),
+        Ok(other) => {
+            CelHostEvalOutcome::Runtime(format!("policy expression must yield bool, got {:?}", other.type_of()))
+        }
         Err(err) => {
             let detail = err.to_string();
             if let Some(failure) = classify_list_filter_host_error(&detail) {
@@ -471,17 +468,15 @@ pub fn risk_gate_response(
                 mesh_config.approval_base_url.as_str(),
             )
         }),
-        RiskDecision::RequireApproval { reason, ttl_s } => {
-            RequestId::new(&ctx.request_id).ok().map(|request_id| {
-                build_approval_required(
-                    prefix,
-                    &request_id,
-                    reason,
-                    *ttl_s,
-                    mesh_config.approval_base_url.as_str(),
-                )
-            })
-        }
+        RiskDecision::RequireApproval { reason, ttl_s } => RequestId::new(&ctx.request_id).ok().map(|request_id| {
+            build_approval_required(
+                prefix,
+                &request_id,
+                reason,
+                *ttl_s,
+                mesh_config.approval_base_url.as_str(),
+            )
+        }),
         _ => None,
     };
     RiskGateResponse {

@@ -18,10 +18,7 @@ const FIXTURE_ISS: &str = "https://sts.trogon.ai/acme";
 fn fixture_keypair() -> (String, JwkSet) {
     let mut rng = rand::thread_rng();
     let private = RsaPrivateKey::new(&mut rng, 2048).expect("rsa");
-    let pem = private
-        .to_pkcs8_pem(LineEnding::LF)
-        .expect("pem")
-        .to_string();
+    let pem = private.to_pkcs8_pem(LineEnding::LF).expect("pem").to_string();
     let public = private.to_public_key();
     let n = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public.n().to_bytes_be());
     let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public.e().to_bytes_be());
@@ -42,15 +39,10 @@ fn fixture_keypair() -> (String, JwkSet) {
 #[tokio::test]
 async fn file_signer_kid_and_iss_match_publisher_fixture_and_token_verifies() {
     let (pem, fixture_jwks) = fixture_keypair();
-    let signer: DynSigner = Arc::new(
-        FileSigner::from_rsa_pem(&pem, FIXTURE_KID).expect("file signer"),
-    );
+    let signer: DynSigner = Arc::new(FileSigner::from_rsa_pem(&pem, FIXTURE_KID).expect("file signer"));
 
     assert_eq!(signer.current_kid(), FIXTURE_KID);
-    assert_eq!(
-        fixture_jwks.keys[0].common.key_id.as_deref(),
-        Some(FIXTURE_KID)
-    );
+    assert_eq!(fixture_jwks.keys[0].common.key_id.as_deref(), Some(FIXTURE_KID));
 
     let mut claims: HashMap<String, Value> = HashMap::new();
     claims.insert("iss".into(), json!(FIXTURE_ISS));

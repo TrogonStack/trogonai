@@ -73,11 +73,7 @@ impl fmt::Display for BundleLoadError {
             Self::UntrustedSigner { nkey_pub } => {
                 write!(f, "signing NKey `{nkey_pub}` not in trusted_signers allowlist")
             }
-            Self::ContentHashMismatch {
-                path,
-                expected,
-                actual,
-            } => write!(
+            Self::ContentHashMismatch { path, expected, actual } => write!(
                 f,
                 "content hash mismatch for `{path}`: expected `{expected}`, got `{actual}`"
             ),
@@ -87,21 +83,13 @@ impl fmt::Display for BundleLoadError {
             Self::MemberMissing { path } => {
                 write!(f, "manifest declares missing member `{path}`")
             }
-            Self::MemberTooLarge { path, size, limit } => write!(
-                f,
-                "member `{path}` size {size} exceeds limit {limit}"
-            ),
-            Self::ArchiveTooLarge { size, limit } => write!(
-                f,
-                "bundle archive size {size} exceeds limit {limit}"
-            ),
-            Self::UnsupportedTargetWit {
-                declared,
-                supported,
-            } => write!(
-                f,
-                "target_wit `{declared}` not supported (host supports `{supported}`)"
-            ),
+            Self::MemberTooLarge { path, size, limit } => {
+                write!(f, "member `{path}` size {size} exceeds limit {limit}")
+            }
+            Self::ArchiveTooLarge { size, limit } => write!(f, "bundle archive size {size} exceeds limit {limit}"),
+            Self::UnsupportedTargetWit { declared, supported } => {
+                write!(f, "target_wit `{declared}` not supported (host supports `{supported}`)")
+            }
             Self::GatewayTooOld {
                 min_gateway_version,
                 running,
@@ -109,10 +97,9 @@ impl fmt::Display for BundleLoadError {
                 f,
                 "min_gateway_version `{min_gateway_version}` exceeds running gateway `{running}`"
             ),
-            Self::DeprecatedManifestFilename { used } => write!(
-                f,
-                "deprecated manifest filename `{used}`; use manifest.toml"
-            ),
+            Self::DeprecatedManifestFilename { used } => {
+                write!(f, "deprecated manifest filename `{used}`; use manifest.toml")
+            }
             Self::KvEmpty { key } => write!(f, "KV key `{key}` is empty or deleted"),
             Self::KvFetch(detail) => write!(f, "KV fetch failed: {detail}"),
             Self::KvWatch(detail) => write!(f, "KV watch failed: {detail}"),

@@ -95,10 +95,7 @@ impl StepUpPolicy {
 }
 
 fn classify_originator(auth_method: &str) -> OriginatorKind {
-    if auth_method.starts_with("workload-")
-        || auth_method == "sentinel:batch"
-        || auth_method == "sentinel:api-key"
-    {
+    if auth_method.starts_with("workload-") || auth_method == "sentinel:batch" || auth_method == "sentinel:api-key" {
         OriginatorKind::Service
     } else {
         OriginatorKind::Human
@@ -141,11 +138,7 @@ mod tests {
         let policy = StepUpPolicy::default();
         let clock = FixedClock(1_000);
         let demand = policy
-            .evaluate(
-                &clock,
-                &ctx("oidc", Some(800)),
-                &ToolAnnotations { sensitive: true },
-            )
+            .evaluate(&clock, &ctx("oidc", Some(800)), &ToolAnnotations { sensitive: true })
             .expect("evaluate");
         assert_eq!(demand, StepUpDemand::None);
     }
@@ -155,11 +148,7 @@ mod tests {
         let policy = StepUpPolicy::default();
         let clock = FixedClock(1_000);
         let demand = policy
-            .evaluate(
-                &clock,
-                &ctx("oidc", Some(600)),
-                &ToolAnnotations { sensitive: true },
-            )
+            .evaluate(&clock, &ctx("oidc", Some(600)), &ToolAnnotations { sensitive: true })
             .expect("evaluate");
         assert_eq!(
             demand,
@@ -193,11 +182,7 @@ mod tests {
         let policy = StepUpPolicy::default();
         let clock = FixedClock(1_000);
         let err = policy
-            .evaluate(
-                &clock,
-                &ctx("webauthn", None),
-                &ToolAnnotations { sensitive: true },
-            )
+            .evaluate(&clock, &ctx("webauthn", None), &ToolAnnotations { sensitive: true })
             .expect_err("missing auth_time");
         assert_eq!(err, StepUpError::MissingAuthTime);
     }

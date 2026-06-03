@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use rsa::pkcs8::DecodePrivateKey;
 use rsa::RsaPrivateKey;
+use rsa::pkcs8::DecodePrivateKey;
 use serde_json::Value;
 
 use crate::jwks::Jwks;
@@ -34,8 +34,7 @@ impl FileMeshSigner {
             .map_err(|e| KeyError::Parse(format!("{} is not valid UTF-8: {e}", signing_path.display())))?;
         let (encoding_key, algorithm) = if RsaPrivateKey::from_pkcs8_pem(pem_text).is_ok() {
             (
-                EncodingKey::from_rsa_pem(&pem_bytes)
-                    .map_err(|e| KeyError::Parse(format!("rsa signing key: {e}")))?,
+                EncodingKey::from_rsa_pem(&pem_bytes).map_err(|e| KeyError::Parse(format!("rsa signing key: {e}")))?,
                 Algorithm::RS256,
             )
         } else {

@@ -53,9 +53,7 @@ pub(crate) async fn handle_inbound<J: Jwks + ?Sized>(
         .start(&tracer);
     let cx = Context::current().with_span(span);
 
-    async { handler.handle(caller, payload).await }
-        .with_context(cx)
-        .await
+    async { handler.handle(caller, payload).await }.with_context(cx).await
 }
 
 fn extract_caller_jwt(headers: &HeaderMap) -> Result<String, SdkError> {
@@ -352,14 +350,23 @@ mod tests {
             .iter()
             .find(|span| span.name.as_ref() == "a2a.serve.dispatch")
             .expect("dispatch span");
-        assert!(dispatch.attributes.iter().any(|kv| {
-            kv.key.as_str() == "agent.id" && kv.value.as_str() == "acme/echo"
-        }));
-        assert!(dispatch.attributes.iter().any(|kv| {
-            kv.key.as_str() == "agent.chain.depth" && kv.value.as_str() == "1"
-        }));
-        assert!(dispatch.attributes.iter().any(|kv| {
-            kv.key.as_str() == "agent.purpose" && kv.value.as_str() == "test-purpose"
-        }));
+        assert!(
+            dispatch
+                .attributes
+                .iter()
+                .any(|kv| { kv.key.as_str() == "agent.id" && kv.value.as_str() == "acme/echo" })
+        );
+        assert!(
+            dispatch
+                .attributes
+                .iter()
+                .any(|kv| { kv.key.as_str() == "agent.chain.depth" && kv.value.as_str() == "1" })
+        );
+        assert!(
+            dispatch
+                .attributes
+                .iter()
+                .any(|kv| { kv.key.as_str() == "agent.purpose" && kv.value.as_str() == "test-purpose" })
+        );
     }
 }

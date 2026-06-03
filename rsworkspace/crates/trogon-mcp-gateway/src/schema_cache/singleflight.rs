@@ -50,9 +50,7 @@ impl SchemaSingleflight {
         }
 
         let fetched = fetch().await?;
-        cache
-            .put(key.clone(), fetched.clone(), "singleflight")
-            .await?;
+        cache.put(key.clone(), fetched.clone(), "singleflight").await?;
         self.in_flight.lock().await.remove(&key);
         Ok(Some(fetched))
     }

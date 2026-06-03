@@ -12,17 +12,15 @@ pub use spicedb_tier1::{
     Tier1AuthorizeOutcome, Tier1SpiceDbBuildError, Tier1SpiceDbConfig,
 };
 pub use tier1_declarative::{
-    GatewayTier1DeclarativeLayer, NoopTier1DeclarativeGate, RealTier1DeclarativeGate,
-    Tier1DeclarativeBuildError, Tier1DeclarativeConfig, Tier1DeclarativeContext, Tier1DeclarativeDecision,
-    Tier1DeclarativeGate, tier1_declarative_audit_rule_fired,
-};
-pub use tier2::{
-    NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext,
+    GatewayTier1DeclarativeLayer, NoopTier1DeclarativeGate, RealTier1DeclarativeGate, Tier1DeclarativeBuildError,
+    Tier1DeclarativeConfig, Tier1DeclarativeContext, Tier1DeclarativeDecision, Tier1DeclarativeGate,
+    tier1_declarative_audit_rule_fired,
 };
 pub use tier2::rule_name::RuleName;
+pub use tier2::{NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext};
 pub use tier3_redaction::{
-    gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle, NoopTier3RedactionGate,
-    RealTier3RedactionGate, Tier3EvaluationContext, Tier3RedactionDecision, Tier3RedactionGate,
-    Tier3SkillManifest, merge_forward_audit_rewrites, tier3_redaction_audit_rewrites,
+    NoopTier3RedactionGate, RealTier3RedactionGate, Tier3EvaluationContext, Tier3RedactionDecision, Tier3RedactionGate,
+    Tier3SkillManifest, gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle,
+    merge_forward_audit_rewrites, tier3_redaction_audit_rewrites,
 };
 pub use wasmtime_substrate::WasmtimeSubstrate;

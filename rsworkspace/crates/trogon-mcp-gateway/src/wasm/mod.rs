@@ -12,9 +12,8 @@ mod tracing;
 mod wasi_stub;
 
 pub use bindings::{
-    contract_identity, ContractIdentity, HostFailure, HostImports, LogLevel, PolicyDecision,
-    PolicyGuest, RequestCtx, SpanContext, SpicedbBinding, ToolDescriptor, UnlinkedHost,
-    WIT_PACKAGE, WIT_VERSION, WORLD_NAME,
+    ContractIdentity, HostFailure, HostImports, LogLevel, PolicyDecision, PolicyGuest, RequestCtx, SpanContext,
+    SpicedbBinding, ToolDescriptor, UnlinkedHost, WIT_PACKAGE, WIT_VERSION, WORLD_NAME, contract_identity,
 };
 pub use config::PoolConfig;
 pub use engine::{WasmBundleHandle, WasmEngine};
@@ -22,9 +21,8 @@ pub use error::{EvaluateOutcome, WasmEngineError, WasmFaultCode};
 pub use pool::{ComponentPool, PoolKey};
 pub use store_state::WasmStoreState;
 pub use tracing::{
-    extract_trace_id, extract_traceparent, parent_from_span_context, populate_request_span,
-    span_context_from_current, traceparent_is_sampled, tracing_level_from_log,
-    ParsedTraceParent, WASM_EVALUATE_SPAN_NAME,
+    ParsedTraceParent, WASM_EVALUATE_SPAN_NAME, extract_trace_id, extract_traceparent, parent_from_span_context,
+    populate_request_span, span_context_from_current, traceparent_is_sampled, tracing_level_from_log,
 };
 
 /// Returns an unlinked host stub and validates contract pins at call sites.

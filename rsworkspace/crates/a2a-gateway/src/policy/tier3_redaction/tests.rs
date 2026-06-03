@@ -42,9 +42,7 @@ fn noop_gate_returns_allow_with_empty_rewrites() {
     );
     assert_eq!(
         gate.redact(&mut ctx),
-        Tier3RedactionDecision::Allow {
-            rewrites: Vec::new()
-        }
+        Tier3RedactionDecision::Allow { rewrites: Vec::new() }
     );
 }
 
@@ -58,17 +56,15 @@ fn gateway_tier3_redaction_env_defaults_off() {
 fn real_gate_records_rewrite_on_mock_host() {
     let skill = SkillId::new("pii-email");
     let mut manifests = BTreeMap::new();
-    manifests.insert(skill.clone(), manifest_for("pii-email", "$.params.message.parts[0].text"));
+    manifests.insert(
+        skill.clone(),
+        manifest_for("pii-email", "$.params.message.parts[0].text"),
+    );
 
     let invoker = MockTier3PartInvoker::with_output(skill.clone(), br#""[REDACTED]""#.to_vec());
     let gate = RealTier3RedactionGate::new(invoker);
 
-    let mut ctx = Tier3EvaluationContext::new(
-        "message/send",
-        Some("caller-1".into()),
-        sample_payload(),
-        manifests,
-    );
+    let mut ctx = Tier3EvaluationContext::new("message/send", Some("caller-1".into()), sample_payload(), manifests);
 
     match gate.redact(&mut ctx) {
         Tier3RedactionDecision::Allow { rewrites } => {
@@ -87,22 +83,14 @@ fn real_gate_records_rewrite_on_mock_host() {
 fn real_gate_refusal_sentinel_returns_refuse() {
     let skill = SkillId::new("deny-part");
     let mut manifests = BTreeMap::new();
-    manifests.insert(
-        skill.clone(),
-        manifest_for("deny-part", "/params/message/parts/0/text"),
-    );
+    manifests.insert(skill.clone(), manifest_for("deny-part", "/params/message/parts/0/text"));
 
     let mut sentinel = TIER3_REFUSE_SENTINEL.to_vec();
     sentinel.extend_from_slice(b":UnauthorizedDataCategory");
     let invoker = MockTier3PartInvoker::with_output(skill.clone(), sentinel);
     let gate = RealTier3RedactionGate::new(invoker);
 
-    let mut ctx = Tier3EvaluationContext::new(
-        "message/send",
-        Some("caller-1".into()),
-        sample_payload(),
-        manifests,
-    );
+    let mut ctx = Tier3EvaluationContext::new("message/send", Some("caller-1".into()), sample_payload(), manifests);
 
     assert_eq!(
         gate.redact(&mut ctx),
@@ -122,12 +110,7 @@ fn real_gate_trap_maps_to_error() {
     let invoker = MockTier3PartInvoker::with_error(skill.clone(), RedactionError::WasmCall("trap".into()));
     let gate = RealTier3RedactionGate::new(invoker);
 
-    let mut ctx = Tier3EvaluationContext::new(
-        "message/send",
-        Some("caller-1".into()),
-        sample_payload(),
-        manifests,
-    );
+    let mut ctx = Tier3EvaluationContext::new("message/send", Some("caller-1".into()), sample_payload(), manifests);
 
     assert_eq!(
         gate.redact(&mut ctx),
@@ -141,8 +124,8 @@ fn real_gate_trap_maps_to_error() {
 #[test]
 fn tier3_refused_response_uses_32802_and_rule_data() {
     let payload = br#"{"jsonrpc":"2.0","id":"x","method":"message/send","params":{}}"#;
-    let bytes = ingress_gateway_tier3_refused_response_bytes(payload, "tier-3 skill refused part", "deny-part")
-        .unwrap();
+    let bytes =
+        ingress_gateway_tier3_refused_response_bytes(payload, "tier-3 skill refused part", "deny-part").unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["error"]["code"], -32_802);
     assert_eq!(value["error"]["data"]["rule"], "deny-part");

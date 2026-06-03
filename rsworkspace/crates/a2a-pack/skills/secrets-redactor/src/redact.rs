@@ -50,17 +50,14 @@ fn mask_github_pats(text: &str) -> String {
 
 fn mask_stripe_keys(text: &str) -> String {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(r"\bsk_live_[A-Za-z0-9]{16,}\b").expect("stripe live key regex")
-    });
+    let re = RE.get_or_init(|| Regex::new(r"\bsk_live_[A-Za-z0-9]{16,}\b").expect("stripe live key regex"));
     re.replace_all(text, MASK).into_owned()
 }
 
 fn mask_bearer_jwts(text: &str) -> String {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
-        Regex::new(r"(?i)\bBearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
-            .expect("bearer jwt regex")
+        Regex::new(r"(?i)\bBearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b").expect("bearer jwt regex")
     });
     re.replace_all(text, MASK).into_owned()
 }

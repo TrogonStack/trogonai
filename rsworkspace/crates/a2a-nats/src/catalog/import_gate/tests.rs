@@ -28,8 +28,7 @@ async fn allow_all_permits_everything() {
     let imported = ImportedAccountName::new("peer-acct");
     let aid = A2aAgentId::new("bot").unwrap();
     assert!(
-        gate
-            .permit(&p, &imported, &aid)
+        gate.permit(&p, &imported, &aid)
             .await
             .expect("AllowAll gate must succeed")
     );
@@ -51,9 +50,7 @@ mod catalog_list_tests {
 
     use crate::agent_id::A2aAgentId;
     use crate::catalog::store::{CatalogStoreError, KvCatalogStore};
-    use crate::catalog::{
-        AllowAllImportGate, ImportGate, ImportGateError, ImportedAccountName, SpiceDbPrincipal,
-    };
+    use crate::catalog::{AllowAllImportGate, ImportGate, ImportGateError, ImportedAccountName, SpiceDbPrincipal};
 
     struct CatalogDenyAllImportGate;
 

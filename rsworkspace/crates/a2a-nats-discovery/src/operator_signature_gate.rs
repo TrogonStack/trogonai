@@ -87,7 +87,9 @@ pub fn signature_max_age_from_env<E: ReadEnv>(env: &E) -> Result<Duration, Opera
     }
 }
 
-pub fn parse_operator_keys(raw: &str) -> Result<BTreeMap<OperatorKeyId, Ed25519PublicKey>, OperatorSignatureGateBuildError> {
+pub fn parse_operator_keys(
+    raw: &str,
+) -> Result<BTreeMap<OperatorKeyId, Ed25519PublicKey>, OperatorSignatureGateBuildError> {
     if raw.trim().is_empty() {
         return Err(OperatorSignatureGateBuildError::Malformed("empty registry".into()));
     }
@@ -128,7 +130,9 @@ pub fn try_real_operator_signature_gate_from_env<E: ReadEnv>(
     now_unix_ms: u64,
 ) -> Result<RealOperatorSignatureGate, OperatorSignatureGateBuildError> {
     let raw = env.var(ENV_DISCOVERY_OPERATOR_KEYS).map_err(|error| match error {
-        std::env::VarError::NotPresent => OperatorSignatureGateBuildError::Malformed(format!("{ENV_DISCOVERY_OPERATOR_KEYS} unset")),
+        std::env::VarError::NotPresent => {
+            OperatorSignatureGateBuildError::Malformed(format!("{ENV_DISCOVERY_OPERATOR_KEYS} unset"))
+        }
         std::env::VarError::NotUnicode(_) => {
             OperatorSignatureGateBuildError::Malformed(format!("{ENV_DISCOVERY_OPERATOR_KEYS} not unicode"))
         }
@@ -155,10 +159,7 @@ impl OperatorSignatureGate for ResolvedOperatorSignatureGate {
     }
 }
 
-pub fn resolve_operator_signature_gate<E: ReadEnv>(
-    env: &E,
-    now_unix_ms: u64,
-) -> ResolvedOperatorSignatureGate {
+pub fn resolve_operator_signature_gate<E: ReadEnv>(env: &E, now_unix_ms: u64) -> ResolvedOperatorSignatureGate {
     match env.var(ENV_DISCOVERY_OPERATOR_KEYS) {
         Ok(raw) => match parse_operator_keys(&raw) {
             Ok(trusted_keys) => {

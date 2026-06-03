@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use a2a_nats::A2aAgentId;
 use async_nats::HeaderMap;
-use cel_interpreter::{to_value, Context, Value};
+use cel_interpreter::{Context, Value, to_value};
 use tracing::warn;
 
 use crate::policy::error::Tier2EvalError;
@@ -39,9 +39,7 @@ impl CelEngine for CelInterpreterEngine {
             .map_err(|err| Tier2EvalError::new(format!("CEL execution failed: {err}")))?;
         match value {
             Value::Bool(result) => Ok(result),
-            other => Err(Tier2EvalError::new(format!(
-                "CEL rule must return bool, got {other:?}"
-            ))),
+            other => Err(Tier2EvalError::new(format!("CEL rule must return bool, got {other:?}"))),
         }
     }
 }
@@ -103,10 +101,7 @@ impl Tier2CelEvaluator for RealTier2CelEvaluator {
     }
 }
 
-fn bind_evaluation_context(
-    cel_ctx: &mut Context,
-    ctx: &Tier2EvaluationContext,
-) -> Result<(), Tier2EvalError> {
+fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) -> Result<(), Tier2EvalError> {
     let request = to_value(serde_json::json!({
         "method": ctx.request_method(),
         "params": ctx.request_params(),
@@ -132,13 +127,9 @@ fn bind_evaluation_context(
     .map_err(|err| Tier2EvalError::new(format!("task binding failed: {err}")))?;
     cel_ctx.add_variable_from_value("task", task);
 
-    let headers: BTreeMap<String, String> = ctx
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let headers_value = to_value(headers)
-        .map_err(|err| Tier2EvalError::new(format!("headers binding failed: {err}")))?;
+    let headers: BTreeMap<String, String> = ctx.headers().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let headers_value =
+        to_value(headers).map_err(|err| Tier2EvalError::new(format!("headers binding failed: {err}")))?;
     cel_ctx.add_variable_from_value("headers", headers_value);
 
     Ok(())

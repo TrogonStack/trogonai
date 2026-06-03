@@ -13,12 +13,14 @@ use trogon_std::env::InMemoryEnv;
 use crate::agent_id::A2aAgentId;
 use crate::catalog::import_gate::gate::ImportGate;
 use crate::catalog::import_gate::principal::{ImportedAccountName, SpiceDbPrincipal};
-use crate::catalog::import_gate::spicedb::config::{ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS};
+use crate::catalog::import_gate::spicedb::config::{
+    ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS,
+};
 
+use super::SpiceDbImportGate;
 use super::cache::{ImportGateCacheKey, ZedTokenCache};
 use super::client::BulkImportPermissionCheck;
 use super::config::ZedTokenTtl;
-use super::SpiceDbImportGate;
 
 struct MockBulkImportClient {
     responses: Mutex<Vec<Result<CheckBulkPermissionsResponse, Status>>>,
@@ -150,8 +152,7 @@ async fn configured_gate_allows_and_caches_zed_token() {
     let gate = SpiceDbImportGate::configured(mock.clone(), ZedTokenCache::new(ZedTokenTtl::from_secs(30)));
 
     assert!(
-        gate
-            .permit(&principal("user/alice"), &imported("peer"), &agent_id("bot"))
+        gate.permit(&principal("user/alice"), &imported("peer"), &agent_id("bot"))
             .await
             .expect("allowed response")
     );
@@ -162,23 +163,21 @@ async fn configured_gate_allows_and_caches_zed_token() {
         requests[0].items[0].resource.as_ref().unwrap().object_type,
         "agent_card"
     );
-    assert_eq!(
-        requests[0].items[0].resource.as_ref().unwrap().object_id,
-        "peer:bot"
-    );
+    assert_eq!(requests[0].items[0].resource.as_ref().unwrap().object_id, "peer:bot");
     assert_eq!(requests[0].items[0].permission, "view");
 
     assert!(
-        gate
-            .permit(&principal("user/alice"), &imported("peer"), &agent_id("bot"))
+        gate.permit(&principal("user/alice"), &imported("peer"), &agent_id("bot"))
             .await
             .expect("second allowed response")
     );
     assert_eq!(mock.recorded_requests().len(), 2);
-    assert!(mock.recorded_requests()[1]
-        .consistency
-        .as_ref()
-        .is_some_and(|consistency| consistency.requirement.is_some()));
+    assert!(
+        mock.recorded_requests()[1]
+            .consistency
+            .as_ref()
+            .is_some_and(|consistency| consistency.requirement.is_some())
+    );
 }
 
 #[tokio::test]
@@ -215,16 +214,14 @@ async fn principal_account_claim_is_used_as_import_subject() {
     let gate = SpiceDbImportGate::configured(mock.clone(), ZedTokenCache::new(ZedTokenTtl::from_secs(30)));
     let principal = SpiceDbPrincipal(serde_json::json!({"account": "consumer-acct"}));
 
-    assert!(gate.permit(&principal, &imported("peer"), &agent_id("bot")).await.expect("allowed"));
+    assert!(
+        gate.permit(&principal, &imported("peer"), &agent_id("bot"))
+            .await
+            .expect("allowed")
+    );
 
     let requests = mock.recorded_requests();
-    let subject = requests[0].items[0]
-        .subject
-        .as_ref()
-        .unwrap()
-        .object
-        .as_ref()
-        .unwrap();
+    let subject = requests[0].items[0].subject.as_ref().unwrap().object.as_ref().unwrap();
     assert_eq!(subject.object_type, "account");
     assert_eq!(subject.object_id, "consumer-acct");
 }

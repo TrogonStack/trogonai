@@ -96,23 +96,24 @@ async fn audience_not_allowed_returns_invalid_target() {
 #[tokio::test]
 async fn shadow_mode_emits_wkl_unattested_deny_audit() {
     let keys = shared_test_keys();
-    let (service, audit) = support::build_service_with_audit(
-        keys,
-        sample_registry_record(),
-        trogon_sts::ChainResolutionMode::Off,
-    );
+    let (service, audit) =
+        support::build_service_with_audit(keys, sample_registry_record(), trogon_sts::ChainResolutionMode::Off);
     let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     service
         .handle(sample_exchange_request(&subject), None)
         .await
         .expect("exchange");
     let events = audit.take_events();
-    assert!(events
-        .iter()
-        .any(|e| e.outcome == "success" && e.decision_reason == "exchange_ok"));
-    assert!(events
-        .iter()
-        .any(|e| e.outcome == "deny" && e.decision_reason == "wkl_unattested"));
+    assert!(
+        events
+            .iter()
+            .any(|e| e.outcome == "success" && e.decision_reason == "exchange_ok")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.outcome == "deny" && e.decision_reason == "wkl_unattested")
+    );
 }
 
 #[tokio::test]

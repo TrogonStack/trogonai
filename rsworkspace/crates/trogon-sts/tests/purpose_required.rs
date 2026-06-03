@@ -15,12 +15,7 @@ use trogon_sts::spicedb::NoOpSpiceDb;
 #[tokio::test]
 async fn empty_request_purpose_rejected_when_required() {
     let keys = shared_test_keys();
-    let service = build_service_with_mode_and_purpose(
-        keys,
-        sample_registry_record(),
-        ChainResolutionMode::Off,
-        true,
-    );
+    let service = build_service_with_mode_and_purpose(keys, sample_registry_record(), ChainResolutionMode::Off, true);
     let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     let mut request = sample_exchange_request(&subject);
     request.purpose = "   ".into();
@@ -32,12 +27,7 @@ async fn empty_request_purpose_rejected_when_required() {
 #[tokio::test]
 async fn empty_bootstrap_purpose_claim_rejected_when_required() {
     let keys = shared_test_keys();
-    let service = build_service_with_mode_and_purpose(
-        keys,
-        sample_registry_record(),
-        ChainResolutionMode::Off,
-        true,
-    );
+    let service = build_service_with_mode_and_purpose(keys, sample_registry_record(), ChainResolutionMode::Off, true);
     let mut claims = bootstrap_claims(keys);
     claims.as_object_mut().expect("object").remove("purpose");
     let subject = mint_bootstrap_token(keys, claims);
@@ -50,12 +40,7 @@ async fn empty_bootstrap_purpose_claim_rejected_when_required() {
 #[tokio::test]
 async fn empty_bootstrap_claim_allowed_when_require_disabled() {
     let keys = shared_test_keys();
-    let service = build_service_with_mode_and_purpose(
-        keys,
-        sample_registry_record(),
-        ChainResolutionMode::Off,
-        false,
-    );
+    let service = build_service_with_mode_and_purpose(keys, sample_registry_record(), ChainResolutionMode::Off, false);
     let mut claims = bootstrap_claims(keys);
     claims.as_object_mut().expect("object").remove("purpose");
     let subject = mint_bootstrap_token(keys, claims);

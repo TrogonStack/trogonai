@@ -3,16 +3,16 @@ use std::sync::{Arc, LazyLock};
 
 use a2a_nats::A2aMethod;
 use a2a_nats::agent_id::A2aAgentId;
-use a2a_pack::resource_tuples::{Tier1A2aMethodSlug, Tier1ResourceTupleTable};
+use a2a_nats::catalog::import_gate::LiveBulkImportPermissionClient;
+use a2a_nats::catalog::import_gate::parse_subject_reference;
 use a2a_nats::catalog::import_gate::{
     BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
     ZedTokenTtl,
 };
-use a2a_nats::catalog::import_gate::LiveBulkImportPermissionClient;
-use a2a_nats::catalog::import_gate::parse_subject_reference;
 use a2a_nats::catalog::spicedb_permission::{
     AgentViewCheckOutcome, AgentViewGate, LiveAgentViewGate, SpiceDbSessionCache, SpiceDbSessionKey,
 };
+use a2a_pack::resource_tuples::{Tier1A2aMethodSlug, Tier1ResourceTupleTable};
 use async_trait::async_trait;
 use authzed::v1::check_bulk_permissions_pair;
 use authzed::v1::check_permission_response::Permissionship;
@@ -32,8 +32,7 @@ pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SE
 
 const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
 
-static TIER1_RESOURCE_TUPLE_TABLE: LazyLock<Tier1ResourceTupleTable> =
-    LazyLock::new(Tier1ResourceTupleTable::bundled);
+static TIER1_RESOURCE_TUPLE_TABLE: LazyLock<Tier1ResourceTupleTable> = LazyLock::new(Tier1ResourceTupleTable::bundled);
 
 pub use a2a_pack::resource_tuples::{
     Tier1DeriveError, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple, Tier1ResourceType,
@@ -50,11 +49,7 @@ pub struct Tier1OwnerTuple {
 
 impl Tier1OwnerTuple {
     pub fn for_task(agent_id: &A2aAgentId, task_id: &str, subject_type: &str, subject_id: &str) -> Self {
-        let tuple = Tier1ResourceTuple::new(
-            "task",
-            format!("{}:{}", agent_id.as_str(), task_id),
-            "owner",
-        );
+        let tuple = Tier1ResourceTuple::new("task", format!("{}:{}", agent_id.as_str(), task_id), "owner");
         Self {
             resource_type: tuple.resource_type,
             resource_id: tuple.resource_id,
@@ -383,11 +378,9 @@ impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
 
         if let Some(snapshot) = self.session_cache.get(session).await {
             request.consistency = Some(Consistency {
-                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(
-                    ZedToken {
-                        token: snapshot.token,
-                    },
-                )),
+                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(ZedToken {
+                    token: snapshot.token,
+                })),
             });
         } else {
             request.consistency = Some(Consistency {
@@ -497,7 +490,12 @@ pub fn owner_tuple_for_message_send(
 ) -> Option<Tier1OwnerTuple> {
     let task_id = task_id_from_params(params)?;
     let (subject_type, subject_id) = spicedb_tier1_subject_from_principal(principal)?;
-    Some(Tier1OwnerTuple::for_task(agent_id, &task_id, &subject_type, &subject_id))
+    Some(Tier1OwnerTuple::for_task(
+        agent_id,
+        &task_id,
+        &subject_type,
+        &subject_id,
+    ))
 }
 
 #[cfg(test)]
@@ -660,16 +658,12 @@ mod tests {
         let tuple = Tier1ResourceTuple::new("agent", "planner", "invoke");
 
         match gate.authorize(&session(), &principal(), &tuple).await {
-            Tier1AuthorizeOutcome::Allowed {
-                zed_token: Some(token),
-            } if token == "zed-1" => {}
+            Tier1AuthorizeOutcome::Allowed { zed_token: Some(token) } if token == "zed-1" => {}
             other => panic!("unexpected first outcome: {other:?}"),
         }
 
         match gate.authorize(&session(), &principal(), &tuple).await {
-            Tier1AuthorizeOutcome::Allowed {
-                zed_token: Some(token),
-            } if token == "zed-2" => {}
+            Tier1AuthorizeOutcome::Allowed { zed_token: Some(token) } if token == "zed-2" => {}
             other => panic!("unexpected second outcome: {other:?}"),
         }
 
@@ -722,13 +716,7 @@ mod tests {
 
     #[test]
     fn derive_tuple_message_send_uses_agent_invoke() {
-        let tuple = derive_tuple(
-            &A2aMethod::MessageSend,
-            &agent(),
-            "pub",
-            &serde_json::json!({}),
-        )
-        .unwrap();
+        let tuple = derive_tuple(&A2aMethod::MessageSend, &agent(), "pub", &serde_json::json!({})).unwrap();
         assert_eq!(tuple.resource_type.as_str(), "agent");
         assert_eq!(tuple.resource_id.as_str(), "planner");
         assert_eq!(tuple.permission.as_str(), "invoke");
@@ -736,25 +724,13 @@ mod tests {
 
     #[test]
     fn derive_tuple_tasks_list_uses_discover() {
-        let tuple = derive_tuple(
-            &A2aMethod::TasksList,
-            &agent(),
-            "pub",
-            &serde_json::json!({}),
-        )
-        .unwrap();
+        let tuple = derive_tuple(&A2aMethod::TasksList, &agent(), "pub", &serde_json::json!({})).unwrap();
         assert_eq!(tuple.permission.as_str(), "discover");
     }
 
     #[test]
     fn derive_tuple_agent_card_uses_agent_card_resource() {
-        let tuple = derive_tuple(
-            &A2aMethod::AgentCard,
-            &agent(),
-            "publisher",
-            &serde_json::json!({}),
-        )
-        .unwrap();
+        let tuple = derive_tuple(&A2aMethod::AgentCard, &agent(), "publisher", &serde_json::json!({})).unwrap();
         assert_eq!(tuple.resource_type.as_str(), "agent_card");
         assert_eq!(tuple.resource_id.as_str(), "publisher/planner");
     }

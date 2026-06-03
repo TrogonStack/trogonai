@@ -19,9 +19,7 @@ pub struct PersonHttpClient {
 impl PersonHttpClient {
     /// Construct with a default reqwest client.
     pub fn new(base_url: impl Into<String>) -> Result<Self, SdkError> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()?;
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?;
         Ok(Self {
             base_url: base_url.into(),
             client,
@@ -35,7 +33,10 @@ impl PersonHttpClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(SdkError::Server { status: status.as_u16(), body });
+            return Err(SdkError::Server {
+                status: status.as_u16(),
+                body,
+            });
         }
         let resp = resp
             .json::<BootstrapResponse>()
@@ -50,16 +51,20 @@ impl PersonHttpClient {
         let resp = self.client.post(&url).json(&req).send().await?;
         let status = resp.status();
         if status == reqwest::StatusCode::ACCEPTED {
-            let v: serde_json::Value = resp.json().await.map_err(|e| {
-                SdkError::InvalidResponse(format!("interaction body: {e}"))
-            })?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| SdkError::InvalidResponse(format!("interaction body: {e}")))?;
             let url = v["url"].as_str().unwrap_or_default().to_string();
             let code = v["code"].as_str().map(|s| s.to_string());
             return Err(SdkError::Interaction { url, code });
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(SdkError::Server { status: status.as_u16(), body });
+            return Err(SdkError::Server {
+                status: status.as_u16(),
+                body,
+            });
         }
         let body = resp
             .json::<TokenResponse>()
@@ -95,8 +100,8 @@ impl PersonNatsClient {
     }
 
     pub async fn bootstrap(&self, req: BootstrapRequest) -> Result<BootstrapResponse, SdkError> {
-        let bytes = serde_json::to_vec(&req)
-            .map_err(|e| SdkError::InvalidResponse(format!("encode bootstrap: {e}")))?;
+        let bytes =
+            serde_json::to_vec(&req).map_err(|e| SdkError::InvalidResponse(format!("encode bootstrap: {e}")))?;
         let msg = tokio::time::timeout(
             self.request_timeout,
             self.client.request(self.subject("bootstrap"), bytes.into()),
@@ -108,8 +113,7 @@ impl PersonNatsClient {
     }
 
     pub async fn exchange(&self, req: TokenRequest) -> Result<TokenResponse, SdkError> {
-        let bytes = serde_json::to_vec(&req)
-            .map_err(|e| SdkError::InvalidResponse(format!("encode token: {e}")))?;
+        let bytes = serde_json::to_vec(&req).map_err(|e| SdkError::InvalidResponse(format!("encode token: {e}")))?;
         let msg = tokio::time::timeout(
             self.request_timeout,
             self.client.request(self.subject("token"), bytes.into()),
@@ -121,9 +125,7 @@ impl PersonNatsClient {
     }
 }
 
-fn decode_nats_response<T: serde::de::DeserializeOwned>(
-    msg: &async_nats::Message,
-) -> Result<T, SdkError> {
+fn decode_nats_response<T: serde::de::DeserializeOwned>(msg: &async_nats::Message) -> Result<T, SdkError> {
     if let Some(headers) = &msg.headers
         && let Some(code) = headers.get("Nats-Service-Error-Code")
     {
@@ -133,11 +135,12 @@ fn decode_nats_response<T: serde::de::DeserializeOwned>(
             .map(|v| v.to_string())
             .unwrap_or_default();
         if status == 202 {
-            return Err(SdkError::Interaction { url: detail, code: None });
+            return Err(SdkError::Interaction {
+                url: detail,
+                code: None,
+            });
         }
         return Err(SdkError::Server { status, body: detail });
     }
-    serde_json::from_slice::<T>(&msg.payload).map_err(|e| {
-        SdkError::InvalidResponse(format!("decode response: {e}"))
-    })
+    serde_json::from_slice::<T>(&msg.payload).map_err(|e| SdkError::InvalidResponse(format!("decode response: {e}")))
 }

@@ -1,10 +1,10 @@
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use bytes::Bytes;
 use a2a_nats::catalog::RegistrarSubject;
 use a2a_nats::{A2aAgentId, A2aPrefix};
+use async_trait::async_trait;
+use bytes::Bytes;
 
 use crate::error::BridgeError;
 use crate::identity::BridgeAgentId;
@@ -136,7 +136,9 @@ impl<H: JsonHttpPost, U: OutboundUpstreamUrlResolve> MappedHttpsUpstream<H, U> {
 }
 
 #[async_trait]
-impl<H: JsonHttpPost + Send + Sync, U: OutboundUpstreamUrlResolve> OutboundHttpsAgentUpstream for MappedHttpsUpstream<H, U> {
+impl<H: JsonHttpPost + Send + Sync, U: OutboundUpstreamUrlResolve> OutboundHttpsAgentUpstream
+    for MappedHttpsUpstream<H, U>
+{
     async fn proxy_jsonrpc_post(
         &self,
         agent_id: AgentRegistrationId,
@@ -161,9 +163,7 @@ pub async fn publish_https_agent_card_to_catalog<R: CatalogRegistrationPublish +
     card_json: &[u8],
 ) -> Result<(), BridgeError> {
     let subject = RegistrarSubject::new(prefix).for_agent(agent_id);
-    registrar
-        .publish_core(subject.as_str(), card_json)
-        .await?;
+    registrar.publish_core(subject.as_str(), card_json).await?;
 
     Ok(())
 }
@@ -249,8 +249,7 @@ mod tests {
     #[tokio::test]
     async fn mapped_https_upstream_hits_resolved_root() {
         let poster = Arc::new(MockPoster::new());
-        let up: MappedHttpsUpstream<MockPoster, UrlOk> =
-            MappedHttpsUpstream::new(poster.clone(), Arc::new(UrlOk));
+        let up: MappedHttpsUpstream<MockPoster, UrlOk> = MappedHttpsUpstream::new(poster.clone(), Arc::new(UrlOk));
         let out = OutboundHttpsAgentUpstream::proxy_jsonrpc_post(
             &up,
             AgentRegistrationId::new("ext"),
@@ -272,9 +271,10 @@ mod tests {
     #[async_trait]
     impl CatalogRegistrationPublish for MockRegistrar {
         async fn publish_core(&self, subject: impl AsRef<str> + Send, payload: &[u8]) -> Result<(), BridgeError> {
-            let mut guard = self.0.lock().map_err(|_| {
-                BridgeError::CatalogRegistration("mock registrar mutex poisoned".into())
-            })?;
+            let mut guard = self
+                .0
+                .lock()
+                .map_err(|_| BridgeError::CatalogRegistration("mock registrar mutex poisoned".into()))?;
             *guard = Some((subject.as_ref().to_owned(), payload.to_vec()));
             Ok(())
         }

@@ -27,10 +27,7 @@ impl ApprovalCoordinator {
     ) -> Result<ApprovalDecision, ApprovalError> {
         let (tx, rx) = oneshot::channel();
         {
-            let mut pending = self
-                .pending
-                .lock()
-                .expect("approval coordinator mutex poisoned");
+            let mut pending = self.pending.lock().expect("approval coordinator mutex poisoned");
             pending.insert(request_id.as_str().to_string(), tx);
         }
 

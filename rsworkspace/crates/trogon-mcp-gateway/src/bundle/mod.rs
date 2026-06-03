@@ -9,26 +9,23 @@ mod manifest_toml;
 mod signature;
 mod validate;
 
-pub use archive::{build_tar, extract_archive, resolve_manifest, BundleArchive};
-pub use errors::BundleLoadError;
-pub use manifest::{
-    BundleManifest, BundleScope, Capabilities, ComponentEntry, ManifestDigest, ProgramEntry,
-    SchemaEntry, Signing, GATEWAY_VERSION, HOST_TARGET_WIT, MANIFEST_DEPRECATED_FILENAME,
-    MANIFEST_FILENAME, SIGNATURE_PATH,
-};
+pub use archive::{BundleArchive, build_tar, extract_archive, resolve_manifest};
 pub use bundle_audit::{
-    BundleAuditFields, BundleAuditPublisher, RecordedBundleAudit, EVENT_HOT_SWAPPED,
-    EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED, EVENT_ROLLED_BACK,
+    BundleAuditFields, BundleAuditPublisher, EVENT_HOT_SWAPPED, EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED,
+    EVENT_ROLLED_BACK, RecordedBundleAudit,
 };
-pub use kv_loader::{
-    BundleHandle, BundleKvLoader, BundleKvLoaderOpts, BundleKvSource, BundleStatus, KvEntry,
-    NatsKvSource,
-};
-pub use signature::{manifest_digest_bytes, parse_signature_bytes, signature_path, TrustedKeys};
+pub use errors::BundleLoadError;
 pub use kv_loader::fake_kv;
-pub use validate::{
-    hash_member, validate_members, LoadedComponent, LoadedProgram, LoadedSchema, ValidatedMembers,
+pub use kv_loader::{
+    BundleHandle, BundleKvLoader, BundleKvLoaderOpts, BundleKvSource, BundleStatus, KvEntry, NatsKvSource,
 };
+pub use manifest::{
+    BundleManifest, BundleScope, Capabilities, ComponentEntry, GATEWAY_VERSION, HOST_TARGET_WIT,
+    MANIFEST_DEPRECATED_FILENAME, MANIFEST_FILENAME, ManifestDigest, ProgramEntry, SIGNATURE_PATH, SchemaEntry,
+    Signing,
+};
+pub use signature::{TrustedKeys, manifest_digest_bytes, parse_signature_bytes, signature_path};
+pub use validate::{LoadedComponent, LoadedProgram, LoadedSchema, ValidatedMembers, hash_member, validate_members};
 
 use signature::verify_manifest_signature;
 
@@ -45,18 +42,12 @@ pub struct LoadedBundle {
     pub schemas: Vec<LoadedSchema>,
 }
 
-pub fn load_bundle(
-    archive_bytes: &[u8],
-    trusted: &TrustedKeys,
-) -> Result<LoadedBundle, BundleLoadError> {
+pub fn load_bundle(archive_bytes: &[u8], trusted: &TrustedKeys) -> Result<LoadedBundle, BundleLoadError> {
     let archive = extract_archive(archive_bytes)?;
     verify_and_materialize(&archive, trusted)
 }
 
-pub fn verify_bundle(
-    archive_bytes: &[u8],
-    trusted: &TrustedKeys,
-) -> Result<LoadedBundle, BundleLoadError> {
+pub fn verify_bundle(archive_bytes: &[u8], trusted: &TrustedKeys) -> Result<LoadedBundle, BundleLoadError> {
     load_bundle(archive_bytes, trusted)
 }
 
@@ -67,23 +58,13 @@ pub fn load_bundle_from_archive(
     verify_and_materialize(archive, trusted)
 }
 
-fn verify_and_materialize(
-    archive: &BundleArchive,
-    trusted: &TrustedKeys,
-) -> Result<LoadedBundle, BundleLoadError> {
+fn verify_and_materialize(archive: &BundleArchive, trusted: &TrustedKeys) -> Result<LoadedBundle, BundleLoadError> {
     let (manifest_filename, manifest_bytes) = resolve_manifest(archive)?;
 
-    let signature_bytes = archive
-        .get(signature_path())
-        .ok_or(BundleLoadError::SignatureMissing)?;
+    let signature_bytes = archive.get(signature_path()).ok_or(BundleLoadError::SignatureMissing)?;
 
     let manifest = BundleManifest::parse(manifest_bytes)?;
-    verify_manifest_signature(
-        manifest_bytes,
-        signature_bytes,
-        &manifest.signing.nkey_pub,
-        trusted,
-    )?;
+    verify_manifest_signature(manifest_bytes, signature_bytes, &manifest.signing.nkey_pub, trusted)?;
 
     manifest.validate()?;
     let scope = manifest.scope()?;

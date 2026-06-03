@@ -21,15 +21,11 @@ pub fn map_routes(snapshot: &GatewayConfigSnapshot) -> Vec<RouteConfiguration> {
                 },
                 routes: vec![Route {
                     r#match: Some(RouteMatch {
-                        path_specifier: Some(PathSpecifier::Prefix(
-                            http_route.path_prefix.clone(),
-                        )),
+                        path_specifier: Some(PathSpecifier::Prefix(http_route.path_prefix.clone())),
                         ..Default::default()
                     }),
                     action: Some(route::Action::Route(RouteAction {
-                        cluster_specifier: Some(ClusterSpecifier::Cluster(
-                            http_route.cluster.clone(),
-                        )),
+                        cluster_specifier: Some(ClusterSpecifier::Cluster(http_route.cluster.clone())),
                         ..Default::default()
                     })),
                     ..Default::default()

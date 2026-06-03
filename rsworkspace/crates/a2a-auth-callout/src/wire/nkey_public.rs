@@ -1,9 +1,9 @@
 use std::fmt;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use nats_jwt_rs::authorization::AuthRequest;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use nats_jwt_rs::Claims;
+use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
 
 use crate::error::AuthCalloutError;
@@ -19,9 +19,8 @@ impl NkeyPublic {
         if trimmed.is_empty() {
             return Err(AuthCalloutError::WireFormat("NKey public key must be non-empty".into()));
         }
-        KeyPair::from_public_key(trimmed).map_err(|e| {
-            AuthCalloutError::WireFormat(format!("invalid NKey public key: {e}"))
-        })?;
+        KeyPair::from_public_key(trimmed)
+            .map_err(|e| AuthCalloutError::WireFormat(format!("invalid NKey public key: {e}")))?;
         Ok(Self(trimmed.to_owned()))
     }
 
@@ -50,31 +49,23 @@ fn decode_server_auth_request_jwt(token: &str) -> Result<Claims<AuthRequest>, Au
         .decode(parts[1].as_bytes())
         .map_err(|e| AuthCalloutError::WireFormat(format!("JWT payload base64: {e}")))?;
 
-    let mut payload: serde_json::Value = serde_json::from_slice(&payload_bytes).map_err(|e| {
-        AuthCalloutError::WireFormat(format!("authorization request JWT payload JSON: {e}"))
-    })?;
+    let mut payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
+        .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request JWT payload JSON: {e}")))?;
 
     let iss = payload
         .get("iss")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            AuthCalloutError::WireFormat("authorization request JWT missing iss".into())
-        })?;
+        .ok_or_else(|| AuthCalloutError::WireFormat("authorization request JWT missing iss".into()))?;
 
-    let kp = KeyPair::from_public_key(iss).map_err(|e| {
-        AuthCalloutError::WireFormat(format!("authorization request issuer NKey: {e}"))
-    })?;
-    kp.verify(
-        &token.as_bytes()[0..token.len() - signature.len() - 1],
-        &decoded_sig,
-    )
-    .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request JWT signature: {e}")))?;
+    let kp = KeyPair::from_public_key(iss)
+        .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request issuer NKey: {e}")))?;
+    kp.verify(&token.as_bytes()[0..token.len() - signature.len() - 1], &decoded_sig)
+        .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request JWT signature: {e}")))?;
 
     normalize_auth_request_payload(&mut payload);
 
-    let claims: Claims<AuthRequest> = serde_json::from_value(payload).map_err(|e| {
-        AuthCalloutError::WireFormat(format!("decode authorization request JWT: {e}"))
-    })?;
+    let claims: Claims<AuthRequest> = serde_json::from_value(payload)
+        .map_err(|e| AuthCalloutError::WireFormat(format!("decode authorization request JWT: {e}")))?;
 
     if claims.aud.as_deref() != Some(super::AUTH_REQUEST_AUDIENCE) {
         return Err(AuthCalloutError::WireFormat(format!(
@@ -108,10 +99,8 @@ fn normalize_auth_request_payload(payload: &mut serde_json::Value) {
     else {
         return;
     };
-    tls.entry("certs")
-        .or_insert_with(|| serde_json::json!([]));
-    tls.entry("verified_chains")
-        .or_insert_with(|| serde_json::json!([]));
+    tls.entry("certs").or_insert_with(|| serde_json::json!([]));
+    tls.entry("verified_chains").or_insert_with(|| serde_json::json!([]));
 }
 
 impl fmt::Debug for NkeyPublic {

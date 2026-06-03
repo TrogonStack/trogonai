@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk, JwkSet,
-    PublicKeyUse,
+    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
+    JwkSet, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use p256::ecdsa::signature::Signer;
@@ -18,7 +18,7 @@ use trogon_aauth_verify::{
     InMemoryReplayStore, NatsPopVerifier, NatsRequest, StaticJwks, SystemTimeSource, TimeSource,
     nats_pop::{NatsHeaders, content_digest_sha256},
 };
-use trogon_identity_types::aauth::{Cnf, DWK_AGENT, TYP_AGENT, NatsSignatureEnvelope, headers};
+use trogon_identity_types::aauth::{Cnf, DWK_AGENT, NatsSignatureEnvelope, TYP_AGENT, headers};
 
 #[derive(Clone)]
 struct FixedClock(Arc<AtomicI64>);
@@ -94,7 +94,8 @@ async fn end_to_end_nats_pop_verifies() {
     let digest = content_digest_sha256(&payload);
     let created = clock.now();
     let nonce = "n-abc-1";
-    let sig_input = "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")";
+    let sig_input =
+        "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")";
 
     // Compute jkt of agent key for the canonical-base keyid.
     let jkt = trogon_aauth_verify::jwk_thumbprint(&agent_jwk_val).expect("jkt");

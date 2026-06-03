@@ -73,7 +73,10 @@ mod time {
         // Arrange: JWT with exp clearly in the past (outside leeway).
         // Act: ingress request with Authorization header.
         // Assert: error.code == AUTH_EXPIRED; data.reason == "expired".
-        unimplemented!("verify error.code == {} and data.reason == expired", rpc_codes::AUTH_EXPIRED);
+        unimplemented!(
+            "verify error.code == {} and data.reason == expired",
+            rpc_codes::AUTH_EXPIRED
+        );
     }
 
     #[tokio::test]

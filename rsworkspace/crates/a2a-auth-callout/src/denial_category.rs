@@ -69,9 +69,9 @@ mod tests {
             DenialCategory::InternalError
         );
         assert_eq!(
-            DenialCategory::from_auth_callout_error(
-                &AuthCalloutError::Deserialize(serde_json::from_str::<String>("x").unwrap_err())
-            ),
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::Deserialize(
+                serde_json::from_str::<String>("x").unwrap_err()
+            )),
             DenialCategory::InvalidRequest
         );
         assert_eq!(
@@ -92,9 +92,7 @@ mod tests {
 
     #[test]
     fn credential_unknown_account() {
-        let err = AuthCalloutError::CredentialVerification(
-            "requested account \"evil\" not allowlisted".into(),
-        );
+        let err = AuthCalloutError::CredentialVerification("requested account \"evil\" not allowlisted".into());
         assert_eq!(
             DenialCategory::from_auth_callout_error(&err),
             DenialCategory::UnknownAccount
@@ -103,8 +101,7 @@ mod tests {
 
     #[test]
     fn credential_verifier_unavailable() {
-        let err =
-            AuthCalloutError::CredentialVerification("OIDC verifier not configured".into());
+        let err = AuthCalloutError::CredentialVerification("OIDC verifier not configured".into());
         assert_eq!(
             DenialCategory::from_auth_callout_error(&err),
             DenialCategory::VerifierUnavailable

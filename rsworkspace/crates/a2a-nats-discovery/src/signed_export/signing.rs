@@ -157,8 +157,13 @@ mod tests {
         let envelope = sign_discovery_export(&signing_key, key_id, payload, 1);
         let empty = BTreeMap::new();
 
-        let err = verify_signed_export(&empty, payload, &envelope, &SignatureVerificationConfig::at_now(1, DEFAULT_SIGNATURE_MAX_AGE))
-            .expect_err("missing trusted key");
+        let err = verify_signed_export(
+            &empty,
+            payload,
+            &envelope,
+            &SignatureVerificationConfig::at_now(1, DEFAULT_SIGNATURE_MAX_AGE),
+        )
+        .expect_err("missing trusted key");
 
         assert!(matches!(err, SignedExportError::UnknownKeyId(_)));
     }
@@ -170,8 +175,13 @@ mod tests {
         let mut envelope = sign_discovery_export(&signing_key, key_id, payload, 1);
         envelope.signature[0] ^= 0xFF;
 
-        let err = verify_signed_export(&trusted, payload, &envelope, &SignatureVerificationConfig::at_now(1, DEFAULT_SIGNATURE_MAX_AGE))
-            .expect_err("tampered signature");
+        let err = verify_signed_export(
+            &trusted,
+            payload,
+            &envelope,
+            &SignatureVerificationConfig::at_now(1, DEFAULT_SIGNATURE_MAX_AGE),
+        )
+        .expect_err("tampered signature");
 
         assert!(matches!(err, SignedExportError::SignatureMismatch));
     }

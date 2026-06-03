@@ -97,11 +97,7 @@ mod tests {
     fn default_permissions_subscribe_to_caller_namespaces() {
         let caller = CallerId::new("usr1").unwrap();
         let perms = IssuedPermissions::default_for_caller(&caller);
-        let subjects: Vec<&str> = perms
-            .subscribe_allow
-            .iter()
-            .map(SubjectPattern::as_str)
-            .collect();
+        let subjects: Vec<&str> = perms.subscribe_allow.iter().map(SubjectPattern::as_str).collect();
         assert!(subjects.contains(&"_INBOX.usr1.>"));
         assert!(subjects.contains(&"a2a.push.usr1.>"));
     }

@@ -9,11 +9,7 @@ pub enum ConfigFormat {
     Toml,
 }
 
-pub fn run(
-    settings: &CtlSettings,
-    format: ConfigFormat,
-    pretty: bool,
-) -> Result<(), String> {
+pub fn run(settings: &CtlSettings, format: ConfigFormat, pretty: bool) -> Result<(), String> {
     let view = settings.to_show_view();
     match format {
         ConfigFormat::Json => emit_json(&view, pretty).map_err(|error| error.to_string()),

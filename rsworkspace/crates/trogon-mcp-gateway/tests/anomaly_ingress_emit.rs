@@ -23,13 +23,13 @@ mod harness {
         pub join: tokio::task::JoinHandle<Result<(), trogon_mcp_gateway::GatewayError>>,
     }
 
-    pub async fn start_gateway(
-        settings: GatewaySettings,
-    ) -> GatewayHarness {
+    pub async fn start_gateway(settings: GatewaySettings) -> GatewayHarness {
         let nats_conf = settings.mcp.nats().clone();
         let prefix = settings.mcp.prefix().clone();
 
-        let backend = connect(&nats_conf, Duration::from_secs(15)).await.expect("backend nats");
+        let backend = connect(&nats_conf, Duration::from_secs(15))
+            .await
+            .expect("backend nats");
         let backend_reply = serde_json::to_vec(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -45,7 +45,11 @@ mod harness {
                 while let Some(msg) = sub.next().await {
                     let Some(reply) = msg.reply else { continue };
                     backend_nats
-                        .publish_with_headers(reply.to_string(), async_nats::HeaderMap::new(), Bytes::from(backend_reply))
+                        .publish_with_headers(
+                            reply.to_string(),
+                            async_nats::HeaderMap::new(),
+                            Bytes::from(backend_reply),
+                        )
                         .await
                         .ok();
                     backend_nats.flush().await.ok();
@@ -54,7 +58,11 @@ mod harness {
             });
         }
 
-        let gateway_client = Arc::new(connect(&nats_conf, Duration::from_secs(15)).await.expect("gateway nats"));
+        let gateway_client = Arc::new(
+            connect(&nats_conf, Duration::from_secs(15))
+                .await
+                .expect("gateway nats"),
+        );
         let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = Arc::new(AllowAllPermissionChecker);
         let traces = trogon_mcp_gateway::trace::TraceStore::default();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -94,6 +102,7 @@ mod harness {
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn anomaly_emits_when_emitter_configured() {
     let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     let connect = async_nats::connect(url);
@@ -141,10 +150,7 @@ async fn anomaly_emits_when_emitter_configured() {
     assert_eq!(features.tenant_id, "unknown");
     assert_eq!(features.agent_id, "anonymous");
     assert_eq!(features.purpose, "");
-    assert_eq!(
-        features.target,
-        backend_target_aud("unknown", "fixture")
-    );
+    assert_eq!(features.target, backend_target_aud("unknown", "fixture"));
     assert_eq!(features.request_id, "1");
     assert_eq!(features.chain_depth, 0);
 
@@ -153,6 +159,7 @@ async fn anomaly_emits_when_emitter_configured() {
 }
 
 #[tokio::test]
+#[ignore = "requires live NATS — see PENDING_TODO §8.3"]
 async fn anomaly_emit_failure_does_not_fail_request() {
     let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     let connect = async_nats::connect(url);
