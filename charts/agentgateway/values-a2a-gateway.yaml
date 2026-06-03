@@ -1,0 +1,15 @@
+# Overlay: deploy `a2a-gateway` from the same chart.
+#
+# Usage:
+#   helm install a2a-gw charts/agentgateway -f charts/agentgateway/values-a2a-gateway.yaml
+image:
+  bin: a2a-gateway
+
+env:
+  A2A_GATEWAY_PROBE_LISTEN_ADDR: "0.0.0.0:8080"
+  A2A_GATEWAY_QUEUE_GROUP: "a2a-gateway"
+  A2A_GATEWAY_AUDIT_STREAM_NAME: "A2A_AUDIT"
+  NATS_URL: "nats://nats:4222"
+  RUST_LOG: "info"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  OTEL_SERVICE_NAME: "a2a-gateway"

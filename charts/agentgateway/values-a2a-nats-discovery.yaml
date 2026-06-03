@@ -1,0 +1,11 @@
+# Overlay: deploy `a2a-nats-discovery` (federated AgentCard discovery + registrar).
+image:
+  bin: a2a-nats-discovery
+
+env:
+  NATS_URL: "nats://nats:4222"
+  A2A_DISCOVERY_CATALOG_KV_BUCKET: "a2a-catalog"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "a2a-nats-discovery"
+
+# existingSecret: a2a-operator-signing-key

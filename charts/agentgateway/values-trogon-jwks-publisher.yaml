@@ -1,0 +1,11 @@
+# Overlay: deploy `trogon-jwks-publisher`.
+image:
+  bin: trogon-jwks-publisher
+
+env:
+  NATS_URL: "nats://nats:4222"
+  TROGON_JWKS_PUBLISHER_KV_BUCKET: "mcp-jwks"
+  RUST_LOG: "info"
+  OTEL_SERVICE_NAME: "trogon-jwks-publisher"
+
+# existingSecret: trogon-account-signing-key
