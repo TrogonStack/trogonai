@@ -25,6 +25,15 @@
     "rsworkspace/crates/a2a-auth-callout": {
       "component": "a2a-auth-callout"
     },
+    "rsworkspace/crates/a2a-nats-discovery": {
+      "component": "a2a-nats-discovery"
+    },
+    "rsworkspace/crates/acp-nats-server": {
+      "component": "acp-nats-server"
+    },
+    "rsworkspace/crates/trogon-traffic-view": {
+      "component": "trogon-traffic-view"
+    },
     "rsworkspace/crates/mcp-nats-server": {
       "component": "mcp-nats-server"
     },
