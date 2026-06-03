@@ -2,6 +2,7 @@
 name = "trogon-aauth-sdk"
 version = "0.0.1"
 edition = "2024"
+license.workspace = true
 publish = false
 description = "Agent-side SDK for AAuth: keypair, bootstrap, request signing (HTTP RFC 9421 + NATS), 401-retry."
 

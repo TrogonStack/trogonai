@@ -2,6 +2,7 @@
 name = "a2a-pack"
 version = "0.0.0-skeleton"
 edition = "2024"
+license.workspace = true
 description = "First-party A2A policy bundle surface (skeleton placeholder)"
 publish = false
 

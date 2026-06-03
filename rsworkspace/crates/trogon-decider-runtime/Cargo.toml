@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Runtime execution, stream, and snapshot primitives for Trogon deciders"
 license = "MIT"
+publish.workspace = true
 repository = "https://github.com/TrogonStack/trogonai"
 
 [features]
