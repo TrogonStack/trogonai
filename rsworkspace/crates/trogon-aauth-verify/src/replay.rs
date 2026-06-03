@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 
@@ -19,15 +18,8 @@ pub trait ReplayStore: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReplayError {
-    /// The in-memory variant: its Mutex got poisoned by a panic on another
-    /// thread. The store cannot recover; callers should treat the request as
-    /// failed-closed.
-    #[error("replay store mutex poisoned")]
-    MutexPoisoned,
-    /// Pluggable backends (NATS JetStream KV, Redis, etc.) surface their own
-    /// typed source error here instead of being flattened to a String.
-    #[error("replay store backend failure")]
-    Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("backend: {0}")]
+    Backend(String),
 }
 
 /// Best-effort in-memory replay protection. Suitable for a single-process gateway
@@ -49,10 +41,8 @@ impl InMemoryReplayStore {
         Self {
             inner: Mutex::new(HashMap::new()),
             clock: Box::new(|| {
-                let secs = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                 i64::try_from(secs).unwrap_or(i64::MAX)
             }),
         }
@@ -78,7 +68,7 @@ impl InMemoryReplayStore {
 #[async_trait]
 impl ReplayStore for InMemoryReplayStore {
     async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError> {
-        let mut map = self.inner.lock().map_err(|_| ReplayError::MutexPoisoned)?;
+        let mut map = self.inner.lock().map_err(|e| ReplayError::Backend(e.to_string()))?;
         self.gc(&mut map);
         let expires_at = self.now().saturating_add(i64::from(ttl_secs));
         if map.contains_key(key) {
@@ -90,4 +80,24 @@ impl ReplayStore for InMemoryReplayStore {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn first_insert_then_replay_fails() {
+        let store = InMemoryReplayStore::new();
+        assert!(store.check_and_insert("k1", 60).await.unwrap());
+        assert!(!store.check_and_insert("k1", 60).await.unwrap());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn expires_after_ttl() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        let now = std::sync::Arc::new(AtomicI64::new(1000));
+        let now_c = now.clone();
+        let store = InMemoryReplayStore::new().with_clock(move || now_c.load(Ordering::SeqCst));
+        assert!(store.check_and_insert("k", 5).await.unwrap());
+        now.store(1010, Ordering::SeqCst); // past expiry
+        assert!(store.check_and_insert("k", 5).await.unwrap());
+    }
+}

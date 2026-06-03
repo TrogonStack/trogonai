@@ -1,27 +1,24 @@
 //! Integration test: mint an `aa-agent+jwt` with a real P-256 key, sign a NATS
 //! envelope, verify end-to-end through `NatsPopVerifier`.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
-    JwkSet, PublicKeyUse,
+    AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk, JwkSet,
+    PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use trogon_aauth_verify::{
-    InMemoryReplayStore, NatsHeaders, NatsPopVerifier, NatsRequest, StaticJwks, SystemTimeSource, TimeSource,
-    nats_pop::{NatsPopError, content_digest_sha256},
+    InMemoryReplayStore, NatsPopVerifier, NatsRequest, StaticJwks, SystemTimeSource, TimeSource,
+    nats_pop::{NatsHeaders, content_digest_sha256},
 };
-use trogon_identity_types::aauth::{Cnf, DWK_AGENT, NatsSignatureEnvelope, TYP_AGENT, headers};
+use trogon_identity_types::aauth::{Cnf, DWK_AGENT, TYP_AGENT, NatsSignatureEnvelope, headers};
 
 #[derive(Clone)]
 struct FixedClock(Arc<AtomicI64>);
@@ -71,9 +68,8 @@ async fn end_to_end_nats_pop_verifies() {
     let clock_value = Arc::new(AtomicI64::new(1_700_000_000));
     let clock = FixedClock(clock_value.clone());
 
-    // Mint the aa-agent+jwt using p256 → ECDSA-SHA256. We can use
-    // `jsonwebtoken`'s EncodingKey::from_ec_pem path, but here we use the raw
-    // signing key via PKCS#8.
+    // Mint the aa-agent+jwt using p256 → ECDSA-SHA256. We can use `jsonwebtoken`'s
+    // EncodingKey::from_ec_pem path, but here we use the raw signing key via PKCS#8.
     let pem = pkcs8_pem_from_signing_key(&ap_signing);
     let enc_key = EncodingKey::from_ec_pem(pem.as_bytes()).expect("from pem");
     let mut header = Header::new(Algorithm::ES256);
@@ -98,8 +94,7 @@ async fn end_to_end_nats_pop_verifies() {
     let digest = content_digest_sha256(&payload);
     let created = clock.now();
     let nonce = "n-abc-1";
-    let sig_input =
-        "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")";
+    let sig_input = "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")";
 
     // Compute jkt of agent key for the canonical-base keyid.
     let jkt = trogon_aauth_verify::jwk_thumbprint(&agent_jwk_val).expect("jkt");
@@ -129,7 +124,7 @@ async fn end_to_end_nats_pop_verifies() {
         subject,
         reply: Some(reply),
         payload: payload.as_slice(),
-        headers: NatsHeaders::new_checked(&headers_vec).expect("unique security headers"),
+        headers: NatsHeaders::new(&headers_vec),
     };
 
     let resolver = StaticJwks::new().with(ap_iss.clone(), ap_set);
@@ -139,12 +134,13 @@ async fn end_to_end_nats_pop_verifies() {
 
     // 5) Replay must fail.
     let err = verifier.verify(&req).await.expect_err("replay");
-    assert!(matches!(err, NatsPopError::Replay));
+    assert!(matches!(err, trogon_aauth_verify::nats_pop::NatsPopError::Replay));
 
-    let _ = SystemTimeSource; // keep the export referenced
+    let _ = SystemTimeSource; // keep referenced
 }
 
 /// PKCS#8 PEM for a p256 SigningKey.
 fn pkcs8_pem_from_signing_key(sk: &SigningKey) -> String {
+    use p256::pkcs8::EncodePrivateKey;
     sk.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).expect("pkcs8").to_string()
 }
