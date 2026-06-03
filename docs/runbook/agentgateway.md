@@ -113,7 +113,12 @@ The grant subject grammar is fixed at `<prefix>.approvals.<request_id>.grant`
 3. Confirm `<prefix>.audit.allow.>` traffic resumes within the policy bundle
    load timeout (~5s).
 4. If the rollback is caused by a bundle regression, also roll back the policy
-   KV revision via `trogon-gateway-ctl bundle revert --to <rev>`.
+   KV revision. For v0.1 this is a manual NATS step:
+   `nats kv put policy-bundle <bundle-key> @<path-to-previous-bundle.tar>`
+   The gateway watcher promotes the new revision within the bundle load
+   timeout (~5s). A first-class `trogon-gateway-ctl bundle revert --to <rev>`
+   subcommand is deferred to v0.2 alongside the admin API
+   (see `docs/roadmap/agentgateway-v0.2.md`).
 
 ## Diagnostic checklist
 
