@@ -2,6 +2,8 @@
 name = "trogon-a2a-sdk"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 description = "Identity-aware A2A client and server SDK (typed call/serve, STS and registry behind traits)"
 readme = "README.md"
 

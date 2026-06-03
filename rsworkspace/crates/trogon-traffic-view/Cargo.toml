@@ -2,6 +2,8 @@
 name = "trogon-traffic-view"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 description = "Agent-traffic view: audit projector, Postgres indexer, and OCSF export"
 
 [lints]

@@ -2,6 +2,8 @@
 name = "a2a-nats-agent"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "a2a-nats-agent"
