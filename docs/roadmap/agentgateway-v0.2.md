@@ -53,6 +53,20 @@ multi-week work (account JWT signing, callout service registration).
 v0.1 ships with the stub returning a clear error; operators are
 expected to deploy a bespoke auth-callout service alongside.
 
+### `a2a-bridge` HTTPS ingress (disposition)
+
+**Decision (2026-06-03):** `a2a-bridge` ships as a `0.0.0-skeleton`
+crate in v0.1 — binary builds but transports default to the stub
+auth-callout client. Production HTTPS ingress is **deferred to v0.2**
+together with the `$SYS` auth callout work above; the two land
+together because the bridge cannot do anything useful without real
+auth-callout responses.
+
+**Why now:** ADR 0017 Option A focuses v0.1 on the NATS substrate;
+HTTPS bridging is purely an integration convenience for HTTP-bound
+MCP/A2A clients. The Helm chart leaves the bridge sub-chart out of
+the default install (PENDING_TODO §7.1) until v0.2.
+
 ---
 
 ## Optional crates
@@ -67,6 +81,32 @@ not published.
 
 **Decision:** Shipped as private library crate in v0.1 (no binary
 target). Webhook adapter restoration moves to v0.2.
+
+---
+
+## MCP federation (Virtual MCP)
+
+### Virtual MCP routing across heterogeneous backends
+
+**Decision (2026-06-03):** Virtual MCP routing across heterogeneous
+backends is **deferred to v0.2**.
+
+Today `trogon-mcp-gateway::chain_resolver` exists and the
+`chain_resolver_e2e.rs` integration test exercises homogeneous chains.
+Cross-backend federation (one client sees N servers as one) is the
+upstream `mcp/mergestream.rs` analog and is not exercised end-to-end
+in v0.1. The `virtual_mcp_routing.rs` test stays `#[ignore]`'d as the
+v0.2 contract pin.
+
+### `tools/list` virtualization (rename / alias / hide)
+
+**Decision (2026-06-03):** Per-client tool **renaming and aliasing**
+is **deferred to v0.2**. The hide / filter dimension (denylist by
+name) ships in v0.1 via `policy/list_filter`.
+
+The `tools_list_filter.rs` integration test stays `#[ignore]`'d
+because it currently asserts rename behavior. v0.1 release notes call
+out the supported subset (filter-only).
 
 ---
 
