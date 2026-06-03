@@ -21,7 +21,7 @@ impl RedactionRuleset {
 
     pub fn from_yaml(s: &str) -> Result<Self, RedactionError> {
         let raw: RawRuleset =
-            serde_yml::from_str(s).map_err(|e| RedactionError::InvalidYaml(e.to_string()))?;
+            serde_norway::from_str(s).map_err(|e| RedactionError::InvalidYaml(e.to_string()))?;
         let mut rules = Vec::with_capacity(raw.rules.len());
         for raw_rule in raw.rules {
             rules.push(RedactionRule {
