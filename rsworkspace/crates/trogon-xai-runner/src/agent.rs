@@ -1080,7 +1080,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: session_model_override,
-                tool_allowlist: Vec::new(),
+                tool_allowlist: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("toolAllowlist"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
