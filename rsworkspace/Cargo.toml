@@ -25,7 +25,7 @@ trogon-std = { path = "crates/trogon-std" }
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
 
 # MCP
-rmcp = { version = "=1.6.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
+rmcp = { version = "=1.7.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
 
 # Async runtime & networking
 async-compat = "=0.2.5"
@@ -37,26 +37,26 @@ buffa = { version = "=0.7.0", features = ["json"] }
 buffa-types = { version = "=0.7.0", features = ["json"] }
 futures = "=0.3.32"
 futures-util = "=0.3.32"
-tokio = "=1.52.1"
+tokio = "=1.52.3"
 tokio-tungstenite = "=0.29.0"
-tower-http = { version = "=0.6.8", features = ["trace"] }
+tower-http = { version = "=0.6.11", features = ["trace"] }
 
 # Serialization
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.228", features = ["derive"] }
-serde_json = "=1.0.149"
+serde_json = "=1.0.150"
 
 # CLI
 clap = { version = "=4.6.1", features = ["derive"] }
 
 # Observability
-opentelemetry = "=0.31.0"
-opentelemetry-appender-tracing = "=0.31.1"
-opentelemetry-otlp = "=0.31.1"
-opentelemetry-semantic-conventions = { version = "=0.31.0", features = ["semconv_experimental"] }
-opentelemetry_sdk = "=0.31.0"
+opentelemetry = "=0.32.0"
+opentelemetry-appender-tracing = "=0.32.0"
+opentelemetry-otlp = "=0.32.0"
+opentelemetry-semantic-conventions = { version = "=0.32.0", features = ["semconv_experimental"] }
+opentelemetry_sdk = "=0.32.1"
 tracing = "=0.1.44"
-tracing-opentelemetry = "=0.32.1"
+tracing-opentelemetry = "=0.33.0"
 tracing-subscriber = "=0.3.23"
 
 # Discord
@@ -66,7 +66,7 @@ twilight-model = "=0.17.1"
 # Misc
 tempfile = "=3.27.0"
 time = "=0.3.47"
-uuid = { version = "=1.23.1", features = ["v4", "v7"] }
+uuid = { version = "=1.23.2", features = ["v4", "v7"] }
 
 [profile.release]
 lto = "thin"
