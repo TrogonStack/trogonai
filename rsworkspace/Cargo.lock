@@ -7442,6 +7442,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-content-scan-stub"
+version = "0.0.1"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "futures",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-mcp-gateway",
+]
+
+[[package]]
 name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
