@@ -1,8 +1,9 @@
 use std::fmt;
 
 use crate::error::{
-    AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED,
-    TASK_NOT_CANCELABLE, TASK_NOT_FOUND, UNSUPPORTED_OPERATION,
+    AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, EXTENDED_AGENT_CARD_NOT_CONFIGURED, EXTENSION_SUPPORT_REQUIRED,
+    INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED, TASK_NOT_CANCELABLE, TASK_NOT_FOUND,
+    UNSUPPORTED_OPERATION, VERSION_NOT_SUPPORTED,
 };
 
 #[derive(Debug)]
@@ -20,6 +21,9 @@ pub enum ClientError {
     UnsupportedOperation,
     ContentTypeNotSupported,
     InvalidAgentResponse,
+    ExtendedAgentCardNotConfigured,
+    ExtensionSupportRequired(String),
+    VersionNotSupported(String),
     AgentUnavailable,
     JsonRpc {
         code: i32,
@@ -42,6 +46,9 @@ impl ClientError {
             UNSUPPORTED_OPERATION => Self::UnsupportedOperation,
             CONTENT_TYPE_NOT_SUPPORTED => Self::ContentTypeNotSupported,
             INVALID_AGENT_RESPONSE => Self::InvalidAgentResponse,
+            EXTENDED_AGENT_CARD_NOT_CONFIGURED => Self::ExtendedAgentCardNotConfigured,
+            EXTENSION_SUPPORT_REQUIRED => Self::ExtensionSupportRequired(message),
+            VERSION_NOT_SUPPORTED => Self::VersionNotSupported(message),
             AGENT_UNAVAILABLE => Self::AgentUnavailable,
             _ => Self::JsonRpc { code, message },
         }
@@ -62,6 +69,9 @@ impl fmt::Display for ClientError {
             Self::UnsupportedOperation => write!(f, "operation not supported"),
             Self::ContentTypeNotSupported => write!(f, "content type not supported"),
             Self::InvalidAgentResponse => write!(f, "invalid agent response"),
+            Self::ExtendedAgentCardNotConfigured => write!(f, "extended agent card not configured"),
+            Self::ExtensionSupportRequired(msg) => write!(f, "extension support required: {msg}"),
+            Self::VersionNotSupported(msg) => write!(f, "A2A protocol version not supported: {msg}"),
             Self::AgentUnavailable => write!(f, "agent unavailable"),
             Self::JsonRpc { code, message } => write!(f, "JSON-RPC error {code}: {message}"),
             Self::ConsumerSetup(msg) => write!(f, "failed to set up event consumer: {msg}"),
@@ -127,6 +137,30 @@ mod tests {
     fn agent_unavailable_code_maps_correctly() {
         let err = ClientError::from_jsonrpc_code(AGENT_UNAVAILABLE, "unavailable".into());
         assert!(matches!(err, ClientError::AgentUnavailable));
+    }
+
+    #[test]
+    fn extended_card_not_configured_code_maps_correctly() {
+        let err = ClientError::from_jsonrpc_code(EXTENDED_AGENT_CARD_NOT_CONFIGURED, "no ext card".into());
+        assert!(matches!(err, ClientError::ExtendedAgentCardNotConfigured));
+    }
+
+    #[test]
+    fn extension_support_required_code_carries_message() {
+        let err = ClientError::from_jsonrpc_code(EXTENSION_SUPPORT_REQUIRED, "need ext foo".into());
+        match err {
+            ClientError::ExtensionSupportRequired(msg) => assert_eq!(msg, "need ext foo"),
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn version_not_supported_code_carries_message() {
+        let err = ClientError::from_jsonrpc_code(VERSION_NOT_SUPPORTED, "9.9.9".into());
+        match err {
+            ClientError::VersionNotSupported(msg) => assert_eq!(msg, "9.9.9"),
+            other => panic!("unexpected variant {other:?}"),
+        }
     }
 
     #[test]
@@ -204,6 +238,29 @@ mod tests {
     #[test]
     fn display_agent_unavailable() {
         assert!(ClientError::AgentUnavailable.to_string().contains("unavailable"));
+    }
+
+    #[test]
+    fn display_extended_card_not_configured() {
+        assert!(
+            ClientError::ExtendedAgentCardNotConfigured
+                .to_string()
+                .contains("extended agent card")
+        );
+    }
+
+    #[test]
+    fn display_extension_support_required() {
+        let err = ClientError::ExtensionSupportRequired("foo".into());
+        assert!(err.to_string().contains("extension support required"));
+        assert!(err.to_string().contains("foo"));
+    }
+
+    #[test]
+    fn display_version_not_supported() {
+        let err = ClientError::VersionNotSupported("0.4".into());
+        assert!(err.to_string().contains("version not supported"));
+        assert!(err.to_string().contains("0.4"));
     }
 
     #[test]

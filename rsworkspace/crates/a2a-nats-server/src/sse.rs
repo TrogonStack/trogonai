@@ -50,6 +50,13 @@ pub fn client_error_to_jsonrpc_code(err: &ClientError) -> (i32, String) {
         ClientError::UnsupportedOperation => (a2a_nats::error::UNSUPPORTED_OPERATION, err.to_string()),
         ClientError::ContentTypeNotSupported => (a2a_nats::error::CONTENT_TYPE_NOT_SUPPORTED, err.to_string()),
         ClientError::InvalidAgentResponse => (a2a_nats::error::INVALID_AGENT_RESPONSE, err.to_string()),
+        ClientError::ExtendedAgentCardNotConfigured => {
+            (a2a_nats::error::EXTENDED_AGENT_CARD_NOT_CONFIGURED, err.to_string())
+        }
+        ClientError::ExtensionSupportRequired(_) => {
+            (a2a_nats::error::EXTENSION_SUPPORT_REQUIRED, err.to_string())
+        }
+        ClientError::VersionNotSupported(_) => (a2a_nats::error::VERSION_NOT_SUPPORTED, err.to_string()),
         ClientError::AgentUnavailable => (a2a_nats::error::AGENT_UNAVAILABLE, err.to_string()),
         ClientError::JsonRpc { code, message } => (*code, message.clone()),
         _ => (-32603, err.to_string()),
