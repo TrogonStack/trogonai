@@ -216,7 +216,9 @@ name = "a2a-pack"
 version = "0.0.0-skeleton"
 dependencies = [
  "a2a-redaction",
+ "base64 0.22.1",
  "jsonschema",
+ "jsonwebtoken 9.3.0",
  "serde",
  "serde_json",
  "tracing",

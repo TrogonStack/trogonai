@@ -6,6 +6,7 @@
 
 pub mod agent_card_read;
 pub mod agent_card_schema;
+pub mod agent_card_signing;
 pub mod audit;
 pub mod bundle;
 pub mod catalog;
@@ -20,6 +21,9 @@ pub use agent_card_read::{
 };
 pub use agent_card_schema::{
     AGENT_CARD_JSON_SCHEMA, AgentCardJsonSchema, AgentCardValidateError, validate_agent_card_value,
+};
+pub use agent_card_signing::{
+    AgentCardKeyResolver, AgentCardSignError, AgentCardSignature, AgentCardSigner, sign_agent_card, verify_agent_card,
 };
 pub use audit::{
     AuditCallerVia, AuditEnvelopeExtensions, AuditPolicyDecision, AuditTaskLifecycleId, AuditTaskStateLabel,
