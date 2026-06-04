@@ -485,6 +485,7 @@ mod gateway_e2e {
             stepup_policy: None,
             stepup_bridge: None,
             freshness_clock: None,
+            multi_region_router: None,
         };
 
         let gateway_client = Arc::new(

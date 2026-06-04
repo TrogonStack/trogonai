@@ -712,6 +712,7 @@ async fn spawn_gateway(
         stepup_policy: None,
         stepup_bridge: None,
         freshness_clock: None,
+        multi_region_router: None,
     };
 
     let gateway_client = Arc::new(connect(nats_conf, connect_timeout).await.map_err(|e| e.to_string())?);

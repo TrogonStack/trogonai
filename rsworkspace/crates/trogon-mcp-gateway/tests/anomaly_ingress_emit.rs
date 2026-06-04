@@ -131,6 +131,10 @@ async fn anomaly_emits_when_emitter_configured() {
         chain_resolver: None,
         rate_limit: None,
         anomaly_emitter: Some(fake.clone()),
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
+        multi_region_router: None,
     };
 
     let harness = harness::start_gateway(settings).await;
@@ -184,6 +188,10 @@ async fn anomaly_emit_failure_does_not_fail_request() {
         chain_resolver: None,
         rate_limit: None,
         anomaly_emitter: Some(fake.clone()),
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
+        multi_region_router: None,
     };
 
     let harness = harness::start_gateway(settings).await;
