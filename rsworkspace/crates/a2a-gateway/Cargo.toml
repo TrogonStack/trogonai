@@ -39,6 +39,9 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+trogon-aauth-verify = { workspace = true }
+trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal"] }
 uuid = { workspace = true }
