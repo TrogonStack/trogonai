@@ -22,6 +22,15 @@ pub const CONTENT_TYPE_NOT_SUPPORTED: i32 = -32005;
 /// A2A-defined: agent response is malformed or otherwise invalid.
 pub const INVALID_AGENT_RESPONSE: i32 = -32006;
 
+/// A2A-defined: agent does not have an extended AgentCard configured to return.
+pub const EXTENDED_AGENT_CARD_NOT_CONFIGURED: i32 = -32007;
+
+/// A2A-defined: client required an extension the agent does not support.
+pub const EXTENSION_SUPPORT_REQUIRED: i32 = -32008;
+
+/// A2A-defined: client requested an A2A protocol version this agent cannot serve.
+pub const VERSION_NOT_SUPPORTED: i32 = -32009;
+
 /// Binding-specific: no agent replicas are reachable on the agent subject (no responders).
 pub const AGENT_UNAVAILABLE: i32 = -32050;
 
@@ -38,6 +47,9 @@ mod tests {
             UNSUPPORTED_OPERATION,
             CONTENT_TYPE_NOT_SUPPORTED,
             INVALID_AGENT_RESPONSE,
+            EXTENDED_AGENT_CARD_NOT_CONFIGURED,
+            EXTENSION_SUPPORT_REQUIRED,
+            VERSION_NOT_SUPPORTED,
             AGENT_UNAVAILABLE,
         ];
         let mut seen = std::collections::HashSet::new();
@@ -57,6 +69,9 @@ mod tests {
             UNSUPPORTED_OPERATION,
             CONTENT_TYPE_NOT_SUPPORTED,
             INVALID_AGENT_RESPONSE,
+            EXTENDED_AGENT_CARD_NOT_CONFIGURED,
+            EXTENSION_SUPPORT_REQUIRED,
+            VERSION_NOT_SUPPORTED,
             AGENT_UNAVAILABLE,
         ] {
             assert!((-32099..=-32000).contains(&code), "{code} out of server range");
