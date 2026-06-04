@@ -131,6 +131,10 @@ pub struct SessionState {
     /// Tools for which the user chose "Always Allow" — auto-approved on future calls.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Restrictive allowlist: when non-empty, only these tool names may be offered
+    /// to the model (empty = no restriction, inherit all tools).
+    #[serde(default)]
+    pub tool_allowlist: Vec<String>,
     /// Session this was branched from. None for root sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
@@ -224,6 +228,7 @@ impl Default for SessionState {
             tool_hooks: crate::hooks::HooksConfig::default(),
             disable_builtin_tools: false,
             allowed_tools: Vec::new(),
+            tool_allowlist: Vec::new(),
             parent_session_id: None,
             branched_at_index: None,
             tool_policies: Vec::new(),
@@ -241,6 +246,37 @@ impl Default for SessionState {
             spawn_depth: 0,
         }
     }
+}
+
+/// Returns true when `allowlist` is empty (no restriction) or `name` is listed.
+pub fn is_tool_in_allowlist(allowlist: &[String], name: &str) -> bool {
+    allowlist.is_empty() || allowlist.iter().any(|t| t == name)
+}
+
+/// Restrict `tools` to names in `allowlist` when the allowlist is non-empty.
+pub fn filter_tool_defs_by_allowlist(
+    tools: Vec<trogon_tools::ToolDef>,
+    allowlist: &[String],
+) -> Vec<trogon_tools::ToolDef> {
+    if allowlist.is_empty() {
+        return tools;
+    }
+    tools
+        .into_iter()
+        .filter(|d| allowlist.iter().any(|t| t == &d.name))
+        .collect()
+}
+
+/// Intersect `enabled` with `allowlist` when the allowlist is non-empty.
+pub fn intersect_enabled_tools(enabled: &[String], allowlist: &[String]) -> Vec<String> {
+    if allowlist.is_empty() {
+        return enabled.to_vec();
+    }
+    enabled
+        .iter()
+        .filter(|t| allowlist.iter().any(|a| a == *t))
+        .cloned()
+        .collect()
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
@@ -1109,5 +1145,32 @@ mod tests {
             let children = store.list_children("root-session").await.unwrap();
             assert!(children.is_empty());
         }
+    }
+
+    #[test]
+    fn filter_tool_defs_by_allowlist_empty_means_no_restriction() {
+        let defs = trogon_tools::all_tool_defs();
+        let len = defs.len();
+        let filtered = filter_tool_defs_by_allowlist(defs, &[]);
+        assert_eq!(filtered.len(), len);
+    }
+
+    #[test]
+    fn filter_tool_defs_by_allowlist_keeps_only_listed_names() {
+        let defs = trogon_tools::all_tool_defs();
+        let filtered = filter_tool_defs_by_allowlist(defs, &["read_file".to_string()]);
+        assert!(filtered.iter().any(|d| d.name == "read_file"));
+        assert!(!filtered.iter().any(|d| d.name == "write_file"));
+    }
+
+    #[test]
+    fn intersect_enabled_tools_applies_allowlist() {
+        let enabled = vec![
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "web_search".to_string(),
+        ];
+        let out = intersect_enabled_tools(&enabled, &["read_file".to_string()]);
+        assert_eq!(out, vec!["read_file".to_string()]);
     }
 }

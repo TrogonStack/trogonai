@@ -193,6 +193,9 @@ struct XaiSession {
     /// Incremented on each sub-agent session so recursion can be bounded.
     #[serde(default)]
     spawn_depth: u32,
+    /// Restrictive subagent tool allowlist (empty = no restriction).
+    #[serde(default)]
+    tool_allowlist: Vec<String>,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -1545,6 +1548,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             mut history,
             last_response_id,
             enabled_tools,
+            tool_allowlist,
             session_system_prompt,
             mut cwd,
             session_mode,
@@ -1566,6 +1570,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.history.clone(),
                 s.last_response_id.clone(),
                 s.enabled_tools.clone(),
+                s.tool_allowlist.clone(),
                 s.system_prompt.clone(),
                 s.cwd.clone(),
                 s.mode.clone(),
@@ -1574,6 +1579,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.terminal_id.clone(),
             )
         };
+        let offered_tools =
+            trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer shared across this turn's permission
         // checks; drained into session_audit once the turn finishes.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1708,12 +1715,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // Build the tools list: server-side enabled tools + optional bash function.
         // Only AVAILABLE_TOOLS entries become ServerSide specs; trogon-tools in
         // enabled_tools are added later as Function specs via all_tool_defs().
-        let mut call_tools: Vec<ToolSpec> = enabled_tools
+        let mut call_tools: Vec<ToolSpec> = offered_tools
             .iter()
             .filter(|t| AVAILABLE_TOOLS.iter().any(|(id, _)| *id == t.as_str()))
             .map(|t| ToolSpec::ServerSide(t.clone()))
             .collect();
-        if wasm_prefix.is_some() {
+        if wasm_prefix.is_some()
+            && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "bash")
+        {
             call_tools.push(ToolSpec::Function {
                 name: "bash".to_string(),
                 description: "Run a shell command in the session sandbox and return its output."
@@ -1732,7 +1741,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         for def in trogon_tools::all_tool_defs() {
-            if enabled_tools.iter().any(|t| t == &def.name) {
+            if offered_tools.iter().any(|t| t == &def.name) {
                 call_tools.push(ToolSpec::Function {
                     name: def.name,
                     description: def.description,
@@ -1743,7 +1752,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // Advertise the spawn_agent tool when a runner_config is set (enables the
         // model to delegate a subtask to an isolated sub-agent in a worktree).
-        if self.runner_config.is_some() {
+        if self.runner_config.is_some()
+            && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "spawn_agent")
+        {
             call_tools.push(ToolSpec::Function {
                 name: "spawn_agent".to_string(),
                 description: "Spawn a specialised sub-agent and return its output. The \
@@ -2246,7 +2257,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 .unwrap_or(serde_json::Value::Null);
                             let task = input["prompt"].as_str().unwrap_or("").to_string();
                             // Read parent context; lock released before any await.
-                            let (parent_cwd, depth, parent_mode, perm_text) = {
+                            let (parent_cwd, depth, parent_mode, perm_text, parent_allowed_tools) = {
                                 let sessions = self.sessions.lock().await;
                                 match sessions.get(&session_id) {
                                     Some(s) => (
@@ -2254,8 +2265,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                         s.spawn_depth,
                                         s.session_mode.clone(),
                                         s.permission_rules_text.clone(),
+                                        self.permission_store.allowed_tools(&session_id),
                                     ),
-                                    None => (cwd.clone(), 0, "default".to_string(), None),
+                                    None => (cwd.clone(), 0, "default".to_string(), None, vec![]),
                                 }
                             };
                             // Optional named custom subagent (.claude/agents/) → its
@@ -2299,6 +2311,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                     notif_tx,
                                 );
 
+                                let spawn_ctx = trogon_runner_tools::spawn_session::SubSessionSpawnContext {
+                                    tool_allowlist: subagent
+                                        .as_ref()
+                                        .map(|d| d.tools.clone())
+                                        .unwrap_or_default(),
+                                    allowed_tools: parent_allowed_tools,
+                                    additional_read_dirs: Vec::new(),
+                                    additional_roots: Vec::new(),
+                                };
                                 match trogon_runner_tools::spawn_session::create_sub_session(
                                     &bridge,
                                     &sub_cwd,
@@ -2306,6 +2327,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                     perm_text.as_deref(),
                                     subagent.as_ref().map(|d| d.system_prompt.as_str()),
                                     subagent.as_ref().and_then(|d| d.model.as_deref()),
+                                    Some(&spawn_ctx),
                                 )
                                 .await
                                 {

@@ -270,6 +270,9 @@ struct OpenRouterSession {
     /// Nesting depth of this session within a spawn_agent chain. 0 = top-level.
     #[serde(default)]
     spawn_depth: u32,
+    /// Restrictive subagent tool allowlist (empty = no restriction).
+    #[serde(default)]
+    tool_allowlist: Vec<String>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -1631,6 +1634,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             mut messages,
             session_system_prompt,
             enabled_tools,
+            tool_allowlist,
             mut cwd,
             mut terminal_id,
             session_mode,
@@ -1652,6 +1656,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.history.clone(),
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
+                s.tool_allowlist.clone(),
                 s.cwd.clone(),
                 s.terminal_id.clone(),
                 s.mode.clone(),
@@ -1661,6 +1666,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.permission_rules_text.clone(),
             )
         };
+        let offered_tools =
+            trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer, drained into session_audit after the turn.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
 
@@ -1707,7 +1714,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         let mut tool_defs: Vec<ToolDef> = trogon_tools::all_tool_defs()
             .into_iter()
-            .filter(|d| enabled_tools.contains(&d.name))
+            .filter(|d| offered_tools.contains(&d.name))
             .map(|d| ToolDef {
                 name: d.name,
                 description: d.description,
@@ -1715,7 +1722,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             })
             .collect();
 
-        if wasm_prefix.is_some() {
+        if wasm_prefix.is_some() && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "bash") {
             tool_defs.push(ToolDef {
                 name: "bash".to_string(),
                 description: "Run a shell command in the session sandbox and return its output.".to_string(),
@@ -1734,7 +1741,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         // Advertise spawn_agent when a runner_config is set (delegate a subtask to an
         // isolated sub-agent running a full tool-use loop in its own git worktree).
-        if self.runner_config.is_some() {
+        if self.runner_config.is_some()
+            && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "spawn_agent")
+        {
             tool_defs.push(ToolDef {
                 name: "spawn_agent".to_string(),
                 description: "Spawn a specialised sub-agent and return its output. The \
@@ -2123,11 +2132,16 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     }
                 } else if call.name == "spawn_agent" {
                     let task = tool_input["prompt"].as_str().unwrap_or("").to_string();
-                    let (parent_cwd, depth, parent_mode) = {
+                    let (parent_cwd, depth, parent_mode, parent_allowed_tools) = {
                         let sessions = self.sessions.lock().await;
                         match sessions.get(&session_id) {
-                            Some(s) => (s.cwd.clone(), s.spawn_depth, s.mode.clone()),
-                            None => (cwd.clone(), 0, default_session_mode()),
+                            Some(s) => (
+                                s.cwd.clone(),
+                                s.spawn_depth,
+                                s.mode.clone(),
+                                self.permission_store.allowed_tools(&session_id),
+                            ),
+                            None => (cwd.clone(), 0, default_session_mode(), vec![]),
                         }
                     };
                     // Optional named custom subagent (.claude/agents/) → its system
@@ -2164,6 +2178,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             runner_cfg,
                             notif_tx,
                         );
+                        let spawn_ctx = trogon_runner_tools::spawn_session::SubSessionSpawnContext {
+                            tool_allowlist: subagent
+                                .as_ref()
+                                .map(|d| d.tools.clone())
+                                .unwrap_or_default(),
+                            allowed_tools: parent_allowed_tools,
+                            additional_read_dirs: Vec::new(),
+                            additional_roots: Vec::new(),
+                        };
                         match trogon_runner_tools::spawn_session::create_sub_session(
                             &bridge,
                             &sub_cwd,
@@ -2171,6 +2194,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             None,
                             subagent.as_ref().map(|d| d.system_prompt.as_str()),
                             subagent.as_ref().and_then(|d| d.model.as_deref()),
+                            Some(&spawn_ctx),
                         )
                         .await
                         {

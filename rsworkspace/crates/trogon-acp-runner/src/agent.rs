@@ -517,6 +517,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         // Ephemeral sub-session inheriting the parent's execution context.
         let sub_sid = uuid::Uuid::new_v4().to_string();
         let now = now_iso8601();
+        let tool_allowlist = subagent
+            .as_ref()
+            .map(|d| d.tools.clone())
+            .unwrap_or_default();
         let sub_state = SessionState {
             cwd: sub_cwd,
             mode: parent_state.mode.clone(),
@@ -529,6 +533,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             system_prompt_override: subagent.as_ref().map(|d| d.system_prompt.clone()),
             permission_rules_text: parent_state.permission_rules_text.clone(),
             egress_policy: parent_state.egress_policy.clone(),
+            allowed_tools: parent_state.allowed_tools.clone(),
+            additional_read_dirs: parent_state.additional_read_dirs.clone(),
+            additional_roots: parent_state.additional_roots.clone(),
+            tool_allowlist,
             parent_session_id: Some(parent_session_id.to_string()),
             spawn_depth: parent_state.spawn_depth + 1,
             created_at: now.clone(),
@@ -656,6 +664,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         if state.mode == "plan" {
             tools.push(exit_plan_mode_tool_def());
         }
+        tools = trogon_runner_tools::filter_tool_defs_by_allowlist(tools, &state.tool_allowlist);
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
@@ -693,12 +702,28 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         .as_ref()
                         .cloned()
                         .unwrap_or_else(EgressPolicy::default_safe);
-                    let (mcp_defs, mcp_dispatch) = trogon_runner_tools::build_session_mcp(&self.http, &state.mcp_servers, &policy).await;
-                    a.add_mcp_tools(mcp_defs, mcp_dispatch);
+                    let (mcp_defs, mcp_dispatch) =
+                        trogon_runner_tools::build_session_mcp(&self.http, &state.mcp_servers, &policy)
+                            .await;
+                    let (mcp_defs, mcp_dispatch): (Vec<_>, Vec<_>) = if state.tool_allowlist.is_empty() {
+                        (mcp_defs, mcp_dispatch)
+                    } else {
+                        mcp_defs
+                            .into_iter()
+                            .zip(mcp_dispatch)
+                            .filter(|(def, _)| {
+                                trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, &def.name)
+                            })
+                            .unzip()
+                    };
+                    if !mcp_defs.is_empty() {
+                        a.add_mcp_tools(mcp_defs, mcp_dispatch);
+                    }
                 }
                 if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats)
                     && let Ok(entries) = reg.discover("execution").await
                     && let Some(entry) = entries.first()
+                    && trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, "bash")
                 {
                     let prefix = entry.metadata["acp_prefix"]
                         .as_str()
@@ -721,7 +746,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 // isolated sub-agent (full tool-use loop in a temp worktree). The
                 // responder lives in main.rs; routed via {prefix}.spawn (off the
                 // `agent.` namespace to avoid the global-wildcard collision).
-                if let Some(ref nats) = self.execution_nats {
+                if let Some(ref nats) = self.execution_nats
+                    && trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, "spawn_agent")
+                {
                     let spawn = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::new(
                         nats.clone(),
                         self.prefix.clone(),
@@ -1319,6 +1346,24 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|m| m.get("permissionRules"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        let tool_allowlist = meta
+            .and_then(|m| m.get("toolAllowlist"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let allowed_tools = meta
+            .and_then(|m| m.get("allowedTools"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         // PreToolUse/PostToolUse hooks (from settings.json `hooks`).
         let tool_hooks = meta
             .and_then(|m| m.get("toolHooks"))
@@ -1342,6 +1387,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             permission_rules_text,
             tool_hooks,
             mcp_servers,
+            allowed_tools,
+            tool_allowlist,
             created_at: now.clone(),
             updated_at: now,
             ..Default::default()
@@ -3129,5 +3176,145 @@ mod tests {
         let saved = store_clone.load("s1").await.unwrap();
         assert_eq!(saved.total_input_tokens, 100, "tokens must not decrease when prompt has no usage event");
         assert_eq!(saved.total_output_tokens, 40);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawn_subagent_restricts_tools_and_inherits_parent_permission_context() {
+        use std::sync::{Arc, Mutex};
+
+        use async_trait::async_trait;
+        use trogon_runner_tools::session_store::{SessionState, SessionStore, mock::MemorySessionStore};
+
+        #[derive(Clone)]
+        struct RecordingStore {
+            inner: MemorySessionStore,
+            last_sub: Arc<Mutex<Option<SessionState>>>,
+        }
+
+        #[async_trait]
+        impl SessionStore for RecordingStore {
+            async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
+                self.inner.load(session_id).await
+            }
+
+            async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
+                if session_id != "parent-1" {
+                    *self.last_sub.lock().unwrap() = Some(state.clone());
+                }
+                self.inner.save(session_id, state).await
+            }
+
+            async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
+                self.inner.delete(session_id).await
+            }
+
+            async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+                self.inner.list_ids().await
+            }
+
+            async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>> {
+                self.inner.list_children(parent_id).await
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_dir = tmp.path().join(".claude/agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            agents_dir.join("readonly.md"),
+            "---\nname: readonly\ntools: read_file\n---\nRead only.\n",
+        )
+        .unwrap();
+
+        let inner = MemorySessionStore::new();
+        inner
+            .save(
+                "parent-1",
+                &SessionState {
+                    cwd: tmp.path().to_string_lossy().to_string(),
+                    allowed_tools: vec!["read_file".to_string()],
+                    additional_read_dirs: vec!["/extra-read".to_string()],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let last_sub = Arc::new(Mutex::new(None));
+        let store = RecordingStore {
+            inner,
+            last_sub: Arc::clone(&last_sub),
+        };
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_response(vec![]);
+        let agent = std::sync::Arc::new(TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner.clone(),
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        ));
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                agent
+                    .spawn_subagent("parent-1", "review files", "readonly")
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        let sub = last_sub.lock().unwrap().clone().expect("sub-session must be saved");
+        assert_eq!(sub.tool_allowlist, vec!["read_file".to_string()]);
+        assert_eq!(sub.allowed_tools, vec!["read_file".to_string()]);
+        assert_eq!(sub.additional_read_dirs, vec!["/extra-read".to_string()]);
+
+        let offered = runner.captured_chat_tools();
+        assert!(offered.contains(&"read_file".to_string()));
+        assert!(!offered.contains(&"write_file".to_string()));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_prompt_empty_tool_allowlist_offers_all_builtin_tools() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        store.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_response(vec![]);
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner.clone(),
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        let offered = runner.captured_chat_tools();
+        assert!(offered.contains(&"read_file".to_string()));
+        assert!(offered.contains(&"write_file".to_string()));
     }
 }

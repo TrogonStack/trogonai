@@ -266,6 +266,8 @@ pub mod mock {
         invoke_checker_for_tool: Arc<Mutex<Option<(String, serde_json::Value)>>>,
         /// The last `system_prompt` argument passed to `run_chat_streaming`.
         captured_system_prompt: Arc<Mutex<Option<String>>>,
+        /// Tool names from the last `run_chat_streaming` call.
+        captured_chat_tools: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockAgentRunner {
@@ -284,6 +286,7 @@ pub mod mock {
                 captured_permission_checker: Arc::new(Mutex::new(None)),
                 invoke_checker_for_tool: Arc::new(Mutex::new(None)),
                 captured_system_prompt: Arc::new(Mutex::new(None)),
+                captured_chat_tools: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -349,6 +352,11 @@ pub mod mock {
         pub fn captured_system_prompt(&self) -> Option<String> {
             self.captured_system_prompt.lock().unwrap().clone()
         }
+
+        /// Return tool names passed to the last `run_chat_streaming` call.
+        pub fn captured_chat_tools(&self) -> Vec<String> {
+            self.captured_chat_tools.lock().unwrap().clone()
+        }
     }
 
     #[async_trait::async_trait(?Send)]
@@ -388,11 +396,13 @@ pub mod mock {
         async fn run_chat_streaming(
             &self,
             messages: Vec<Message>,
-            _tools: &[ToolDef],
+            tools: &[ToolDef],
             system_prompt: Option<&str>,
             event_tx: mpsc::Sender<AgentEvent>,
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
+            *self.captured_chat_tools.lock().unwrap() =
+                tools.iter().map(|d| d.name.clone()).collect();
             // If configured, invoke the captured permission checker with a fake tool
             // call to exercise the audit recording path. Clone out of the mutexes and
             // drop the guards before the await so neither is held across it.
