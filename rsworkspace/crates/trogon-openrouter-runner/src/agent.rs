@@ -2602,7 +2602,8 @@ async fn execute_bash_stateful(
 
     let nats = nats.clone();
     let session_id = session_id.to_string();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(trogon_runner_tools::wasm_bash_tool::DEFAULT_BASH_TIMEOUT_SECS);
 
     // 2. Snapshot baseline output length
     let baseline_len = {
