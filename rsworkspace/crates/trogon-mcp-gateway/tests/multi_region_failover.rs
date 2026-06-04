@@ -281,18 +281,20 @@ mod router_failover {
     //! `RegionRouter` acceptance (ADR 0016 deterministic failover + session pin).
     //! Full gateway/NATS harness cases below remain scaffolded until `gateway.rs` wiring lands.
 
+    use std::sync::Arc;
+
     use trogon_mcp_gateway::multi_region::{
         MultiRegionConfig, MultiRegionConfigError, NoopRegionAuditSink, RegionHealth, RegionHealthConfig,
         RegionRouteErrorKind, RegionRouter, RequestContext, RouteReason, TopologyBuildError,
     };
 
-    fn router_from_json(json: &str) -> RegionRouter<NoopRegionAuditSink> {
+    fn router_from_json(json: &str) -> RegionRouter {
         let topo = MultiRegionConfig::from_json_str(json)
             .expect("config")
             .into_topology()
             .expect("topology");
         let health = RegionHealth::new(&topo, RegionHealthConfig::default());
-        RegionRouter::new(topo, health, NoopRegionAuditSink)
+        RegionRouter::new(topo, health, Arc::new(NoopRegionAuditSink))
     }
 
     const TWO_REGION_JSON: &str = r#"{
