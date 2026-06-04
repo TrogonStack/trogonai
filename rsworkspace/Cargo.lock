@@ -74,6 +74,7 @@ dependencies = [
  "cel-interpreter",
  "clap",
  "futures",
+ "jsonwebtoken 10.4.0",
  "moka",
  "nkeys",
  "serde",
@@ -87,6 +88,8 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
  "uuid",
@@ -7345,6 +7348,7 @@ dependencies = [
  "tracing",
  "trogon-aauth-verify",
  "trogon-identity-types",
+ "trogon-nats",
  "uuid",
 ]
 
