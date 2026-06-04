@@ -15,6 +15,8 @@ use trogon_aauth_verify::{JwksResolver, time_source::TimeSource};
 use crate::core::{BootstrapRequest, PersonCore, PersonError, TokenRequest};
 use crate::policy::ConsentPolicy;
 use crate::store::PersonStore;
+use crate::wif::WifStore;
+use crate::wif_exchange::{WifExchangeError, WifExchangeRequest, WifExchangeService};
 
 pub struct HttpState<R: JwksResolver, S: PersonStore, P: ConsentPolicy, C: TimeSource> {
     pub core: Arc<PersonCore<R, S, P, C>>,
@@ -33,6 +35,33 @@ where
         .route("/.well-known/aauth-person.json", get(get_meta::<R, S, P, C>))
         .route("/aauth/agent", post(post_bootstrap::<R, S, P, C>))
         .route("/aauth/token", post(post_token::<R, S, P, C>))
+        .with_state(state)
+}
+
+pub struct WifHttpState<R, S, P, C, W, J>
+where
+    R: JwksResolver,
+    S: PersonStore,
+    P: ConsentPolicy,
+    C: TimeSource,
+    W: WifStore,
+    J: JwksResolver,
+{
+    pub core: Arc<PersonCore<R, S, P, C>>,
+    pub exchange: Arc<WifExchangeService<Arc<W>, J, C>>,
+}
+
+pub fn wif_router<R, S, P, C, W, J>(state: Arc<WifHttpState<R, S, P, C, W, J>>) -> Router
+where
+    R: JwksResolver + 'static,
+    S: PersonStore + 'static,
+    P: ConsentPolicy + 'static,
+    C: TimeSource + Clone + 'static,
+    W: WifStore + 'static,
+    J: JwksResolver + 'static,
+{
+    Router::new()
+        .route("/aauth/wif/exchange", post(post_wif_exchange::<R, S, P, C, W, J>))
         .with_state(state)
 }
 
@@ -100,6 +129,46 @@ where
         Ok(resp) => Json(resp).into_response(),
         Err(e) => person_error_to_http(e),
     }
+}
+
+async fn post_wif_exchange<R, S, P, C, W, J>(
+    State(s): State<Arc<WifHttpState<R, S, P, C, W, J>>>,
+    Json(req): Json<WifExchangeRequest>,
+) -> impl IntoResponse
+where
+    R: JwksResolver,
+    S: PersonStore,
+    P: ConsentPolicy,
+    C: TimeSource,
+    W: WifStore,
+    J: JwksResolver,
+{
+    let resolved = match s.exchange.resolve(&req).await {
+        Ok(r) => r,
+        Err(e) => return wif_error_to_http(e),
+    };
+    match s.core.mint_wif_auth(&resolved) {
+        Ok(resp) => Json(resp).into_response(),
+        Err(e) => person_error_to_http(e),
+    }
+}
+
+fn wif_error_to_http(e: WifExchangeError) -> axum::response::Response {
+    let code = match &e {
+        WifExchangeError::UnsupportedGrantType(_) | WifExchangeError::UnsupportedSubjectTokenType(_) => {
+            StatusCode::BAD_REQUEST
+        }
+        WifExchangeError::UnknownProvider(_)
+        | WifExchangeError::ProviderDisabled(_)
+        | WifExchangeError::UnknownServiceAccount(..)
+        | WifExchangeError::NoMappingMatch
+        | WifExchangeError::AmbiguousMatch(_) => StatusCode::FORBIDDEN,
+        WifExchangeError::SubjectToken(_) | WifExchangeError::IssuerMismatch { .. } => StatusCode::UNAUTHORIZED,
+        WifExchangeError::Jwks(_) | WifExchangeError::ClaimMapping(_) | WifExchangeError::Store(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
+    (code, e.to_string()).into_response()
 }
 
 fn person_error_to_http(e: PersonError) -> axum::response::Response {
