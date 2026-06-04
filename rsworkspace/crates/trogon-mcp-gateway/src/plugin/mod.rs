@@ -43,10 +43,15 @@
 //!
 //! Default callout timeout: **250 ms** (ADR 0011 policy-callout tier; distinct from auth callout).
 
+pub mod contentscan;
 pub mod dispatcher;
 pub mod errors;
 pub mod registry;
 
+pub use contentscan::{
+    CONTENT_SCAN_PLUGIN_NAME, ContentScanDecision, ContentScanDirection, ContentScanFinding, ContentScanRequest,
+    ContentScanSeverity, ContentScanner,
+};
 pub use dispatcher::{DEFAULT_CALLOUT_TIMEOUT_MS, PluginDispatcher, PluginDispatcherConfig};
 pub use errors::{PluginCalloutError, PluginFailureClass};
 pub use registry::{PluginChainSpec, PluginRegistry};
