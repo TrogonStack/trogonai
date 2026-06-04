@@ -19,6 +19,28 @@ use crate::policy::{CelHostEvalOutcome, PolicyError, configure_policy_cel_contex
 
 pub const AUDIT_FILTERED_BY_CEL: &str = "filtered_by_cel";
 pub const AUDIT_CEL_EVAL_ERROR: &str = "cel_eval_error";
+pub const AUDIT_RENAMED: &str = "catalog_renamed";
+
+/// Per-client rewrite rule applied to `tools/list` candidates after CEL filtering.
+///
+/// Matches by exact `from` name; renames to `to`. v0.2 ships exact-match only;
+/// pattern/regex matching is reserved for a follow-up if needed
+/// (see `docs/identity/tools-list-filtering.md` and ADR 0015).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolRewriteRule {
+    pub from: String,
+    pub to: String,
+}
+
+impl ToolRewriteRule {
+    #[must_use]
+    pub fn new(from: impl Into<String>, to: impl Into<String>) -> Self {
+        Self {
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListFilterAuditEvent {
@@ -132,6 +154,28 @@ pub fn filter_tools_by_cel_with_engine(engine: &MergeEngine, params: ListFilterP
     }
 
     ListFilterOutcome { kept, audit_events }
+}
+
+/// Apply rename/alias rewrites in-place to a finished [`ListFilterOutcome`].
+///
+/// Each rule matches by exact `from` against the candidate name; first matching
+/// rule wins. Renamed entries emit an [`AUDIT_RENAMED`] audit event recording
+/// the prior name in `reason`. Call this after [`filter_tools_by_cel`] when the
+/// caller has policy-bundle-supplied rewrite rules to apply.
+pub fn apply_tool_rewrites(outcome: &mut ListFilterOutcome, rules: &[ToolRewriteRule]) {
+    if rules.is_empty() {
+        return;
+    }
+    for candidate in outcome.kept.iter_mut() {
+        if let Some(rule) = rules.iter().find(|r| r.from == candidate.name) {
+            let prior = std::mem::replace(&mut candidate.name, rule.to.clone());
+            outcome.audit_events.push(ListFilterAuditEvent {
+                event: AUDIT_RENAMED,
+                tool_name: rule.to.clone(),
+                reason: prior,
+            });
+        }
+    }
 }
 
 fn passthrough_outcome(candidates: Vec<ToolCandidate>) -> ListFilterOutcome {
@@ -801,5 +845,77 @@ mod tests {
         );
 
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn apply_tool_rewrites_renames_exact_match_and_emits_audit() {
+        let mut outcome = ListFilterOutcome {
+            kept: vec![
+                ToolCandidate {
+                    name: "read_file".into(),
+                    input_schema: None,
+                },
+                ToolCandidate {
+                    name: "search".into(),
+                    input_schema: None,
+                },
+            ],
+            audit_events: vec![],
+        };
+        let rules = vec![ToolRewriteRule::new("read_file", "fs_read")];
+        apply_tool_rewrites(&mut outcome, &rules);
+
+        assert_eq!(outcome.kept[0].name, "fs_read");
+        assert_eq!(outcome.kept[1].name, "search");
+        assert_eq!(outcome.audit_events.len(), 1);
+        assert_eq!(outcome.audit_events[0].event, AUDIT_RENAMED);
+        assert_eq!(outcome.audit_events[0].tool_name, "fs_read");
+        assert_eq!(outcome.audit_events[0].reason, "read_file");
+    }
+
+    #[test]
+    fn apply_tool_rewrites_first_matching_rule_wins() {
+        let mut outcome = ListFilterOutcome {
+            kept: vec![ToolCandidate {
+                name: "foo".into(),
+                input_schema: None,
+            }],
+            audit_events: vec![],
+        };
+        let rules = vec![
+            ToolRewriteRule::new("foo", "first_winner"),
+            ToolRewriteRule::new("foo", "second_loser"),
+        ];
+        apply_tool_rewrites(&mut outcome, &rules);
+        assert_eq!(outcome.kept[0].name, "first_winner");
+    }
+
+    #[test]
+    fn apply_tool_rewrites_empty_rules_is_noop() {
+        let mut outcome = ListFilterOutcome {
+            kept: vec![ToolCandidate {
+                name: "foo".into(),
+                input_schema: None,
+            }],
+            audit_events: vec![],
+        };
+        apply_tool_rewrites(&mut outcome, &[]);
+        assert_eq!(outcome.kept[0].name, "foo");
+        assert!(outcome.audit_events.is_empty());
+    }
+
+    #[test]
+    fn apply_tool_rewrites_no_match_leaves_outcome_unchanged() {
+        let mut outcome = ListFilterOutcome {
+            kept: vec![ToolCandidate {
+                name: "foo".into(),
+                input_schema: None,
+            }],
+            audit_events: vec![],
+        };
+        let rules = vec![ToolRewriteRule::new("bar", "baz")];
+        apply_tool_rewrites(&mut outcome, &rules);
+        assert_eq!(outcome.kept[0].name, "foo");
+        assert!(outcome.audit_events.is_empty());
     }
 }
