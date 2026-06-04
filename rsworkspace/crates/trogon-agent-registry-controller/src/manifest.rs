@@ -234,6 +234,7 @@ impl ManifestRecord {
                 Some(self.allowed_purposes.clone())
             },
             mesh_token_ttl_s: self.mesh_token_ttl_s,
+            allow_capabilities: vec![],
             metadata: self.metadata.clone(),
             lifecycle_state: self.lifecycle_state,
             created_at: timestamp.clone(),
