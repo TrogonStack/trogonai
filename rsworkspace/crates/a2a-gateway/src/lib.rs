@@ -16,6 +16,7 @@
 //! `{prefix}.push.dlq.{caller_id}.{task_id}`. Terminal push DLQ publishes today originate from
 //! the `a2a-nats` agent `Bridge` / `message/stream` pump — not from this gateway forwarding layer.
 
+pub mod aauth;
 pub mod agent_card_surface;
 pub mod caller_jwt_header;
 pub mod config;
