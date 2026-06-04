@@ -6243,6 +6243,7 @@ dependencies = [
  "html2text",
  "httpmock",
  "ignore",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

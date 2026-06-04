@@ -24,10 +24,12 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
         Err(e) => return format!("search_files: {e}"),
     };
 
-    let needle = if case_insensitive {
-        pattern.to_lowercase()
-    } else {
-        pattern.clone()
+    let re = match regex::RegexBuilder::new(&pattern)
+        .case_insensitive(case_insensitive)
+        .build()
+    {
+        Ok(re) => re,
+        Err(e) => return format!("search_files: invalid regex: {e}"),
     };
 
     // Walk files respecting .gitignore via the `ignore` crate.
@@ -61,13 +63,7 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
             .to_string_lossy();
 
         for (line_no, line) in content.lines().enumerate() {
-            let haystack = if case_insensitive {
-                line.to_lowercase()
-            } else {
-                line.to_string()
-            };
-
-            if haystack.contains(&needle) {
+            if re.is_match(line) {
                 let entry_str = format!("{}:{}: {}\n", rel, line_no + 1, line.trim_end());
                 if output.len() + entry_str.len() > MAX_OUTPUT_BYTES {
                     truncated = true;
@@ -167,5 +163,39 @@ mod tests {
         ).await;
         assert!(result.contains("b.rs:1:"), "{result}");
         assert!(!result.contains("other.rs"), "must only search in sub/: {result}");
+    }
+
+    #[tokio::test]
+    async fn regex_pattern_matches() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "fn hello() {}\nlet x = 1;\n").unwrap();
+
+        let result = search_files(&ctx(&dir), &json!({ "pattern": r"fn \w+\(\)" })).await;
+        assert!(result.contains("a.rs:1:"), "must match fn hello(): {result}");
+        assert!(result.contains("fn hello()"), "{result}");
+        assert!(!result.contains("let x"), "literal backslashes would not match: {result}");
+    }
+
+    #[tokio::test]
+    async fn case_insensitive_regex() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "fn Hello() {}\n").unwrap();
+
+        let result = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": r"fn hello\(\)", "case_insensitive": true }),
+        )
+        .await;
+        assert!(result.contains("a.rs:1:"), "case-insensitive regex must match: {result}");
+    }
+
+    #[tokio::test]
+    async fn invalid_regex_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let result = search_files(&ctx(&dir), &json!({ "pattern": r"[" })).await;
+        assert!(
+            result.contains("invalid regex"),
+            "expected invalid regex error: {result}"
+        );
     }
 }

@@ -227,11 +227,11 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             "search_files",
-            "Search for a literal string pattern across files in the working directory. Respects .gitignore. Returns matching lines with file:line format, truncated at 100 matches.",
+            "Search for a regular expression pattern across files in the working directory. Respects .gitignore. Returns matching lines with file:line format, truncated at 100 matches.",
             json!({
                 "type": "object",
                 "properties": {
-                    "pattern":          { "type": "string",  "description": "Literal string to search for" },
+                    "pattern":          { "type": "string",  "description": "Regular expression pattern (Rust regex syntax)" },
                     "path":             { "type": "string",  "description": "Directory to search in, relative to working directory (default: '.')" },
                     "case_insensitive": { "type": "boolean", "description": "If true, search is case-insensitive (default: false)" }
                 },
