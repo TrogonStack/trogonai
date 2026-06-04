@@ -1,10 +1,16 @@
 pub mod error;
+pub mod per_skill;
 pub mod spicedb_tier1;
 pub mod tier1_declarative;
 pub mod tier2;
 pub mod tier2_cel;
 pub mod tier3_redaction;
 pub mod wasmtime_substrate;
+
+pub use per_skill::{
+    PerSkillDecision, PerSkillPolicy, PerSkillPolicyConfig, PerSkillRequest, ResolvedRule, SkillEffect, SkillRule,
+    SkillScope,
+};
 
 pub use error::{PolicyError, Tier2EvalError};
 pub use spicedb_tier1::{
