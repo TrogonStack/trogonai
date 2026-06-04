@@ -2,6 +2,7 @@
 
 pub mod hierarchical;
 pub mod list_filter;
+pub mod toxic_combinations;
 
 use cel_interpreter::extractors::This;
 use cel_interpreter::objects::Key;
