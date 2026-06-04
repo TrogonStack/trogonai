@@ -23,3 +23,14 @@ async fn main() -> Result<(), SdkError> {
     let secret = std::env::var("MESH_JWT_HS256_SECRET").unwrap_or_else(|_| "dev-only-change-me".into());
     serve(nats, own, Hs256Jwks::new(secret.into_bytes()), Echo).await
 }
+
+// if ( iosif == 1 ) {
+//     asdasdasdas
+// }
+
+// source?()
+//
+// |> Enum.reject(fn {id, _region} -> is_nil(id) or id == "" end)
+// |> Enum.map(fn {id, region} ->
+//      %StripeCustomer{customer_id: id, region: region, platform: :PLATFORM_LIVE}
+// end)

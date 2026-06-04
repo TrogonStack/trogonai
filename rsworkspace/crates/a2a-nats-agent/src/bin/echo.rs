@@ -237,7 +237,63 @@ impl A2aHandler for EchoHandler {
     }
 
     async fn agent_card(&self, _req: a2a_types::GetExtendedAgentCardRequest) -> Result<a2a_types::AgentCard, A2aError> {
-        Err(A2aError::unsupported_operation("not implemented"))
+        Ok(echo_agent_card())
+    }
+}
+
+fn echo_agent_card() -> a2a_types::AgentCard {
+    use std::collections::HashMap;
+    let base_url = std::env::var("ECHO_AGENT_BASE_URL").unwrap_or_else(|_| "https://echo.example.com".into());
+    let mut security_schemes: HashMap<String, a2a_types::SecurityScheme> = HashMap::new();
+    security_schemes.insert(
+        "bearer".to_string(),
+        a2a_types::SecurityScheme {
+            scheme: Some(a2a_types::security_scheme::Scheme::HttpAuthSecurityScheme(
+                a2a_types::HttpAuthSecurityScheme {
+                    scheme: "bearer".to_string(),
+                    bearer_format: "JWT".to_string(),
+                    description: "OIDC access token".to_string(),
+                },
+            )),
+        },
+    );
+    a2a_types::AgentCard {
+        name: "echo".to_string(),
+        description: "Reference A2A echo agent".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        supported_interfaces: vec![
+            a2a_types::AgentInterface {
+                url: format!("{base_url}/"),
+                protocol_binding: "JSONRPC".to_string(),
+                protocol_version: "0.3.0".to_string(),
+                tenant: String::new(),
+            },
+            a2a_types::AgentInterface {
+                url: format!("{base_url}/v1"),
+                protocol_binding: "HTTP+JSON".to_string(),
+                protocol_version: "0.3.0".to_string(),
+                tenant: String::new(),
+            },
+        ],
+        capabilities: Some(a2a_types::AgentCapabilities {
+            streaming: Some(true),
+            push_notifications: Some(true),
+            ..Default::default()
+        }),
+        default_input_modes: vec!["text/plain".to_string()],
+        default_output_modes: vec!["text/plain".to_string()],
+        security_schemes,
+        security_requirements: vec![a2a_types::SecurityRequirement {
+            schemes: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "bearer".to_string(),
+                    a2a_types::StringList { list: vec![] },
+                );
+                m
+            },
+        }],
+        ..Default::default()
     }
 }
 

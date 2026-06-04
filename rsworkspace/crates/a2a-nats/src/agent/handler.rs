@@ -3,8 +3,9 @@ use std::pin::Pin;
 use futures::Stream;
 
 use crate::error::{
-    AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED,
-    TASK_NOT_CANCELABLE, TASK_NOT_FOUND, UNSUPPORTED_OPERATION,
+    AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, EXTENDED_AGENT_CARD_NOT_CONFIGURED, EXTENSION_SUPPORT_REQUIRED,
+    INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED, TASK_NOT_CANCELABLE, TASK_NOT_FOUND,
+    UNSUPPORTED_OPERATION, VERSION_NOT_SUPPORTED,
 };
 
 pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a_types::StreamResponse, A2aError>> + Send + 'static>>;
@@ -50,6 +51,18 @@ impl A2aError {
 
     pub fn agent_unavailable(message: impl Into<String>) -> Self {
         Self::new(AGENT_UNAVAILABLE, message)
+    }
+
+    pub fn extended_agent_card_not_configured(message: impl Into<String>) -> Self {
+        Self::new(EXTENDED_AGENT_CARD_NOT_CONFIGURED, message)
+    }
+
+    pub fn extension_support_required(message: impl Into<String>) -> Self {
+        Self::new(EXTENSION_SUPPORT_REQUIRED, message)
+    }
+
+    pub fn version_not_supported(message: impl Into<String>) -> Self {
+        Self::new(VERSION_NOT_SUPPORTED, message)
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
@@ -154,6 +167,15 @@ mod tests {
         );
         assert_eq!(A2aError::invalid_agent_response("x").code, INVALID_AGENT_RESPONSE);
         assert_eq!(A2aError::agent_unavailable("x").code, AGENT_UNAVAILABLE);
+        assert_eq!(
+            A2aError::extended_agent_card_not_configured("x").code,
+            EXTENDED_AGENT_CARD_NOT_CONFIGURED
+        );
+        assert_eq!(
+            A2aError::extension_support_required("x").code,
+            EXTENSION_SUPPORT_REQUIRED
+        );
+        assert_eq!(A2aError::version_not_supported("x").code, VERSION_NOT_SUPPORTED);
         assert_eq!(A2aError::internal("x").code, -32603);
     }
 
