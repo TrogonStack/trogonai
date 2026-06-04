@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt;
-use std::num::NonZeroUsize;
 use std::path::Path;
 
 use crate::source::discord::config::DiscordBotToken;
@@ -36,17 +35,6 @@ use crate::constants::{
     DEFAULT_STREAM_MAX_AGE_SECS,
 };
 use crate::source_status::SourceStatus;
-
-#[derive(Debug)]
-struct ZeroNotAllowed;
-
-impl fmt::Display for ZeroNotAllowed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("must be greater than zero")
-    }
-}
-
-impl std::error::Error for ZeroNotAllowed {}
 
 #[derive(Debug)]
 struct DurationTooLong {
@@ -378,10 +366,6 @@ struct GatewayConfig {
     http_server: HttpServerConfig,
     #[config(nested)]
     nats: NatsConfigSection,
-    // TODO: restore dynamic server-info negotiation once the async-nats race is resolved.
-    // See the TODO in main.rs for the full explanation.
-    #[config(env = "TROGON_GATEWAY_NATS_MAX_PAYLOAD_BYTES", default = 1_048_576)]
-    nats_max_payload_bytes: usize,
     #[config(nested)]
     sources: SourcesConfig,
 }
@@ -629,7 +613,6 @@ impl<T> SourceIntegration<T> {
 pub struct ResolvedConfig {
     pub http_server: ResolvedHttpServerConfig,
     pub nats: trogon_nats::NatsConfig,
-    pub nats_max_payload_bytes: NonZeroUsize,
     pub github: Vec<SourceIntegration<crate::source::github::GithubConfig>>,
     pub discord: Option<crate::source::discord::DiscordConfig>,
     pub slack: Vec<SourceIntegration<crate::source::slack::SlackConfig>>,
@@ -688,18 +671,6 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let notion = resolve_notion_integrations(cfg.sources.notion, &mut errors);
     let sentry = resolve_sentry_integrations(cfg.sources.sentry, &mut errors);
 
-    let nats_max_payload_bytes = match NonZeroUsize::new(cfg.nats_max_payload_bytes) {
-        Some(v) => v,
-        None => {
-            errors.push(ConfigValidationError::invalid(
-                "nats",
-                "nats_max_payload_bytes",
-                ZeroNotAllowed,
-            ));
-            return Err(ConfigError::Validation(errors));
-        }
-    };
-
     if !errors.is_empty() {
         return Err(ConfigError::Validation(errors));
     }
@@ -709,7 +680,6 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
             port: cfg.http_server.port,
         },
         nats,
-        nats_max_payload_bytes,
         github,
         discord,
         slack,
@@ -4009,20 +3979,5 @@ timestamp_tolerance_secs = 0
         let f = write_toml("this is not { valid toml");
         let result = load(Some(f.path()));
         assert!(matches!(result, Err(ConfigError::Load(_))));
-    }
-
-    #[test]
-    fn nats_max_payload_bytes_zero_is_error() {
-        let toml = r#"
-nats_max_payload_bytes = 0
-
-[sources.linear.integrations.primary.webhook]
-webhook_secret = "linear-secret"
-"#;
-        let f = write_toml(toml);
-        let result = load(Some(f.path()));
-        assert!(
-            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("nats_max_payload_bytes")))
-        );
     }
 }

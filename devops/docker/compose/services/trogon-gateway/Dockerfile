@@ -1,5 +1,5 @@
 # ── Stage 1: chef — generate dependency recipe ──────────────────────────────
-FROM rust:1.93-slim AS chef
+FROM rust:1.96.0-slim-bookworm AS chef
 
 RUN cargo install cargo-chef --locked
 
@@ -26,7 +26,7 @@ RUN cargo build --release -p trogon-gateway && \
     strip target/release/trogon-gateway
 
 # ── Stage 4: runtime ────────────────────────────────────────────────────────
-FROM debian:bookworm-20250317-slim AS runtime
+FROM debian:bookworm-20260518-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \

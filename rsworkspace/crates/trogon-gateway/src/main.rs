@@ -48,6 +48,20 @@ const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
 type SourceResult = (&'static str, Result<(), String>);
 
 #[cfg(not(coverage))]
+#[derive(Debug)]
+struct MissingNatsServerInfo;
+
+#[cfg(not(coverage))]
+impl fmt::Display for MissingNatsServerInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("NATS server info is unavailable")
+    }
+}
+
+#[cfg(not(coverage))]
+impl std::error::Error for MissingNatsServerInfo {}
+
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = CliArgs::<cli::Cli>::new().parse_args();
@@ -80,23 +94,7 @@ async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::erro
     info!("trogon-gateway starting");
 
     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
-    // TODO: restore the line below once the async-nats race is resolved.
-    //
-    // `trogon_nats::connect` always sets `retry_on_initial_connect`, which causes
-    // async-nats to return the `Client` before the background connection task has
-    // populated the `ServerInfo` watch channel. Reading `server_info().max_payload`
-    // immediately after `connect()` therefore returns 0 (the `Default` value for
-    // `usize`), which collapses `MaxPayload::from_server_limit` to a threshold of 0
-    // and routes every payload — including tiny ones — through the object-store
-    // claim-check path.
-    //
-    // Until async-nats guarantees `server_info()` is populated before returning the
-    // `Client` (or `trogon_nats::connect` exposes a post-connection hook), the value
-    // is taken from config (`TROGON_GATEWAY_NATS_MAX_PAYLOAD_BYTES`, default 1 MiB).
-    //
-    // Tracking issue: https://github.com/TrogonStack/trogonai/issues/122
-    // let server_max_payload = nats.server_info().max_payload;
-    let server_max_payload = resolved.nats_max_payload_bytes.get();
+    let server_max_payload = nats.try_server_info().ok_or(MissingNatsServerInfo)?.max_payload;
     let max_payload = MaxPayload::from_server_limit(server_max_payload);
     info!(
         server_max_payload_bytes = server_max_payload,
@@ -155,7 +153,7 @@ async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::erro
         client.clone(),
         object_store.clone(),
         CLAIM_CHECK_BUCKET.to_string(),
-        max_payload,
+        nats.clone(),
     );
 
     {
