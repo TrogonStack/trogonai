@@ -28,6 +28,7 @@ pub mod spicedb;
 pub mod stepup;
 pub mod subject;
 pub mod throttle;
+pub mod tls;
 pub mod trace;
 pub mod wasm;
 
