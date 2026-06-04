@@ -7536,6 +7536,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-frontend-proxy"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
