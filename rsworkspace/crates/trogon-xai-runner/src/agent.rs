@@ -1768,16 +1768,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Name of a custom sub-agent defined in .claude/agents/. Its tools allowlist and instructions are enforced. Omit for a generic sub-agent."
+                        },
                         "capability": {
                             "type": "string",
-                            "description": "Agent capability to use, e.g. 'explore' or 'plan'"
+                            "description": "Generic capability when no named agent is given, e.g. 'explore' or 'plan'"
                         },
                         "prompt": {
                             "type": "string",
                             "description": "The task or question to send to the sub-agent"
                         }
                     },
-                    "required": ["capability", "prompt"]
+                    "required": ["prompt"]
                 }),
             });
         }
