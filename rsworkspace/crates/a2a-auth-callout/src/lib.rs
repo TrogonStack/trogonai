@@ -28,6 +28,9 @@ pub use jwt::{
     SpiceDbPrincipal, SpiceDbSubject, UserJwtClaims, UserJwtSubject, caller_id_from_minted_jwt,
     decode_nats_user_payload,
 };
+pub use permissions::{
+    IssuedPermissions, SubjectAclContext, SubjectAclTemplate, SubjectPattern, SubjectPatternError, TemplateError,
+};
 pub use signing_key_source::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
     SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, signing_key_source_from_process_env,
