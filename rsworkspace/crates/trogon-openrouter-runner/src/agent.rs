@@ -1080,6 +1080,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: session_model_override,
+                tool_allowlist: Vec::new(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
@@ -1204,6 +1205,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         history,
                         system_prompt,
                         enabled_tools: enabled_tools.clone(),
+                        tool_allowlist: Vec::new(),
                         created_at: Instant::now(),
                         last_used_at: Instant::now(),
                         created_at_iso,
@@ -1317,6 +1319,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: inherited_model.clone(),
+                tool_allowlist: Vec::new(),
                 compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,

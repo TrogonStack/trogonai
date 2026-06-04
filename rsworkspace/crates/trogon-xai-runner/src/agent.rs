@@ -712,6 +712,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd,
                 model: snap.model.clone(),
+                tool_allowlist: Vec::new(),
                 compactor_model: snap.compactor_model.clone(),
                 api_key: self.global_api_key.clone(),
                 history,
@@ -1079,6 +1080,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: session_model_override,
+                tool_allowlist: Vec::new(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
@@ -1238,6 +1240,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: inherited_model.clone(),
+                tool_allowlist: Vec::new(),
                 compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,
