@@ -1087,7 +1087,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
-                mode: default_session_mode(),
+                // Keep the permission-gate `mode` in sync with `session_mode` at
+                // creation. A session created with `bypassPermissions` via meta
+                // (e.g. spawn_agent sub-sessions) must bypass the gate too —
+                // otherwise its tools hang waiting for an approval nobody answers.
+                // `set_session_mode` already keeps the two fields identical.
+                mode: session_mode.clone(),
                 tool_policies: Vec::new(),
                 mcp_servers,
                 total_input_tokens: 0,
@@ -1752,6 +1757,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     },
                     "required": ["question"]
                 }),
+            });
+        }
+
+        // Advertise the `spawn_agent` tool when the sub-agent execution backend is
+        // wired (runner config + a NATS client). The interceptor below builds a
+        // real sub-session that runs its own tool-use loop (Gap C). Without this
+        // advertisement the model never sees the tool and can never delegate.
+        if self.runner_config.is_some()
+            && (self.execution_nats.is_some() || self.permission_nats.is_some())
+        {
+            let def = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def();
+            tool_defs.push(ToolDef {
+                name: def.name,
+                description: def.description,
+                parameters: def.input_schema,
             });
         }
 

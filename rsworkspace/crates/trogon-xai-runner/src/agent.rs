@@ -1087,7 +1087,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
-                mode: default_session_mode(),
+                // Keep the permission-gate `mode` in sync with `session_mode` at
+                // creation. A session created with `bypassPermissions` via meta
+                // (e.g. spawn_agent sub-sessions) must bypass the gate too —
+                // otherwise its tools hang waiting for an approval nobody answers.
+                // `set_session_mode` already keeps the two fields identical.
+                mode: session_mode.clone(),
                 tool_policies: Vec::new(),
                 mcp_servers,
                 terminal_id: None,
@@ -1753,6 +1758,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     },
                     "required": ["question"]
                 }),
+            });
+        }
+
+        // Advertise the `spawn_agent` tool when the sub-agent execution backend is
+        // wired (execution NATS + runner config). The interceptor below builds a
+        // real sub-session that runs its own tool-use loop (Gap C). Without this
+        // advertisement the model never sees the tool and can never delegate.
+        if self.execution_nats.is_some() && self.runner_config.is_some() {
+            let def = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def();
+            call_tools.push(ToolSpec::Function {
+                name: def.name,
+                description: def.description,
+                parameters: def.input_schema,
             });
         }
 
