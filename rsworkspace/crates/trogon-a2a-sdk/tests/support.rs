@@ -159,6 +159,7 @@ pub fn kv_agent_record(agent_id: &str, wkl: &str, audiences: Vec<String>) -> Age
         allowed_audiences: audiences,
         allowed_purposes: Some(vec![TEST_PURPOSE.to_string()]),
         mesh_token_ttl_s: Some(120),
+        allow_capabilities: vec![],
         metadata: serde_json::Value::Null,
         lifecycle_state: LifecycleState::Active,
         created_at: "2026-05-27T00:00:00Z".to_string(),
