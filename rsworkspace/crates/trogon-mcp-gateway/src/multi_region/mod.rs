@@ -1,9 +1,11 @@
 //! Multi-region NATS connection selection and deterministic failover (ADR 0016).
 //!
-//! Follow-up wiring: call `RegionRouter::route` from `gateway::handle_ingress_inner` before
-//! publishing to the regional NATS client so reply inboxes stay region-local.
-//!
-//! Configuration is standalone ([`MultiRegionConfig`]); fold into `GatewaySettings` in a later PR.
+//! [`RegionRouter`] is wired into `gateway::handle_ingress_inner` via
+//! `GatewaySettings::multi_region_router` (`Option<Arc<RegionRouter>>`); when present it
+//! resolves a region + session pin per request and emits audit events through a
+//! `dyn RegionAuditSink`. Per-region NATS fan-out (one client per [`RegionId`])
+//! and cross-region audit topology remain a v0.2 follow-up — see
+//! `docs/roadmap/agentgateway-v0.2.md` (§ Gateway architecture / Multi-region routing).
 
 mod audit;
 mod config;

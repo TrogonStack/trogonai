@@ -138,6 +138,12 @@ impl ApprovalIngressHarness {
             rate_limit: None,
             approval_gate,
             mesh_config: mesh_config_forcing_hitl(),
+            context_throttle: None,
+            anomaly_emitter: None,
+            stepup_policy: None,
+            stepup_bridge: None,
+            freshness_clock: None,
+            multi_region_router: None,
         };
 
         let gateway_client = Arc::new(connect(&nats_conf, connect_timeout).await.expect("gateway nats"));

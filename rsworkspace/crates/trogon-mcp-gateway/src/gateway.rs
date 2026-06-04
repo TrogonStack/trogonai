@@ -30,6 +30,7 @@ use crate::egress::{
 };
 use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
+use crate::multi_region::{RegionRouter, RequestContext as RegionRequestContext};
 use crate::policy::SpicedbGatePolicy;
 use crate::policy::hierarchical::{self, MergeRequestContext};
 use crate::policy::list_filter::{self, ListFilterParams, ToolCandidate};
@@ -94,6 +95,10 @@ pub struct GatewaySettings {
     pub stepup_bridge: Option<Arc<dyn ApprovalBridge>>,
     /// When `None` and step-up is enabled, defaults to [`SystemFreshnessClock`].
     pub freshness_clock: Option<Arc<dyn FreshnessClock>>,
+    /// Multi-region deterministic-failover router (ADR 0016). When `None`, ingress runs single-region.
+    /// Wired into `handle_ingress_inner` for region selection + session pinning; per-region NATS
+    /// fan-out and cross-region audit topology remain v0.2 follow-up per `docs/roadmap/agentgateway-v0.2.md`.
+    pub multi_region_router: Option<Arc<RegionRouter>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -217,6 +222,31 @@ async fn handle_ingress_inner(
         warn!(subject = %msg.subject, "ingress message has no JSON-RPC method");
         return Ok(());
     };
+
+    if let Some(router) = settings.multi_region_router.as_deref() {
+        let session = msg
+            .headers
+            .as_ref()
+            .and_then(|h| h.get_last(MCP_SESSION_HEADER).or_else(|| h.get(MCP_SESSION_HEADER)))
+            .map(|v| v.as_str().to_string())
+            .filter(|id| !id.is_empty());
+        let ctx = RegionRequestContext {
+            session_id: session.clone(),
+        };
+        match router.route(None, &ctx) {
+            Ok(decision) => {
+                debug!(
+                    region = %decision.region.as_str(),
+                    reason = ?decision.reason,
+                    session_id = session.as_deref().unwrap_or(""),
+                    "multi-region route decision",
+                );
+            }
+            Err(err) => {
+                warn!(error = %err, "multi-region routing failed; staying on default client");
+            }
+        }
+    }
 
     let request_id = jsonrpc_request_id(&msg.payload);
     let legacy_tenant_hdr = tenant_from_headers(msg.headers.as_ref());
