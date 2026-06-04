@@ -37,7 +37,6 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::check_tool_permission;
-use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
 use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::{
     AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
@@ -205,7 +204,9 @@ fn context_window_tokens(model_id: &str) -> Option<u64> {
     if m.contains("qwen") {
         return Some(131_072);
     }
-    None
+    // Unknown model: fall back to a conservative default so the model-aware
+    // compaction gate still works (returning None would disable compaction for it).
+    Some(128_000)
 }
 
 #[derive(serde::Serialize)]
@@ -771,15 +772,6 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     }
 }
 
-fn trim_openrouter_history(history: &mut Vec<Message>, max: usize) {
-    while history.len() > max {
-        history.remove(0);
-        while history.first().map(|m| m.role != "user").unwrap_or(false) {
-            history.remove(0);
-        }
-    }
-}
-
 fn openrouter_history_to_wire(history: &[Message]) -> Vec<WireMessage> {
     history
         .iter()
@@ -896,24 +888,6 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
     }
     out.extend(tool_results);
     out
-}
-
-async fn compact_or_trim_openrouter_history(
-    nats: &Option<async_nats::Client>,
-    history: &mut Vec<Message>,
-    max: usize,
-    model: &str,
-    compactor_model: Option<&str>,
-) {
-    if let Some(nats) = nats {
-        let (token_budget, threshold_pct) = compaction_settings_from_env();
-        let wire = openrouter_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", model, compactor_model).await {
-            *history = openrouter_history_from_wire(compacted);
-            return;
-        }
-    }
-    trim_openrouter_history(history, max);
 }
 
 #[async_trait(?Send)]
@@ -1785,15 +1759,23 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             messages.push(Message::user(user_input.clone()));
         }
 
-        if let Some(nats) = &self.execution_nats {
-            let (token_budget, threshold_pct) = compaction_settings_from_env();
-            let wire = openrouter_history_to_wire(&messages);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", &resolved_model, compactor_model.as_deref()).await {
-                messages = openrouter_history_from_wire(compacted);
-                // Intentionally not writing back to s.history here: the post-turn path
-                // assigns the full messages (including new response) to s.history and
-                // then calls compact_or_trim.  Writing here would cause double compaction
-                // on the same turn and race with concurrent prompts.
+        // Context compaction (pre-turn): model-aware gate via the compactor backend.
+        // Uses the model's real context window; no env budget, no blind trim. Not
+        // written back to s.history here — the post-turn path persists the full
+        // history and compacts it, avoiding double compaction / races.
+        if let Some(nats) = &self.compactor_nats {
+            let cw = context_window_tokens(&resolved_model);
+            if crate::compaction::should_compact(&messages, cw) {
+                let context_window = cw.unwrap_or(128_000);
+                let (new_messages, _compacted) = crate::compaction::compact(
+                    nats,
+                    messages,
+                    &resolved_model,
+                    compactor_model.as_deref(),
+                    context_window,
+                )
+                .await;
+                messages = new_messages;
             }
         }
 
@@ -2288,8 +2270,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             };
             messages.push(msg);
         }
-        let mut history = messages;
-        compact_or_trim_openrouter_history(&self.execution_nats, &mut history, self.max_history, &resolved_model, compactor_model.as_deref()).await;
+        let history = messages;
 
         let snapshot = {
             let mut sessions = self.sessions.lock().await;
@@ -2313,6 +2294,42 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         };
         if let (Some(store), Some(snapshot)) = (&self.session_store, snapshot) {
             store.save(&snapshot).await;
+        }
+
+        // Context compaction (post-turn): model-aware only, via the compactor
+        // backend. Reads the freshly-persisted history (incl. the new response),
+        // compacts unlocked, then re-acquires the lock to write back + snapshot.
+        if let Some(nats) = self.compactor_nats.clone() {
+            let snapshot = {
+                let sessions = self.sessions.lock().await;
+                sessions.get(&session_id).map(|s| {
+                    (
+                        s.history.clone(),
+                        s.model.clone().unwrap_or_else(|| self.default_model.clone()),
+                        s.compactor_model.clone(),
+                    )
+                })
+            };
+            if let Some((history, model, compactor_model)) = snapshot {
+                let cw = context_window_tokens(&model);
+                if crate::compaction::should_compact(&history, cw) {
+                    let context_window = cw.unwrap_or(128_000);
+                    let (new_history, compacted) =
+                        crate::compaction::compact(&nats, history, &model, compactor_model.as_deref(), context_window)
+                            .await;
+                    if compacted {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            s.history = new_history;
+                        }
+                        if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
+                            let snap = self.build_snapshot(&session_id, s);
+                            store.save(&snap).await;
+                        }
+                        info!(session_id, "openrouter: context compacted post-turn");
+                    }
+                }
+            }
         }
 
         Ok(PromptResponse::new(stop_reason))
@@ -2420,8 +2437,23 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 };
                 let import_model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
                 let import_compactor_model = s.compactor_model.clone();
-                compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history, &import_model, import_compactor_model.as_deref())
-                    .await;
+                if let Some(nats) = &self.compactor_nats {
+                    let cw = context_window_tokens(&import_model);
+                    if crate::compaction::should_compact(&s.history, cw) {
+                        let context_window = cw.unwrap_or(128_000);
+                        let (new_history, compacted) = crate::compaction::compact(
+                            nats,
+                            std::mem::take(&mut s.history),
+                            &import_model,
+                            import_compactor_model.as_deref(),
+                            context_window,
+                        )
+                        .await;
+                        if compacted {
+                            s.history = new_history;
+                        }
+                    }
+                }
                 // MED-20: persist the imported (and compacted) history to KV so a
                 // runner restart before the next prompt doesn't revert /compact.
                 if let Some(store) = &self.session_store {
@@ -2448,29 +2480,29 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     let model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
                     (s.history.clone(), model, s.compactor_model.clone())
                 };
-                let wire = openrouter_history_to_wire(&history);
-                let tokens_before = estimate_tokens(&wire);
-                let nats = self.execution_nats.as_ref().ok_or_else(|| {
+                let tokens_before = crate::compaction::estimate_tokens(&history);
+                let nats = self.compactor_nats.as_ref().ok_or_else(|| {
                     Error::new(
                         ErrorCode::InternalError.into(),
                         "no compactor backend for compaction",
                     )
                 })?;
-                let (token_budget, threshold_pct) = compaction_settings_from_env();
-                let compacted_wire = maybe_compact(
-                    nats,
-                    &wire,
-                    token_budget,
-                    threshold_pct,
-                    "openrouter",
-                    &resolved_model,
-                    compactor_model.as_deref(),
-                )
-                .await
-                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
-                let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
-                    let tokens_after = estimate_tokens(&cw);
-                    let new_history = openrouter_history_from_wire(cw);
+                let cw = context_window_tokens(&resolved_model);
+                let context_window = cw.unwrap_or(128_000);
+                let (new_history, did_compact) = if crate::compaction::should_compact(&history, cw) {
+                    crate::compaction::compact(
+                        nats,
+                        history,
+                        &resolved_model,
+                        compactor_model.as_deref(),
+                        context_window,
+                    )
+                    .await
+                } else {
+                    (history, false)
+                };
+                let tokens_after = crate::compaction::estimate_tokens(&new_history);
+                let (compacted, tokens_after) = if did_compact {
                     let mut sessions = self.sessions.lock().await;
                     if let Some(s) = sessions.get_mut(session_id) {
                         s.history = new_history;
@@ -2744,25 +2776,15 @@ mod tests {
     use crate::http_client::mock::MockOpenRouterHttpClient;
     use crate::session_notifier::MockSessionNotifier;
 
-    // ── CHARACTERIZATION: unknown OpenRouter models disable model-aware compaction ──
-    // Proves that removing the env path is UNSAFE until context_window_tokens returns
-    // a sane default for unknown models (today it returns None → model-aware skips them).
+    // Unknown OpenRouter models fall back to a conservative default window, so the
+    // single model-aware compaction path works for every model (no None → no gap).
     #[test]
-    fn characterize_unknown_model_disables_model_aware_compaction() {
-        // Known models map to a real window → model-aware compaction works:
+    fn unknown_model_falls_back_to_default_window_so_model_aware_works() {
         assert_eq!(context_window_tokens("anthropic/claude-3.5-sonnet"), Some(200_000));
         assert_eq!(context_window_tokens("openai/gpt-4"), Some(8_192));
-
-        // Unknown models → None → the model-aware gate can NEVER fire, regardless of
-        // history size (should_compact returns false for a None window). Only the env
-        // (200k) path would compact them, so deleting the env path would leave unknown
-        // OpenRouter models with NO compaction at all.
-        assert_eq!(context_window_tokens("acme/brand-new-model-v9"), None);
+        assert_eq!(context_window_tokens("acme/brand-new-model-v9"), Some(128_000));
         let huge = vec![crate::client::Message::user("x".repeat(1_000_000))];
-        assert!(
-            !crate::compaction::should_compact(&huge, None),
-            "unknown model → None window → model-aware never compacts (only env path would)"
-        );
+        assert!(crate::compaction::should_compact(&huge, Some(128_000)));
     }
 
     // Serialise all tests that mutate environment variables so they don't race
@@ -2805,93 +2827,6 @@ mod tests {
 
     fn local() -> tokio::task::LocalSet {
         tokio::task::LocalSet::new()
-    }
-
-    // ── trim_history ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn trim_history_removes_complete_turn_from_front() {
-        let mut history = vec![
-            Message::user("a"),
-            Message::assistant("b"),
-            Message::user("c"),
-            Message::assistant("d"),
-        ];
-        trim_openrouter_history(&mut history, 2);
-        assert_eq!(history.len(), 2);
-        assert_eq!(history[0].content, "c");
-        assert_eq!(history[1].content, "d");
-    }
-
-    #[test]
-    fn trim_history_skips_multiple_consecutive_non_user_messages() {
-        // Two tool rounds in one turn: user → [tool_calls, tool_result] × 2 → assistant
-        let mut history = vec![
-            Message::user("q1"),
-            Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
-                id: "c1".to_string(), name: "read_file".to_string(), arguments: "{}".to_string(),
-            }]),
-            Message::tool_result("c1".to_string(), "r1".to_string()),
-            Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
-                id: "c2".to_string(), name: "list_directory".to_string(), arguments: "{}".to_string(),
-            }]),
-            Message::tool_result("c2".to_string(), "r2".to_string()),
-            Message::assistant("a1"),
-            Message::user("q2"),
-            Message::assistant("a2"),
-        ];
-        trim_openrouter_history(&mut history, 3);
-        assert_eq!(history.len(), 2, "must skip all non-user messages between turns");
-        assert_eq!(history[0].content, "q2");
-        assert_eq!(history[1].content, "a2");
-    }
-
-    #[test]
-    fn trim_history_removes_tool_round_complete_turn() {
-        let mut history = vec![
-            Message::user("q1"),
-            Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
-                id: "call_1".to_string(),
-                name: "read_file".to_string(),
-                arguments: "{}".to_string(),
-            }]),
-            Message::tool_result("call_1".to_string(), "file contents".to_string()),
-            Message::assistant("answer"),
-            Message::user("q2"),
-            Message::assistant("reply2"),
-        ];
-        trim_openrouter_history(&mut history, 3);
-        assert_eq!(history.len(), 2, "must trim entire tool round turn");
-        assert_eq!(history[0].content, "q2");
-        assert_eq!(history[1].content, "reply2");
-    }
-
-    #[test]
-    fn trim_history_no_op_when_under_limit() {
-        let mut history = vec![Message::user("a"), Message::assistant("b")];
-        trim_openrouter_history(&mut history, 5);
-        assert_eq!(history.len(), 2);
-    }
-
-    #[test]
-    fn trim_history_no_op_when_at_limit() {
-        let mut history = vec![Message::user("a"), Message::assistant("b")];
-        trim_openrouter_history(&mut history, 2);
-        assert_eq!(history.len(), 2);
-    }
-
-    #[test]
-    fn trim_history_clears_all_when_max_is_zero() {
-        let mut history = vec![Message::user("a"), Message::assistant("b")];
-        trim_openrouter_history(&mut history, 0);
-        assert!(history.is_empty());
-    }
-
-    #[test]
-    fn trim_history_empty_is_noop() {
-        let mut history: Vec<Message> = vec![];
-        trim_openrouter_history(&mut history, 5);
-        assert!(history.is_empty());
     }
 
     // ── maybe_evict_oldest ────────────────────────────────────────────────────
@@ -4304,31 +4239,6 @@ mod tests {
         }).await;
     }
 
-    #[tokio::test]
-    async fn prompt_trims_history_to_max() {
-        let agent = make_agent_with_key("k");
-        local().run_until(async move {
-            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
-            let sid = resp.session_id.clone();
-            // Pre-fill with max_history messages (default = 20).
-            {
-                let mut sessions = agent.sessions.lock().await;
-                let s = sessions.get_mut(&sid.to_string()).unwrap();
-                for i in 0..20 {
-                    s.history.push(Message::user(format!("q{i}")));
-                }
-            }
-            // One more prompt with a reply adds 2 more → trim to 20.
-            agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "r".to_string() }]);
-            agent.prompt(PromptRequest::new(
-                sid.clone(),
-                vec![ContentBlock::from("extra".to_string())],
-            )).await.unwrap();
-            let sessions = agent.sessions.lock().await;
-            let s = sessions.get(&sid.to_string()).unwrap();
-            assert!(s.history.len() <= 20, "history must be trimmed to max_history");
-        }).await;
-    }
 
     #[tokio::test]
     async fn prompt_system_prompt_not_stored_in_history() {
@@ -6308,54 +6218,6 @@ mod tests {
                 assert_eq!(s.role, d.role);
                 assert_eq!(s.text, d.text);
             }
-        }).await;
-    }
-
-    #[tokio::test]
-    async fn ext_method_import_trims_to_max_history() {
-        let agent = {
-            let _lock = env_lock();
-            unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "2"); }
-            let a = make_agent();
-            unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
-            a
-        };
-        local().run_until(async move {
-            agent.test_insert_session("trim1").await;
-
-            let params = serde_json::value::RawValue::from_string(
-                serde_json::json!({
-                    "sessionId": "trim1",
-                    "messages": [
-                        { "role": "user",      "text": "a" },
-                        { "role": "assistant", "text": "b" },
-                        { "role": "user",      "text": "c" },
-                        { "role": "assistant", "text": "d" },
-                        { "role": "user",      "text": "e" }
-                    ]
-                }).to_string(),
-            ).unwrap();
-            agent
-                .ext_method(ExtRequest::new("session/import", params.into()))
-                .await
-                .unwrap();
-
-            let export_params = serde_json::value::RawValue::from_string(
-                serde_json::json!({ "sessionId": "trim1" }).to_string(),
-            ).unwrap();
-            let resp = agent
-                .ext_method(ExtRequest::new("session/export", export_params.into()))
-                .await
-                .unwrap();
-
-            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                serde_json::from_str(resp.0.get()).unwrap();
-
-            assert!(
-                portable.len() <= 2,
-                "expected history trimmed to max_history=2, got {} messages",
-                portable.len()
-            );
         }).await;
     }
 

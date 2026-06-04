@@ -1195,12 +1195,13 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
                 .await
                 .unwrap();
 
-            // The compactor's 3-message result replaced the large history.
+            // Pre-turn compaction replaces the 25-message history with 3 summary
+            // messages; this turn then adds user + assistant (5 total).
             let hist = agent.test_session_history("s-compact").await;
             assert_eq!(
                 hist.len(),
-                3,
-                "history must be replaced by the compactor's compacted result"
+                5,
+                "compacted history (3) plus this turn's user and assistant"
             );
             assert!(
                 hist[0]
@@ -1221,24 +1222,13 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
         .await;
 }
 
-/// END-TO-END CHARACTERIZATION of the double-path compaction bug.
-///
-/// Runs a real prompt turn on a `grok-4-fast` session (2M-token window) whose
-/// history is ~187k tokens — i.e. ABOVE the model-blind env gate (200k×85% =
-/// 170k) but FAR BELOW the model-aware gate (2M×85% = 1.7M, only ~9% used).
-///
-/// A stand-in compactor on `trogon.compactor.compact` captures every request
-/// payload. The two paths are distinguishable on the wire: the env path
-/// (`maybe_compact`) sends a `CompactReq` WITHOUT `context_window`; the
-/// model-aware path (`compaction::compact`) sends one WITH it.
-///
-/// Proves the runtime manifestation: the env path compacts a 2M-window model at
-/// ~187k (premature, model-blind), while the model-aware path correctly stays
-/// silent. This is NOT desired behavior — delete/update when the env path is
-/// removed in favor of the model-aware one.
+/// grok-4-fast at ~187k tokens is below the model-aware gate (2M×85% = 1.7M).
+/// A stand-in compactor records requests; compaction must not run on this turn —
+/// the single model-aware path uses the model's real 2M window, so 187k (~9%)
+/// is well under threshold and the large history is preserved verbatim.
 #[cfg(feature = "test-helpers")]
 #[tokio::test]
-async fn characterize_env_path_compacts_grok4fast_prematurely_e2e() {
+async fn grok4fast_under_model_aware_threshold_is_not_compacted_e2e() {
     use std::time::Duration;
     use trogon_xai_runner::Message;
 
@@ -1291,8 +1281,7 @@ async fn characterize_env_path_compacts_grok4fast_prematurely_e2e() {
         .with_session_store(Arc::new(store))
         .with_compactor(nats.clone());
 
-    // ~187k-token history: 25 × 30 KB ≈ 750 KB / 4 ≈ 187k tokens. Over the env
-    // gate (170k), far under the 2M model-aware gate (1.7M).
+    // ~187k-token history: 25 × 30 KB ≈ 750 KB / 4 ≈ 187k tokens — under 1.7M gate.
     let big = "x".repeat(30_000);
     let mut history = Vec::new();
     for i in 0..25 {
@@ -1316,54 +1305,24 @@ async fn characterize_env_path_compacts_grok4fast_prematurely_e2e() {
                 .await
                 .unwrap();
 
-            // (1) Inspect the captured compactor requests to identify which path(s)
-            //     fired. Env path → no `context_window`; model-aware → has it.
-            let (with_window, without_window) = {
-                let reqs = captured.lock().unwrap();
-                assert!(!reqs.is_empty(), "the compactor must have been called");
-                let with_window = reqs
-                    .iter()
-                    .filter(|v| v.get("context_window").is_some())
-                    .count();
-                let without_window = reqs
-                    .iter()
-                    .filter(|v| v.get("context_window").is_none())
-                    .count();
-                eprintln!(
-                    "CAPTURED compactor requests: total={}, with_window={with_window}, without_window={without_window}",
-                    reqs.len()
-                );
-                for (i, r) in reqs.iter().enumerate() {
-                    eprintln!("  req[{i}] context_window = {:?}", r.get("context_window"));
-                }
-                (with_window, without_window)
-            };
-
-            // The ENV (model-blind) path fired: a CompactReq with NO context_window
-            // compacted a 2M-window model at ~187k (≈9% of its window). Premature.
+            // The model-aware gate (1.7M) is far above 187k, so compaction must NOT
+            // run: the compactor is never called and the large history is preserved.
             assert!(
-                without_window >= 1,
-                "env path (no context_window) compacted a 2M model at 187k — model-blind & premature"
-            );
-            // The model-aware path correctly stayed silent (187k < its 1.7M gate),
-            // so the ONLY compaction was the wrong, model-blind one.
-            assert_eq!(
-                with_window, 0,
-                "model-aware path (with context_window) must NOT fire at 187k on a 2M model"
+                captured.lock().unwrap().is_empty(),
+                "compactor must not be called when history is under the model-aware threshold"
             );
 
-            // (2) And the history was actually compacted — the 25-message history is
-            //     gone, replaced by the summary checkpoint (+ the new turn's messages).
             let hist = agent.test_session_history("s-fast").await;
             assert!(
-                hist.len() < 25,
-                "the 25-message history must have been compacted (now {})",
+                hist.len() >= 25,
+                "large history must be preserved (got {} messages)",
                 hist.len()
             );
             assert!(
-                hist.iter()
+                !hist
+                    .iter()
                     .any(|m| m.content.as_deref().unwrap_or("").contains("context-summary")),
-                "compacted history must contain the summary checkpoint"
+                "history must not be replaced by a compaction summary"
             );
         })
         .await;

@@ -27,12 +27,19 @@ use trogon_xai_runner::{MockSessionNotifier, XaiAgent, XaiClient};
 /// `FsTrogonMdLoader` are wired in. The resulting type is
 /// `XaiAgent<XaiClient, MockSessionNotifier>` with the default `FsTrogonMdLoader`.
 fn make_live_agent(api_key: &str) -> XaiAgent<XaiClient, MockSessionNotifier> {
+    // Wire the permission gate as `main.rs` does, so deny rules are consulted and
+    // audited. A rule-based deny resolves before the channel is used, so the
+    // receiver can be dropped here. Without this, the gate is absent and every
+    // tool is allowed (and nothing is audited).
+    let (perm_tx, _perm_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
     XaiAgent::with_deps(
         MockSessionNotifier::new(),
         "grok-3",
         api_key,
         XaiClient::new(),
     )
+    .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new())
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────

@@ -40,7 +40,6 @@ use trogon_runner_tools::{
     build_session_mcp, convert_mcp_servers, elicit_via_channel, ElicitationTx, StoredMcpServer,
 };
 use trogon_runner_tools::check_tool_permission;
-use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
 use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
 use trogon_runner_tools::session_store::{AuditEntry, AuditOutcome, ToolPolicy, append_audit_entries};
@@ -1576,24 +1575,24 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             .unwrap_or(&self.default_model)
             .to_string();
 
-        // Context compaction (theirs): summarize the oldest portion via the
-        // trogon-compactor service. Falls back to history trimming when the
-        // compactor is unavailable or did not reduce the history below threshold.
+        // Context compaction (pre-turn): model-aware gate + trogon-compactor.
+        // Uses the model's real context window (not a fixed env budget) so the
+        // threshold is correct for every model; no blind message-count trim.
         let mut pre_turn_compacted = false;
-        if let Some(nats) = &self.compactor_nats {
-            let (token_budget, threshold_pct) = compaction_settings_from_env();
-            let wire = xai_history_to_wire(&history);
-            if let Ok(Some(compacted)) =
-                maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", &resolved_model, compactor_model.as_deref()).await
-            {
-                history = xai_history_from_wire(compacted);
-                pre_turn_compacted = true;
-            }
-        }
-        // Fallback trim (ours): if compaction did not run or did not shrink the
-        // history, drop the oldest messages so the request stays within bounds.
-        if !pre_turn_compacted && history.len() > self.max_history {
-            trim_history(&mut history, self.max_history);
+        let context_window = context_window_tokens(&resolved_model);
+        if let Some(nats) = &self.compactor_nats
+            && crate::compaction::should_compact(&history, context_window)
+        {
+            let (new_history, compacted) = crate::compaction::compact(
+                nats,
+                history,
+                &resolved_model,
+                compactor_model.as_deref(),
+                context_window,
+            )
+            .await;
+            history = new_history;
+            pre_turn_compacted = compacted;
         }
 
         let trogon_md = self.md_loader.load(&cwd).await;
@@ -2441,9 +2440,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 let mut sessions = self.sessions.lock().await;
                 sessions.get_mut(&session_id).map(|s| {
                     // If pre-turn compaction ran, the stored history should be based
-                    // on the compacted snapshot to match what was sent to xAI.
+                    // on the compacted snapshot to match what was sent to xAI, and the
+                    // stateful response pointer must be cleared so the next turn
+                    // re-sends the compacted history (the server's old context is stale).
                     if pre_turn_compacted {
                         s.history = history;
+                        s.last_response_id = None;
                     }
                     if !resuming {
                         s.history.push(Message::user(user_input));
@@ -2470,14 +2472,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 })
             };
 
-            if let Some(mut compacted) = history_for_compaction {
-                compact_or_trim_xai_history(&self.compactor_nats, &mut compacted, self.max_history, &model, compactor_model.as_deref())
-                    .await;
+            if let Some(history) = history_for_compaction {
                 let snapshot = {
                     let mut sessions = self.sessions.lock().await;
                     match sessions.get_mut(&session_id) {
                         Some(s) => {
-                            s.history = compacted;
+                            s.history = history;
                             // Persist cumulative token usage and the terminal ID for
                             // stateful bash so list_sessions and resume stay accurate.
                             s.total_input_tokens += prompt_input_total;
@@ -2682,29 +2682,28 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 let model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
                 (s.history.clone(), model, s.compactor_model.clone())
             };
-            let wire = xai_history_to_wire(&history);
-            let tokens_before = estimate_tokens(&wire);
+            let tokens_before = crate::compaction::estimate_tokens(&history);
             let nats = self.compactor_nats.as_ref().ok_or_else(|| {
                 Error::new(
                     ErrorCode::InternalError.into(),
                     "no compactor backend for compaction",
                 )
             })?;
-            let (token_budget, threshold_pct) = compaction_settings_from_env();
-            let compacted_wire = maybe_compact(
-                nats,
-                &wire,
-                token_budget,
-                threshold_pct,
-                "xai",
-                &resolved_model,
-                compactor_model.as_deref(),
-            )
-            .await
-            .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
-            let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
-                let tokens_after = estimate_tokens(&cw);
-                let new_history = xai_history_from_wire(cw);
+            let context_window = context_window_tokens(&resolved_model);
+            let (new_history, did_compact) = if crate::compaction::should_compact(&history, context_window) {
+                crate::compaction::compact(
+                    nats,
+                    history,
+                    &resolved_model,
+                    compactor_model.as_deref(),
+                    context_window,
+                )
+                .await
+            } else {
+                (history, false)
+            };
+            let tokens_after = crate::compaction::estimate_tokens(&new_history);
+            let (compacted, tokens_after) = if did_compact {
                 let mut sessions = self.sessions.lock().await;
                 if let Some(s) = sessions.get_mut(session_id) {
                     s.history = new_history;
@@ -2798,53 +2797,6 @@ fn xai_history_from_wire(wire: Vec<WireMessage>) -> Vec<Message> {
         .collect()
 }
 
-/// Try NATS compaction when over token budget; fall back to message-count trim.
-async fn compact_or_trim_xai_history(
-    nats: &Option<async_nats::Client>,
-    history: &mut Vec<Message>,
-    max: usize,
-    model: &str,
-    compactor_model: Option<&str>,
-) {
-    if let Some(nats) = nats {
-        let (token_budget, threshold_pct) = compaction_settings_from_env();
-        let wire = xai_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", model, compactor_model).await {
-            *history = xai_history_from_wire(compacted);
-            return;
-        }
-    }
-    trim_history(history, max);
-}
-
-/// Trim `history` in-place so it contains at most `max` messages.
-///
-/// Messages are removed from the front in structure-aware increments:
-/// - A leading `user` + `assistant` pair is removed together (2 at a time).
-/// - A leading orphaned `user` message (no corresponding assistant — left over
-///   from a timed-out or cancelled turn) is removed individually (1 at a time).
-/// - Any other leading role (malformed state) stops trimming immediately.
-///
-/// This avoids the blind "round up to even" approach, which could leave an
-/// `assistant` message without a preceding `user` when orphaned user messages
-/// accumulate from consecutive timed-out turns.
-fn trim_history(history: &mut Vec<Message>, max: usize) {
-    while history.len() > max {
-        match (
-            history.first().map(|m| m.role.as_str()),
-            history.get(1).map(|m| m.role.as_str()),
-        ) {
-            (Some("user"), Some("assistant")) => {
-                history.drain(..2);
-            }
-            (Some("user"), _) => {
-                // Orphaned user message (followed by another user, or last in list).
-                history.drain(..1);
-            }
-            _ => break, // Unexpected structure — stop to avoid corruption.
-        }
-    }
-}
 
 /// Parse the `arguments` string returned by xAI's API into a `serde_json::Value`.
 ///
@@ -3362,38 +3314,18 @@ mod tests {
     use crate::http_client::mock::MockXaiHttpClient;
     use crate::session_notifier::MockSessionNotifier;
 
-    // ── CHARACTERIZATION: env vs model-aware compaction threshold divergence ─────
-    // Documents the CURRENT double-path behavior (the env path runs alongside the
-    // model-aware path each turn). This is NOT desired behavior — when the env
-    // path is removed in favor of the model-aware one, update/delete this test.
+    // Compaction is model-aware: the threshold derives from each model's real
+    // context window (no fixed env budget, no model-blind path).
     #[test]
-    fn characterize_env_threshold_is_model_blind_vs_per_model_windows() {
-        // Env path (compact_or_trim_xai_history → maybe_compact) uses a FIXED 200k
-        // budget at 85% = 170k for EVERY model, ignoring the real context window.
-        const ENV_THRESHOLD: u64 = 200_000 * 85 / 100;
-        assert_eq!(ENV_THRESHOLD, 170_000);
-
-        // Model-aware path (compaction::should_compact) derives the window per model:
+    fn per_model_context_windows_and_compaction_thresholds() {
         assert_eq!(context_window_tokens("grok-4-fast-reasoning"), 2_000_000);
         assert_eq!(context_window_tokens("grok-4-0709"), 256_000);
         assert_eq!(context_window_tokens("grok-3-mini"), 131_072);
 
-        let aware = |w: u64| w * 85 / 100;
-
-        // grok-4-fast (2M): the model-aware gate fires at 1.7M, which is EXACTLY 10×
-        // the env threshold (170k). The env path therefore compacts ~10× too early
-        // on a 2M-window model.
-        assert_eq!(aware(2_000_000), 1_700_000);
-        assert_eq!(aware(2_000_000), 10 * ENV_THRESHOLD);
-
-        // grok-3 (131k): its WHOLE window is below the env threshold (170k), so the
-        // env token-gate can never fire (the request hits the 131k limit first);
-        // only the model-aware gate (~111k) protects grok-3.
-        assert!(
-            131_072 < ENV_THRESHOLD,
-            "grok-3 window 131k < env threshold 170k → env token-gate never fires for grok-3"
-        );
-        assert!(aware(131_072) < 131_072);
+        let threshold = |w: u64| w * 85 / 100;
+        assert_eq!(threshold(2_000_000), 1_700_000);
+        assert_eq!(threshold(256_000), 217_600);
+        assert!(threshold(131_072) < 131_072);
     }
 
     type TestAgent = XaiAgent<Arc<MockXaiHttpClient>, Arc<MockSessionNotifier>>;
@@ -4911,42 +4843,6 @@ mod tests {
         );
     }
 
-    // ── prompt: history trimming ──────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn prompt_trims_history_when_max_exceeded() {
-        let mock_http = Arc::new(MockXaiHttpClient::new());
-        let mock_notifier = Arc::new(MockSessionNotifier::new());
-        let agent: TestAgent = XaiAgent::with_deps(
-            Arc::clone(&mock_notifier),
-            "grok-3",
-            "test-key",
-            Arc::clone(&mock_http),
-        )
-        .with_max_history(4);
-        agent.test_insert_session("trim", "/tmp", None).await;
-
-        // 3 turns produce 6 history entries (user + assistant each); must be trimmed to 4.
-        for _ in 0..3 {
-            mock_http.push_response(vec![
-                XaiEvent::TextDelta {
-                    text: "reply".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
-            agent
-                .prompt(PromptRequest::new("trim", vec![ContentBlock::from("hi")]))
-                .await
-                .unwrap();
-        }
-
-        let len = agent.test_history_len("trim").await;
-        assert!(
-            len <= 4,
-            "history ({len}) should be trimmed to max_history=4"
-        );
-    }
-
     // ── prompt: timeout ───────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -5985,99 +5881,6 @@ mod tests {
             ids.contains(&"grok-3-mini".to_string()),
             "default grok-3-mini must be present"
         );
-    }
-
-    // ── trim_history ──────────────────────────────────────────────────────────
-
-    fn msg(role: &str, content: &str) -> Message {
-        Message {
-            role: role.to_string(),
-            content: Some(content.to_string()),
-            prompt_tokens: None,
-            completion_tokens: None,
-        }
-    }
-
-    fn roles(history: &[Message]) -> Vec<&str> {
-        history.iter().map(|m| m.role.as_str()).collect()
-    }
-
-    #[test]
-    fn trim_history_no_op_when_at_or_below_max() {
-        let mut h = vec![msg("user", "a"), msg("assistant", "b")];
-        trim_history(&mut h, 2);
-        assert_eq!(h.len(), 2);
-        trim_history(&mut h, 4);
-        assert_eq!(h.len(), 2);
-    }
-
-    #[test]
-    fn trim_history_removes_oldest_pair() {
-        let mut h = vec![
-            msg("user", "u1"),
-            msg("assistant", "a1"),
-            msg("user", "u2"),
-            msg("assistant", "a2"),
-            msg("user", "u3"),
-            msg("assistant", "a3"),
-        ];
-        trim_history(&mut h, 4);
-        assert_eq!(h.len(), 4);
-        assert_eq!(h[0].content_str(), "u2");
-    }
-
-    #[test]
-    fn trim_history_odd_max_removes_full_pair() {
-        let mut h = vec![
-            msg("user", "u1"),
-            msg("assistant", "a1"),
-            msg("user", "u2"),
-            msg("assistant", "a2"),
-        ];
-        trim_history(&mut h, 3);
-        assert_eq!(h.len(), 2);
-        assert_eq!(h[0].content_str(), "u2");
-        assert_eq!(h[1].content_str(), "a2");
-    }
-
-    #[test]
-    fn trim_history_orphaned_user_removed_individually() {
-        let mut h = vec![
-            msg("user", "orphan"),
-            msg("user", "new"),
-            msg("assistant", "reply"),
-        ];
-        trim_history(&mut h, 2);
-        assert_eq!(h.len(), 2);
-        assert_eq!(h[0].content_str(), "new");
-        assert_eq!(h[1].content_str(), "reply");
-    }
-
-    #[test]
-    fn trim_history_multiple_orphans_then_pair() {
-        let mut h = vec![
-            msg("user", "orphan1"),
-            msg("user", "orphan2"),
-            msg("user", "new"),
-            msg("assistant", "reply"),
-        ];
-        trim_history(&mut h, 2);
-        assert_eq!(roles(&h), vec!["user", "assistant"]);
-        assert_eq!(h[0].content_str(), "new");
-    }
-
-    #[test]
-    fn trim_history_stops_on_unexpected_leading_role() {
-        let mut h = vec![msg("assistant", "a"), msg("user", "u")];
-        trim_history(&mut h, 1);
-        assert_eq!(h.len(), 2, "should not trim malformed leading assistant");
-    }
-
-    #[test]
-    fn trim_history_empty_is_noop() {
-        let mut h: Vec<Message> = vec![];
-        trim_history(&mut h, 0);
-        assert!(h.is_empty());
     }
 
     // ── enabled_tools: passed to chat_stream ─────────────────────────────────

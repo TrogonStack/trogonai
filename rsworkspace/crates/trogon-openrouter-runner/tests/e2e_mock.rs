@@ -4306,69 +4306,6 @@ async fn text_notification_sent_after_tool_round_via_nats() {
         .await;
 }
 
-// ── trim_history never orphans tool result messages ───────────────────────────
-
-#[tokio::test]
-async fn trim_history_does_not_orphan_tool_result_messages_via_nats() {
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            // max=2 forces aggressive trimming: after each prompt the history is
-            // cut to 2 messages, so we can verify no orphaned tool results survive.
-            let _env_guard = env_lock();
-            unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "2"); }
-            let h = Harness::new();
-            unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
-
-            let sid = create_session(&h).await;
-
-            // Prompt 1: simple exchange, establishes baseline history
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "pong".to_string() }]);
-            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
-            h.session_req(
-                &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![ContentBlock::from("ping")]),
-                "r.trim1",
-            );
-            h.expect_n_publishes(2).await;
-
-            // Prompt 2: tool round — produces assistant tool_calls + tool result in history
-            h.http.push(vec![OpenRouterEvent::ToolCallsReady {
-                calls: vec![AssembledToolCall {
-                    id: "call_trim".to_string(),
-                    name: "list_directory".to_string(),
-                    arguments: r#"{"path":"."}"#.to_string(),
-                }],
-            }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
-            h.session_req(
-                &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![ContentBlock::from("list files")]),
-                "r.trim2",
-            );
-            h.expect_n_publishes(3).await;
-
-            // Prompt 3: simple — forces another trim; verify second HTTP call wire messages
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
-            h.session_req(
-                &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![ContentBlock::from("last")]),
-                "r.trim3",
-            );
-            h.expect_n_publishes(4).await;
-
-            let msgs = h.http.last_messages();
-            // Invariant: no tool_call_id without a preceding tool_calls in the same wire batch
-            let has_orphaned_tool_result = msgs.iter().any(|m| {
-                m.tool_call_id.is_some()
-                    && !msgs.iter().any(|other| other.tool_calls.is_some())
-            });
-            assert!(
-                !has_orphaned_tool_result,
-                "trim must not leave orphaned tool result messages without matching tool_calls: {msgs:?}"
-            );
-        })
-        .await;
-}
 
 // ── tool-round history preserved into next prompt's wire messages ─────────────
 

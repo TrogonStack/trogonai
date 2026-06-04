@@ -1110,57 +1110,6 @@ async fn usage_tokens_stored_in_kv_assistant_message() {
         .await;
 }
 
-// env var tests share a mutex to avoid parallel mutation races
-static ENV_MUTEX: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-
-#[tokio::test]
-async fn history_trimmed_to_max_history_in_kv() {
-    let _lock = ENV_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap();
-
-    unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "2"); }
-    let (js, _c) = make_js().await;
-    let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ReplyHttpClient)
-        .with_session_store(Arc::new(store));
-    unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
-
-    tokio::task::LocalSet::new()
-        .run_until(async move {
-            let resp = agent
-                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
-                .await
-                .unwrap();
-            let session_id = resp.session_id.to_string();
-
-            // Send 3 prompts: each adds user + assistant = 2 messages.
-            // With max_history=2, only the last turn (2 messages) survives.
-            for i in 0..3u32 {
-                agent
-                    .prompt(PromptRequest::new(
-                        resp.session_id.clone(),
-                        vec![ContentBlock::from(format!("turn {i}"))],
-                    ))
-                    .await
-                    .unwrap();
-            }
-
-            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .expect("entry must exist");
-            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            let messages = v["messages"].as_array().unwrap();
-            assert!(
-                messages.len() <= 2,
-                "history must be trimmed to max_history=2 in KV; got {} messages: {messages:?}",
-                messages.len()
-            );
-        })
-        .await;
-}
-
 #[tokio::test]
 async fn new_session_with_loaders_stores_agent_id_in_kv() {
     let (js, _c) = make_js().await;
