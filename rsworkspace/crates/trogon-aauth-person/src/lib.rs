@@ -12,4 +12,7 @@ pub mod store;
 
 pub use core::{BootstrapRequest, BootstrapResponse, PersonCore, PersonError, TokenRequest, TokenResponse};
 pub use policy::{AllowConfiguredScopes, ConsentDecision, ConsentPolicy};
-pub use store::{InMemoryStore, PersonStore};
+pub use store::{
+    AGENTS_BUCKET, AgentRecord, CONSENTS_BUCKET, ConsentRecord, InMemoryStore, JetStreamReplayStore, JetStreamStore,
+    PersonStore, REPLAY_BUCKET, StoreError, agents_bucket_config, consents_bucket_config, replay_bucket_config,
+};
