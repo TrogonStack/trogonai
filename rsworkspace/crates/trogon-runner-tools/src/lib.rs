@@ -46,7 +46,8 @@ pub use portable_session::{
 };
 pub use session_store::{
     AllowedToolsSessionStore, AuditEntry, AuditOutcome, NatsSessionStore, SessionState,
-    SessionStore, StoredMcpServer, TodoItem, append_audit_entries,
+    SessionStore, StoredMcpServer, TodoItem, append_audit_entries, filter_tool_defs_by_allowlist,
+    intersect_enabled_tools, is_tool_in_allowlist,
 };
 pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogon_md_hierarchy, load_trogon_md, project_trogon_md_path};
 

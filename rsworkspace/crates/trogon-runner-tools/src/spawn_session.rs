@@ -13,6 +13,17 @@ use trogon_std::time::GetElapsed;
 
 pub use crate::worktree::create_worktree;
 
+/// Permission and tool context propagated from a parent session into a sub-agent session.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SubSessionSpawnContext {
+    /// Restrictive tool allowlist from a named subagent definition (empty = no restriction).
+    pub tool_allowlist: Vec<String>,
+    /// Parent auto-approve list (`allowed_tools`); not a restrictive allowlist.
+    pub allowed_tools: Vec<String>,
+    pub additional_read_dirs: Vec<String>,
+    pub additional_roots: Vec<String>,
+}
+
 /// Open a new ACP session on the provided bridge.
 ///
 /// `mode` controls the permission mode of the sub-session:
@@ -31,6 +42,7 @@ pub async fn create_sub_session<N, C, J>(
     permission_rules_text: Option<&str>,
     system_prompt: Option<&str>,
     model: Option<&str>,
+    spawn_ctx: Option<&SubSessionSpawnContext>,
 ) -> Result<String, String>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
@@ -49,6 +61,34 @@ where
             "systemPromptOverride".to_string(),
             serde_json::Value::String(sp.to_string()),
         );
+    }
+    if let Some(ctx) = spawn_ctx {
+        if !ctx.tool_allowlist.is_empty() {
+            meta.insert(
+                "toolAllowlist".to_string(),
+                serde_json::json!(ctx.tool_allowlist),
+            );
+        }
+        if !ctx.allowed_tools.is_empty() {
+            meta.insert(
+                "allowedTools".to_string(),
+                serde_json::json!(ctx.allowed_tools),
+            );
+        }
+        if !ctx.additional_roots.is_empty() {
+            meta.insert(
+                "additionalRoots".to_string(),
+                serde_json::json!(ctx.additional_roots),
+            );
+        }
+        if !ctx.additional_read_dirs.is_empty() {
+            meta.insert(
+                "permissions".to_string(),
+                serde_json::json!({
+                    "additionalDirectories": ctx.additional_read_dirs,
+                }),
+            );
+        }
     }
 
     let req = NewSessionRequest::new(PathBuf::from(cwd)).meta(meta);
