@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::HeaderMap;
@@ -27,6 +28,22 @@ impl MaxPayload {
 
     pub fn threshold(&self) -> usize {
         self.0
+    }
+}
+
+pub trait MaxPayloadLimit: Send + Sync + 'static {
+    fn max_payload(&self) -> MaxPayload;
+}
+
+impl MaxPayloadLimit for MaxPayload {
+    fn max_payload(&self) -> MaxPayload {
+        *self
+    }
+}
+
+impl MaxPayloadLimit for async_nats::Client {
+    fn max_payload(&self) -> MaxPayload {
+        MaxPayload::from_server_limit(async_nats::Client::max_payload(self))
     }
 }
 
@@ -87,21 +104,31 @@ impl<E: std::error::Error + Send + Sync + 'static> std::error::Error for ClaimRe
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ClaimCheckPublisher<P, S> {
     publisher: P,
     store: S,
     bucket_name: String,
-    max_payload: MaxPayload,
+    max_payload: Arc<dyn MaxPayloadLimit>,
+}
+
+impl<P: fmt::Debug, S: fmt::Debug> fmt::Debug for ClaimCheckPublisher<P, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClaimCheckPublisher")
+            .field("publisher", &self.publisher)
+            .field("store", &self.store)
+            .field("bucket_name", &self.bucket_name)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<P, S> ClaimCheckPublisher<P, S> {
-    pub fn new(publisher: P, store: S, bucket_name: String, max_payload: MaxPayload) -> Self {
+    pub fn new<M: MaxPayloadLimit>(publisher: P, store: S, bucket_name: String, max_payload: M) -> Self {
         Self {
             publisher,
             store,
             bucket_name,
-            max_payload,
+            max_payload: Arc::new(max_payload),
         }
     }
 }
@@ -140,7 +167,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
         ack_timeout: Duration,
     ) -> PublishOutcome<P::PublishError> {
         let payload_bytes = payload.len();
-        let threshold = self.max_payload.threshold();
+        let max_payload = self.max_payload.max_payload();
+        let threshold = max_payload.threshold();
 
         if payload_bytes <= threshold {
             debug!(
@@ -302,11 +330,36 @@ mod tests {
 
 #[cfg(all(test, feature = "test-support"))]
 mod integration_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use super::*;
     use crate::jetstream::mocks::MockJetStreamPublisher;
     use crate::jetstream::mocks::MockObjectStore;
+
+    #[derive(Clone)]
+    struct DynamicMaxPayload {
+        server_limit: Arc<AtomicUsize>,
+    }
+
+    impl DynamicMaxPayload {
+        fn new(server_limit: usize) -> Self {
+            Self {
+                server_limit: Arc::new(AtomicUsize::new(server_limit)),
+            }
+        }
+
+        fn set_server_limit(&self, server_limit: usize) {
+            self.server_limit.store(server_limit, Ordering::Relaxed);
+        }
+    }
+
+    impl MaxPayloadLimit for DynamicMaxPayload {
+        fn max_payload(&self) -> MaxPayload {
+            MaxPayload::from_server_limit(self.server_limit.load(Ordering::Relaxed))
+        }
+    }
 
     #[tokio::test]
     async fn small_payload_publishes_directly() {
@@ -400,6 +453,46 @@ mod integration_tests {
         assert!(outcome.is_ok());
         assert_eq!(publisher.published_messages()[0].payload.len(), 1024);
         assert!(store.stored_objects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn publish_uses_current_max_payload_limit() {
+        let publisher = MockJetStreamPublisher::new();
+        let store = MockObjectStore::new();
+        let max_payload = DynamicMaxPayload::new(1024 + PROTOCOL_OVERHEAD);
+        let cc = ClaimCheckPublisher::new(
+            publisher.clone(),
+            store.clone(),
+            "test-bucket".to_string(),
+            max_payload.clone(),
+        );
+
+        let direct = cc
+            .publish_event(
+                "test.subject".to_string(),
+                HeaderMap::new(),
+                Bytes::from(vec![0u8; 512]),
+                Duration::from_secs(5),
+            )
+            .await;
+        assert!(direct.is_ok());
+
+        max_payload.set_server_limit(256 + PROTOCOL_OVERHEAD);
+        let claimed = cc
+            .publish_event(
+                "test.subject".to_string(),
+                HeaderMap::new(),
+                Bytes::from(vec![0u8; 512]),
+                Duration::from_secs(5),
+            )
+            .await;
+        assert!(claimed.is_ok());
+
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].payload.len(), 512);
+        assert!(messages[1].payload.is_empty());
+        assert_eq!(store.stored_objects().len(), 1);
     }
 
     #[tokio::test]
