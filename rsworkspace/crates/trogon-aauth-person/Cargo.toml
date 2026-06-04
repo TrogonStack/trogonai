@@ -32,6 +32,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "
 tracing = { workspace = true }
 trogon-identity-types = { workspace = true }
 trogon-aauth-verify = { workspace = true }
+trogon-nats = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
