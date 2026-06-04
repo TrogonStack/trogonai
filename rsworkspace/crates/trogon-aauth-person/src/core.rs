@@ -11,6 +11,7 @@ use trogon_identity_types::aauth::{DWK_AGENT, TYP_AGENT, TYP_AUTH};
 
 use crate::policy::{ConsentContext, ConsentDecision, ConsentPolicy};
 use crate::store::{AgentRecord, ConsentRecord, PersonStore};
+use crate::wif_exchange::ResolvedWifExchange;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PersonError {
@@ -229,6 +230,57 @@ where
         Ok(TokenResponse {
             auth_jwt,
             scope: serde_json::from_value::<String>(claims["scope"].clone()).unwrap_or_default(),
+            expires_in: exp - iat,
+        })
+    }
+
+    /// Mint an `aa-auth+jwt` for a resolved WIF exchange.
+    ///
+    /// `resolved` carries the WIF provider, the matched service-account
+    /// mapping, derived attributes, and the raw upstream claims. The minted
+    /// token's subject is the resolved service account; scope is the union of
+    /// the mapping's permissions; audience is the original upstream issuer so
+    /// downstream resources can detect federated origin.
+    pub fn mint_wif_auth(&self, resolved: &ResolvedWifExchange) -> Result<TokenResponse, PersonError> {
+        let iat = self.clock.now();
+        let exp = iat + self.auth_jwt_ttl_secs;
+        let scope = resolved.permissions.join(" ");
+        let upstream_iss = resolved
+            .raw_claims
+            .get("iss")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let upstream_sub = resolved.raw_claims.get("sub").and_then(|v| v.as_str()).unwrap_or_default();
+
+        let mut header = Header::new(self.signing_alg);
+        header.typ = Some(TYP_AUTH.into());
+        header.kid = Some(self.signing_kid.clone());
+
+        let consent_id = format!("c-wif-{:x}", iat);
+        let claims = serde_json::json!({
+            "iss": self.iss,
+            "sub": resolved.service_account_id,
+            "aud": upstream_iss,
+            "jti": jti(iat, &resolved.mapping_id),
+            "iat": iat,
+            "exp": exp,
+            "agent": resolved.service_account_id,
+            "scope": scope,
+            "principal": upstream_sub,
+            "consent_id": consent_id,
+            "wif": {
+                "provider": resolved.provider_id,
+                "mapping": resolved.mapping_id,
+                "attributes": resolved.attributes,
+            },
+        });
+
+        let auth_jwt = encode(&header, &claims, &self.signing_key).map_err(|e| PersonError::Encode(e.to_string()))?;
+
+        Ok(TokenResponse {
+            auth_jwt,
+            scope,
             expires_in: exp - iat,
         })
     }
