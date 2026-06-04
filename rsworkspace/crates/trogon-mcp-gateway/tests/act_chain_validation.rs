@@ -68,6 +68,7 @@ impl ActChainValidationHarness {
             stepup_policy: None,
             stepup_bridge: None,
             freshness_clock: None,
+            multi_region_router: None,
         };
         Self {
             nats_conf,

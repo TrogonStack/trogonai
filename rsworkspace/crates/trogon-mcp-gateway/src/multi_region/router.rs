@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use super::audit::RegionAuditSink;
 use super::errors::RegionRouteError;
@@ -25,16 +25,25 @@ pub struct RequestContext {
     pub session_id: Option<String>,
 }
 
-#[derive(Debug)]
-pub struct RegionRouter<A: RegionAuditSink> {
+pub struct RegionRouter {
     topology: RegionTopology,
     health: RegionHealth,
-    audit: A,
+    audit: Arc<dyn RegionAuditSink>,
     session_pins: RwLock<HashMap<String, RegionId>>,
 }
 
-impl<A: RegionAuditSink> RegionRouter<A> {
-    pub fn new(topology: RegionTopology, health: RegionHealth, audit: A) -> Self {
+impl std::fmt::Debug for RegionRouter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionRouter")
+            .field("topology", &self.topology)
+            .field("health", &self.health)
+            .field("session_pins", &self.session_pins)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RegionRouter {
+    pub fn new(topology: RegionTopology, health: RegionHealth, audit: Arc<dyn RegionAuditSink>) -> Self {
         Self {
             topology,
             health,
@@ -119,7 +128,7 @@ impl<A: RegionAuditSink> RegionRouter<A> {
     }
 }
 
-impl<A: RegionAuditSink> RegionRouter<A> {
+impl RegionRouter {
     pub fn mark_region_recovered(&self, region: &RegionId) {
         let was_unreachable = !self.health.is_healthy(region);
         self.health.force_healthy(region);
@@ -160,15 +169,17 @@ mod tests {
         RegionTopology::new(home, vec![west], endpoints).unwrap()
     }
 
-    fn router() -> RegionRouter<RecordingRegionAuditSink> {
+    fn router() -> (RegionRouter, Arc<RecordingRegionAuditSink>) {
         let topo = two_region_topo();
         let health = RegionHealth::new(&topo, RegionHealthConfig::default());
-        RegionRouter::new(topo, health, RecordingRegionAuditSink::default())
+        let sink = Arc::new(RecordingRegionAuditSink::default());
+        let router = RegionRouter::new(topo, health, sink.clone());
+        (router, sink)
     }
 
     #[test]
     fn happy_path_selects_home() {
-        let router = router();
+        let (router, _sink) = router();
         let decision = router.route(None, &RequestContext::default()).expect("route");
         assert_eq!(decision.region.as_str(), "us-east");
         assert_eq!(decision.reason, RouteReason::HomeRegion);
@@ -176,13 +187,13 @@ mod tests {
 
     #[test]
     fn failover_when_home_unreachable() {
-        let router = router();
+        let (router, sink) = router();
         let home = RegionId::new("us-east").unwrap();
         router.health.force_unreachable(&home);
         let decision = router.route(None, &RequestContext::default()).expect("route");
         assert_eq!(decision.region.as_str(), "us-west");
         assert!(matches!(decision.reason, RouteReason::Failover { .. }));
-        let events = router.audit.failed_overs.lock().expect("lock");
+        let events = sink.failed_overs.lock().expect("lock");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0.as_str(), "us-east");
         assert_eq!(events[0].1.as_str(), "us-west");
@@ -190,7 +201,7 @@ mod tests {
 
     #[test]
     fn all_unreachable_returns_error_with_attempt_list() {
-        let router = router();
+        let (router, _sink) = router();
         router.health.force_unreachable(&RegionId::new("us-east").unwrap());
         router.health.force_unreachable(&RegionId::new("us-west").unwrap());
         let err = router.route(None, &RequestContext::default()).expect_err("route");
@@ -200,7 +211,7 @@ mod tests {
 
     #[test]
     fn session_pin_sticky_across_calls_while_healthy() {
-        let router = router();
+        let (router, _sink) = router();
         let ctx = RequestContext {
             session_id: Some("sess-1".into()),
         };
@@ -214,7 +225,7 @@ mod tests {
 
     #[test]
     fn clear_session_pin_allows_failover_when_home_down() {
-        let router = router();
+        let (router, _sink) = router();
         let ctx = RequestContext {
             session_id: Some("sess-2".into()),
         };

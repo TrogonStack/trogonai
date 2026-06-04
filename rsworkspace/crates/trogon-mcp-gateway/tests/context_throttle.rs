@@ -100,6 +100,7 @@ mod harness {
             stepup_policy: None,
             stepup_bridge: None,
             freshness_clock: None,
+            multi_region_router: None,
         };
 
         let nats = Arc::new(connect(&nats_conf, connect_timeout).await.expect("nats connect"));

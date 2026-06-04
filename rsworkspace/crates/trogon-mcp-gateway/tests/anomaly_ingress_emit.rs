@@ -137,6 +137,7 @@ async fn anomaly_emits_when_emitter_configured() {
         stepup_policy: None,
         stepup_bridge: None,
         freshness_clock: None,
+        multi_region_router: None,
     };
 
     let harness = harness::start_gateway(settings).await;
@@ -196,6 +197,7 @@ async fn anomaly_emit_failure_does_not_fail_request() {
         stepup_policy: None,
         stepup_bridge: None,
         freshness_clock: None,
+        multi_region_router: None,
     };
 
     let harness = harness::start_gateway(settings).await;

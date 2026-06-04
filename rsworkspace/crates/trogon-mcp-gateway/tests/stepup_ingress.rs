@@ -59,6 +59,7 @@ fn base_settings(
         stepup_policy,
         stepup_bridge,
         freshness_clock,
+        multi_region_router: None,
     }
 }
 

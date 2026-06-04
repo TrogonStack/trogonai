@@ -139,6 +139,7 @@ async fn main() -> Result<(), BoxError> {
         stepup_policy: None,
         stepup_bridge: None,
         freshness_clock: None,
+        multi_region_router: None,
     };
 
     info!(
