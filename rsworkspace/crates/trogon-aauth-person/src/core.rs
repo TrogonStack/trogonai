@@ -285,6 +285,49 @@ where
         })
     }
 
+    /// Mint an `aa-auth+jwt` for an OAuth `authorization_code` exchange.
+    ///
+    /// Subject is the principal the human approved consent as; audience
+    /// is the client_id so downstream resources can attribute the call
+    /// to the registered OAuth client. TTL is clamped to `auth_jwt_ttl_secs`.
+    pub fn mint_oauth_auth(
+        &self,
+        client_id: &str,
+        principal: &str,
+        granted_scope: &str,
+        ttl_secs: i64,
+    ) -> Result<TokenResponse, PersonError> {
+        let iat = self.clock.now();
+        let exp = iat + ttl_secs.min(self.auth_jwt_ttl_secs);
+
+        let mut header = Header::new(self.signing_alg);
+        header.typ = Some(TYP_AUTH.into());
+        header.kid = Some(self.signing_kid.clone());
+
+        let consent_id = format!("c-oauth-{:x}", iat);
+        let claims = serde_json::json!({
+            "iss": self.iss,
+            "sub": principal,
+            "aud": client_id,
+            "jti": jti(iat, client_id),
+            "iat": iat,
+            "exp": exp,
+            "agent": client_id,
+            "scope": granted_scope,
+            "principal": principal,
+            "consent_id": consent_id,
+            "oauth": { "client_id": client_id },
+        });
+
+        let auth_jwt = encode(&header, &claims, &self.signing_key).map_err(|e| PersonError::Encode(e.to_string()))?;
+
+        Ok(TokenResponse {
+            auth_jwt,
+            scope: granted_scope.to_string(),
+            expires_in: exp - iat,
+        })
+    }
+
     /// JWKS for this PS (the keys used to sign `aa-agent+jwt` and `aa-auth+jwt`).
     pub fn jwks(&self) -> JwkSet {
         // Callers wire the actual public JWK in via the builder; the core

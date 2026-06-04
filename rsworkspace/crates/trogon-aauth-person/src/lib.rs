@@ -8,6 +8,8 @@ pub mod claim_mapping;
 pub mod core;
 pub mod http;
 pub mod nats;
+pub mod oauth_clients;
+pub mod oauth_code;
 pub mod policy;
 pub mod store;
 pub mod wif;
