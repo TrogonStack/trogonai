@@ -7336,6 +7336,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
+ "cel-interpreter",
  "futures",
  "jsonwebtoken 10.4.0",
  "p256",
