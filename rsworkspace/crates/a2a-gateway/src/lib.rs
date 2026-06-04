@@ -2,9 +2,10 @@
 //!
 //! Engineering checklist beyond opaque forward: **[`docs/a2a/explanation/gateway-roadmap.md`](../../../../docs/a2a/explanation/gateway-roadmap.md)**.
 //!
-//! Planned authorization and policy seams are documented in [A2A architecture](../../../../docs/a2a/explanation/architecture.md):
-//! queue-group subscriber (`A2A_GATEWAY_QUEUE_GROUP`) with opaque JSON-RPC bridging today; JWT
-//! validation, policy bundles (`a2a-pack`), and ingress audit emission remain future work.
+//! Authorization runs as tier1 declarative + tier2 CEL + tier3 redaction (`policy/`), with
+//! [`policy::per_skill`] handling per-skill allow/deny bundles and
+//! [`audit_ingress`] publishing the ingress audit envelope on
+//! `{prefix}.a2a.audit.{outcome}.ingress.{skill}`.
 //!
 //! ## Future: authenticated caller identity
 //!
@@ -18,6 +19,7 @@
 
 pub mod aauth;
 pub mod agent_card_surface;
+pub mod audit_ingress;
 pub mod caller_jwt_header;
 pub mod config;
 pub mod gw_ingress_stream;
