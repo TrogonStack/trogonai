@@ -9,6 +9,7 @@
 pub mod challenge;
 pub mod jkt;
 pub mod jwks;
+pub mod jwks_cache;
 pub mod nats_pop;
 pub mod replay;
 pub mod time_source;
@@ -16,7 +17,8 @@ pub mod token;
 
 pub use challenge::{ChallengeMinter, mint_resource_jwt};
 pub use jkt::jwk_thumbprint;
-pub use jwks::{JwksResolver, StaticJwks};
+pub use jwks::{JwksError, JwksResolver, StaticJwks};
+pub use jwks_cache::{CachedJwksResolver, DEFAULT_NEGATIVE_TTL_SECS, DEFAULT_TTL_SECS};
 pub use nats_pop::{NatsHeaders, NatsPopVerifier, NatsRequest};
 pub use replay::{InMemoryReplayStore, ReplayStore};
 pub use time_source::{SystemTimeSource, TimeSource};
