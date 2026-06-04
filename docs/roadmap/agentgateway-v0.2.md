@@ -14,14 +14,20 @@ in the current cut.
 
 ### Multi-region routing
 
-Wire `multi_region/mod.rs` into `gateway::handle_ingress_inner`.
+**Status (2026-06-03):** `RegionRouter` now uses
+`Arc<dyn RegionAuditSink>` (no generic), is exposed as
+`GatewaySettings::multi_region_router: Option<Arc<RegionRouter>>`, and
+is invoked from `gateway::handle_ingress_inner` to resolve a region +
+session pin per request. The wiring is observability-only today (the
+decision is logged via `tracing::debug!` and audit-sink failover
+events fire); the gateway still publishes to a single default NATS
+client.
 
-**Deferred because:** `RegionRouter<A: RegionAuditSink>` is generic over
-the sink type; wiring requires converting to `Arc<dyn RegionAuditSink>`
-or threading a generic parameter through `GatewaySettings`. The
-multi-region runtime topology (per-region NATS clients, cross-region
-audit fanout, failover policy) is unscoped. **Owner:** architecture
-review before code.
+What remains in v0.2: per-region NATS client fan-out (a `RegionId ->
+Arc<async_nats::Client>` registry built from `MultiRegionConfig`),
+selection of the regional client at `handle_ingress_inner` publish
+time, and cross-region audit fanout policy. **Owner:** architecture
+review before the per-region client topology lands.
 
 ### Distributed KV-sync rate limiter (ADR 0012 Tier 2)
 
@@ -36,22 +42,38 @@ the meantime (`charts/agentgateway/values.yaml`, `replicaCount: 1`).
 
 ### Per-request User JWT propagation + Subject ACL templates
 
-`jwt_caller_identity.rs`.
+`a2a-gateway/src/jwt_caller_identity.rs`.
 
-**Deferred because:** `production_default()` already enforces
-`trust_caller_headers: false`. The remaining work (per-request JWT
-extraction from inbound A2A metadata, Subject ACL template
-materialization) needs an explicit spec; v0.1 ships with the secure
-default.
+**Status (2026-06-03):** Per-request JWT extraction now ships in v0.1
+via `JwtHeaderCallerIdentitySource` — it pulls
+`CALLER_JWT_HEADER_NAME` from inbound A2A message headers, verifies
+the minted user JWT against the configured `SigningKeySource`, and
+materializes a `JwtCallerIdentity { spicedb_subject, audience,
+source: MessageCallerJwtHeader }`. `production_default()` keeps
+`trust_caller_headers: false`; only the verified JWT path mints an
+identity in production.
+
+**Subject ACL template materialization** (2026-06-03): shipped.
+`a2a_auth_callout::SubjectAclTemplate` carries `publish` / `subscribe`
+pattern lists with `{caller}` `{aud}` `{sub}` `{iss}` placeholder
+substitution; `materialize(&SubjectAclContext)` validates each
+rendered pattern through `SubjectPattern::new` and produces an
+`IssuedPermissions`. Unknown placeholders, missing context values,
+unclosed `{`, and whitespace in rendered subjects all fail closed.
+What remains in v0.2: wire callers in the auth-callout dispatcher
+(`a2a-auth-callout::dispatcher`) to load templates from policy config
+and call `materialize` in place of `IssuedPermissions::default_for_caller`.
 
 ### Real NATS `$SYS` auth callout
 
-`a2a-bridge/src/auth.rs` `StubAuthCalloutClient` → real implementation.
-
-**Deferred because:** NATS decentralized auth-callout integration is
-multi-week work (account JWT signing, callout service registration).
-v0.1 ships with the stub returning a clear error; operators are
-expected to deploy a bespoke auth-callout service alongside.
+**Status (2026-06-03):** Shipped in v0.1. `a2a-bridge/src/auth.rs`
+exposes `AuthCalloutJsonMintClient<W>` over the `AuthCalloutClient`
+trait, with `AsyncNatsAuthMintWire` providing the real NATS request
+transport against an external mint service. `StubAuthCalloutClient`
+remains for tests / dry-run deployments only. Helm packaging lands as
+`charts/agentgateway/values-a2a-auth-callout.yaml`. No outstanding
+v0.2 work in this bullet — the dependent `a2a-bridge` HTTPS ingress
+item below is what remains.
 
 ### `a2a-bridge` HTTPS ingress (disposition)
 
@@ -121,13 +143,13 @@ production flow today.
 
 ### NATS KV-backed `ReplayStore`
 
-`InMemoryReplayStore` ships for single-process deployments. The trait +
-KV layout are documented in
-[`aauth-design.md` §D6 / §D9](../identity/aauth-design.md#d6-storage).
-
-**Deferred because:** v0 deploys a single Person Server replica; KV
-backing is required only for HA and is a straightforward port once we
-own the KV layout in production.
+**Status (2026-06-03):** Shipped. `trogon_aauth_person::JetStreamReplayStore`
+implements `ReplayStore` using `kv::Store::create` for atomic
+compare-and-set replay detection (`kv::CreateErrorKind::AlreadyExists`
+maps to "already seen"). Bucket is `aauth-replay`; key lifetime is
+bounded by bucket `max_age` passed to `replay_bucket_config(ttl)`.
+`InMemoryReplayStore` remains the default for single-process Person
+Server replicas.
 
 ### Python AAuth SDK
 
@@ -142,13 +164,20 @@ surface lands once rather than twice.
 
 ### A2A gateway AAuth coverage
 
-`trogon-mcp-gateway::aauth` is wired; `a2a-gateway` enforces JWT-based
-identity today but does not yet run `trogon-aauth-verify` on its ingress
-path.
+**Status (2026-06-03):** Verifier module shipped.
+`a2a-gateway::aauth` mirrors `trogon-mcp-gateway::aauth` and exposes
+`AAuthIngress` over `NatsPopVerifier` + `TokenVerifier` with
+`AAuthMode::{Off, Shadow, Enforce}` and a `ChallengeMinter`-backed
+`AAuthDeny::to_requirement_header()` that emits the `AAuth-Requirement`
+header on enforce-mode failure. `AAUTH_REQUIRED_CODE = -32118` matches
+the MCP path. Unit tests cover header rendering and anonymous
+resolution.
 
-**Deferred because:** the AAuth ingress shape needs an A2A-side decision
-on where token / PoP headers ride (callout vs. inline) — tracked
-alongside the `$SYS` auth callout item above and lands together.
+What remains in v0.2: wiring `AAuthIngress::resolve_nats` into
+`runtime::dispatch_gateway_ingress`. That call site needs the policy
+config decision on where token / PoP headers ride (inline NATS headers
+vs. auth-callout extraction) before the verifier replaces the existing
+JWT-header path — the verifier capability itself no longer blocks.
 
 ### Hardening pass
 
@@ -199,13 +228,17 @@ v0.2 contract pin.
 
 ### `tools/list` virtualization (rename / alias / hide)
 
-**Decision (2026-06-03):** Per-client tool **renaming and aliasing**
-is **deferred to v0.2**. The hide / filter dimension (denylist by
-name) ships in v0.1 via `policy/list_filter`.
+**Status (2026-06-03):** Per-client tool **rename / alias** now ships
+via `policy::list_filter::apply_tool_rewrites` in
+`trogon-mcp-gateway`. Exact-name match, first-rule-wins, emits a
+`catalog_renamed` audit event. The hide / filter dimension already
+shipped in v0.1 via `policy/list_filter`.
 
-The `tools_list_filter.rs` integration test stays `#[ignore]`'d
-because it currently asserts rename behavior. v0.1 release notes call
-out the supported subset (filter-only).
+What remains in v0.2: wire `apply_tool_rewrites` from a policy-bundle
+config field (today the function is callable but rules are supplied
+by the caller). The ignored integration tests in
+`tests/tools_list_filter.rs` are NATS-harness gated, not rename
+gated.
 
 ---
 
@@ -234,16 +267,19 @@ the `/healthz`+`/readyz` listener.
 ## Open GitHub items
 
 - **PR #190** — `chore(deps): Bump rand 0.8.5 → 0.8.6` (dependabot).
-  Auto-merge once CI green. **Action:** enable automerge on the PR;
-  no v0.2 code required.
+  **Merged 2026-06-01.**
 - **PR #189** — `chore(deps): Bump rustls-webpki 0.103.10 → 0.103.13`
-  (dependabot). Auto-merge once CI green.
+  (dependabot). **Merged 2026-06-01.**
 - **Issue #122** — restore `server_info().max_payload` once
   async-nats race resolved. **Blocked on upstream.**
 - **Issue #101** — TTL on `trogon-claims` object store bucket.
-  Provisioning manifest now sets a 10-minute KV TTL
-  (`devops/nats/kv/trogon-claims.json`); object-store variant tracked
-  alongside if/when needed.
+  **Decided (2026-06-03):** KV-only. Provisioning manifest sets a
+  10-minute KV TTL (`devops/nats/kv/trogon-claims.json`). The
+  object-store variant is **not pursued** — claims are small-payload
+  short-TTL records that fit the KV constraints; an object-store
+  variant only becomes useful if claim payloads grow past KV size
+  limits, which the current schema does not require. Close the
+  object-store half of #101.
 - **Issue #136** — local dev orchestration decision (Docker Compose
   vs. native process orchestration).
 
