@@ -733,7 +733,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         prefix,
                         &session_id,
                         std::path::PathBuf::from(&state.cwd),
-                        std::time::Duration::from_secs(30),
+                        std::time::Duration::from_secs(
+                            trogon_runner_tools::wasm_bash_tool::DEFAULT_BASH_TIMEOUT_SECS,
+                        ),
                         self.store.clone(),
                     );
                     let (name, orig, client) = bash.into_dispatch();

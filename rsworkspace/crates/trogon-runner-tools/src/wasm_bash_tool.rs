@@ -49,6 +49,9 @@ fn release_session_creation_lock(session_id: &str) {
     creation_locks().lock().unwrap().remove(session_id);
 }
 
+pub const DEFAULT_BASH_TIMEOUT_SECS: u64 = 120;
+pub const MAX_BASH_TIMEOUT_SECS: u64 = 600;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const START_MARKER_PREFIX: &str = "__START_";
 const START_MARKER_SUFFIX: &str = "__";
@@ -98,7 +101,9 @@ impl<S: SessionStore> WasmRuntimeBashTool<S> {
     pub fn tool_def() -> ToolDef {
         ToolDef {
             name: "bash".to_string(),
-            description: "Run a shell command in the session sandbox and return its output."
+            description: "Run a shell command in the session sandbox and return its output. \
+                Long-running commands are supported (up to 600 seconds via timeout_secs); \
+                partial output is returned if the command times out."
                 .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -106,6 +111,10 @@ impl<S: SessionStore> WasmRuntimeBashTool<S> {
                     "command": {
                         "type": "string",
                         "description": "The shell command to execute."
+                    },
+                    "timeout_secs": {
+                        "type": "integer",
+                        "description": "Maximum seconds to wait for the command (default 120, max 600). Use a higher value for long builds/tests."
                     }
                 },
                 "required": ["command"]
@@ -132,7 +141,7 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
         let wasm_prefix = self.wasm_prefix.clone();
         let session_id = self.session_id.clone();
         let sandbox_dir = self.sandbox_dir.clone();
-        let timeout = self.timeout;
+        let timeout = resolve_timeout(arguments, self.timeout);
         let store = self.store.clone();
 
         Box::pin(async move {
@@ -268,6 +277,14 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
     }
 }
 
+/// Resolves the per-call bash timeout from optional `timeout_secs` in `arguments`.
+fn resolve_timeout(arguments: &Value, default: Duration) -> Duration {
+    let args_timeout = arguments["timeout_secs"].as_u64();
+    args_timeout
+        .map(|s| s.clamp(1, MAX_BASH_TIMEOUT_SECS))
+        .map(Duration::from_secs)
+        .unwrap_or(default)
+}
 
 /// Wrap `s` in single quotes for safe use as one POSIX-shell word, escaping any
 /// embedded single quote as the standard `'\''` sequence (close-quote, escaped
@@ -536,6 +553,42 @@ mod tests {
         assert_eq!(
             extract_output(&output, start, exit_prefix),
             Some("fake __EXIT_0__ printed by user\nreal output".to_string())
+        );
+    }
+
+    // ── resolve_timeout ───────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_timeout_uses_default_when_param_absent() {
+        let args = serde_json::json!({ "command": "ls" });
+        let default = Duration::from_secs(DEFAULT_BASH_TIMEOUT_SECS);
+        assert_eq!(resolve_timeout(&args, default), default);
+    }
+
+    #[test]
+    fn resolve_timeout_honors_explicit_value() {
+        let args = serde_json::json!({ "command": "ls", "timeout_secs": 300 });
+        assert_eq!(
+            resolve_timeout(&args, Duration::from_secs(DEFAULT_BASH_TIMEOUT_SECS)),
+            Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn resolve_timeout_clamps_to_max() {
+        let args = serde_json::json!({ "command": "ls", "timeout_secs": 99999 });
+        assert_eq!(
+            resolve_timeout(&args, Duration::from_secs(DEFAULT_BASH_TIMEOUT_SECS)),
+            Duration::from_secs(MAX_BASH_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn resolve_timeout_clamps_zero_to_one() {
+        let args = serde_json::json!({ "command": "ls", "timeout_secs": 0 });
+        assert_eq!(
+            resolve_timeout(&args, Duration::from_secs(DEFAULT_BASH_TIMEOUT_SECS)),
+            Duration::from_secs(1)
         );
     }
 
