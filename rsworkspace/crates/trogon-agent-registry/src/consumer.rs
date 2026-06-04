@@ -177,6 +177,7 @@ mod tests {
             allowed_audiences: vec![],
             allowed_purposes: None,
             mesh_token_ttl_s: None,
+            allow_capabilities: vec![],
             metadata: serde_json::Value::Null,
             lifecycle_state: state,
             created_at: "2026-05-27T00:00:00Z".to_string(),

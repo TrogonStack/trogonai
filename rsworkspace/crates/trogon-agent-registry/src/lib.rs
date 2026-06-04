@@ -2,6 +2,7 @@ mod audit;
 mod cache;
 mod consumer;
 mod store;
+pub mod tool_capability;
 mod types;
 
 pub use audit::{
@@ -13,4 +14,5 @@ pub use consumer::{ConsumerError, LOOKUP_SUBJECT, QUEUE_GROUP, lookup, resolve_l
 pub use store::{
     AgentRegistryStore, BUCKET_NAME, RegistryWatchEvent, bucket_config, latest_key, open_bucket, spawn_watch_task,
 };
-pub use types::{AgentRecord, LifecycleState, LookupRequest, LookupResponse};
+pub use tool_capability::{CapabilityDecision, CapabilityReason, CapabilityResolution, resolve_tool_capability};
+pub use types::{AgentRecord, LifecycleState, LookupRequest, LookupResponse, ToolCapability};

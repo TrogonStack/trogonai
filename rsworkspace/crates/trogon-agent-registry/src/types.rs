@@ -9,6 +9,26 @@ pub enum LifecycleState {
     Revoked,
 }
 
+/// Coarse-grained capability flag for an MCP tool. The tool's
+/// server declares the capability authoritatively; the gateway
+/// fail-safes to [`ToolCapability::Write`] when the declaration
+/// is missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolCapability {
+    Read,
+    Write,
+}
+
+impl ToolCapability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+}
+
 /// Authoritative agent identity record stored in NATS KV.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentRecord {
@@ -23,6 +43,12 @@ pub struct AgentRecord {
     pub allowed_purposes: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh_token_ttl_s: Option<u32>,
+    /// Capability allow-list. When non-empty the gateway permits
+    /// any tool whose declared capability is contained here, in
+    /// addition to the explicit `allowed_tools`. Empty disables
+    /// the coarse pathway (only `allowed_tools` applies).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_capabilities: Vec<ToolCapability>,
     #[serde(default)]
     pub metadata: serde_json::Value,
     pub lifecycle_state: LifecycleState,
@@ -63,6 +89,7 @@ mod tests {
             allowed_audiences: vec!["mcp.server.pagerduty".to_string()],
             allowed_purposes: Some(vec!["incident.response".to_string()]),
             mesh_token_ttl_s: Some(300),
+            allow_capabilities: vec![],
             metadata: serde_json::json!({"description": "Pages on-call"}),
             lifecycle_state: LifecycleState::Active,
             created_at: "2026-05-27T00:00:00Z".to_string(),

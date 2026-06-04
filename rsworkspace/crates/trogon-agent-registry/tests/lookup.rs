@@ -21,6 +21,7 @@ fn sample_record(agent_id: &str) -> AgentRecord {
         allowed_audiences: vec!["mcp.server.pagerduty".to_string()],
         allowed_purposes: Some(vec!["incident.response".to_string()]),
         mesh_token_ttl_s: Some(300),
+        allow_capabilities: vec![],
         metadata: serde_json::json!({"description": "integration test agent"}),
         lifecycle_state: LifecycleState::Active,
         created_at: "2026-05-27T00:00:00Z".to_string(),
