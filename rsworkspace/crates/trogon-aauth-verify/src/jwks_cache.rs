@@ -8,7 +8,6 @@
 //! requests.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
@@ -23,26 +22,10 @@ pub const DEFAULT_TTL_SECS: i64 = 600;
 /// Default negative TTL for cached failures. Short enough that a transient
 /// outage at the upstream IdP self-heals quickly without becoming a tight loop.
 pub const DEFAULT_NEGATIVE_TTL_SECS: i64 = 30;
-/// Hard cap on the number of distinct issuers held in the cache. `iss` is
-/// pulled from the JWT payload before signature verification, so an attacker
-/// can drive arbitrary distinct strings into this map. The cap prevents
-/// unbounded growth; once reached, a single existing entry is evicted to make
-/// room for the new one.
-pub const DEFAULT_MAX_ENTRIES: usize = 1024;
 
 enum CachedEntry {
-    Hit {
-        keys: JwkSet,
-        expires_at: i64,
-    },
-    /// Preserves the original `JwksError` variant (UnknownIssuer / Transport /
-    /// Malformed) across the negative-TTL window so a replayed cached failure
-    /// reports the same failure kind as the first miss did, instead of being
-    /// flattened to `Transport`.
-    Miss {
-        error: JwksError,
-        expires_at: i64,
-    },
+    Hit { keys: JwkSet, expires_at: i64 },
+    Miss { error: String, expires_at: i64 },
 }
 
 impl CachedEntry {
@@ -59,13 +42,7 @@ pub struct CachedJwksResolver<R: JwksResolver, T: TimeSource> {
     time: T,
     ttl_secs: i64,
     negative_ttl_secs: i64,
-    max_entries: usize,
     entries: RwLock<HashMap<String, CachedEntry>>,
-    /// Bumped by every `invalidate*` call. A concurrent `resolve` snapshots
-    /// this before fetching and refuses to write its result back if the
-    /// counter has moved — that's what blocks a slow in-flight fetch from
-    /// undoing an invalidation that landed while it was waiting.
-    generation: AtomicU64,
 }
 
 impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
@@ -76,9 +53,7 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
             time,
             ttl_secs: DEFAULT_TTL_SECS,
             negative_ttl_secs: DEFAULT_NEGATIVE_TTL_SECS,
-            max_entries: DEFAULT_MAX_ENTRIES,
             entries: RwLock::new(HashMap::new()),
-            generation: AtomicU64::new(0),
         }
     }
 
@@ -94,139 +69,173 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
         self
     }
 
-    #[must_use]
-    pub fn with_max_entries(mut self, max_entries: usize) -> Self {
-        self.max_entries = max_entries.max(1);
-        self
-    }
-
     /// Drop every cached entry. Operators use this after rotating provider
     /// trust material so the next verification re-fetches.
     pub async fn invalidate_all(&self) {
-        let mut guard = self.entries.write().await;
-        // Bump the generation BEFORE releasing the write guard. Otherwise a
-        // concurrent resolve waiting on the write lock could acquire it after
-        // `clear()`/`remove()` ran but before `fetch_add` landed, observe the
-        // pre-bump generation, and insert a pre-rotation outcome back into
-        // the cache.
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        guard.clear();
+        self.entries.write().await.clear();
     }
 
     /// Drop the cached entry for a single issuer.
     pub async fn invalidate(&self, iss: &str) {
-        let mut guard = self.entries.write().await;
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        guard.remove(iss);
+        self.entries.write().await.remove(iss);
     }
 }
-
-/// Maximum number of resolve retries when a concurrent `invalidate*` lands
-/// while a fetch is in flight. Bounded so an adversarial invalidate loop
-/// cannot pin a caller in an unbounded retry cycle.
-const MAX_INVALIDATE_RETRIES: usize = 3;
 
 #[async_trait]
 impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
     async fn resolve(&self, iss: &str) -> Result<JwkSet, JwksError> {
-        // Sample wall time fresh at every step. The fast read-lock check, the
-        // slow-path freshness check after `inner.resolve`, and the `expires_at`
-        // we write all need to use the wall time AT THAT POINT — otherwise a
-        // slow JWKS fetch (or a long lock wait) lets us serve expired entries
-        // and lets new entries live longer than the configured TTL.
+        let now = self.time.now();
         if let Some(entry) = self.entries.read().await.get(iss)
-            && entry.is_fresh(self.time.now())
+            && entry.is_fresh(now)
         {
             return match entry {
                 CachedEntry::Hit { keys, .. } => Ok(keys.clone()),
-                CachedEntry::Miss { error, .. } => Err(error.clone()),
+                CachedEntry::Miss { error, .. } => Err(JwksError::Transport(error.clone())),
             };
         }
 
-        // Re-fetch when the generation moves mid-flight. A pre-rotation fetch
-        // that started before invalidate() must NOT supply stale keys back to
-        // the verifier — that defeats operator-driven key rotation. We re-run
-        // up to MAX_INVALIDATE_RETRIES times and only then yield whatever the
-        // last fetch returned, to bound work under an adversarial invalidate
-        // loop.
-        let mut last_outcome: Option<Result<JwkSet, JwksError>> = None;
-        for _ in 0..=MAX_INVALIDATE_RETRIES {
-            let snapshot = self.generation.load(Ordering::SeqCst);
-            let outcome = self.inner.resolve(iss).await;
-            let mut guard = self.entries.write().await;
-            // Re-sample after the inner.resolve await — that's the only clock
-            // value that the TTL of the entry we're about to write should be
-            // anchored to.
-            let now = self.time.now();
-
-            if self.generation.load(Ordering::SeqCst) != snapshot {
-                // Operator invalidated between snapshot and now. The outcome
-                // we just got could be pre-rotation — drop it and retry.
-                last_outcome = Some(outcome);
-                drop(guard);
-                continue;
+        let outcome = self.inner.resolve(iss).await;
+        let mut guard = self.entries.write().await;
+        match &outcome {
+            Ok(keys) => {
+                guard.insert(
+                    iss.to_string(),
+                    CachedEntry::Hit {
+                        keys: keys.clone(),
+                        expires_at: now.saturating_add(self.ttl_secs),
+                    },
+                );
             }
-            if let Some(existing) = guard.get(iss)
-                && existing.is_fresh(now)
-            {
-                // A concurrent resolver populated a fresh entry while we
-                // were out. Return that entry — NOT our own outcome — so two
-                // concurrent callers cannot disagree about the cache state
-                // (e.g. a transient error here while the peer landed a Hit
-                // would otherwise surface as a phantom failure).
-                return match existing {
-                    CachedEntry::Hit { keys, .. } => Ok(keys.clone()),
-                    CachedEntry::Miss { error, .. } => Err(error.clone()),
-                };
+            Err(err) => {
+                guard.insert(
+                    iss.to_string(),
+                    CachedEntry::Miss {
+                        error: err.to_string(),
+                        expires_at: now.saturating_add(self.negative_ttl_secs),
+                    },
+                );
             }
-
-            // Bound the map. `iss` is attacker-controlled until signature
-            // checks, so cap the distinct-issuer set before inserting. Random
-            // eviction is intentional — none of the cache states is "more
-            // valuable" than any other, and avoiding LRU bookkeeping keeps
-            // the hot path simple.
-            if !guard.contains_key(iss)
-                && guard.len() >= self.max_entries
-                && let Some(victim) = guard.keys().next().cloned()
-            {
-                guard.remove(&victim);
-            }
-
-            match &outcome {
-                Ok(keys) => {
-                    guard.insert(
-                        iss.to_string(),
-                        CachedEntry::Hit {
-                            keys: keys.clone(),
-                            expires_at: now.saturating_add(self.ttl_secs),
-                        },
-                    );
-                }
-                Err(err) => {
-                    guard.insert(
-                        iss.to_string(),
-                        CachedEntry::Miss {
-                            error: err.clone(),
-                            expires_at: now.saturating_add(self.negative_ttl_secs),
-                        },
-                    );
-                }
-            }
-            return outcome;
         }
-        // Adversarial invalidate-loop fallback: return the last fetch outcome
-        // unwritten. The next caller pays one more upstream fetch instead of
-        // observing stale keys from this caller's cache write. The loop
-        // always runs at least once, so last_outcome is always Some.
-        match last_outcome {
-            Some(outcome) => outcome,
-            // Defensively re-issue rather than panic if the loop somehow
-            // never populated last_outcome (only reachable if
-            // MAX_INVALIDATE_RETRIES is reduced to 0).
-            None => self.inner.resolve(iss).await,
-        }
+        outcome
     }
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::jwks::StaticJwks;
+
+    #[derive(Clone, Default)]
+    struct MockTime {
+        now: Arc<AtomicI64>,
+    }
+
+    impl MockTime {
+        fn at(secs: i64) -> Self {
+            Self {
+                now: Arc::new(AtomicI64::new(secs)),
+            }
+        }
+        fn advance(&self, secs: i64) {
+            self.now.fetch_add(secs, Ordering::SeqCst);
+        }
+    }
+
+    impl TimeSource for MockTime {
+        fn now(&self) -> i64 {
+            self.now.load(Ordering::SeqCst)
+        }
+    }
+
+    struct CountingResolver {
+        inner: StaticJwks,
+        calls: AtomicUsize,
+        fail_with: Mutex<Option<JwksError>>,
+    }
+
+    impl CountingResolver {
+        fn new(inner: StaticJwks) -> Self {
+            Self {
+                inner,
+                calls: AtomicUsize::new(0),
+                fail_with: Mutex::new(None),
+            }
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+        fn fail_next(&self, err: JwksError) {
+            *self.fail_with.lock().unwrap() = Some(err);
+        }
+    }
+
+    #[async_trait]
+    impl JwksResolver for CountingResolver {
+        async fn resolve(&self, iss: &str) -> Result<JwkSet, JwksError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(err) = self.fail_with.lock().unwrap().take() {
+                return Err(err);
+            }
+            self.inner.resolve(iss).await
+        }
+    }
+
+    fn empty_set() -> JwkSet {
+        JwkSet { keys: vec![] }
+    }
+
+    #[tokio::test]
+    async fn hits_inner_once_within_ttl() {
+        let inner = CountingResolver::new(StaticJwks::new().with("iss.example", empty_set()));
+        let cache = CachedJwksResolver::new(inner, MockTime::at(0)).with_ttl_secs(60);
+
+        cache.resolve("iss.example").await.expect("first hit");
+        cache.resolve("iss.example").await.expect("cached hit");
+        cache.resolve("iss.example").await.expect("cached hit");
+
+        assert_eq!(cache.inner.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn re_fetches_after_ttl_expires() {
+        let inner = CountingResolver::new(StaticJwks::new().with("iss.example", empty_set()));
+        let time = MockTime::at(0);
+        let cache = CachedJwksResolver::new(inner, time.clone()).with_ttl_secs(60);
+
+        cache.resolve("iss.example").await.expect("first hit");
+        time.advance(61);
+        cache.resolve("iss.example").await.expect("re-fetched");
+
+        assert_eq!(cache.inner.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn negative_cache_dampens_failure_storms() {
+        let inner = CountingResolver::new(StaticJwks::new().with("iss.example", empty_set()));
+        inner.fail_next(JwksError::Transport("boom".into()));
+        let cache = CachedJwksResolver::new(inner, MockTime::at(0)).with_negative_ttl_secs(30);
+
+        let first = cache.resolve("iss.example").await;
+        assert!(matches!(first, Err(JwksError::Transport(_))));
+        let second = cache.resolve("iss.example").await;
+        assert!(matches!(second, Err(JwksError::Transport(_))));
+
+        assert_eq!(cache.inner.calls(), 1, "negative cache held the second call");
+    }
+
+    #[tokio::test]
+    async fn invalidate_clears_entry() {
+        let inner = CountingResolver::new(StaticJwks::new().with("iss.example", empty_set()));
+        let cache = CachedJwksResolver::new(inner, MockTime::at(0));
+
+        cache.resolve("iss.example").await.expect("first hit");
+        cache.invalidate("iss.example").await;
+        cache.resolve("iss.example").await.expect("re-fetched");
+
+        assert_eq!(cache.inner.calls(), 2);
+    }
+}
