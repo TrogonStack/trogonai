@@ -138,7 +138,6 @@ fn estimate_token_count(messages: &[Message]) -> u64 {
 /// Times out after 25 s (well under the registry TTL of 30 s) so that a slow or
 /// absent compactor never holds the session semaphore long enough to cause the
 /// registry entry to expire or the CLI to time out.
-#[cfg_attr(coverage, coverage(off))]
 /// Request sent to `trogon-compactor`. acp is Anthropic-only, so `provider` is
 /// always `"anthropic"`; the service compacts with the session `model` unless a
 /// same-provider `compactor_model` override is set.
