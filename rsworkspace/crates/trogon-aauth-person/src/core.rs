@@ -176,6 +176,7 @@ where
                 agent_id: &agent.claims.sub,
                 resource_iss: &resource_claims.iss,
                 requested_scope: &resource_claims.scope,
+                backend: &resource_claims.iss,
             })
             .await;
 

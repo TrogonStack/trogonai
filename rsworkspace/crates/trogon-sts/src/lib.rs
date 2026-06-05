@@ -5,6 +5,8 @@ pub mod chain_resolution;
 pub mod circuit_breaker;
 pub mod error;
 pub mod exchange;
+pub mod http;
+pub mod k8s_attestor;
 pub mod limits;
 pub mod registry;
 pub mod signer;
@@ -14,6 +16,7 @@ pub mod svid_verify;
 pub mod token_verify;
 pub mod trust;
 pub mod types;
+pub mod validator_config;
 pub mod workload_svid;
 
 pub use chain_resolution::ChainResolutionMode;

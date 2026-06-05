@@ -28,3 +28,5 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tower = { version = "=0.5.3", features = ["util"] }
+wiremock = { workspace = true }

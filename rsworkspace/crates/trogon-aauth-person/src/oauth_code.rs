@@ -108,6 +108,11 @@ pub struct AuthorizeRequest {
     #[serde(default)]
     pub state: Option<String>,
     pub principal: String,
+    /// Backend (MCP server) identifier. Used to key consent persistence
+    /// per Solo.io's `(sub, backend)` rule and to drive
+    /// `consent_disabled` opt-out lookups.
+    #[serde(default)]
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,6 +311,7 @@ mod tests {
             scope: "read:tools".into(),
             state: Some("xyz".into()),
             principal: "alice".into(),
+            backend: None,
         }
     }
 

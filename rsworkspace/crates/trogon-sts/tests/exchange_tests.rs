@@ -117,6 +117,65 @@ async fn shadow_mode_emits_wkl_unattested_deny_audit() {
 }
 
 #[tokio::test]
+async fn delegation_mode_emits_rfc8693_act_claim_and_act_chain() {
+    let keys = shared_test_keys();
+    let service = build_service(keys, sample_registry_record());
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
+    let request = sample_exchange_request(&subject);
+    let response = service.handle(request, None).await.expect("exchange");
+    let payload = decode_payload(&response.access_token);
+    assert!(payload.get("act_chain").is_some(), "act_chain present in delegation mode");
+    let act = payload.get("act").and_then(|v| v.as_object()).expect("act claim");
+    assert_eq!(act.get("sub").and_then(|v| v.as_str()), Some("user:alice"));
+    assert_eq!(
+        act.get("agent_id").and_then(|v| v.as_str()),
+        Some("acme/oncall-agent")
+    );
+}
+
+#[tokio::test]
+async fn exchange_only_mode_suppresses_act_and_act_chain() {
+    let keys = shared_test_keys();
+    let service = build_service(keys, sample_registry_record());
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
+    let mut request = sample_exchange_request(&subject);
+    request.mode = trogon_sts::types::ExchangeMode::ExchangeOnly;
+    let response = service.handle(request, None).await.expect("exchange");
+    let payload = decode_payload(&response.access_token);
+    assert!(
+        payload.get("act_chain").is_none(),
+        "act_chain absent in ExchangeOnly mode"
+    );
+    assert!(payload.get("act").is_none(), "act claim absent in ExchangeOnly mode");
+}
+
+#[tokio::test]
+async fn elicitation_only_mode_suppresses_act_claim() {
+    let keys = shared_test_keys();
+    let service = build_service(keys, sample_registry_record());
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
+    let mut request = sample_exchange_request(&subject);
+    request.mode = trogon_sts::types::ExchangeMode::ElicitationOnly;
+    let response = service.handle(request, None).await.expect("exchange");
+    let payload = decode_payload(&response.access_token);
+    assert!(payload.get("act").is_none());
+    assert!(payload.get("act_chain").is_none());
+}
+
+#[tokio::test]
+async fn auth_only_mode_suppresses_act_claim() {
+    let keys = shared_test_keys();
+    let service = build_service(keys, sample_registry_record());
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
+    let mut request = sample_exchange_request(&subject);
+    request.mode = trogon_sts::types::ExchangeMode::AuthOnly;
+    let response = service.handle(request, None).await.expect("exchange");
+    let payload = decode_payload(&response.access_token);
+    assert!(payload.get("act").is_none());
+    assert!(payload.get("act_chain").is_none());
+}
+
+#[tokio::test]
 async fn ttl_clamps_to_registry_mesh_token_ttl_s() {
     let keys = shared_test_keys();
     let mut record = sample_registry_record();

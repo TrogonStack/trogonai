@@ -162,10 +162,12 @@ pub fn sample_exchange_request(subject_token: &str) -> StsExchangeRequest {
         subject_token: subject_token.to_string(),
         subject_token_type: "urn:ietf:params:oauth:token-type:jwt".into(),
         actor_token: "spiffe://acme.local/ns/prod/sa/oncall-agent".into(),
+        actor_token_type: "urn:ietf:params:oauth:token-type:jwt".into(),
         audience: "urn:trogon:mcp:backend:acme:github".into(),
         scope: "tool:github::create_issue tool:github::search_issues".into(),
         purpose: "oncall-incident-triage".into(),
         requested_token_type: "urn:ietf:params:oauth:token-type:jwt".into(),
+        mode: Default::default(),
     }
 }
 
