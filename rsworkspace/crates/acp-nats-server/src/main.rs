@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+
 mod acp_connection_id;
 mod config;
 mod connection;

@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
