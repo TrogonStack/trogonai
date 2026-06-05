@@ -235,6 +235,7 @@ where
             agent_id: &req.client_id,
             resource_iss: &s.core.iss,
             requested_scope: &req.scope,
+            backend: req.backend.as_deref().unwrap_or(&req.client_id),
         })
         .await;
     let granted_scope = match decision {

@@ -4,7 +4,7 @@
 //! `(principal, agent_id, resource_iss) → scope`, auto-issue `aa-auth+jwt`. In
 //! production this is replaced by an interactive consent flow.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 
@@ -19,6 +19,9 @@ pub struct ConsentContext<'a> {
     pub agent_id: &'a str,
     pub resource_iss: &'a str,
     pub requested_scope: &'a str,
+    /// Backend (MCP server) the consent is being requested for. Used by
+    /// `BackendBypassPolicy` to honor the `consent_disabled` opt-out.
+    pub backend: &'a str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,5 +72,84 @@ impl ConsentPolicy for AllowConfiguredScopes {
                 reason: "no consent on file".into(),
             },
         }
+    }
+}
+
+/// Wraps another `ConsentPolicy` and skips the consent screen entirely
+/// for backends listed in `consent_disabled`. Mirrors Solo.io's
+/// `consent_disabled: "true"` elicitation-secret opt-out.
+pub struct BackendBypassPolicy<P> {
+    inner: P,
+    consent_disabled_backends: HashSet<String>,
+    bypass_ttl_secs: i64,
+}
+
+impl<P> BackendBypassPolicy<P> {
+    pub fn new(inner: P, bypass_ttl_secs: i64) -> Self {
+        Self {
+            inner,
+            consent_disabled_backends: HashSet::new(),
+            bypass_ttl_secs,
+        }
+    }
+
+    #[must_use]
+    pub fn disable_consent_for(mut self, backend: &str) -> Self {
+        self.consent_disabled_backends.insert(backend.into());
+        self
+    }
+
+    pub fn is_consent_disabled(&self, backend: &str) -> bool {
+        self.consent_disabled_backends.contains(backend)
+    }
+}
+
+#[async_trait]
+impl<P: ConsentPolicy> ConsentPolicy for BackendBypassPolicy<P> {
+    async fn decide(&self, ctx: &ConsentContext<'_>) -> ConsentDecision {
+        if self.is_consent_disabled(ctx.backend) {
+            return ConsentDecision::Allow {
+                granted_scope: ctx.requested_scope.to_string(),
+                ttl_secs: self.bypass_ttl_secs,
+            };
+        }
+        self.inner.decide(ctx).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx<'a>(backend: &'a str, scope: &'a str) -> ConsentContext<'a> {
+        ConsentContext {
+            principal: "alice",
+            agent_id: "agent",
+            resource_iss: "https://mcp.example.com",
+            requested_scope: scope,
+            backend,
+        }
+    }
+
+    #[tokio::test]
+    async fn backend_bypass_short_circuits_disabled_backend() {
+        let inner = AllowConfiguredScopes::new(60);
+        let policy = BackendBypassPolicy::new(inner, 300).disable_consent_for("mcp-public");
+        let decision = policy.decide(&ctx("mcp-public", "read:tools")).await;
+        assert_eq!(
+            decision,
+            ConsentDecision::Allow {
+                granted_scope: "read:tools".into(),
+                ttl_secs: 300,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn backend_bypass_falls_through_for_other_backends() {
+        let inner = AllowConfiguredScopes::new(60);
+        let policy = BackendBypassPolicy::new(inner, 300).disable_consent_for("mcp-public");
+        let decision = policy.decide(&ctx("mcp-private", "read:tools")).await;
+        assert!(matches!(decision, ConsentDecision::Deny { .. }));
     }
 }

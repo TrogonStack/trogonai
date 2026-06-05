@@ -5,12 +5,16 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod claim_mapping;
+pub mod consent_screen;
 pub mod core;
+pub mod external_idp;
 pub mod http;
 pub mod nats;
 pub mod oauth_clients;
 pub mod oauth_code;
+pub mod oauth_issuer_config;
 pub mod policy;
+pub mod refresh_tokens;
 pub mod store;
 pub mod wif;
 pub mod wif_admin;

@@ -1,14 +1,54 @@
 use serde::{Deserialize, Serialize};
 
+pub const TOKEN_TYPE_JWT: &str = "urn:ietf:params:oauth:token-type:jwt";
+pub const GRANT_TYPE_TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
+
+fn default_actor_token_type() -> String {
+    TOKEN_TYPE_JWT.to_string()
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "PascalCase")]
+pub enum ExchangeMode {
+    #[default]
+    Delegation,
+    ExchangeOnly,
+    ElicitationOnly,
+    AuthOnly,
+}
+
+impl ExchangeMode {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw {
+            "" => Ok(Self::default()),
+            "Delegation" | "delegation" => Ok(Self::Delegation),
+            "ExchangeOnly" | "exchange-only" | "exchange_only" | "impersonation" | "Impersonation" => {
+                Ok(Self::ExchangeOnly)
+            }
+            "ElicitationOnly" | "elicitation-only" | "elicitation_only" => Ok(Self::ElicitationOnly),
+            "AuthOnly" | "auth-only" | "auth_only" => Ok(Self::AuthOnly),
+            other => Err(format!("unsupported exchange mode: {other}")),
+        }
+    }
+
+    pub fn suppresses_act_claim(self) -> bool {
+        matches!(self, Self::ExchangeOnly | Self::ElicitationOnly | Self::AuthOnly)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct StsExchangeRequest {
     pub subject_token: String,
     pub subject_token_type: String,
     pub actor_token: String,
+    #[serde(default = "default_actor_token_type")]
+    pub actor_token_type: String,
     pub audience: String,
     pub scope: String,
     pub purpose: String,
     pub requested_token_type: String,
+    #[serde(default)]
+    pub mode: ExchangeMode,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
