@@ -36,7 +36,7 @@ struct OrchestrationRequest {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 pub async fn serve<P: OrchestratorProvider, C: AgentCaller, S: RegistryStore>(
     port: u16,
     engine: OrchestratorEngine<P, C, S>,

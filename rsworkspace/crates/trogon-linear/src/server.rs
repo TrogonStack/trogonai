@@ -34,7 +34,7 @@ struct AppState<J> {
 /// for incoming requests:
 /// - `POST /webhook` — receives Linear webhook events and publishes to NATS JetStream
 /// - `GET  /health`  — liveness probe, always returns 200 OK
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 pub async fn serve(
     config: LinearConfig,
     nats: async_nats::Client,
