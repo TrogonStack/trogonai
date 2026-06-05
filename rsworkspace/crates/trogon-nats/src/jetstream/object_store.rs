@@ -21,7 +21,6 @@ pub trait ObjectStoreGet: Send + Sync + Clone + 'static {
     fn get(&self, name: &str) -> impl Future<Output = Result<Self::Reader, Self::Error>> + Send;
 }
 
-#[cfg_attr(coverage, coverage(off))]
 #[derive(Debug)]
 pub enum ProvisionObjectStoreError {
     Create(async_nats::jetstream::context::CreateObjectStoreError),
@@ -48,7 +47,6 @@ impl Error for ProvisionObjectStoreError {
     }
 }
 
-#[cfg_attr(coverage, coverage(off))]
 #[derive(Clone)]
 pub struct NatsObjectStore {
     store: async_nats::jetstream::object_store::ObjectStore,
