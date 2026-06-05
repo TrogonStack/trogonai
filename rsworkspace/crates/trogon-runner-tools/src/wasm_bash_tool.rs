@@ -13,7 +13,7 @@ use serde_json::Value;
 use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
 
-use crate::session_store::SessionStore;
+use crate::session_store::{BashJob, SessionStore};
 
 type CreationLockMap = std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
 
@@ -115,6 +115,10 @@ impl<S: SessionStore> WasmRuntimeBashTool<S> {
                     "timeout_secs": {
                         "type": "integer",
                         "description": "Maximum seconds to wait for the command (default 120, max 600). Use a higher value for long builds/tests."
+                    },
+                    "run_in_background": {
+                        "type": "boolean",
+                        "description": "Run the command in the background; returns a job id immediately. Poll output with the bash_output tool. Use for long-running commands you want to monitor."
                     }
                 },
                 "required": ["command"]
@@ -152,6 +156,19 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
 
             let term_base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
             let ext_base = format!("{wasm_prefix}.session.{session_id}.client.ext");
+
+            if arguments["run_in_background"].as_bool() == Some(true) {
+                return start_background_job(
+                    &nats,
+                    &term_base,
+                    &ext_base,
+                    &session_id,
+                    &sandbox_dir,
+                    &store,
+                    command,
+                )
+                .await;
+            }
 
             // ── Obtain or create the persistent terminal ──────────────────────
             // The creation lock serialises concurrent bash calls for the same session
@@ -207,38 +224,12 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             // echoes a literal "__START_5__" / "__EXIT_0__" cannot be mistaken for
             // our markers. The model never sees these tool-execution-time values
             // (pid / nanoseconds / counter), so it cannot reproduce the nonce.
-            let seq = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            let nonce = format!("{:x}{:x}{:x}", std::process::id(), nanos, seq);
-            let start_marker = format!("{START_MARKER_PREFIX}{nonce}{START_MARKER_SUFFIX}");
-            let exit_marker_prefix = format!("{EXIT_MARKER_PREFIX}{nonce}_");
-            // B8: run the user command as a single, fully-quoted `eval` argument
-            // instead of interpolating it raw between the markers. Raw interpolation
-            // means an unbalanced quote / trailing backslash / open heredoc leaves
-            // the persistent shell waiting for more input, so the exit marker never
-            // arrives (full-timeout hang) and the terminal stays poisoned for later
-            // commands. Single-quoting the command (escaping `'` as `'\''`) makes
-            // malformed input an instant `eval` syntax error, and `$?` still
-            // captures the user command's exit status because `eval` runs in the
-            // current shell.
-            let escaped_command = shell_single_quote(&command);
-            let cmd_with_markers = format!(
-                "echo \"{start_marker}\"; eval {escaped_command}; echo \"{exit_marker_prefix}$?{EXIT_MARKER_SUFFIX}\"\n"
-            );
-            let write_req = serde_json::json!({
-                "terminal_id": terminal_id,
-                "data": cmd_with_markers.as_bytes()
-            });
-            let payload = serde_json::to_vec(&write_req).map_err(|e| e.to_string())?;
-            nats.request(
-                format!("{ext_base}.terminal.write_stdin"),
-                payload.into(),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+            let nonce = new_invocation_nonce();
+            let (start_marker, exit_marker_prefix) = invocation_markers(&nonce);
+            let cmd_with_markers =
+                build_cmd_with_markers(&command, &start_marker, &exit_marker_prefix);
+            write_terminal_stdin(&nats, &ext_base, &terminal_id, &cmd_with_markers)
+                .await?;
 
             // ── Poll for output until marker found or timeout ─────────────────
             let deadline = tokio::time::Instant::now() + timeout;
@@ -246,18 +237,8 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             loop {
                 tokio::time::sleep(POLL_INTERVAL).await;
 
-                let req = TerminalOutputRequest::new(
-                    session_id.clone(),
-                    terminal_id.clone(),
-                );
-                let payload = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
-                let msg = nats
-                    .request(format!("{term_base}.output"), payload.into())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp: serde_json::Value =
-                    serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
-                let full_output = terminal_output_from_response(&resp)?;
+                let full_output =
+                    fetch_terminal_output(&nats, &term_base, &session_id, &terminal_id).await?;
 
                 if let Some(output) = extract_output(&full_output, &start_marker, &exit_marker_prefix) {
                     return Ok(output);
@@ -275,6 +256,283 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             }
         })
     }
+}
+
+/// Polls new output from a background bash job started with `run_in_background`.
+pub struct BashOutputTool<S> {
+    nats: async_nats::Client,
+    wasm_prefix: String,
+    session_id: String,
+    store: S,
+}
+
+impl<S: SessionStore> BashOutputTool<S> {
+    pub fn new(
+        nats: async_nats::Client,
+        wasm_prefix: impl Into<String>,
+        session_id: impl Into<String>,
+        store: S,
+    ) -> Self {
+        Self {
+            nats,
+            wasm_prefix: wasm_prefix.into(),
+            session_id: session_id.into(),
+            store,
+        }
+    }
+
+    pub fn tool_def() -> ToolDef {
+        ToolDef {
+            name: "bash_output".to_string(),
+            description: "Read new output from a background bash job; reports whether it is still running or has exited (with exit code)."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The background job id returned by bash"
+                    }
+                },
+                "required": ["id"]
+            }),
+            cache_control: None,
+        }
+    }
+
+    pub fn into_dispatch(self) -> (String, String, Arc<dyn McpCallTool>)
+    where
+        S: Send + Sync + 'static,
+    {
+        (
+            "bash_output".to_string(),
+            "bash_output".to_string(),
+            Arc::new(self),
+        )
+    }
+}
+
+impl<S: SessionStore> McpCallTool for BashOutputTool<S> {
+    fn call_tool<'a>(
+        &'a self,
+        _name: &'a str,
+        arguments: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+        let nats = self.nats.clone();
+        let wasm_prefix = self.wasm_prefix.clone();
+        let session_id = self.session_id.clone();
+        let store = self.store.clone();
+
+        Box::pin(async move {
+            let job_id = arguments["id"]
+                .as_str()
+                .ok_or_else(|| "missing id argument".to_string())?;
+
+            let term_base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+
+            let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
+            let job_idx = state
+                .background_jobs
+                .iter()
+                .position(|j| j.id == job_id)
+                .ok_or_else(|| format!("background job not found: {job_id}"))?;
+
+            let terminal_id = state.background_jobs[job_idx].terminal_id.clone();
+            let full_output =
+                fetch_terminal_output(&nats, &term_base, &session_id, &terminal_id).await?;
+
+            let poll = poll_background_job_output(&full_output, &state.background_jobs[job_idx]);
+            let job = &mut state.background_jobs[job_idx];
+            job.read_offset = poll.new_read_offset;
+            if poll.finished {
+                job.finished = true;
+                job.exit_code = poll.exit_code;
+            }
+            store.save(&session_id, &state).await.map_err(|e| e.to_string())?;
+
+            let status = if poll.finished {
+                format!(
+                    "\n[job {job_id} exited with code {}]",
+                    poll.exit_code.unwrap_or(0)
+                )
+            } else {
+                format!("\n[job {job_id} running]")
+            };
+            Ok(format!("{}{status}", poll.new_output))
+        })
+    }
+}
+
+async fn start_background_job<S: SessionStore>(
+    nats: &async_nats::Client,
+    term_base: &str,
+    ext_base: &str,
+    session_id: &str,
+    sandbox_dir: &PathBuf,
+    store: &S,
+    command: String,
+) -> Result<String, String> {
+    let nonce = new_invocation_nonce();
+    let (start_marker, exit_marker_prefix) = invocation_markers(&nonce);
+    let job_id = nonce;
+
+    let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
+        .cwd(sandbox_dir.clone());
+    let payload = serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
+    let msg = nats
+        .request(format!("{term_base}.create"), payload.into())
+        .await
+        .map_err(|e| e.to_string())?;
+    let resp: CreateTerminalResponse =
+        serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
+    let terminal_id = resp.terminal_id.0.to_string();
+
+    let cmd_with_markers = build_cmd_with_markers(&command, &start_marker, &exit_marker_prefix);
+    write_terminal_stdin(nats, ext_base, &terminal_id, &cmd_with_markers).await?;
+
+    let mut state = store.load(session_id).await.map_err(|e| e.to_string())?;
+    state.background_jobs.push(BashJob {
+        id: job_id.clone(),
+        command,
+        terminal_id,
+        start_marker,
+        exit_marker_prefix,
+        read_offset: 0,
+        finished: false,
+        exit_code: None,
+    });
+    store
+        .save(session_id, &state)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "Started background job {job_id}. Poll its output with the bash_output tool (id=\"{job_id}\")."
+    ))
+}
+
+fn new_invocation_nonce() -> String {
+    let seq = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{:x}{:x}{:x}", std::process::id(), nanos, seq)
+}
+
+fn invocation_markers(nonce: &str) -> (String, String) {
+    (
+        format!("{START_MARKER_PREFIX}{nonce}{START_MARKER_SUFFIX}"),
+        format!("{EXIT_MARKER_PREFIX}{nonce}_"),
+    )
+}
+
+/// B8: run the user command as a single, fully-quoted `eval` argument instead of
+/// interpolating it raw between the markers.
+fn build_cmd_with_markers(command: &str, start_marker: &str, exit_marker_prefix: &str) -> String {
+    let escaped_command = shell_single_quote(command);
+    format!(
+        "echo \"{start_marker}\"; eval {escaped_command}; echo \"{exit_marker_prefix}$?{EXIT_MARKER_SUFFIX}\"\n"
+    )
+}
+
+async fn write_terminal_stdin(
+    nats: &async_nats::Client,
+    ext_base: &str,
+    terminal_id: &str,
+    cmd_with_markers: &str,
+) -> Result<(), String> {
+    let write_req = serde_json::json!({
+        "terminal_id": terminal_id,
+        "data": cmd_with_markers.as_bytes()
+    });
+    let payload = serde_json::to_vec(&write_req).map_err(|e| e.to_string())?;
+    nats.request(
+        format!("{ext_base}.terminal.write_stdin"),
+        payload.into(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn fetch_terminal_output(
+    nats: &async_nats::Client,
+    term_base: &str,
+    session_id: &str,
+    terminal_id: &str,
+) -> Result<String, String> {
+    let req = TerminalOutputRequest::new(session_id.to_string(), terminal_id.to_string());
+    let payload = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
+    let msg = nats
+        .request(format!("{term_base}.output"), payload.into())
+        .await
+        .map_err(|e| e.to_string())?;
+    let resp: serde_json::Value =
+        serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
+    terminal_output_from_response(&resp)
+}
+
+struct JobPollUpdate {
+    new_output: String,
+    finished: bool,
+    exit_code: Option<i32>,
+    new_read_offset: usize,
+}
+
+fn poll_background_job_output(full_output: &str, job: &BashJob) -> JobPollUpdate {
+    let Some(after_start) = extract_after_start_marker(full_output, &job.start_marker) else {
+        return JobPollUpdate {
+            new_output: String::new(),
+            finished: job.finished,
+            exit_code: job.exit_code,
+            new_read_offset: job.read_offset,
+        };
+    };
+
+    if let Some(clean) = find_before_exit_marker(after_start, &job.exit_marker_prefix) {
+        let exit_code = parse_exit_code(after_start, &job.exit_marker_prefix);
+        JobPollUpdate {
+            new_output: slice_from_offset(&clean, job.read_offset),
+            finished: true,
+            exit_code,
+            new_read_offset: clean.len(),
+        }
+    } else {
+        JobPollUpdate {
+            new_output: slice_from_offset(after_start, job.read_offset),
+            finished: false,
+            exit_code: None,
+            new_read_offset: after_start.len(),
+        }
+    }
+}
+
+fn slice_from_offset(s: &str, offset: usize) -> String {
+    if offset >= s.len() {
+        String::new()
+    } else {
+        s[offset..].to_string()
+    }
+}
+
+fn parse_exit_code(output: &str, exit_prefix: &str) -> Option<i32> {
+    let mut last_code: Option<i32> = None;
+    let mut search = output;
+    let mut offset = 0;
+    while let Some(pos) = search.find(exit_prefix) {
+        let abs = offset + pos;
+        let after = &output[abs + exit_prefix.len()..];
+        if let Some(end) = after.find(EXIT_MARKER_SUFFIX) {
+            let code_str = &after[..end];
+            if code_str.chars().all(|c| c.is_ascii_digit()) {
+                last_code = code_str.parse().ok();
+            }
+        }
+        offset = abs + exit_prefix.len();
+        search = &output[offset..];
+    }
+    last_code
 }
 
 /// Resolves the per-call bash timeout from optional `timeout_secs` in `arguments`.
@@ -636,5 +894,116 @@ mod tests {
             .as_str()
             .expect("command type must be a string");
         assert_eq!(ty, "string");
+    }
+
+    // ── background job output polling ─────────────────────────────────────────
+
+    fn sample_job(start: &str, exit_prefix: &str) -> BashJob {
+        BashJob {
+            id: "job1".to_string(),
+            command: "sleep 1".to_string(),
+            terminal_id: "term-1".to_string(),
+            start_marker: start.to_string(),
+            exit_marker_prefix: exit_prefix.to_string(),
+            read_offset: 0,
+            finished: false,
+            exit_code: None,
+        }
+    }
+
+    #[test]
+    fn slice_from_offset_returns_tail_after_offset() {
+        assert_eq!(slice_from_offset("hello world", 6), "world");
+    }
+
+    #[test]
+    fn slice_from_offset_returns_empty_when_offset_past_end() {
+        assert_eq!(slice_from_offset("hi", 5), "");
+    }
+
+    #[test]
+    fn parse_exit_code_reads_last_valid_marker() {
+        let output = "noise\n__EXIT_deadbeef_1__\nmore\n__EXIT_deadbeef_0__\n";
+        assert_eq!(parse_exit_code(output, "__EXIT_deadbeef_"), Some(0));
+    }
+
+    #[test]
+    fn parse_exit_code_returns_none_when_absent() {
+        assert_eq!(parse_exit_code("still running", "__EXIT_abc_"), None);
+    }
+
+    #[test]
+    fn poll_background_job_output_returns_empty_when_start_marker_absent() {
+        let job = sample_job("__START_1__", "__EXIT_1_");
+        let poll = poll_background_job_output("no marker yet", &job);
+        assert!(poll.new_output.is_empty());
+        assert!(!poll.finished);
+        assert_eq!(poll.new_read_offset, 0);
+    }
+
+    #[test]
+    fn poll_background_job_output_returns_incremental_output_while_running() {
+        let job = sample_job("__START_1__", "__EXIT_1_");
+        let full = "__START_1__\nline1\nline2\n";
+        let poll = poll_background_job_output(full, &job);
+        assert_eq!(poll.new_output, "line1\nline2\n");
+        assert!(!poll.finished);
+        assert_eq!(poll.new_read_offset, "line1\nline2\n".len());
+    }
+
+    #[test]
+    fn poll_background_job_output_returns_only_new_bytes_since_read_offset() {
+        let mut job = sample_job("__START_2__", "__EXIT_2_");
+        job.read_offset = 6; // already consumed "line1\n"
+        let full = "__START_2__\nline1\nline2\n";
+        let poll = poll_background_job_output(full, &job);
+        assert_eq!(poll.new_output, "line2\n");
+        assert!(!poll.finished);
+        assert_eq!(poll.new_read_offset, "line1\nline2\n".len());
+    }
+
+    #[test]
+    fn poll_background_job_output_detects_exit_and_trims_markers() {
+        let job = sample_job("__START_3__", "__EXIT_3_");
+        let full = "__START_3__\ndone\n__EXIT_3_2__\n";
+        let poll = poll_background_job_output(full, &job);
+        assert_eq!(poll.new_output, "done");
+        assert!(poll.finished);
+        assert_eq!(poll.exit_code, Some(2));
+        assert_eq!(poll.new_read_offset, "done".len());
+    }
+
+    #[test]
+    fn poll_background_job_output_incremental_after_partial_reads_on_finish() {
+        let mut job = sample_job("__START_4__", "__EXIT_4_");
+        job.read_offset = 5; // already saw "part\n"
+        let full = "__START_4__\npart\nial\n__EXIT_4_0__\n";
+        let poll = poll_background_job_output(full, &job);
+        assert_eq!(poll.new_output, "ial");
+        assert!(poll.finished);
+        assert_eq!(poll.exit_code, Some(0));
+        assert_eq!(poll.new_read_offset, "part\nial".len());
+    }
+
+    // ── bash_output tool_def ──────────────────────────────────────────────────
+
+    #[test]
+    fn bash_output_tool_def_name_is_bash_output() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = BashOutputTool::<MemorySessionStore>::tool_def();
+        assert_eq!(def.name, "bash_output");
+    }
+
+    #[test]
+    fn bash_output_tool_def_schema_requires_id() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = BashOutputTool::<MemorySessionStore>::tool_def();
+        let required = def.input_schema["required"]
+            .as_array()
+            .expect("required must be an array");
+        assert!(
+            required.iter().any(|v| v.as_str() == Some("id")),
+            "schema must require 'id', got: {required:?}"
+        );
     }
 }

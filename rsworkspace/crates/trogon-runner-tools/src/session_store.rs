@@ -74,6 +74,22 @@ pub struct TodoItem {
 
 const BUCKET: &str = "ACP_SESSIONS";
 
+/// A background bash job started via `bash` with `run_in_background: true`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BashJob {
+    pub id: String,
+    pub command: String,
+    pub terminal_id: String,
+    pub start_marker: String,
+    pub exit_marker_prefix: String,
+    #[serde(default)]
+    pub read_offset: usize,
+    #[serde(default)]
+    pub finished: bool,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+}
+
 /// Persisted state for a single ACP session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
@@ -186,6 +202,9 @@ pub struct SessionState {
     /// Cumulative cache-read tokens across all prompt turns in this session.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub total_cache_read_tokens: u64,
+    /// Background bash jobs started with `run_in_background: true`.
+    #[serde(default)]
+    pub background_jobs: Vec<BashJob>,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -244,6 +263,7 @@ impl Default for SessionState {
             total_cache_creation_tokens: 0,
             total_cache_read_tokens: 0,
             spawn_depth: 0,
+            background_jobs: Vec::new(),
         }
     }
 }
