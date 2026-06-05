@@ -3126,6 +3126,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
@@ -3160,6 +3161,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3247,6 +3249,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
@@ -3281,6 +3284,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3315,6 +3319,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
