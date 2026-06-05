@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))] // coverage build cfg-excludes the entrypoint, orphaning its private helpers
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod acp_connection_id;
