@@ -743,6 +743,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         vec![WasmRuntimeBashTool::<S>::tool_def()],
                         vec![(name, orig, client)],
                     );
+                    // bash_output: poll output from background bash jobs (TOOL-2 wave 2a).
+                    let bash_output = trogon_runner_tools::wasm_bash_tool::BashOutputTool::new(
+                        nats.clone(),
+                        prefix,
+                        &session_id,
+                        self.store.clone(),
+                    );
+                    let (bo_name, bo_orig, bo_client) = bash_output.into_dispatch();
+                    a.add_mcp_tools(
+                        vec![trogon_runner_tools::wasm_bash_tool::BashOutputTool::<S>::tool_def()],
+                        vec![(bo_name, bo_orig, bo_client)],
+                    );
                 }
                 // Offer the spawn_agent tool so the model can delegate subtasks to an
                 // isolated sub-agent (full tool-use loop in a temp worktree). The
