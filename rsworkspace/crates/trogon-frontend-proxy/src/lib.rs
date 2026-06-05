@@ -10,6 +10,7 @@
 //! 3.1 (`trogon-mcp-gateway::tls`) so we don't redo cert reload.
 
 pub mod audit;
+pub mod protected_resource;
 pub mod proxy;
 pub mod routes;
 

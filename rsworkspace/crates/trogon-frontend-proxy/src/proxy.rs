@@ -135,9 +135,12 @@ where
         Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
 
-    let mesh_token = match service.minter.mint(&route.mesh_audience, &tenant).await {
-        Ok(t) => t,
-        Err(e) => return error_response(StatusCode::BAD_GATEWAY, ProxyError::Mint(e)),
+    let mesh_token = match route.token_exchange_mode {
+        crate::routes::TokenExchangeMode::AuthOnly => None,
+        _ => match service.minter.mint(&route.mesh_audience, &tenant).await {
+            Ok(t) => Some(t),
+            Err(e) => return error_response(StatusCode::BAD_GATEWAY, ProxyError::Mint(e)),
+        },
     };
 
     let upstream = match build_upstream_url(&route.upstream_url, &uri) {
@@ -150,10 +153,10 @@ where
         Err(e) => return error_response(StatusCode::BAD_REQUEST, ProxyError::RequestBody(e.to_string())),
     };
 
-    let mut req = service
-        .http
-        .request(reqwest_method(&method), upstream)
-        .header("authorization", format!("Bearer {mesh_token}"));
+    let mut req = service.http.request(reqwest_method(&method), upstream);
+    if let Some(token) = mesh_token.as_deref() {
+        req = req.header("authorization", format!("Bearer {token}"));
+    }
 
     for (name, value) in headers.iter() {
         if STRIPPED_REQUEST_HEADERS.iter().any(|h| name.as_str().eq_ignore_ascii_case(h)) {
@@ -265,6 +268,7 @@ mod tests {
             backend: Backend::Mcp,
             upstream_url: "https://mcp.internal.example".into(),
             mesh_audience: "mesh.mcp".into(),
+            token_exchange_mode: crate::routes::TokenExchangeMode::default(),
         }
     }
 
@@ -337,4 +341,50 @@ mod tests {
         assert_eq!(event.outcome, FrontendAuditOutcome::Dispatched);
     }
 
+    #[tokio::test]
+    async fn auth_only_route_does_not_mint_mesh_token() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let upstream = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/m"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+        let store = InMemoryRouteStore::new();
+        store
+            .put(Route {
+                tenant: "acme".into(),
+                backend: Backend::Mcp,
+                upstream_url: upstream.uri(),
+                mesh_audience: "mesh.mcp".into(),
+                token_exchange_mode: crate::routes::TokenExchangeMode::AuthOnly,
+            })
+            .await
+            .unwrap();
+        struct FailingMinter;
+        #[async_trait]
+        impl TokenMinter for FailingMinter {
+            async fn mint(&self, _audience: &str, _tenant: &str) -> Result<String, String> {
+                panic!("mint must not be called in AuthOnly mode");
+            }
+        }
+        let svc = Arc::new(ProxyService::new(
+            Arc::new(store),
+            Arc::new(FailingMinter),
+            reqwest::Client::new(),
+        ));
+        let mut headers = HeaderMap::new();
+        headers.insert(TENANT_HEADER, HeaderValue::from_static("acme"));
+        let resp = dispatch(
+            axum::extract::State(svc),
+            Method::GET,
+            "/m".parse().unwrap(),
+            headers,
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
 }

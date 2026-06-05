@@ -64,10 +64,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             subject_token: args.subject_token.clone(),
             subject_token_type: "urn:ietf:params:oauth:token-type:jwt".into(),
             actor_token: args.actor_token.clone(),
+            actor_token_type: "urn:ietf:params:oauth:token-type:jwt".into(),
             audience: args.audience.clone(),
             scope: String::new(),
             purpose: args.purpose.clone(),
             requested_token_type: "urn:ietf:params:oauth:token-type:jwt".into(),
+            mode: Default::default(),
         };
 
         let payload = serde_json::to_vec(&request)?;

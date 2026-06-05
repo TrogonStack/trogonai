@@ -15,7 +15,7 @@ use crate::registry::RegistryLookup;
 use crate::signer::DynSigner;
 use crate::spicedb::{NoOpSpiceDb, SpiceDbCheck};
 use crate::token_verify::verify_subject_token;
-use crate::types::{MintedClaimsSummary, StsExchangeRequest, StsExchangeResponse, StsTokenErrorResponse};
+use crate::types::{ExchangeMode, MintedClaimsSummary, StsExchangeRequest, StsExchangeResponse, StsTokenErrorResponse};
 use crate::{DEFAULT_MESH_TOKEN_TTL_SECS, MAX_MESH_TOKEN_TTL_SECS, MIN_MESH_TOKEN_TTL_SECS};
 
 pub type ExchangeRequest = StsExchangeRequest;
@@ -218,7 +218,12 @@ where
         {
             return Err(StsError::ActChainLoopDetected);
         }
-        act_chain.push(new_entry);
+        act_chain.push(new_entry.clone());
+        let act_chain_for_claims = if request.mode.suppresses_act_claim() {
+            Vec::new()
+        } else {
+            act_chain.clone()
+        };
 
         let ttl = mesh_token_ttl(registry_record.as_ref());
         let iat = now_unix();
@@ -235,7 +240,26 @@ where
         claims.insert("purpose".into(), json!(request.purpose));
         claims.insert("wkl".into(), json!(actor_wkl));
         claims.insert("wkl_attested_at".into(), json!(wkl_attested_at));
-        claims.insert("act_chain".into(), json!(act_chain));
+        if request.mode == ExchangeMode::Delegation {
+            claims.insert("act_chain".into(), json!(act_chain_for_claims));
+            let mut act = serde_json::Map::new();
+            act.insert("sub".into(), json!(new_entry.sub));
+            if let Some(agent_id) = &new_entry.agent_id {
+                act.insert("agent_id".into(), json!(agent_id));
+            }
+            if let Some(wkl) = &new_entry.wkl {
+                act.insert("wkl".into(), json!(wkl));
+            }
+            if let Some(prior) = subject.act_chain.last() {
+                let mut nested = serde_json::Map::new();
+                nested.insert("sub".into(), json!(prior.sub));
+                if let Some(agent_id) = &prior.agent_id {
+                    nested.insert("agent_id".into(), json!(agent_id));
+                }
+                act.insert("act".into(), Value::Object(nested));
+            }
+            claims.insert("act".into(), Value::Object(act));
+        }
         if let Some(agent_id) = &subject.agent_id {
             claims.insert("agent_id".into(), json!(agent_id));
         }
@@ -259,7 +283,7 @@ where
             wkl: Some(actor_wkl.clone()),
             purpose: Some(request.purpose.clone()),
             scope,
-            act_chain_depth: act_chain.len(),
+            act_chain_depth: act_chain_for_claims.len(),
         };
 
         Ok((
@@ -305,14 +329,18 @@ pub fn require_purpose_from_env() -> bool {
 }
 
 fn validate_wire_request(request: &StsExchangeRequest) -> Result<(), StsError> {
+    use crate::types::TOKEN_TYPE_JWT;
     if request.subject_token.trim().is_empty() {
         return Err(StsError::InvalidRequest("subject_token required".into()));
     }
-    if request.subject_token_type != "urn:ietf:params:oauth:token-type:jwt" {
+    if request.subject_token_type != TOKEN_TYPE_JWT {
         return Err(StsError::InvalidRequest("unsupported subject_token_type".into()));
     }
-    if request.requested_token_type != "urn:ietf:params:oauth:token-type:jwt" {
+    if request.requested_token_type != TOKEN_TYPE_JWT {
         return Err(StsError::InvalidRequest("unsupported requested_token_type".into()));
+    }
+    if !request.actor_token.trim().is_empty() && request.actor_token_type != TOKEN_TYPE_JWT {
+        return Err(StsError::InvalidRequest("unsupported actor_token_type".into()));
     }
     if request.audience.trim().is_empty() {
         return Err(StsError::InvalidRequest("audience required".into()));
