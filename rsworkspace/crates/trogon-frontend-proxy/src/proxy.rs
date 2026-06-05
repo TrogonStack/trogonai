@@ -10,7 +10,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
 use crate::audit::{FrontendAuditEvent, FrontendAuditOutcome};
-use crate::routes::{Route, RouteStore, TENANT_HEADER};
+use crate::routes::{Route, RouteStore, TENANT_HEADER, TokenExchangeMode};
 
 /// Headers that must not be forwarded as-is on either leg. Authorization
 /// is replaced with the mesh JWT; hop-by-hop headers are dropped.
@@ -60,8 +60,21 @@ pub enum ProxyError {
 
 #[async_trait]
 pub trait TokenMinter: Send + Sync {
-    /// Mint an outbound mesh JWT for the given upstream `audience`.
-    async fn mint(&self, audience: &str, tenant: &str) -> Result<String, String>;
+    /// Mint the outbound bearer token for `audience`/`tenant` under
+    /// the requested exchange `mode`. The minter is responsible for
+    /// translating `mode` to the right STS form parameter (see
+    /// `StsMinter`).
+    async fn mint(&self, audience: &str, tenant: &str, mode: TokenExchangeMode) -> Result<String, String>;
+}
+
+/// Lookup hook for `ElicitationOnly` mode. When set on `ProxyService`,
+/// the dispatcher consults the store *before* falling back to the
+/// `TokenMinter` so a previously-consented upstream credential (e.g.
+/// the user's Microsoft Graph token captured via `trogon-aauth-person`)
+/// can be injected directly.
+#[async_trait]
+pub trait ElicitationCredentialStore: Send + Sync {
+    async fn lookup(&self, tenant: &str, audience: &str) -> Option<String>;
 }
 
 pub struct ProxyService<S, M>
@@ -72,6 +85,7 @@ where
     pub routes: Arc<S>,
     pub minter: Arc<M>,
     pub http: reqwest::Client,
+    pub elicitation_store: Option<Arc<dyn ElicitationCredentialStore>>,
 }
 
 impl<S, M> ProxyService<S, M>
@@ -80,17 +94,24 @@ where
     M: TokenMinter,
 {
     pub fn new(routes: Arc<S>, minter: Arc<M>, http: reqwest::Client) -> Self {
-        Self { routes, minter, http }
+        Self {
+            routes,
+            minter,
+            http,
+            elicitation_store: None,
+        }
+    }
+
+    pub fn with_elicitation_store(mut self, store: Arc<dyn ElicitationCredentialStore>) -> Self {
+        self.elicitation_store = Some(store);
+        self
     }
 
     pub fn resolve_tenant<'a>(&self, headers: &'a HeaderMap) -> Result<&'a str, ProxyError> {
         headers
             .get(TENANT_HEADER)
             .ok_or(ProxyError::MissingTenantHeader(TENANT_HEADER))
-            .and_then(|v| {
-                v.to_str()
-                    .map_err(|_| ProxyError::MissingTenantHeader(TENANT_HEADER))
-            })
+            .and_then(|v| v.to_str().map_err(|_| ProxyError::MissingTenantHeader(TENANT_HEADER)))
             .map(|s| {
                 if s.is_empty() {
                     Err(ProxyError::MissingTenantHeader(TENANT_HEADER))
@@ -136,8 +157,25 @@ where
     };
 
     let mesh_token = match route.token_exchange_mode {
-        crate::routes::TokenExchangeMode::AuthOnly => None,
-        _ => match service.minter.mint(&route.mesh_audience, &tenant).await {
+        TokenExchangeMode::AuthOnly => None,
+        TokenExchangeMode::ElicitationOnly => {
+            let stored = match service.elicitation_store.as_ref() {
+                Some(s) => s.lookup(&tenant, &route.mesh_audience).await,
+                None => None,
+            };
+            match stored {
+                Some(t) => Some(t),
+                None => match service
+                    .minter
+                    .mint(&route.mesh_audience, &tenant, route.token_exchange_mode)
+                    .await
+                {
+                    Ok(t) => Some(t),
+                    Err(e) => return error_response(StatusCode::BAD_GATEWAY, ProxyError::Mint(e)),
+                },
+            }
+        }
+        mode => match service.minter.mint(&route.mesh_audience, &tenant, mode).await {
             Ok(t) => Some(t),
             Err(e) => return error_response(StatusCode::BAD_GATEWAY, ProxyError::Mint(e)),
         },
@@ -159,7 +197,10 @@ where
     }
 
     for (name, value) in headers.iter() {
-        if STRIPPED_REQUEST_HEADERS.iter().any(|h| name.as_str().eq_ignore_ascii_case(h)) {
+        if STRIPPED_REQUEST_HEADERS
+            .iter()
+            .any(|h| name.as_str().eq_ignore_ascii_case(h))
+        {
             continue;
         }
         req = req.header(name.as_str(), value.as_bytes());
@@ -249,7 +290,7 @@ mod tests {
 
     #[async_trait]
     impl TokenMinter for StaticMinter {
-        async fn mint(&self, audience: &str, tenant: &str) -> Result<String, String> {
+        async fn mint(&self, audience: &str, tenant: &str, _mode: TokenExchangeMode) -> Result<String, String> {
             Ok(format!("mesh::{audience}::{tenant}"))
         }
     }
@@ -342,6 +383,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn elicitation_only_uses_stored_credential_when_present() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let upstream = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/m"))
+            .and(header("authorization", "Bearer stored.upstream.jwt"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&upstream)
+            .await;
+        let store = InMemoryRouteStore::new();
+        store
+            .put(Route {
+                tenant: "acme".into(),
+                backend: Backend::Mcp,
+                upstream_url: upstream.uri(),
+                mesh_audience: "graph.aud".into(),
+                token_exchange_mode: TokenExchangeMode::ElicitationOnly,
+            })
+            .await
+            .unwrap();
+
+        struct FailingMinter;
+        #[async_trait]
+        impl TokenMinter for FailingMinter {
+            async fn mint(&self, _audience: &str, _tenant: &str, _mode: TokenExchangeMode) -> Result<String, String> {
+                panic!("mint must not be called when elicitation store returns Some");
+            }
+        }
+
+        struct StaticElicitationStore;
+        #[async_trait]
+        impl ElicitationCredentialStore for StaticElicitationStore {
+            async fn lookup(&self, _tenant: &str, _audience: &str) -> Option<String> {
+                Some("stored.upstream.jwt".to_string())
+            }
+        }
+
+        let service = Arc::new(
+            ProxyService::new(Arc::new(store), Arc::new(FailingMinter), reqwest::Client::new())
+                .with_elicitation_store(Arc::new(StaticElicitationStore)),
+        );
+
+        use axum::Router;
+        use axum::routing::any;
+        let app = Router::new()
+            .route("/{*path}", any(dispatch::<InMemoryRouteStore, FailingMinter>))
+            .with_state(service);
+
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/m")
+                    .header(TENANT_HEADER, "acme")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn auth_only_route_does_not_mint_mesh_token() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -366,7 +475,7 @@ mod tests {
         struct FailingMinter;
         #[async_trait]
         impl TokenMinter for FailingMinter {
-            async fn mint(&self, _audience: &str, _tenant: &str) -> Result<String, String> {
+            async fn mint(&self, _audience: &str, _tenant: &str, _mode: TokenExchangeMode) -> Result<String, String> {
                 panic!("mint must not be called in AuthOnly mode");
             }
         }

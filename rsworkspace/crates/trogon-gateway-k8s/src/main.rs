@@ -6,7 +6,8 @@ use kube::Client;
 use tracing_subscriber::EnvFilter;
 
 use trogon_gateway_k8s::controller::{
-    ControllerContext, run_gateway_controller, run_http_route_controller, run_mcp_gateway_config_controller,
+    ControllerContext, run_agentgateway_backend_controller, run_enterprise_policy_controller, run_gateway_controller,
+    run_http_route_controller, run_mcp_gateway_config_controller,
 };
 use trogon_gateway_k8s::health;
 use trogon_gateway_k8s::nats::open_default_config_kv;
@@ -61,7 +62,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::try_join!(
         run_mcp_gateway_config_controller(Arc::clone(&ctx), namespace.clone()),
         run_gateway_controller(Arc::clone(&ctx), namespace.clone()),
-        run_http_route_controller(ctx, namespace),
+        run_http_route_controller(Arc::clone(&ctx), namespace.clone()),
+        run_enterprise_policy_controller(Arc::clone(&ctx), namespace.clone()),
+        run_agentgateway_backend_controller(ctx, namespace),
     )?;
 
     Ok(())

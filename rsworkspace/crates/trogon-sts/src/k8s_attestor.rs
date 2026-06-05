@@ -44,8 +44,7 @@ impl WorkloadAttestor for K8sServiceAccountAttestor {
         let header = decode_header(token).map_err(|e| AttestError::Denied(format!("jwt header: {e}")))?;
         let jwks = self.jwks.read().await;
         let jwk = pick_jwk(&jwks, header.alg, header.kid.as_deref())?;
-        let decoding_key =
-            DecodingKey::from_jwk(jwk).map_err(|e| AttestError::Denied(format!("jwk: {e}")))?;
+        let decoding_key = DecodingKey::from_jwk(jwk).map_err(|e| AttestError::Denied(format!("jwk: {e}")))?;
         let mut validation = Validation::new(header.alg);
         validation.leeway = CLOCK_SKEW_SECS as u64;
         validation.validate_exp = true;
@@ -80,11 +79,7 @@ fn pick_jwk<'a>(
     alg: Algorithm,
     kid: Option<&str>,
 ) -> Result<&'a jsonwebtoken::jwk::Jwk, AttestError> {
-    let compatible: Vec<_> = jwks
-        .keys
-        .iter()
-        .filter(|k| jwk_compatible_with_alg(k, alg))
-        .collect();
+    let compatible: Vec<_> = jwks.keys.iter().filter(|k| jwk_compatible_with_alg(k, alg)).collect();
     if compatible.is_empty() {
         return Err(AttestError::Unavailable(
             "k8s JWKS contained no keys compatible with token algorithm".into(),
@@ -122,8 +117,7 @@ fn string_claim(map: &serde_json::Map<String, Value>, key: &str) -> Option<Strin
 mod tests {
     use super::*;
     use jsonwebtoken::jwk::{
-        AlgorithmParameters, CommonParameters, Jwk, KeyAlgorithm, PublicKeyUse, RSAKeyParameters,
-        RSAKeyType,
+        AlgorithmParameters, CommonParameters, Jwk, KeyAlgorithm, PublicKeyUse, RSAKeyParameters, RSAKeyType,
     };
     use jsonwebtoken::{EncodingKey, Header, encode};
     use rsa::pkcs1::EncodeRsaPrivateKey;

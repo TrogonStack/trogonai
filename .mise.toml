@@ -33,3 +33,13 @@ run = "cargo clippy --workspace && cargo fmt --check"
 description = "Format and check all Rust code (fmt, clippy, all targets, all features)"
 dir = "rsworkspace"
 run = "cargo fmt && cargo clippy --all-targets --all-features"
+
+[tasks."crdgen"]
+description = "Regenerate Helm CRD YAML from Rust CustomResource types"
+dir = "rsworkspace"
+run = "cargo run --quiet -p trogon-gateway-k8s --bin crdgen"
+
+[tasks."crdgen:check"]
+description = "Fail if generated CRD YAML drifts from the Rust source"
+depends = ["crdgen"]
+run = "git diff --exit-code -- charts/agentgateway-crds/templates"
