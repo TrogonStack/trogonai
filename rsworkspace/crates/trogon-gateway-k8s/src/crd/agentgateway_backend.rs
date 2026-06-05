@@ -90,9 +90,7 @@ impl AgentgatewayBackendSpec {
     /// Returns the configured issuer-proxy URL if the
     /// `agentgateway.dev/issuer-proxy` annotation is present.
     pub fn issuer_proxy(&self) -> Option<&str> {
-        self.resource_metadata
-            .get(ISSUER_PROXY_ANNOTATION)
-            .map(String::as_str)
+        self.resource_metadata.get(ISSUER_PROXY_ANNOTATION).map(String::as_str)
     }
 }
 
@@ -115,10 +113,7 @@ mod tests {
         }"#;
         let spec: AgentgatewayBackendSpec = serde_json::from_str(json).expect("parse");
         assert_eq!(spec.targets[0].name.as_deref(), Some("primary"));
-        assert_eq!(
-            spec.issuer_proxy(),
-            Some("https://gw.example.com/aauth")
-        );
+        assert_eq!(spec.issuer_proxy(), Some("https://gw.example.com/aauth"));
         let jwt = spec.jwt_validation.unwrap();
         assert_eq!(jwt.audiences, vec!["mcp-fileserver"]);
     }

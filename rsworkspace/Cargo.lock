@@ -7623,6 +7623,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "serde_norway",
  "sha2 0.10.8",
  "time",
  "tokio",
