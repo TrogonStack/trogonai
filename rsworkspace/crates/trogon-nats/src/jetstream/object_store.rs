@@ -21,14 +21,14 @@ pub trait ObjectStoreGet: Send + Sync + Clone + 'static {
     fn get(&self, name: &str) -> impl Future<Output = Result<Self::Reader, Self::Error>> + Send;
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 #[derive(Debug)]
 pub enum ProvisionObjectStoreError {
     Create(async_nats::jetstream::context::CreateObjectStoreError),
     Get(async_nats::jetstream::context::ObjectStoreError),
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 impl std::fmt::Display for ProvisionObjectStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -38,7 +38,7 @@ impl std::fmt::Display for ProvisionObjectStoreError {
     }
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 impl Error for ProvisionObjectStoreError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -48,13 +48,13 @@ impl Error for ProvisionObjectStoreError {
     }
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 #[derive(Clone)]
 pub struct NatsObjectStore {
     store: async_nats::jetstream::object_store::ObjectStore,
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 impl NatsObjectStore {
     pub async fn provision(
         js: &async_nats::jetstream::Context,
@@ -77,7 +77,7 @@ impl NatsObjectStore {
     }
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 impl ObjectStorePut for NatsObjectStore {
     type Error = async_nats::jetstream::object_store::PutError;
     type Info = async_nats::jetstream::object_store::ObjectInfo;
@@ -87,7 +87,7 @@ impl ObjectStorePut for NatsObjectStore {
     }
 }
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 impl ObjectStoreGet for NatsObjectStore {
     type Error = async_nats::jetstream::object_store::GetError;
     type Reader = async_nats::jetstream::object_store::Object;
