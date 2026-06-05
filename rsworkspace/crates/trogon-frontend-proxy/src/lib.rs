@@ -13,10 +13,10 @@ pub mod audit;
 pub mod protected_resource;
 pub mod proxy;
 pub mod routes;
+pub mod sts_minter;
 
 pub use audit::{FrontendAuditEvent, FrontendAuditOutcome, audit_subject};
 pub use proxy::{ProxyError, ProxyHandler, ProxyService, TokenMinter};
 pub use routes::{
-    Backend, FRONTEND_ROUTES_BUCKET, InMemoryRouteStore, Route, RouteStore, RouteStoreError,
-    TENANT_HEADER,
+    Backend, FRONTEND_ROUTES_BUCKET, InMemoryRouteStore, Route, RouteStore, RouteStoreError, TENANT_HEADER,
 };

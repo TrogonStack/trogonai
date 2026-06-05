@@ -24,18 +24,32 @@ decision per item.
 
 ### 1. RFC 9728 OAuth Resource Metadata (§15.1 `mcp/auth.rs`)
 
-**Deferred to v0.2.** Status `❌`.
+**Superseded-in-part (2026-06-04).** Original status `❌` (Deferred to
+v0.2). Current status `⚠️ types-shipped, wiring-pending`.
 
-MCP clients that expect `/.well-known/oauth-protected-resource/{path}`
-and `/.well-known/oauth-authorization-server/{path}` will not discover
-our gateway as an OAuth-protected resource in v0.1. Today the gateway
-validates JWTs from a configured JWKS but does not advertise the
-discovery surface upstream MCP clients use.
+Commit `4d1f98eab feat(agentgateway): close Solo.io MCP token-exchange
+spec gaps` on `yordis/agentgateway` introduced
+`trogon-frontend-proxy::protected_resource` with full RFC 9728 +
+RFC 8414 metadata types, axum router, and unit tests. The router is
+**not** mounted on any binary, so deployed gateways still return 404
+on `/.well-known/oauth-protected-resource/mcp/{backend}` and
+`/.well-known/oauth-authorization-server/mcp/{backend}`. Remaining
+wiring (mount router, thread `GatewayDiscovery` from env) is tracked
+in [`PENDING_TODO.md §3.2`](../../PENDING_TODO.md). When that lands,
+this row flips to `✅`.
 
-v0.2 will add a `/.well-known/*` set served alongside `/healthz` and
-`/readyz` on `MCP_GATEWAY_PROBE_LISTEN_ADDR`, populated from the
-existing JWT configuration (issuer URL + JWKS URI). Tracked in
-`docs/roadmap/agentgateway-v0.2.md`.
+Original deferral text follows for historical reference:
+
+> MCP clients that expect `/.well-known/oauth-protected-resource/{path}`
+> and `/.well-known/oauth-authorization-server/{path}` will not discover
+> our gateway as an OAuth-protected resource in v0.1. Today the gateway
+> validates JWTs from a configured JWKS but does not advertise the
+> discovery surface upstream MCP clients use.
+>
+> v0.2 will add a `/.well-known/*` set served alongside `/healthz` and
+> `/readyz` on `MCP_GATEWAY_PROBE_LISTEN_ADDR`, populated from the
+> existing JWT configuration (issuer URL + JWKS URI). Tracked in
+> `docs/roadmap/agentgateway-v0.2.md`.
 
 ### 2. `Mcp-Session-Id` header semantics (§15.2 CORS row)
 
@@ -137,6 +151,26 @@ v0.1. Operators wanting dashboards build them from the OTel metrics
 documented in `docs/identity/otel-wiring.md`. v0.2 will ship at least
 one reference dashboard JSON under `devops/grafana/` and reference it
 from the chart values.
+
+### 9b. `AuthOnly` token-exchange mode at the STS HTTP layer
+
+**Decided (2026-06-05).** Status `✅`. The STS rejects
+`mode=AuthOnly` requests with HTTP 400 `invalid_request`.
+
+`AuthOnly` is a frontend-proxy concern only. The proxy short-circuits
+the mint path on `AuthOnly` routes (no token-exchange call) and
+forwards the inbound request to the backend without an upstream mesh
+credential — see
+`trogon-frontend-proxy::proxy::dispatch` and PENDING_TODO §3.4. An
+`AuthOnly` request reaching the STS therefore signals a
+misconfiguration (or a client bypassing the proxy contract) and is
+rejected at `validate_wire_request` rather than silently minted as a
+degenerate identity token.
+
+The other three Solo.io modes (`Delegation`, `ExchangeOnly`,
+`ElicitationOnly`) continue to be accepted, with `ExchangeOnly` and
+`ElicitationOnly` suppressing the RFC 8693 `act`/`act_chain` claims
+per `ExchangeMode::suppresses_act_claim`.
 
 ### 10. Reference-deployment examples tree (§15.7)
 

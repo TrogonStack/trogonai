@@ -123,10 +123,7 @@ where
 {
     Router::new()
         .route("/oauth2/token", post(post_token::<R, A, S>))
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(get_discovery::<R, A, S>),
-        )
+        .route("/.well-known/oauth-authorization-server", get(get_discovery::<R, A, S>))
         .route("/.well-known/jwks.json", get(get_jwks::<R, A, S>))
         .route("/healthz", get(healthz))
         .with_state(state)

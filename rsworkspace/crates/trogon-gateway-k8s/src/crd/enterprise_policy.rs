@@ -166,10 +166,7 @@ mod tests {
             "backend": { "tokenExchange": { "mode": "ElicitationOnly" } }
         }"#;
         let spec: EnterpriseAgentgatewayPolicySpec = serde_json::from_str(json).expect("parse");
-        assert_eq!(
-            spec.backend.unwrap().token_exchange.unwrap().mode,
-            "ElicitationOnly"
-        );
+        assert_eq!(spec.backend.unwrap().token_exchange.unwrap().mode, "ElicitationOnly");
     }
 
     #[test]
