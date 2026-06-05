@@ -201,18 +201,33 @@ where you direct agents and stay in control."
 
 ## 6. Technical architecture
 
-### 6.1 Stack
-- **Framework:** React + TypeScript (largest ecosystem, best codegen tooling). SolidJS is a
-  viable lighter alternative if bundle size matters more than ecosystem.
-- **Data layer:** TanStack Query — views become queries, commands become mutations, with
-  cache invalidation driven by incoming events.
-- **Routing:** TanStack Router or React Router (file-based).
-- **Styling/components:** Tailwind + a headless component lib (Radix / shadcn) for an
-  auditable, themeable design system.
+### 6.1 Stack (decided)
+
+The front-end is an authenticated internal operator surface — data-heavy tables,
+timelines, and forms talking to a separate Rust API. That rules out server-side rendering
+and meta-frameworks; it calls for a static single-page app served in front of
+`trogon-console`.
+
+- **Framework:** **React + TypeScript**, built as a **Vite SPA**. Chosen for ecosystem
+  depth, the maturity of the proto/Connect codegen tooling in TS-React, and hiring. The
+  app builds to static files served in front of `trogon-console`.
+- **Explicitly not a meta-framework:** **no Next.js / Remix.** SSR and SEO don't matter for
+  an authenticated internal console; a Node SSR server would add deployment surface and
+  failure modes we don't need. Plain Vite SPA.
+- **Data layer:** **TanStack Query** — views become queries, commands become mutations,
+  with cache invalidation driven by incoming events. (Server is the source of truth.)
+- **Routing:** **TanStack Router** (type-safe routes).
+- **Styling/components:** **shadcn/ui** (Radix + Tailwind) — accessible tables, dialogs,
+  command palette, drawers out of the box: the exact primitives an operator console needs.
 - **State:** minimal global state; server is the source of truth. Local state only for
   forms and UI.
 - **Real-time:** native EventSource (SSE) for the timeline; upgrade to WebSocket if
   bidirectional needs emerge.
+
+**Alternatives considered:** SvelteKit/Svelte and SolidJS are leaner and pleasant; if the
+team already ships fast in one of them, that familiarity beats React's ecosystem advantage
+and we'd switch. React is the default because it's the safe, long-lived choice — not the
+flashiest.
 
 ### 6.2 The contract pipeline (critical)
 This is what makes the "thin client, fat contract" principle real:
@@ -382,7 +397,9 @@ That spec is simultaneously: the design doc, the acceptance criteria, and the
 
 ## 11. Open decisions (need your call)
 
-1. **Framework:** React (ecosystem/codegen maturity) vs. SolidJS (lighter). Default: React.
+1. ~~**Framework:** React vs. SolidJS.~~ **DECIDED:** React + TypeScript as a Vite SPA, no
+   meta-framework (see §6.1). Revisit only if the build team already ships faster in
+   Svelte/Solid.
 2. **Transport for v1:** REST-first then Connect, or commit to Connect/gRPC-web from day
    one?
 3. **Repo layout:** front-end inside the monorepo (`web/` or a `packages/` workspace next
