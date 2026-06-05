@@ -22,7 +22,7 @@ struct AppState<S: MemoryStore> {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 pub async fn serve(
     port: u16,
     store: async_nats::jetstream::kv::Store,

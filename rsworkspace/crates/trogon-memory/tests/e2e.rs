@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, allow(unused_imports))] // coverage cfg-excludes the e2e test body that uses these imports
 use std::time::Duration;
 
 use async_nats::jetstream;
