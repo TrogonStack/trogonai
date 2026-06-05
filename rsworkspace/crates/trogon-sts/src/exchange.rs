@@ -345,6 +345,11 @@ fn validate_wire_request(request: &StsExchangeRequest) -> Result<(), StsError> {
     if request.audience.trim().is_empty() {
         return Err(StsError::InvalidRequest("audience required".into()));
     }
+    if request.mode == ExchangeMode::AuthOnly {
+        return Err(StsError::InvalidRequest(
+            "mode=AuthOnly is a frontend-proxy short-circuit and must not reach STS".into(),
+        ));
+    }
     Ok(())
 }
 

@@ -12,11 +12,11 @@
 use std::sync::Arc;
 
 use axum::Json;
+use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,20 +94,14 @@ pub fn router(discovery: Arc<GatewayDiscovery>) -> Router {
         .with_state(discovery)
 }
 
-async fn get_protected_resource(
-    State(d): State<Arc<GatewayDiscovery>>,
-    Path(backend): Path<String>,
-) -> Response {
+async fn get_protected_resource(State(d): State<Arc<GatewayDiscovery>>, Path(backend): Path<String>) -> Response {
     if backend.is_empty() || backend.contains('/') {
         return (StatusCode::BAD_REQUEST, "invalid backend").into_response();
     }
     Json(d.protected_resource(&backend)).into_response()
 }
 
-async fn get_authorization_server(
-    State(d): State<Arc<GatewayDiscovery>>,
-    Path(backend): Path<String>,
-) -> Response {
+async fn get_authorization_server(State(d): State<Arc<GatewayDiscovery>>, Path(backend): Path<String>) -> Response {
     if backend.is_empty() || backend.contains('/') {
         return (StatusCode::BAD_REQUEST, "invalid backend").into_response();
     }
@@ -149,6 +143,42 @@ mod tests {
         assert_eq!(doc.resource, "https://gw.example.com/mcp/fileserver");
         assert_eq!(doc.authorization_servers, vec!["https://gw.example.com/aauth"]);
         assert!(doc.bearer_methods_supported.contains(&"header".to_string()));
+    }
+
+    #[tokio::test]
+    async fn router_merged_with_catchall_still_resolves_well_known() {
+        use axum::routing::any;
+
+        async fn catchall() -> &'static str {
+            "catchall"
+        }
+
+        let app = router(discovery()).merge(Router::new().route("/{*path}", any(catchall)));
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-protected-resource/mcp/fileserver")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let doc: ProtectedResourceMetadata = serde_json::from_slice(&body).unwrap();
+        assert_eq!(doc.resource, "https://gw.example.com/mcp/fileserver");
+
+        let fall_through = app
+            .oneshot(Request::builder().uri("/some/tenant/path").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(fall_through.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(fall_through.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"catchall");
     }
 
     #[tokio::test]

@@ -10,6 +10,10 @@ publish = false
 name = "trogon-gateway-k8s"
 path = "src/main.rs"
 
+[[bin]]
+name = "crdgen"
+path = "src/bin/crdgen.rs"
+
 [lints]
 workspace = true
 
@@ -25,6 +29,7 @@ kube-runtime = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_norway = { workspace = true }
 sha2 = { workspace = true }
 time = { workspace = true, features = ["formatting"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "net", "io-util"] }

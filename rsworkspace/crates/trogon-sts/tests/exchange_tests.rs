@@ -124,13 +124,13 @@ async fn delegation_mode_emits_rfc8693_act_claim_and_act_chain() {
     let request = sample_exchange_request(&subject);
     let response = service.handle(request, None).await.expect("exchange");
     let payload = decode_payload(&response.access_token);
-    assert!(payload.get("act_chain").is_some(), "act_chain present in delegation mode");
+    assert!(
+        payload.get("act_chain").is_some(),
+        "act_chain present in delegation mode"
+    );
     let act = payload.get("act").and_then(|v| v.as_object()).expect("act claim");
     assert_eq!(act.get("sub").and_then(|v| v.as_str()), Some("user:alice"));
-    assert_eq!(
-        act.get("agent_id").and_then(|v| v.as_str()),
-        Some("acme/oncall-agent")
-    );
+    assert_eq!(act.get("agent_id").and_then(|v| v.as_str()), Some("acme/oncall-agent"));
 }
 
 #[tokio::test]
@@ -163,16 +163,15 @@ async fn elicitation_only_mode_suppresses_act_claim() {
 }
 
 #[tokio::test]
-async fn auth_only_mode_suppresses_act_claim() {
+async fn auth_only_mode_is_rejected_as_invalid_request() {
     let keys = shared_test_keys();
     let service = build_service(keys, sample_registry_record());
     let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     let mut request = sample_exchange_request(&subject);
     request.mode = trogon_sts::types::ExchangeMode::AuthOnly;
-    let response = service.handle(request, None).await.expect("exchange");
-    let payload = decode_payload(&response.access_token);
-    assert!(payload.get("act").is_none());
-    assert!(payload.get("act_chain").is_none());
+    let err = service.handle(request, None).await.expect_err("auth_only rejected");
+    assert_eq!(err.error, "invalid_request");
+    assert!(err.error_description.contains("AuthOnly"));
 }
 
 #[tokio::test]
