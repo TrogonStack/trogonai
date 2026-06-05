@@ -25,6 +25,7 @@
 //! | `WEBHOOK_DISPATCH_TIMEOUT_SECS` | `30`                 | Per-request timeout for outbound deliveries   |
 //! | Standard `NATS_*` variables for NATS connection (see `trogon-nats`)
 
+#![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
 pub mod config;
 pub mod dispatcher;
 pub mod http_client;

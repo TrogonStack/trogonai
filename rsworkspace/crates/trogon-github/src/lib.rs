@@ -29,6 +29,7 @@
 //! | `GITHUB_STREAM_MAX_AGE_SECS` | `604800` | Max age of messages in JetStream (seconds, default 7 days) |
 //! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
 
+#![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
 pub mod config;
 pub mod server;
 pub mod signature;
