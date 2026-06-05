@@ -1186,6 +1186,8 @@ where
         let mut mcp_servers = Self::convert_mcp_servers(&args.mcp_servers);
         mcp_servers.extend(stdio_servers);
         let new_state = SessionState {
+            tool_allowlist: Vec::new(),
+            background_jobs: Vec::new(),
             messages,
             model: src_state.model.clone(),
             compactor_model: src_state.compactor_model.clone(),
