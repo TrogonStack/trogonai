@@ -2722,6 +2722,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
         mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
     ) {
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
+            tool_allowlist: Vec::new(),
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
@@ -2983,6 +2984,7 @@ mod tests {
 
     fn make_session() -> OpenRouterSession {
         OpenRouterSession {
+            tool_allowlist: Vec::new(),
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
