@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, allow(dead_code, unused_imports))] // coverage cfg-excludes main(), orphaning helpers + imports
 #[cfg(not(coverage))]
 mod cli;
 #[cfg_attr(coverage, allow(dead_code))]
