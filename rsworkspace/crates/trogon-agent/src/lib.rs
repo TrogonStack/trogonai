@@ -1,3 +1,4 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
 //! # trogon-agent
 //!
 //! Agentic loop that consumes GitHub and Linear events from NATS
