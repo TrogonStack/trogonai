@@ -66,10 +66,12 @@ pub fn build_exchange_request(
         subject_token: subject_token.to_string(),
         subject_token_type: JWT_TOKEN_TYPE.to_string(),
         actor_token: actor_token.to_string(),
+        actor_token_type: JWT_TOKEN_TYPE.to_string(),
         audience: audience.to_string(),
         scope: scope.to_string(),
         purpose: purpose.to_string(),
         requested_token_type: JWT_TOKEN_TYPE.to_string(),
+        mode: Default::default(),
     }
 }
 

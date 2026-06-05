@@ -7343,6 +7343,7 @@ dependencies = [
  "jsonwebtoken 10.4.0",
  "p256",
  "rand_core 0.6.4",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2 0.10.8",
@@ -7353,6 +7354,7 @@ dependencies = [
  "trogon-identity-types",
  "trogon-nats",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -7507,7 +7509,9 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tower",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -7747,6 +7751,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-kms",
+ "axum",
  "base64 0.22.1",
  "bytes",
  "clap",
@@ -7764,6 +7769,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "trogon-identity-types",

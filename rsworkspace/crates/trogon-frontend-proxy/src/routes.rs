@@ -31,6 +31,28 @@ impl Backend {
     }
 }
 
+/// How the gateway should treat the user's inbound credential.
+/// Mirrors Solo.io agentgateway's `tokenExchange.mode` policy values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub enum TokenExchangeMode {
+    /// Inbound subject token is exchanged for a delegated mesh token
+    /// carrying both `sub` and `act` claims.
+    #[default]
+    Delegation,
+    /// Inbound subject token is exchanged for an impersonation token
+    /// carrying only `sub` (no `act` claim).
+    ExchangeOnly,
+    /// Elicitation flow — the gateway obtains and stores per-user
+    /// upstream OAuth credentials via the consent screen, then injects
+    /// the stored upstream token on every backend call.
+    ElicitationOnly,
+    /// Downstream IdP login only. The inbound JWT is validated but the
+    /// gateway performs no upstream OAuth exchange or elicitation.
+    /// Backend receives no per-user upstream credential.
+    AuthOnly,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Route {
     pub tenant: String,
@@ -38,6 +60,10 @@ pub struct Route {
     pub upstream_url: String,
     /// JWT audience to mint for the outbound mesh token.
     pub mesh_audience: String,
+    /// Per-Solo.io spec, the token-exchange mode for this backend.
+    /// Defaults to `Delegation` for backwards compatibility.
+    #[serde(default)]
+    pub token_exchange_mode: TokenExchangeMode,
 }
 
 #[derive(Debug)]
@@ -96,6 +122,7 @@ mod tests {
             backend: Backend::Mcp,
             upstream_url: "https://mcp.internal.example".into(),
             mesh_audience: "mesh.mcp".into(),
+            token_exchange_mode: TokenExchangeMode::default(),
         }
     }
 
