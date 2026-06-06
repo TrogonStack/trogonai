@@ -839,7 +839,11 @@ async fn acp_glob_tool_dispatched_via_wire_format() {
 async fn acp_fetch_url_tool_dispatched_via_wire_format() {
     use httpmock::prelude::*;
 
-    // Server that serves the URL being fetched.
+    // Server that *would* serve the URL — but in integration tests trogon-tools is
+    // compiled with cfg(test)=false, so fetch_url's SSRF guard is active and blocks
+    // the loopback (127.0.0.1) MockServer before it ever connects. This test therefore
+    // verifies the dispatch round-trip via the SSRF-blocked tool_result rather than
+    // fetched content (which is impossible to fetch from loopback here).
     let target_server = MockServer::start();
     target_server.mock(|when, then| {
         when.method(GET).path("/page");
@@ -860,7 +864,10 @@ async fn acp_fetch_url_tool_dispatched_via_wire_format() {
         when.method(POST)
             .path("/messages")
             .body_contains("tool_result")
-            .body_contains("acp-fetch-sentinel");
+            // The fetch_url SSRF guard rejects loopback with this message; the
+            // tool_result carrying it proves the tool was dispatched and its
+            // result flowed back to the model.
+            .body_contains("not permitted");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("fetched"));
@@ -908,7 +915,7 @@ async fn acp_fetch_url_tool_dispatched_via_wire_format() {
 /// from actual API responses.
 #[tokio::test]
 async fn acp_tool_use_cycle_exported_as_portable_blocks_via_wire() {
-    use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+    use trogon_runner_tools::portable_session::{PortableBlock, PortableExportV2};
 
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("sentinel.txt"), "sentinel-export-content-xyz\n").unwrap();
@@ -975,9 +982,14 @@ async fn acp_tool_use_cycle_exported_as_portable_blocks_via_wire() {
             .expect("timed out waiting for session/export response")
             .expect("no session/export response");
 
-            let messages: Vec<PortableMessage> =
-                serde_json::from_slice(&export_msg.payload)
-                    .expect("response must be a PortableMessage array");
+            // The ext_method reply wraps the payload as {"result": <export>}. A
+            // tool_use cycle has structured blocks, so the export is the versioned
+            // V2 format (a `{version, messages}` object, not a flat array).
+            let envelope: serde_json::Value = serde_json::from_slice(&export_msg.payload)
+                .expect("response must be JSON");
+            let export: PortableExportV2 = serde_json::from_value(envelope["result"].clone())
+                .expect("result must be a V2 portable export object");
+            let messages = export.messages;
 
             assert!(
                 !messages.is_empty(),
