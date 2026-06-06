@@ -611,8 +611,11 @@ async fn runner_publishes_error_event_when_anthropic_unreachable() {
             let (mut notif_sub, mut resp_sub) =
                 send_text(&nats, prefix, session_id, "hello").await;
 
+            // The agent retries send errors MAX_RETRIES (4) times with a 5s
+            // backoff before surfacing the error, so the response only arrives
+            // after ~20s — wait longer than that.
             let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
 
             // Must be either a PromptResponse (has "stopReason") or an ACP error (has "code").
             assert!(
@@ -4542,6 +4545,26 @@ async fn runner_cache_tokens_persisted_to_kv() {
 /// terminal.  The first call creates the terminal and runs command 1.  The
 /// second call must reuse the same terminal (no extra `terminal.create` request)
 /// and runs command 2.
+/// Reconstructs the per-invocation `__START_<nonce>__` marker (and bare
+/// `<nonce>`) from a `terminal.write_stdin` payload, so the mock can echo back
+/// the start + nonce'd exit markers the bash tool's output extraction requires.
+fn markers_from_written_command(payload: &[u8]) -> (String, String) {
+    let req: serde_json::Value =
+        serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
+    let bytes: Vec<u8> = req["data"]
+        .as_array()
+        .expect("write_stdin payload must carry `data` bytes")
+        .iter()
+        .map(|v| v.as_u64().expect("data byte") as u8)
+        .collect();
+    let cmd = String::from_utf8(bytes).expect("written command must be UTF-8");
+    let start = cmd.find("__START_").expect("command must contain a start marker");
+    let after = &cmd[start + "__START_".len()..];
+    let end = after.find("__").expect("start marker must terminate with __");
+    let nonce = after[..end].to_string();
+    (format!("__START_{nonce}__"), nonce)
+}
+
 fn spawn_two_bash_calls(
     nats: async_nats::Client,
     base: String,
@@ -4567,19 +4590,10 @@ fn spawn_two_bash_calls(
                 .await
                 .unwrap();
         }
-        // baseline output (empty)
-        if let Some(msg) = output_sub.next().await {
-            nats.publish(
-                msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"output": ""}))
-                    .unwrap()
-                    .into(),
-            )
-            .await
-            .unwrap();
-        }
-        // write_stdin for command 1
+        // write_stdin for command 1 — capture markers (HIGH-21: no baseline read)
+        let mut markers1 = None;
         if let Some(msg) = write_sub.next().await {
+            markers1 = Some(markers_from_written_command(&msg.payload));
             nats.publish(
                 msg.reply.unwrap(),
                 serde_json::to_vec(&serde_json::json!({"ok": true}))
@@ -4589,9 +4603,10 @@ fn spawn_two_bash_calls(
             .await
             .unwrap();
         }
+        let (start1, nonce1) = markers1.expect("write_stdin 1 must arrive");
         // poll output for command 1
         if let Some(msg) = output_sub.next().await {
-            let full = format!("{output1}__EXIT_0__\n");
+            let full = format!("{start1}\n{output1}__EXIT_{nonce1}_0__\n");
             nats.publish(
                 msg.reply.unwrap(),
                 serde_json::to_vec(&serde_json::json!({"output": full}))
@@ -4603,19 +4618,10 @@ fn spawn_two_bash_calls(
         }
 
         // ── Second bash call (no create — terminal already exists) ─────────────
-        // baseline output
-        if let Some(msg) = output_sub.next().await {
-            nats.publish(
-                msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"output": ""}))
-                    .unwrap()
-                    .into(),
-            )
-            .await
-            .unwrap();
-        }
-        // write_stdin for command 2
+        // write_stdin for command 2 — capture markers (HIGH-21: no baseline read)
+        let mut markers2 = None;
         if let Some(msg) = write_sub.next().await {
+            markers2 = Some(markers_from_written_command(&msg.payload));
             nats.publish(
                 msg.reply.unwrap(),
                 serde_json::to_vec(&serde_json::json!({"ok": true}))
@@ -4625,9 +4631,10 @@ fn spawn_two_bash_calls(
             .await
             .unwrap();
         }
+        let (start2, nonce2) = markers2.expect("write_stdin 2 must arrive");
         // poll output for command 2
         if let Some(msg) = output_sub.next().await {
-            let full = format!("{output2}__EXIT_0__\n");
+            let full = format!("{start2}\n{output2}__EXIT_{nonce2}_0__\n");
             nats.publish(
                 msg.reply.unwrap(),
                 serde_json::to_vec(&serde_json::json!({"output": full}))
