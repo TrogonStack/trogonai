@@ -149,9 +149,20 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
         "payload must include session_id so the spawn handler can load the parent session"
     );
 
-    // Verify exactly 3 fields — no extras, no missing.
+    // `agent` selects a named .claude/agents/ definition (AGT-2); it defaults to
+    // empty when only the legacy `capability` selector is supplied.
+    assert_eq!(
+        parsed["agent"].as_str(),
+        Some(""),
+        "payload must include the agent selector (empty when unspecified)"
+    );
+
+    // Verify exactly 4 fields — no extras, no missing.
     let field_count = parsed.as_object().map(|o| o.len()).unwrap_or(0);
-    assert_eq!(field_count, 3, "payload must have exactly 3 fields: capability, prompt, session_id");
+    assert_eq!(
+        field_count, 4,
+        "payload must have exactly 4 fields: capability, agent, prompt, session_id"
+    );
 }
 
 #[tokio::test]
