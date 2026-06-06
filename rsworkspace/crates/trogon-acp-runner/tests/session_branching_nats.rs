@@ -38,7 +38,9 @@ use trogon_acp_runner::{
     session_notifier::mock::MockSessionNotifier,
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message};
-use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+use trogon_runner_tools::portable_session::{
+    EXPORT_VERSION_V2, PortableBlock, PortableExportV2, PortableMessage, PortableMessageV2,
+};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -922,28 +924,38 @@ async fn ext_method_codex_style_import_converts_blocks_in_nats_kv() {
 
             let agent = make_agent(store.clone());
 
-            // Synthetic codex/ACP-style messages: ToolCall (assistant) + ToolResult (user)
-            let messages = vec![
-                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
-                PortableMessage {
-                    role: "assistant".to_string(),
-                    text: String::new(),
-                    blocks: vec![PortableBlock::ToolUse {
-                        id: "c1".to_string(),
-                        name: "read_file".to_string(),
-                        input_summary: serde_json::json!({"path": "test.txt"}).to_string(),
-                    }],
-                },
-                PortableMessage {
-                    role: "user".to_string(),
-                    text: String::new(),
-                    blocks: vec![PortableBlock::ToolResult {
-                        id: "c1".to_string(),
-                        output_summary: "file contents".to_string(),
-                    }],
-                },
-            ];
-            let messages_json = serde_json::to_string(&messages).unwrap();
+            // Synthetic codex/ACP-style history with tool blocks. Tool calls can
+            // only survive a session/import in the V2 (block-bearing) format — the
+            // flat V1 format is text-only by design (MED-18 drops tool_use) — so
+            // send a versioned V2 export here.
+            let export = PortableExportV2 {
+                version: EXPORT_VERSION_V2,
+                messages: vec![
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "user".to_string(),
+                        blocks: vec![PortableBlock::Text { text: "use a tool".to_string() }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "assistant".to_string(),
+                        blocks: vec![PortableBlock::ToolUse {
+                            id: "c1".to_string(),
+                            name: "read_file".to_string(),
+                            input_summary: serde_json::json!({"path": "test.txt"}).to_string(),
+                        }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "user".to_string(),
+                        blocks: vec![PortableBlock::ToolResult {
+                            id: "c1".to_string(),
+                            output_summary: "file contents".to_string(),
+                        }],
+                    },
+                ],
+            };
+            let messages_json = serde_json::to_string(&export).unwrap();
 
             let params: Arc<serde_json::value::RawValue> =
                 serde_json::value::RawValue::from_string(
