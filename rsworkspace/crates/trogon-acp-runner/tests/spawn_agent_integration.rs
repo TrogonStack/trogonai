@@ -114,7 +114,7 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
     let nats_clone = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_clone
-            .subscribe(format!("{prefix}.agent.spawn"))
+            .subscribe(format!("{prefix}.spawn"))
             .await
             .unwrap();
         if let Some(msg) = sub.next().await {
