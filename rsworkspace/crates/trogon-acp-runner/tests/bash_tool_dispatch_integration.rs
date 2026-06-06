@@ -144,6 +144,28 @@ fn sse_end_turn(text: &str) -> String {
     .join("")
 }
 
+/// Reconstructs the per-invocation `__START_<nonce>__` marker (and the bare
+/// `<nonce>`) from a `terminal.write_stdin` payload. The bash tool wraps each
+/// command as `echo "__START_<nonce>__"; eval <cmd>; echo "__EXIT_<nonce>_$?__"`,
+/// so a real terminal echoes both markers back on stdout — these mocks must do
+/// the same or the tool's marker-scoped output extraction never matches.
+fn markers_from_written_command(payload: &[u8]) -> (String, String) {
+    let req: serde_json::Value =
+        serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
+    let bytes: Vec<u8> = req["data"]
+        .as_array()
+        .expect("write_stdin payload must carry `data` bytes")
+        .iter()
+        .map(|v| v.as_u64().expect("data byte") as u8)
+        .collect();
+    let cmd = String::from_utf8(bytes).expect("written command must be UTF-8");
+    let start = cmd.find("__START_").expect("command must contain a start marker");
+    let after = &cmd[start + "__START_".len()..];
+    let end = after.find("__").expect("start marker must terminate with __");
+    let nonce = after[..end].to_string();
+    (format!("__START_{nonce}__"), nonce)
+}
+
 /// Spawn mock NATS responders for the four interactions used by the
 /// demarcation-marker protocol: create → output(baseline) → write_stdin → output(poll).
 fn spawn_terminal_responders(
@@ -168,21 +190,20 @@ fn spawn_terminal_responders(
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 2. terminal.output — baseline (empty)
-        if let Some(msg) = output_sub.next().await {
-            let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
-            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
-        }
-
-        // 3. ext.terminal.write_stdin — ACK
+        // 2. ext.terminal.write_stdin — capture the per-invocation markers + ACK
+        // (HIGH-21: the tool no longer reads a baseline before writing — it brackets
+        //  the command with a start marker — so there is no baseline output request.)
+        let mut markers = None;
         if let Some(msg) = write_sub.next().await {
+            markers = Some(markers_from_written_command(&msg.payload));
             let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
+        let (start_marker, nonce) = markers.expect("write_stdin must arrive before output poll");
 
-        // 4. terminal.output — poll with demarcation marker
+        // 4. terminal.output — poll, echoing the real terminal's start + exit markers
         if let Some(msg) = output_sub.next().await {
-            let full = format!("{output}__EXIT_0__\n");
+            let full = format!("{start_marker}\n{output}__EXIT_{nonce}_0__\n");
             let payload = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
@@ -605,15 +626,10 @@ fn spawn_terminal_responders_with_exit_code(
                 .await
                 .unwrap();
         }
-        if let Some(msg) = output_sub.next().await {
-            nats.publish(
-                msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap().into(),
-            )
-            .await
-            .unwrap();
-        }
+        // HIGH-21: no baseline output read before the write — go straight to write.
+        let mut markers = None;
         if let Some(msg) = write_sub.next().await {
+            markers = Some(markers_from_written_command(&msg.payload));
             nats.publish(
                 msg.reply.unwrap(),
                 serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap().into(),
@@ -621,8 +637,9 @@ fn spawn_terminal_responders_with_exit_code(
             .await
             .unwrap();
         }
+        let (start_marker, nonce) = markers.expect("write_stdin must arrive before output poll");
         if let Some(msg) = output_sub.next().await {
-            let full = format!("{output}__EXIT_{exit_code}__\n");
+            let full = format!("{start_marker}\n{output}__EXIT_{nonce}_{exit_code}__\n");
             nats.publish(
                 msg.reply.unwrap(),
                 serde_json::to_vec(&serde_json::json!({"output": full})).unwrap().into(),
