@@ -559,6 +559,13 @@ impl PermissionChecker for ModePermissionChecker {
                 return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
             }
 
+            // CFG-3: an explicit `ask` rule (settings.json `permissions.ask`) forces the
+            // interactive prompt, skipping mode + read-only auto-allow. Deny still wins
+            // (handled above); bypassPermissions never reaches here.
+            if self.inner.rules.explicitly_asks(tool_name, tool_input) {
+                return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
+            }
+
             match self.mode.as_str() {
                 "dontAsk" => {
                     push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -1830,6 +1837,46 @@ mod tests {
                 .check("tc", "read_file", &serde_json::json!({"path": "a.rs"}))
                 .await,
             "PreToolUse matcher must not fire for a non-matching tool"
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_dont_ask_explicit_ask_rule_prompts_via_channel() {
+        // An explicit `ask` rule must force the interactive prompt even in dontAsk
+        // mode (which otherwise auto-allows). The responder DENIES; the call can only
+        // return false if it actually routed through the channel — a plain dontAsk
+        // auto-allow would return true, so this discriminates the fix from a no-op.
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "dontAsk".to_string(),
+            inner: make_rules_checker("ask_commands: git push", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+        };
+        let got_request = tokio::spawn(async move {
+            match rx.recv().await {
+                Some(req) => {
+                    let _ = req.response_tx.send(false); // deny at the prompt
+                    true
+                }
+                None => false,
+            }
+        });
+        assert!(
+            !checker
+                .check(
+                    "tc-daa",
+                    "bash",
+                    &serde_json::json!({"command": "git push origin main"}),
+                )
+                .await,
+            "explicit ask rule must route to the prompt; denied there → false"
+        );
+        assert!(
+            got_request.await.unwrap(),
+            "the interactive channel must have received the request (not auto-allowed)"
         );
     }
 }
