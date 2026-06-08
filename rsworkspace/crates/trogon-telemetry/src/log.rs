@@ -12,6 +12,8 @@ use trogon_std::dirs::SystemDirs;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::CreateDirAll;
 
+use crate::TelemetryProviderShutdownError;
+
 pub(crate) static LOGGER_PROVIDER: OnceLock<SdkLoggerProvider> = OnceLock::new();
 
 pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<SdkLoggerProvider> {
@@ -25,11 +27,11 @@ pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<SdkLoggerProv
     Ok(provider)
 }
 
-pub(crate) fn shutdown() -> Result<(), String> {
+pub(crate) fn shutdown() -> Result<(), TelemetryProviderShutdownError> {
     if let Some(provider) = LOGGER_PROVIDER.get() {
         provider
             .shutdown()
-            .map_err(|e| format!("failed to shutdown logger provider: {e}"))?;
+            .map_err(|source| TelemetryProviderShutdownError::Logger { source: source.into() })?;
     }
     Ok(())
 }

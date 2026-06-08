@@ -12,6 +12,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+use std::error::Error;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
@@ -21,14 +22,37 @@ use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
 #[derive(Debug)]
 pub struct TelemetryShutdownError {
-    errors: Vec<String>,
+    errors: Vec<TelemetryProviderShutdownError>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TelemetryProviderShutdownError {
+    #[error("failed to shutdown tracer provider")]
+    Tracer {
+        #[source]
+        source: anyhow::Error,
+    },
+    #[error("failed to shutdown meter provider")]
+    Meter {
+        #[source]
+        source: anyhow::Error,
+    },
+    #[error("failed to shutdown logger provider")]
+    Logger {
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 impl std::fmt::Display for TelemetryShutdownError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "failed to shutdown OpenTelemetry providers:")?;
         for error in &self.errors {
-            writeln!(f, "  - {error}")?;
+            write!(f, "  - {error}")?;
+            if let Some(source) = error.source() {
+                write!(f, ": {source}")?;
+            }
+            writeln!(f)?;
         }
         Ok(())
     }
@@ -227,7 +251,14 @@ mod tests {
     #[test]
     fn telemetry_shutdown_error_formats_all_errors() {
         let error = TelemetryShutdownError {
-            errors: vec!["trace failed".to_string(), "metric failed".to_string()],
+            errors: vec![
+                TelemetryProviderShutdownError::Tracer {
+                    source: anyhow::anyhow!("trace failed"),
+                },
+                TelemetryProviderShutdownError::Meter {
+                    source: anyhow::anyhow!("metric failed"),
+                },
+            ],
         };
 
         let message = error.to_string();

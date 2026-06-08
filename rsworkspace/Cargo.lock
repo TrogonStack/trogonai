@@ -3411,6 +3411,7 @@ dependencies = [
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "thiserror",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
