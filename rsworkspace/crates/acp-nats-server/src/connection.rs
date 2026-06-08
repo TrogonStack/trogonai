@@ -14,17 +14,17 @@ use crate::constants::DUPLEX_BUFFER_SIZE;
 
 #[derive(Debug, thiserror::Error)]
 enum ConnectionShutdownError {
-    #[error("client task error")]
+    #[error("client task error: {source}")]
     ClientTask {
         #[source]
         source: tokio::task::JoinError,
     },
-    #[error("io task spawn error")]
+    #[error("io task spawn error: {source}")]
     IoTaskSpawn {
         #[source]
         source: tokio::task::JoinError,
     },
-    #[error("io task error")]
+    #[error("io task error: {source}")]
     IoTask {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -199,6 +199,8 @@ mod tests {
     use axum::extract::State;
     use axum::extract::ws::WebSocketUpgrade;
     use axum::response::Response;
+    use std::error::Error;
+    use std::io;
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
@@ -229,6 +231,16 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         format!("ws://{}{}", addr, ACP_ENDPOINT)
+    }
+
+    #[test]
+    fn shutdown_error_display_includes_source_details() {
+        let error = ConnectionShutdownError::IoTask {
+            source: Box::new(io::Error::other("duplex closed")),
+        };
+
+        assert_eq!(error.to_string(), "io task error: duplex closed");
+        assert_eq!(error.source().unwrap().to_string(), "duplex closed");
     }
 
     #[tokio::test]
