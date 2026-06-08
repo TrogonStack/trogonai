@@ -1,4 +1,3 @@
-use std::fmt;
 use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -26,7 +25,8 @@ impl FromStr for SourceStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported status value '{value}' ; expected 'enabled' or 'disabled'")]
 pub struct SourceStatusError {
     value: String,
 }
@@ -36,18 +36,6 @@ impl SourceStatusError {
         Self { value: value.into() }
     }
 }
-
-impl fmt::Display for SourceStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "unsupported status value '{}' ; expected 'enabled' or 'disabled'",
-            self.value
-        )
-    }
-}
-
-impl std::error::Error for SourceStatusError {}
 
 #[cfg(test)]
 mod tests {

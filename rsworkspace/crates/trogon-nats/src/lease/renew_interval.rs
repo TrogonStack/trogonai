@@ -1,4 +1,3 @@
-use std::fmt;
 use std::time::Duration;
 
 use trogon_std::{NonZeroDuration, ZeroDuration};
@@ -6,20 +5,11 @@ use trogon_std::{NonZeroDuration, ZeroDuration};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LeaseRenewInterval(NonZeroDuration);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LeaseRenewIntervalError {
+    #[error("lease renew interval must not be zero")]
     ZeroDuration,
 }
-
-impl fmt::Display for LeaseRenewIntervalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ZeroDuration => f.write_str("lease renew interval must not be zero"),
-        }
-    }
-}
-
-impl std::error::Error for LeaseRenewIntervalError {}
 
 impl LeaseRenewInterval {
     pub fn new(renew_interval: NonZeroDuration) -> Self {

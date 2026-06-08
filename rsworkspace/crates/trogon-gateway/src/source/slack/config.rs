@@ -23,28 +23,12 @@ impl fmt::Debug for SlackSigningSecret {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SlackAppTokenError {
-    Empty(EmptySecret),
+    #[error("{0}")]
+    Empty(#[source] EmptySecret),
+    #[error("must start with xapp-")]
     MissingPrefix,
-}
-
-impl fmt::Display for SlackAppTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty(error) => write!(f, "{error}"),
-            Self::MissingPrefix => f.write_str("must start with xapp-"),
-        }
-    }
-}
-
-impl std::error::Error for SlackAppTokenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Empty(error) => Some(error),
-            Self::MissingPrefix => None,
-        }
-    }
 }
 
 #[derive(Clone)]

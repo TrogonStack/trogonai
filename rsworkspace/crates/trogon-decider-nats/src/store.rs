@@ -48,60 +48,27 @@ impl fmt::Display for OptimisticConcurrencyConflictError {
 
 impl std::error::Error for OptimisticConcurrencyConflictError {}
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Error raised by [`JetStreamStore`] read, append, and snapshot operations.
 pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible, SnapshotTypeError = Infallible> {
     /// Subject resolution failed before JetStream storage was accessed.
-    ResolveSubject(Error),
+    #[error("failed to resolve stream subject state: {0}")]
+    ResolveSubject(#[source] Error),
     /// Reading stream events from JetStream failed.
-    ReadStream(StreamStoreError),
+    #[error("failed to read stream events: {0}")]
+    ReadStream(#[source] StreamStoreError),
     /// Appending stream events to JetStream failed.
-    AppendStream(StreamStoreError),
+    #[error("failed to append stream events: {0}")]
+    AppendStream(#[source] StreamStoreError),
     /// Reading or writing snapshots failed.
-    Snapshot(SnapshotStoreError<SnapshotPayloadError, SnapshotTypeError>),
+    #[error("failed to access snapshots: {0}")]
+    Snapshot(#[source] SnapshotStoreError<SnapshotPayloadError, SnapshotTypeError>),
     /// Encoding or decoding a runtime payload failed.
-    Codec(Error),
+    #[error("codec error: {0}")]
+    Codec(#[source] Error),
     /// The write precondition did not match the current stream state.
-    OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError),
-}
-
-impl<Error, SnapshotPayloadError, SnapshotTypeError> fmt::Display
-    for JetStreamStoreError<Error, SnapshotPayloadError, SnapshotTypeError>
-where
-    Error: std::error::Error + Send + Sync + 'static,
-    SnapshotPayloadError: std::fmt::Display,
-    SnapshotTypeError: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ResolveSubject(source) => {
-                write!(f, "failed to resolve stream subject state: {source}")
-            }
-            Self::ReadStream(source) => write!(f, "failed to read stream events: {source}"),
-            Self::AppendStream(source) => write!(f, "failed to append stream events: {source}"),
-            Self::Snapshot(source) => write!(f, "failed to access snapshots: {source}"),
-            Self::Codec(source) => write!(f, "codec error: {source}"),
-            Self::OptimisticConcurrencyConflict(source) => source.fmt(f),
-        }
-    }
-}
-
-impl<Error, SnapshotPayloadError, SnapshotTypeError> std::error::Error
-    for JetStreamStoreError<Error, SnapshotPayloadError, SnapshotTypeError>
-where
-    Error: std::error::Error + Send + Sync + 'static,
-    SnapshotPayloadError: std::error::Error + 'static,
-    SnapshotTypeError: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::ResolveSubject(source) => Some(source),
-            Self::ReadStream(source) | Self::AppendStream(source) => Some(source),
-            Self::Snapshot(source) => Some(source),
-            Self::Codec(source) => Some(source),
-            Self::OptimisticConcurrencyConflict(source) => Some(source),
-        }
-    }
+    #[error("{0}")]
+    OptimisticConcurrencyConflict(#[source] OptimisticConcurrencyConflictError),
 }
 
 #[derive(Clone)]

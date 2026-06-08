@@ -1,7 +1,15 @@
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SnapshotEncodeError<PayloadSource, SnapshotTypeSource = std::convert::Infallible> {
-    SnapshotType { source: SnapshotTypeSource },
-    Payload { source: PayloadSource },
+    #[error("failed to resolve snapshot type: {source}")]
+    SnapshotType {
+        #[source]
+        source: SnapshotTypeSource,
+    },
+    #[error("failed to encode snapshot payload: {source}")]
+    Payload {
+        #[source]
+        source: PayloadSource,
+    },
 }
 
 impl<PayloadSource, SnapshotTypeSource> SnapshotEncodeError<PayloadSource, SnapshotTypeSource> {
@@ -28,46 +36,13 @@ impl<PayloadSource, SnapshotTypeSource> SnapshotEncodeError<PayloadSource, Snaps
     }
 }
 
-impl<PayloadSource, SnapshotTypeSource> std::fmt::Display for SnapshotEncodeError<PayloadSource, SnapshotTypeSource>
-where
-    PayloadSource: std::fmt::Display,
-    SnapshotTypeSource: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SnapshotType { source } => write!(f, "failed to resolve snapshot type: {source}"),
-            Self::Payload { source } => write!(f, "failed to encode snapshot payload: {source}"),
-        }
-    }
-}
-
-impl<PayloadSource, SnapshotTypeSource> std::error::Error for SnapshotEncodeError<PayloadSource, SnapshotTypeSource>
-where
-    PayloadSource: std::error::Error + 'static,
-    SnapshotTypeSource: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::SnapshotType { source } => Some(source),
-            Self::Payload { source } => Some(source),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
+    #[error("{0}")]
     struct TestSourceError(&'static str);
-
-    impl std::fmt::Display for TestSourceError {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.0)
-        }
-    }
-
-    impl std::error::Error for TestSourceError {}
 
     #[test]
     fn display_and_source_preserve_payload_encode_error() {

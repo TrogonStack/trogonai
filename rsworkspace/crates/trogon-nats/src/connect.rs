@@ -4,35 +4,16 @@ use async_nats::{Client, ConnectOptions, Event};
 use std::time::Duration;
 use tracing::{info, instrument, warn};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    InvalidCredentials(std::io::Error),
+    #[error("Failed to load credentials file: {0}")]
+    InvalidCredentials(#[source] std::io::Error),
+    #[error("Failed to connect to NATS servers {servers:?}: {error}")]
     ConnectionFailed {
         servers: Vec<String>,
+        #[source]
         error: async_nats::ConnectError,
     },
-}
-
-impl std::fmt::Display for ConnectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidCredentials(e) => {
-                write!(f, "Failed to load credentials file: {}", e)
-            }
-            Self::ConnectionFailed { servers, error } => {
-                write!(f, "Failed to connect to NATS servers {:?}: {}", servers, error)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConnectError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidCredentials(e) => Some(e),
-            Self::ConnectionFailed { error, .. } => Some(error),
-        }
-    }
 }
 
 fn reconnect_delay(attempts: usize) -> Duration {

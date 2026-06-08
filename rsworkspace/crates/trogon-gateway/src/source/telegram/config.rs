@@ -8,28 +8,12 @@ use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
 #[derive(Clone)]
 pub struct TelegramBotToken(SecretString);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TelegramBotTokenError {
-    Empty(EmptySecret),
+    #[error("{0}")]
+    Empty(#[source] EmptySecret),
+    #[error("must match Telegram bot token format")]
     InvalidFormat,
-}
-
-impl fmt::Display for TelegramBotTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty(error) => write!(f, "{error}"),
-            Self::InvalidFormat => f.write_str("must match Telegram bot token format"),
-        }
-    }
-}
-
-impl std::error::Error for TelegramBotTokenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Empty(error) => Some(error),
-            Self::InvalidFormat => None,
-        }
-    }
 }
 
 impl TelegramBotToken {
@@ -87,28 +71,12 @@ impl fmt::Debug for TelegramWebhookSecret {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TelegramPublicWebhookUrl(Url);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TelegramPublicWebhookUrlError {
-    Parse(url::ParseError),
+    #[error("invalid public webhook URL: {0}")]
+    Parse(#[source] url::ParseError),
+    #[error("invalid public webhook URL: must use https")]
     InsecureScheme,
-}
-
-impl fmt::Display for TelegramPublicWebhookUrlError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Parse(error) => write!(f, "invalid public webhook URL: {error}"),
-            Self::InsecureScheme => f.write_str("invalid public webhook URL: must use https"),
-        }
-    }
-}
-
-impl std::error::Error for TelegramPublicWebhookUrlError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Parse(error) => Some(error),
-            Self::InsecureScheme => None,
-        }
-    }
 }
 
 impl TelegramPublicWebhookUrl {

@@ -7,6 +7,8 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 mcp-nats = { workspace = true }
 rmcp = { workspace = true }

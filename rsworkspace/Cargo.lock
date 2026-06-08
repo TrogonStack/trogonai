@@ -15,6 +15,7 @@ dependencies = [
  "opentelemetry_sdk",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -35,6 +36,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -48,6 +50,7 @@ version = "0.1.0"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
+ "anyhow",
  "async-compat",
  "async-nats",
  "axum",
@@ -58,6 +61,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tokio-tungstenite",
  "tower",
@@ -75,6 +79,7 @@ version = "0.0.1"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
+ "anyhow",
  "async-compat",
  "async-nats",
  "bytes",
@@ -1518,6 +1523,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
  "trogon-nats",
@@ -1528,11 +1534,13 @@ dependencies = [
 name = "mcp-nats-server"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "axum",
  "clap",
  "mcp-nats",
  "rmcp",
  "serde_json",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
@@ -1546,11 +1554,13 @@ dependencies = [
 name = "mcp-nats-stdio"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "clap",
  "mcp-nats",
  "rmcp",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
  "trogon-std",
@@ -3247,6 +3257,7 @@ dependencies = [
 name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
+ "thiserror",
  "trybuild",
 ]
 
@@ -3260,6 +3271,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "thiserror",
  "time",
  "tokio",
  "trogon-decider-runtime",
@@ -3276,6 +3288,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
  "trogon-decider",
@@ -3287,6 +3300,7 @@ dependencies = [
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-nats",
  "axum",
  "base64",
@@ -3304,6 +3318,7 @@ dependencies = [
  "sha2 0.11.0",
  "subtle",
  "tempfile",
+ "thiserror",
  "time",
  "tokio",
  "tokio-tungstenite",
@@ -3330,6 +3345,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
+ "thiserror",
  "time",
  "tokio",
  "tracing",
@@ -3349,6 +3365,7 @@ dependencies = [
  "cron",
  "proptest",
  "rrule",
+ "thiserror",
  "trogon-decider",
  "trogon-decider-runtime",
  "trogon-nats",
@@ -3376,6 +3393,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tower",
  "tower-http",
@@ -3388,6 +3406,7 @@ dependencies = [
 name = "trogon-telemetry"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -3406,6 +3425,7 @@ dependencies = [
  "buffa-types",
  "chrono",
  "serde",
+ "thiserror",
  "trogon-decider-runtime",
 ]
 

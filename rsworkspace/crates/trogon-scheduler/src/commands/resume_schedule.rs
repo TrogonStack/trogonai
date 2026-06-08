@@ -8,28 +8,19 @@ pub struct ResumeSchedule {
     pub id: ScheduleId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResumeScheduleError {
+    #[error("schedule '{id}' does not exist")]
     ScheduleNotFound { id: ScheduleId },
+    #[error("schedule '{id}' was deleted")]
     ScheduleDeleted { id: ScheduleId },
+    #[error("schedule '{id}' is already active")]
     AlreadyActive { id: ScheduleId },
+    #[error("state value is missing")]
     MissingStateValue,
+    #[error("unknown state value: {value}")]
     UnknownStateValue { value: i32 },
 }
-
-impl std::fmt::Display for ResumeScheduleError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ScheduleNotFound { id } => write!(formatter, "schedule '{id}' does not exist"),
-            Self::ScheduleDeleted { id } => write!(formatter, "schedule '{id}' was deleted"),
-            Self::AlreadyActive { id } => write!(formatter, "schedule '{id}' is already active"),
-            Self::MissingStateValue => formatter.write_str("state value is missing"),
-            Self::UnknownStateValue { value } => write!(formatter, "unknown state value: {value}"),
-        }
-    }
-}
-
-impl std::error::Error for ResumeScheduleError {}
 
 impl ResumeSchedule {
     pub fn new(id: ScheduleId) -> Self {

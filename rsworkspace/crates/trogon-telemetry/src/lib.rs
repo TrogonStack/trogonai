@@ -150,7 +150,7 @@ fn try_init_otel<A>(
         opentelemetry_sdk::metrics::SdkMeterProvider,
         opentelemetry_sdk::logs::SdkLoggerProvider,
     ),
-    Box<dyn std::error::Error>,
+    anyhow::Error,
 >
 where
     A: IntoIterator<Item = ResourceAttribute>,

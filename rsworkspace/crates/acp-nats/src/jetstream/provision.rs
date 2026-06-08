@@ -3,16 +3,9 @@ use trogon_nats::jetstream::JetStreamContext;
 
 use super::streams;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("stream provisioning failed: {0}")]
 pub struct ProvisionError(pub String);
-
-impl std::fmt::Display for ProvisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream provisioning failed: {}", self.0)
-    }
-}
-
-impl std::error::Error for ProvisionError {}
 
 pub async fn provision_streams<J: JetStreamContext>(
     js: &J,

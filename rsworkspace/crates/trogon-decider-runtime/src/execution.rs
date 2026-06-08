@@ -201,7 +201,7 @@ pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError>
 /// the exact source error type for each phase. Domain failures come from the
 /// decider, storage failures come from the concrete read/append/snapshot
 /// operation that failed, and codec failures stay tied to the event traits.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CommandError<
     DecideError,
     EvolveError,
@@ -213,25 +213,35 @@ pub enum CommandError<
     DecodeError,
 > {
     /// The command could not decide because the domain rejected it.
-    Decide(DecideError),
+    #[error("command decision failed: {0}")]
+    Decide(#[source] DecideError),
     /// The command or replay could not evolve state from an event.
-    Evolve(EvolveError),
+    #[error("command state evolution failed: {0}")]
+    Evolve(#[source] EvolveError),
     /// Snapshot loading failed before replaying stream history.
-    ReadSnapshot(ReadSnapshotError),
+    #[error("command snapshot read failed: {0}")]
+    ReadSnapshot(#[source] ReadSnapshotError),
     /// Stream history loading failed.
-    ReadStream(ReadStreamError),
+    #[error("command stream read failed: {0}")]
+    ReadStream(#[source] ReadStreamError),
     /// Appending the decided events failed after the command was accepted.
-    Append(AppendStreamError),
+    #[error("command stream append failed: {0}")]
+    Append(#[source] AppendStreamError),
     /// A decided domain event could not provide its stored event type.
-    EventType(EventTypeError),
+    #[error("command event type failed: {0}")]
+    EventType(#[source] EventTypeError),
     /// A decided domain event could not encode its payload.
-    EventEncode(PayloadEncodeError),
+    #[error("command event encoding failed: {0}")]
+    EventEncode(#[source] PayloadEncodeError),
     /// A stored event could not be converted back into a domain event.
-    DecodeEvent(DecodeError),
+    #[error("command event decoding failed: {0}")]
+    DecodeEvent(#[source] DecodeError),
     /// The loaded snapshot claims a position newer than the stream can prove.
+    #[error("{0}")]
     SnapshotAheadOfStream(SnapshotAheadOfStream),
     /// The snapshot's recorded position cannot be advanced (u64 overflow).
-    ReadAfterOverflow(ReadAfterOverflow),
+    #[error("{0}")]
+    ReadAfterOverflow(#[source] ReadAfterOverflow),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,17 +250,43 @@ pub struct SnapshotAheadOfStream {
     pub stream_position: Option<StreamPosition>,
 }
 
-enum ReplayStreamError<EvolveError, DecodeError> {
-    Evolve(EvolveError),
-    DecodeEvent(DecodeError),
+impl std::fmt::Display for SnapshotAheadOfStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.stream_position {
+            Some(stream_position) => write!(
+                f,
+                "snapshot position {} is ahead of current stream position {stream_position}",
+                self.snapshot_position
+            ),
+            None => write!(
+                f,
+                "snapshot position {} exists but the stream has no current position",
+                self.snapshot_position
+            ),
+        }
+    }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ReplayStreamError<EvolveError, DecodeError> {
+    #[error("{0}")]
+    Evolve(#[source] EvolveError),
+    #[error("{0}")]
+    DecodeEvent(#[source] DecodeError),
+}
+
+#[derive(Debug, thiserror::Error)]
 enum AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError> {
-    Decide(DecideError),
-    Evolve(EvolveError),
-    Append(AppendStreamError),
-    EventType(EventTypeError),
-    EventEncode(PayloadEncodeError),
+    #[error("{0}")]
+    Decide(#[source] DecideError),
+    #[error("{0}")]
+    Evolve(#[source] EvolveError),
+    #[error("{0}")]
+    Append(#[source] AppendStreamError),
+    #[error("{0}")]
+    EventType(#[source] EventTypeError),
+    #[error("{0}")]
+    EventEncode(#[source] PayloadEncodeError),
 }
 
 impl<
@@ -312,111 +348,6 @@ impl<
             AppendDecisionError::Append(error) => Self::Append(error),
             AppendDecisionError::EventType(error) => Self::EventType(error),
             AppendDecisionError::EventEncode(error) => Self::EventEncode(error),
-        }
-    }
-}
-
-impl<
-    DecideError,
-    EvolveError,
-    ReadSnapshotError,
-    ReadStreamError,
-    AppendStreamError,
-    EventTypeError,
-    PayloadEncodeError,
-    DecodeError,
-> std::fmt::Display
-    for CommandError<
-        DecideError,
-        EvolveError,
-        ReadSnapshotError,
-        ReadStreamError,
-        AppendStreamError,
-        EventTypeError,
-        PayloadEncodeError,
-        DecodeError,
-    >
-where
-    DecideError: std::fmt::Display,
-    EvolveError: std::fmt::Display,
-    ReadSnapshotError: std::fmt::Display,
-    ReadStreamError: std::fmt::Display,
-    AppendStreamError: std::fmt::Display,
-    EventTypeError: std::fmt::Display,
-    PayloadEncodeError: std::fmt::Display,
-    DecodeError: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Decide(source) => write!(f, "command decision failed: {source}"),
-            Self::Evolve(source) => write!(f, "command state evolution failed: {source}"),
-            Self::ReadSnapshot(source) => write!(f, "command snapshot read failed: {source}"),
-            Self::ReadStream(source) => write!(f, "command stream read failed: {source}"),
-            Self::Append(source) => write!(f, "command stream append failed: {source}"),
-            Self::EventType(source) => write!(f, "command event type failed: {source}"),
-            Self::EventEncode(source) => write!(f, "command event encoding failed: {source}"),
-            Self::DecodeEvent(source) => write!(f, "command event decoding failed: {source}"),
-            Self::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                snapshot_position,
-                stream_position: Some(stream_position),
-            }) => write!(
-                f,
-                "snapshot position {snapshot_position} is ahead of current stream position {stream_position}"
-            ),
-            Self::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                snapshot_position,
-                stream_position: None,
-            }) => write!(
-                f,
-                "snapshot position {snapshot_position} exists but the stream has no current position"
-            ),
-            Self::ReadAfterOverflow(source) => write!(f, "{source}"),
-        }
-    }
-}
-
-impl<
-    DecideError,
-    EvolveError,
-    ReadSnapshotError,
-    ReadStreamError,
-    AppendStreamError,
-    EventTypeError,
-    PayloadEncodeError,
-    DecodeError,
-> std::error::Error
-    for CommandError<
-        DecideError,
-        EvolveError,
-        ReadSnapshotError,
-        ReadStreamError,
-        AppendStreamError,
-        EventTypeError,
-        PayloadEncodeError,
-        DecodeError,
-    >
-where
-    DecideError: std::error::Error + 'static,
-    EvolveError: std::error::Error + 'static,
-    ReadSnapshotError: std::error::Error + 'static,
-    ReadStreamError: std::error::Error + 'static,
-    AppendStreamError: std::error::Error + 'static,
-    EventTypeError: std::error::Error + 'static,
-    PayloadEncodeError: std::error::Error + 'static,
-    DecodeError: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Decide(source) => Some(source),
-            Self::Evolve(source) => Some(source),
-            Self::ReadSnapshot(source) => Some(source),
-            Self::ReadStream(source) => Some(source),
-            Self::Append(source) => Some(source),
-            Self::EventType(source) => Some(source),
-            Self::EventEncode(source) => Some(source),
-            Self::DecodeEvent(source) => Some(source),
-            Self::SnapshotAheadOfStream(_) => None,
-            Self::ReadAfterOverflow(source) => Some(source),
         }
     }
 }
@@ -949,45 +880,43 @@ mod tests {
         Unencodable { id: String },
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
     enum TestDecisionError {
+        #[error("{self:?}")]
         AlreadyRegistered,
+        #[error("{self:?}")]
         Missing,
+        #[error("{self:?}")]
         AlreadyDisabled,
     }
 
-    impl std::fmt::Display for TestDecisionError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{self:?}")
-        }
-    }
-
-    impl std::error::Error for TestDecisionError {}
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
     enum TestCommandError {
+        #[error("{self:?}")]
         BrokenEvent,
+        #[error("{self:?}")]
         AlreadyRegistered,
+        #[error("{self:?}")]
         Missing,
+        #[error("{self:?}")]
         AlreadyDisabled,
     }
 
-    impl std::fmt::Display for TestCommandError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{self:?}")
-        }
-    }
-
-    impl std::error::Error for TestCommandError {}
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
     enum TestInfraError {
+        #[error("{self:?}")]
         ReadSnapshot,
+        #[error("{self:?}")]
         WriteSnapshot,
+        #[error("{self:?}")]
         ReadStream,
+        #[error("{self:?}")]
         Append,
+        #[error("{self:?}")]
         Json,
+        #[error("{self:?}")]
         EventType,
+        #[error("{self:?}")]
         EventEncode,
     }
 
@@ -996,14 +925,6 @@ mod tests {
             Self::Json
         }
     }
-
-    impl std::fmt::Display for TestInfraError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{self:?}")
-        }
-    }
-
-    impl std::error::Error for TestInfraError {}
 
     impl From<TestDecisionError> for TestCommandError {
         fn from(value: TestDecisionError) -> Self {
