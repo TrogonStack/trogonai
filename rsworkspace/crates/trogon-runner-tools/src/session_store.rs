@@ -205,6 +205,10 @@ pub struct SessionState {
     /// Background bash jobs started with `run_in_background: true`.
     #[serde(default)]
     pub background_jobs: Vec<BashJob>,
+    /// Extra environment variables applied to the session's bash terminal, from
+    /// settings.json `env` (received via `_meta.env` at session creation).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub env: std::collections::HashMap<String, String>,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -264,6 +268,7 @@ impl Default for SessionState {
             total_cache_read_tokens: 0,
             spawn_depth: 0,
             background_jobs: Vec::new(),
+            env: HashMap::new(),
         }
     }
 }

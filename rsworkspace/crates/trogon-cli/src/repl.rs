@@ -415,6 +415,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     permission_coordinator: std::sync::Arc<PermissionCoordinator>,
     stream: bool,
+    default_model: Option<String>,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
     plan: bool,
@@ -463,6 +464,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         if resumed && let Err(e) = sup.rebind(&prefix, session.session_id()).await {
             eprintln!("warning: permission client rebind failed: {e}");
         }
+    }
+    if !resumed
+        && let Some(ref m) = default_model
+        && let Err(e) = session.set_model(m).await
+    {
+        eprintln!("warning: could not apply default model {m}: {e}");
     }
 
     let history_path = expand_tilde(HISTORY_PATH);
@@ -1019,12 +1026,32 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             } else {
                                 resolve_model_alias(cm_arg)
                             };
-                            match do_compact_model(&session, &resolved).await {
-                                Ok(msg) => {
-                                    println!("{msg}");
-                                    compactor_model_sel = if resolved == "default" { None } else { Some(resolved) };
+                            let proceed = if resolved == "default" {
+                                true
+                            } else {
+                                match runner_advertises_model(&registry, &prefix, &resolved).await {
+                                    Ok(true) => true,
+                                    Ok(false) => {
+                                        eprintln!(
+                                            "error: unknown compaction model '{resolved}' — run /compact-model with no args to list valid ids"
+                                        );
+                                        false
+                                    }
+                                    Err(e) => {
+                                        eprintln!("error: {e}");
+                                        false
+                                    }
                                 }
-                                Err(e) => eprintln!("error: {e}"),
+                            };
+                            if proceed {
+                                match do_compact_model(&session, &resolved).await {
+                                    Ok(msg) => {
+                                        println!("{msg}");
+                                        compactor_model_sel =
+                                            if resolved == "default" { None } else { Some(resolved) };
+                                    }
+                                    Err(e) => eprintln!("error: {e}"),
+                                }
                             }
                         }
                     } else if cmd == "/mcp" {
@@ -1714,17 +1741,17 @@ pub fn resolve_model_alias(input: &str) -> String {
     match input {
         "haiku" => "claude-haiku-4-5-20251001".into(),
         "sonnet" => "claude-sonnet-4-6".into(),
-        "opus" => "claude-opus-4-7".into(),
+        "opus" => "claude-opus-4-6".into(),
         "grok" => "grok-3".into(),
         "grok-mini" => "grok-3-mini".into(),
         "openrouter" => {
-            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4".into())
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".into())
         }
         // Short aliases for the OpenRouter models. These must match the IDs the
         // openrouter runner registers (OPENROUTER_MODELS); update both together.
-        "op-claude" => "anthropic/claude-sonnet-4".into(),
+        "op-claude" => "anthropic/claude-sonnet-4-6".into(),
         "op-gpt" => "openai/gpt-4o".into(),
-        "op-gemini" => "google/gemini-2.5-pro".into(),
+        "op-gemini" => "google/gemini-pro-1.5".into(),
         "codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
         "o3" => "o3".into(),
         "gpt-4o" => "gpt-4o".into(),
@@ -2185,6 +2212,32 @@ pub(crate) async fn format_compactor_models<RS: RegistryStore>(
         }
     }
     Ok(out.trim_end().to_string())
+}
+
+pub(crate) async fn runner_advertises_model<RS: RegistryStore>(
+    registry: &Registry<RS>,
+    current_prefix: &str,
+    model_id: &str,
+) -> Result<bool, String> {
+    let all = registry.list_all().await.map_err(|e| e.to_string())?;
+    for cap in all {
+        let cap_prefix = cap
+            .metadata
+            .get("acp_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&cap.agent_type);
+        if cap_prefix != current_prefix {
+            continue;
+        }
+        if let Some(arr) = cap.metadata.get("models").and_then(|v| v.as_array()) {
+            for id in arr.iter().filter_map(|m| m.as_str()) {
+                if id == model_id {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
 }
 
 pub(crate) async fn format_model_catalog<RS: RegistryStore>(
@@ -3395,7 +3448,7 @@ mod tests {
     #[test]
     fn resolve_model_alias_claude_shortcuts() {
         assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-6");
-        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-7");
+        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
         assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5-20251001");
     }
 
@@ -3411,7 +3464,7 @@ mod tests {
             std::env::remove_var("OPENROUTER_DEFAULT_MODEL");
             std::env::remove_var("CODEX_DEFAULT_MODEL");
         }
-        assert_eq!(resolve_model_alias("openrouter"), "anthropic/claude-sonnet-4");
+        assert_eq!(resolve_model_alias("openrouter"), "anthropic/claude-sonnet-4-6");
         assert_eq!(resolve_model_alias("codex"), "o4-mini");
     }
 
@@ -3434,6 +3487,49 @@ mod tests {
         assert_eq!(resolve_model_alias("o3"), "o3");
         assert_eq!(resolve_model_alias("gpt-4o"), "gpt-4o");
         assert_eq!(resolve_model_alias("custom/model-id"), "custom/model-id");
+    }
+
+    #[test]
+    fn resolve_model_alias_targets_registered_ids() {
+        const ACP_IDS: &[&str] =
+            &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
+        const OR_IDS: &[&str] =
+            &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
+
+        for alias in ["haiku", "sonnet", "opus"] {
+            let resolved = resolve_model_alias(alias);
+            assert!(ACP_IDS.contains(&resolved.as_str()), "{alias} -> {resolved}");
+        }
+        for alias in ["op-claude", "op-gpt", "op-gemini", "openrouter"] {
+            let resolved = resolve_model_alias(alias);
+            assert!(OR_IDS.contains(&resolved.as_str()), "{alias} -> {resolved}");
+        }
+    }
+
+    #[tokio::test]
+    async fn runner_advertises_model_checks_registry() {
+        use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
+
+        let registry = Registry::new(MockRegistryStore::new());
+        let mut cap = AgentCapability::new("runner", ["chat"], "agents.runner.>");
+        cap.metadata = serde_json::json!({
+            "acp_prefix": "acp.claude",
+            "models": ["claude-haiku-4-5-20251001"]
+        });
+        registry.register(&cap).await.unwrap();
+
+        assert_eq!(
+            runner_advertises_model(&registry, "acp.claude", "claude-haiku-4-5-20251001")
+                .await
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            runner_advertises_model(&registry, "acp.claude", "bogus-model")
+                .await
+                .unwrap(),
+            false
+        );
     }
 
     #[test]
