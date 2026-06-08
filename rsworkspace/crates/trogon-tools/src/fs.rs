@@ -110,18 +110,42 @@ pub fn resolve_path(
         return Err("path is outside the working directory".to_string());
     }
 
+    let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
+
     // Resolve symlinks for parts that exist so a symlink pointing outside cwd
-    // is caught. For paths that don't exist yet (new files), fall back to the
-    // lexically-normalized result which already passed the starts_with check.
+    // is caught. For paths that don't exist yet (new files), walk up to the
+    // nearest existing ancestor, canonicalize it, and re-append the missing
+    // trailing components before re-checking containment.
     if let Ok(canonical) = std::fs::canonicalize(&normalized) {
-        let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
         if !canonical.starts_with(&cwd_canonical) {
             return Err("path is outside the working directory".to_string());
         }
         return Ok(canonical);
     }
 
-    Ok(normalized)
+    let mut ancestor = normalized.clone();
+    let mut trailing: Vec<std::ffi::OsString> = Vec::new();
+    while !ancestor.exists() {
+        match ancestor.file_name() {
+            Some(name) => trailing.push(name.to_os_string()),
+            None => break,
+        }
+        if !ancestor.pop() {
+            break;
+        }
+    }
+
+    let mut resolved = std::fs::canonicalize(&ancestor)
+        .map_err(|_| "path is outside the working directory".to_string())?;
+    trailing.reverse();
+    for component in trailing {
+        resolved.push(component);
+    }
+
+    if !resolved.starts_with(&cwd_canonical) {
+        return Err("path is outside the working directory".to_string());
+    }
+    Ok(resolved)
 }
 
 fn normalize_components(path: &std::path::Path) -> std::path::PathBuf {
@@ -521,6 +545,28 @@ mod tests {
         let cwd = cwd_dir.path().to_string_lossy().into_owned();
         let err = resolve_path(&cwd, "evil/secret.txt").unwrap_err();
         assert!(err.contains("outside"), "got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_path_symlink_parent_new_file_rejected() {
+        // NEW-5: a new file path through a symlinked parent dir that points
+        // outside cwd must be rejected; lexical containment alone is not enough.
+        let cwd_dir = TempDir::new().unwrap();
+        let outside_dir = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside_dir.path(), cwd_dir.path().join("evil")).unwrap();
+
+        let cwd = cwd_dir.path().to_string_lossy().into_owned();
+        let err = resolve_path(&cwd, "evil/new_secret.txt").unwrap_err();
+        assert!(err.contains("outside"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_path_new_file_directly_in_cwd_allowed() {
+        let dir = TempDir::new().unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let result = resolve_path(&cwd, "new_file.txt").unwrap();
+        assert_eq!(result, dir.path().join("new_file.txt"));
     }
 
     #[cfg(unix)]
