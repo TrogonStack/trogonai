@@ -510,10 +510,156 @@ impl ModePermissionChecker {
         let Some(path) = extract_path_from_input(tool_input) else {
             return true;
         };
+        Self::path_within_read_roots(cwd, path, &self.read_dirs)
+    }
+
+    /// Whether a read-only bash command only touches paths within the allowed read
+    /// roots. Returns `true` when containment is disabled (`cwd` is `None`). When
+    /// cwd is set, only auto-allows if every identifiable path argument is
+    /// contained; unparsable commands fail closed (prompt).
+    fn read_only_bash_allowed(&self, tool_input: &Value) -> bool {
+        let Some(cwd) = self.cwd.as_deref() else {
+            return true;
+        };
+        let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        let Some(path_args) = extract_read_only_bash_paths(cmd) else {
+            return false;
+        };
+        if path_args.is_empty() {
+            return true;
+        }
+        path_args
+            .iter()
+            .all(|path| Self::path_within_read_roots(cwd, path, &self.read_dirs))
+    }
+
+    fn path_within_read_roots(cwd: &str, path: &str, read_dirs: &[String]) -> bool {
         let target = lexical_abs(cwd, path);
         std::iter::once(lexical_abs(cwd, "."))
-            .chain(self.read_dirs.iter().map(|d| lexical_abs(cwd, d)))
+            .chain(read_dirs.iter().map(|d| lexical_abs(cwd, d)))
             .any(|root| target.starts_with(&root))
+    }
+}
+
+/// Skip leading flag tokens (`-l`, `--all`, `-n 10`, …) and return the remainder.
+fn skip_bash_flag_tokens<'a, 'b>(args: &'b [&'a str]) -> &'b [&'a str] {
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i];
+        if a == "--" {
+            return &args[i + 1..];
+        }
+        if !a.starts_with('-') {
+            break;
+        }
+        if a.contains('=') {
+            i += 1;
+            continue;
+        }
+        if a.len() > 1
+            && !a.starts_with("--")
+            && a.chars().skip(1).all(|c| c.is_ascii_alphabetic())
+        {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i < args.len() && !args[i].starts_with('-') {
+            i += 1;
+        }
+    }
+    &args[i..]
+}
+
+/// Collect non-flag arguments that refer to filesystem paths.
+fn collect_bash_path_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let mut paths = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i];
+        if a == "--" {
+            paths.extend(&args[i + 1..]);
+            break;
+        }
+        if a.starts_with('-') {
+            if a.contains('=') {
+                i += 1;
+                continue;
+            }
+            if a.len() > 1
+                && !a.starts_with("--")
+                && a.chars().skip(1).all(|c| c.is_ascii_alphabetic())
+            {
+                i += 1;
+                continue;
+            }
+            i += 1;
+            if i < args.len() && !args[i].starts_with('-') {
+                i += 1;
+            }
+            continue;
+        }
+        paths.push(a);
+        i += 1;
+    }
+    paths
+}
+
+/// Path arguments from a read-only bash command. `None` when the command cannot
+/// be parsed reliably (caller should prompt).
+fn extract_read_only_bash_paths(cmd: &str) -> Option<Vec<&str>> {
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    let base = tokens[0].trim_start_matches('(');
+    match base {
+        "pwd" | "df" | "echo" | "which" => Some(vec![]),
+        "ls" | "ll" | "dir" | "cat" | "head" | "tail" | "wc" | "file" | "stat" | "du" | "tree" => {
+            Some(collect_bash_path_args(&tokens[1..]))
+        }
+        "find" => {
+            // `find` can execute commands or write/delete via these actions —
+            // it is not read-only when any are present, so fail closed (prompt).
+            const FIND_UNSAFE: &[&str] = &[
+                "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf",
+                "-fprintf0", "-fls",
+            ];
+            if tokens[1..].iter().any(|t| FIND_UNSAFE.contains(t)) {
+                return None;
+            }
+            // Leading operands (before the first predicate/option) are the search
+            // roots; check every one, not just the first. No roots = searches cwd.
+            Some(
+                tokens[1..]
+                    .iter()
+                    .take_while(|t| !t.starts_with('-'))
+                    .copied()
+                    .collect(),
+            )
+        }
+        "grep" | "rg" => {
+            // `-f/--file` reads a patterns FILE we wouldn't containment-check, and
+            // `-e/--regexp` supplies the pattern via flag (so the first positional
+            // is a path, not the pattern). Both break the parse below — fail closed.
+            if tokens[1..].iter().any(|t| {
+                matches!(*t, "-f" | "--file" | "-e" | "--regexp")
+                    || t.starts_with("--file=")
+                    || t.starts_with("--regexp=")
+            }) {
+                return None;
+            }
+            let rest = skip_bash_flag_tokens(&tokens[1..]);
+            if rest.is_empty() {
+                Some(vec![])
+            } else {
+                Some(rest[1..].to_vec())
+            }
+        }
+        "test" | "[" => None,
+        _ => None,
     }
 }
 
@@ -579,8 +725,12 @@ impl PermissionChecker for ModePermissionChecker {
                     if normalize_tool_name(tool_name) == "bash"
                         && is_read_only_bash_command(tool_input) =>
                 {
-                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                    true
+                    if self.read_only_bash_allowed(tool_input) {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                        true
+                    } else {
+                        self.inner.inner.check(tool_call_id, tool_name, tool_input).await
+                    }
                 }
                 "acceptEdits" if is_edit_tool(tool_name) => {
                     push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -1679,6 +1829,52 @@ mod tests {
                 .check("tc", "read_file", &serde_json::json!({"path": "/etc/passwd"}))
                 .await,
             "reads outside cwd must not be auto-allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_bash_inside_cwd_allowed_outside_prompts() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("default", tx, Some("/work"), vec![], None);
+        assert!(
+            checker
+                .check("tc", "bash", &serde_json::json!({"command": "cat src/a.rs"}))
+                .await,
+            "read-only bash inside cwd must still auto-allow"
+        );
+        let (tx2, rx2) = mpsc::channel(1);
+        drop(rx2);
+        let checker2 = full_checker("default", tx2, Some("/work"), vec![], None);
+        assert!(
+            !checker2
+                .check("tc", "bash", &serde_json::json!({"command": "cat /etc/passwd"}))
+                .await,
+            "read-only bash outside cwd must not be auto-allowed"
+        );
+    }
+
+    #[test]
+    fn extract_paths_find_exec_and_grep_file_flags_fail_closed() {
+        // find that executes/writes is never read-only → None (caller prompts)
+        assert_eq!(extract_read_only_bash_paths("find . -exec rm {} ;"), None);
+        assert_eq!(extract_read_only_bash_paths("find . -delete"), None);
+        // grep reading a patterns file, or with a flag-supplied pattern → None
+        assert_eq!(extract_read_only_bash_paths("grep -f /etc/patterns ."), None);
+        assert_eq!(extract_read_only_bash_paths("grep --file=/etc/p ."), None);
+        assert_eq!(extract_read_only_bash_paths("grep -e foo bar"), None);
+        // benign forms still parse: every leading find root is checked
+        assert_eq!(
+            extract_read_only_bash_paths("find /etc -name x"),
+            Some(vec!["/etc"])
+        );
+        assert_eq!(
+            extract_read_only_bash_paths("find . sub -type f"),
+            Some(vec![".", "sub"])
+        );
+        assert_eq!(
+            extract_read_only_bash_paths("grep pattern src/a.rs"),
+            Some(vec!["src/a.rs"])
         );
     }
 
