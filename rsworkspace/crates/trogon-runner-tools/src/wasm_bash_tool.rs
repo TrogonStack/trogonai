@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -368,7 +368,7 @@ async fn start_background_job<S: SessionStore>(
     term_base: &str,
     ext_base: &str,
     session_id: &str,
-    sandbox_dir: &PathBuf,
+    sandbox_dir: &Path,
     store: &S,
     command: String,
 ) -> Result<String, String> {
@@ -377,7 +377,7 @@ async fn start_background_job<S: SessionStore>(
     let job_id = nonce;
 
     let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
-        .cwd(sandbox_dir.clone());
+        .cwd(sandbox_dir.to_path_buf());
     let payload = serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
     let msg = nats
         .request(format!("{term_base}.create"), payload.into())
