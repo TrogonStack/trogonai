@@ -138,6 +138,8 @@ pub struct SessionInit {
     /// Tool-event hooks (PreToolUse/PostToolUse) for the runner to run around tool
     /// dispatch. Sent as `_meta.toolHooks`.
     pub tool_hooks: Option<trogon_runner_tools::HooksConfig>,
+    /// Extra environment variables for the session's bash terminal (settings.json `env`).
+    pub env: std::collections::HashMap<String, String>,
 }
 
 impl SessionInit {
@@ -170,6 +172,14 @@ impl SessionInit {
             && let Ok(v) = serde_json::to_value(hooks)
         {
             meta.insert("toolHooks".into(), v);
+        }
+        if !self.env.is_empty() {
+            let map: serde_json::Map<String, Value> = self
+                .env
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                .collect();
+            meta.insert("env".into(), Value::Object(map));
         }
         if meta.is_empty() { None } else { Some(meta) }
     }
@@ -1824,5 +1834,17 @@ mod session_init_tests {
         let meta = init.to_meta().expect("meta present");
         assert_eq!(meta.get("systemPromptOverride").and_then(|v| v.as_str()), Some("base"));
         assert_eq!(meta.get("systemPrompt").and_then(|v| v.as_str()), Some("extra"));
+    }
+
+    #[test]
+    fn env_maps_to_meta_object() {
+        use std::collections::HashMap;
+        let init = SessionInit {
+            env: HashMap::from([("FOO".into(), "bar".into())]),
+            ..Default::default()
+        };
+        let meta = init.to_meta().expect("meta present");
+        let env_obj = meta.get("env").and_then(|v| v.as_object()).expect("env object");
+        assert_eq!(env_obj.get("FOO").and_then(|v| v.as_str()), Some("bar"));
     }
 }

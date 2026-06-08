@@ -216,6 +216,7 @@ fn build_session_init(
         // permissions.allow/deny translated to trogon rule-text.
         permission_rules: settings.permission_rules_text(),
         tool_hooks,
+        env: settings.env.clone(),
     }
 }
 

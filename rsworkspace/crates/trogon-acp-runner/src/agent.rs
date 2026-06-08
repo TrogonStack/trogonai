@@ -1387,6 +1387,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|v| v.as_str())
             .unwrap_or("default")
             .to_string();
+        let env = meta
+            .and_then(|m| m.get("env"))
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect::<std::collections::HashMap<String, String>>()
+            })
+            .unwrap_or_default();
 
         let now = now_iso8601();
         let mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
@@ -1402,6 +1411,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             mcp_servers,
             allowed_tools,
             tool_allowlist,
+            env,
             created_at: now.clone(),
             updated_at: now,
             ..Default::default()
