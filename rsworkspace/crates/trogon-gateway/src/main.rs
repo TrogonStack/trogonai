@@ -24,6 +24,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[cfg(not(coverage))]
+use anyhow::Context;
+#[cfg(not(coverage))]
 use tokio::task::JoinSet;
 #[cfg(not(coverage))]
 use tracing::{error, info};
@@ -44,7 +46,7 @@ const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
 
 #[cfg(not(coverage))]
-type SourceResult = (&'static str, Result<(), String>);
+type SourceResult = (&'static str, anyhow::Result<()>);
 
 #[cfg(not(coverage))]
 #[derive(Debug, thiserror::Error)]
@@ -170,7 +172,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
             let result = tokio::select! {
                 _ = trogon_std::signal::shutdown_signal() => Ok(()),
                 result = crate::source::slack::socket_mode::run(p, &slack_cfg) => {
-                    result.map_err(|error| error.to_string())
+                    result.context("slack socket mode")
                 }
             };
             ("slack-socket-mode", result)
@@ -192,7 +194,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(trogon_std::signal::shutdown_signal())
             .await;
-        ("http", result.map_err(|e| format!("http server: {e}")))
+        ("http", result.context("http server"))
     });
 
     let task_count = join_set.len();
