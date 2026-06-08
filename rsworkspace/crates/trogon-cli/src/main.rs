@@ -94,9 +94,9 @@ struct Args {
     #[arg(long)]
     doctor: bool,
 
-    /// Stream assistant text live instead of buffering until a tool boundary
+    /// Buffer assistant text until a tool boundary instead of streaming it live
     #[arg(long)]
-    stream: bool,
+    no_stream: bool,
 
     /// Resume the last session for this project (from ~/.local/share/trogon/sessions.json)
     #[arg(long, conflicts_with = "session_id")]
@@ -426,7 +426,7 @@ async fn main() -> anyhow::Result<()> {
             nats,
             acp_config,
             args.nats_url,
-            args.stream,
+            !args.no_stream,
             resume,
             args.dangerously_skip_permissions,
             args.plan,
@@ -445,6 +445,15 @@ mod tests {
     use clap::Parser;
     use std::path::PathBuf;
     use trogon_cli::Settings;
+
+    #[test]
+    fn no_stream_defaults_off_and_flag_enables() {
+        let args = Args::try_parse_from(["trogon"]).unwrap();
+        assert!(!args.no_stream);
+
+        let args = Args::try_parse_from(["trogon", "--no-stream"]).unwrap();
+        assert!(args.no_stream);
+    }
 
     #[test]
     fn sessions_list_subcommand_parses() {
