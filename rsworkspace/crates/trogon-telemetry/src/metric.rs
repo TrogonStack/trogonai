@@ -3,6 +3,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use std::sync::OnceLock;
 
+use crate::TelemetryProviderShutdownError;
 use crate::constants::METRIC_EXPORT_INTERVAL;
 
 pub(crate) static METER_PROVIDER: OnceLock<SdkMeterProvider> = OnceLock::new();
@@ -22,11 +23,11 @@ pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<SdkMeterProvi
     Ok(provider)
 }
 
-pub(crate) fn shutdown() -> Result<(), String> {
+pub(crate) fn shutdown() -> Result<(), TelemetryProviderShutdownError> {
     if let Some(provider) = METER_PROVIDER.get()
-        && let Err(e) = provider.shutdown()
+        && let Err(source) = provider.shutdown()
     {
-        return Err(format!("failed to shutdown meter provider: {e}"));
+        return Err(TelemetryProviderShutdownError::Meter { source: source.into() });
     }
     Ok(())
 }
