@@ -23,7 +23,7 @@ use std::net::IpAddr;
 use std::rc::Rc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
-use tracing::{error, info, warn};
+use tracing::{error as tracing_error, info, warn};
 use trogon_std::time::SystemClock;
 use uuid::Uuid;
 
@@ -82,83 +82,59 @@ pub struct HttpGetOutcome {
     pub stream: SseReceiver,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum HttpTransportError {
+    #[error("{message}")]
     BadRequest {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     NotFound {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     Conflict {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     Forbidden {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     UnsupportedMediaType {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     NotAcceptable {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     NotImplemented {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
+    #[error("{message}")]
     Internal {
         message: &'static str,
+        #[source]
         source: Option<BoxError>,
     },
-}
-
-impl std::fmt::Display for HttpTransportError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.message())
-    }
-}
-
-impl std::error::Error for HttpTransportError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source_ref()
-    }
 }
 
 impl HttpTransportError {
-    fn message(&self) -> &'static str {
-        match self {
-            Self::BadRequest { message, .. }
-            | Self::NotFound { message, .. }
-            | Self::Conflict { message, .. }
-            | Self::Forbidden { message, .. }
-            | Self::UnsupportedMediaType { message, .. }
-            | Self::NotAcceptable { message, .. }
-            | Self::NotImplemented { message, .. }
-            | Self::Internal { message, .. } => message,
-        }
-    }
-
-    fn source_ref(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::BadRequest { source, .. }
-            | Self::NotFound { source, .. }
-            | Self::Conflict { source, .. }
-            | Self::Forbidden { source, .. }
-            | Self::UnsupportedMediaType { source, .. }
-            | Self::NotAcceptable { source, .. }
-            | Self::NotImplemented { source, .. }
-            | Self::Internal { source, .. } => source
-                .as_deref()
-                .map(|source| source as &(dyn std::error::Error + 'static)),
-        }
-    }
-
     fn bad_request(message: &'static str) -> Self {
         Self::BadRequest { message, source: None }
     }
@@ -580,7 +556,7 @@ fn inject_session_id_into_response_result_or_preserve(
     match inject_session_id_into_response_result(&outbound, session_id) {
         Ok(updated_outbound) => updated_outbound,
         Err(error) => {
-            error!(%connection_id, error = %error, "Failed to augment outbound session response");
+            tracing_error!(%connection_id, error = %error, "Failed to augment outbound session response");
             outbound
         }
     }
@@ -656,7 +632,7 @@ fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
             })))
             .is_err()
         {
-            error!("Connection thread is gone; dropping WebSocket");
+            tracing_error!("Connection thread is gone; dropping WebSocket");
         }
     });
     response.headers_mut().insert(ACP_CONNECTION_ID_HEADER, response_header);

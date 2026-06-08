@@ -42,10 +42,13 @@ impl fmt::Display for SourceIntegrationId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum SourceIntegrationIdError {
+    #[error("source integration id must not be empty")]
     Empty,
+    #[error("source integration id contains invalid character '{0}'")]
     InvalidCharacter(char),
+    #[error("source integration id exceeds maximum length: {0}")]
     TooLong(usize),
 }
 
@@ -58,18 +61,6 @@ impl SourceIntegrationIdError {
         }
     }
 }
-
-impl fmt::Display for SourceIntegrationIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("source integration id must not be empty"),
-            Self::InvalidCharacter(ch) => write!(f, "source integration id contains invalid character '{ch}'"),
-            Self::TooLong(length) => write!(f, "source integration id exceeds maximum length: {length}"),
-        }
-    }
-}
-
-impl std::error::Error for SourceIntegrationIdError {}
 
 #[cfg(test)]
 mod tests {

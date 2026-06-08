@@ -2,22 +2,13 @@ use buffa::MessageField;
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::v1;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MessageHeadersError {
+    #[error("header name '{name}' is invalid")]
     InvalidName { name: String },
+    #[error("header '{name}' contains an invalid value")]
     InvalidValue { name: String },
 }
-
-impl std::fmt::Display for MessageHeadersError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidName { name } => write!(f, "header name '{name}' is invalid"),
-            Self::InvalidValue { name } => write!(f, "header '{name}' contains an invalid value"),
-        }
-    }
-}
-
-impl std::error::Error for MessageHeadersError {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageHeaders(Vec<MessageHeader>);

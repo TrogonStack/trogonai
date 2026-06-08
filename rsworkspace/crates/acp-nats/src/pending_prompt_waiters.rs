@@ -10,16 +10,9 @@ use crate::constants::PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW;
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct PromptToken(pub u64);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("mutex lock poisoned")]
 pub(crate) struct LockPoisonedError;
-
-impl std::fmt::Display for LockPoisonedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "mutex lock poisoned")
-    }
-}
-
-impl std::error::Error for LockPoisonedError {}
 
 impl<T> From<PoisonError<T>> for LockPoisonedError {
     fn from(_: PoisonError<T>) -> Self {

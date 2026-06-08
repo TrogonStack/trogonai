@@ -1,5 +1,3 @@
-use std::fmt;
-
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use hmac::{Hmac, KeyInit, Mac};
@@ -7,31 +5,15 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SignatureError {
+    #[error("missing sha256= prefix")]
     MissingPrefix,
-    InvalidBase64(base64::DecodeError),
+    #[error("invalid base64 encoding")]
+    InvalidBase64(#[source] base64::DecodeError),
+    #[error("signature mismatch")]
     Mismatch,
-}
-
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingPrefix => f.write_str("missing sha256= prefix"),
-            Self::InvalidBase64(_) => f.write_str("invalid base64 encoding"),
-            Self::Mismatch => f.write_str("signature mismatch"),
-        }
-    }
-}
-
-impl std::error::Error for SignatureError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidBase64(error) => Some(error),
-            _ => None,
-        }
-    }
 }
 
 pub fn crc_response_token(consumer_secret: &str, crc_token: &str) -> String {

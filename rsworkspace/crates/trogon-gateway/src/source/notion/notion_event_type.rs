@@ -3,31 +3,34 @@ use std::fmt;
 use trogon_nats::DottedNatsToken;
 use trogon_nats::SubjectTokenViolation;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct NotionEventTypeError(pub SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum NotionEventTypeError {
+    #[error("type must not be empty")]
+    Empty,
+    #[error("type contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("type is too long: {0} bytes (max 128)")]
+    TooLong(usize),
+}
 
-impl fmt::Display for NotionEventTypeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.0 {
-            SubjectTokenViolation::Empty => f.write_str("type must not be empty"),
-            SubjectTokenViolation::InvalidCharacter(ch) => {
-                write!(f, "type contains invalid character: {:?}", ch)
-            }
-            SubjectTokenViolation::TooLong(len) => {
-                write!(f, "type is too long: {} bytes (max 128)", len)
-            }
+impl From<SubjectTokenViolation> for NotionEventTypeError {
+    fn from(violation: SubjectTokenViolation) -> Self {
+        match violation {
+            SubjectTokenViolation::Empty => Self::Empty,
+            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
         }
     }
 }
-
-impl std::error::Error for NotionEventTypeError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NotionEventType(DottedNatsToken);
 
 impl NotionEventType {
     pub fn new(value: impl AsRef<str>) -> Result<Self, NotionEventTypeError> {
-        DottedNatsToken::new(value).map(Self).map_err(NotionEventTypeError)
+        DottedNatsToken::new(value)
+            .map(Self)
+            .map_err(NotionEventTypeError::from)
     }
 
     pub fn as_str(&self) -> &str {

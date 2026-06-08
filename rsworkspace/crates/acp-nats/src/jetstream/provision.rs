@@ -3,26 +3,24 @@ use trogon_nats::jetstream::JetStreamContext;
 
 use super::streams;
 
-#[derive(Debug)]
-pub struct ProvisionError(pub String);
-
-impl std::fmt::Display for ProvisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream provisioning failed: {}", self.0)
-    }
+#[derive(Debug, thiserror::Error)]
+#[error("stream provisioning failed for {stream}")]
+pub struct ProvisionError<Source> {
+    stream: String,
+    #[source]
+    source: Source,
 }
-
-impl std::error::Error for ProvisionError {}
 
 pub async fn provision_streams<J: JetStreamContext>(
     js: &J,
     prefix: &crate::acp_prefix::AcpPrefix,
-) -> Result<(), ProvisionError> {
+) -> Result<(), ProvisionError<J::Error>> {
     for config in streams::all_configs(prefix) {
         let name = config.name.clone();
-        js.get_or_create_stream(config)
-            .await
-            .map_err(|e| ProvisionError(format!("{name}: {e}")))?;
+        js.get_or_create_stream(config).await.map_err(|source| ProvisionError {
+            stream: name.clone(),
+            source,
+        })?;
         info!(stream = %name, "Provisioned JetStream stream");
     }
     Ok(())
@@ -32,6 +30,7 @@ pub async fn provision_streams<J: JetStreamContext>(
 mod tests {
     use super::*;
     use crate::acp_prefix::AcpPrefix;
+    use std::error::Error;
     use trogon_nats::jetstream::MockJetStreamContext;
 
     fn p(s: &str) -> AcpPrefix {
@@ -71,8 +70,9 @@ mod tests {
         let ctx = MockJetStreamContext::new();
         ctx.fail_next();
         let result = provision_streams(&ctx, &p("acp")).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ACP_COMMANDS"));
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("ACP_COMMANDS"));
+        assert!(error.source().is_some());
     }
 
     #[tokio::test]

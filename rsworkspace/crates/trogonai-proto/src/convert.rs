@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 pub const PROTOBUF_DURATION_MAX_SECONDS: u64 = 315_576_000_000;
 pub const PROTOBUF_DURATION_MAX: std::time::Duration = std::time::Duration::from_secs(PROTOBUF_DURATION_MAX_SECONDS);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("duration must fit the protobuf Duration range: max {max:?}, got {actual:?}")]
 pub struct DurationConversionError {
     max: std::time::Duration,
     actual: std::time::Duration,
@@ -19,18 +20,6 @@ impl DurationConversionError {
         self.actual
     }
 }
-
-impl std::fmt::Display for DurationConversionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "duration must fit the protobuf Duration range: max {:?}, got {:?}",
-            self.max, self.actual
-        )
-    }
-}
-
-impl std::error::Error for DurationConversionError {}
 
 pub fn timestamp_from_datetime(value: &DateTime<Utc>) -> Timestamp {
     Timestamp::from_unix(value.timestamp(), value.timestamp_subsec_nanos() as i32)

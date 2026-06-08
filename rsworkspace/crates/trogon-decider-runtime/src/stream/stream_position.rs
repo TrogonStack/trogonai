@@ -72,7 +72,8 @@ impl std::fmt::Display for StreamPosition {
 }
 
 /// Error returned when constructing an invalid [`StreamPosition`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("stream position must be greater than zero, got {value}")]
 pub struct InvalidStreamPosition {
     value: u64,
 }
@@ -83,11 +84,3 @@ impl InvalidStreamPosition {
         self.value
     }
 }
-
-impl std::fmt::Display for InvalidStreamPosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream position must be greater than zero, got {}", self.value)
-    }
-}
-
-impl std::error::Error for InvalidStreamPosition {}

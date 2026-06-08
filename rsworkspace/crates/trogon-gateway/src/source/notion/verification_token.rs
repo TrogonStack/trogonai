@@ -1,5 +1,3 @@
-use std::fmt;
-
 use async_nats::client::SubscribeError as NatsSubscribeError;
 use async_nats::jetstream::context::GetStreamError;
 use async_nats::jetstream::stream::{LastRawMessageError, LastRawMessageErrorKind};
@@ -10,46 +8,24 @@ use trogon_nats::{NatsToken, SubscribeClient};
 use super::NotionVerificationToken;
 use super::config::NotionConfig;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum VerificationTokenError {
+    #[error("no verification request received yet; trigger 'Verify endpoint' in Notion and retry")]
     NoVerificationRequest,
-    InvalidVerificationRequest(serde_json::Error),
+    #[error("verification request payload is not valid JSON")]
+    InvalidVerificationRequest(#[source] serde_json::Error),
+    #[error("verification request payload is missing verification_token")]
     MissingVerificationToken,
-    InvalidVerificationToken(trogon_std::EmptySecret),
-    Stream(GetStreamError),
-    LastMessage(LastRawMessageError),
-    Subscribe(NatsSubscribeError),
+    #[error("verification_token must not be empty")]
+    InvalidVerificationToken(#[source] trogon_std::EmptySecret),
+    #[error("failed to open Notion JetStream stream")]
+    Stream(#[source] GetStreamError),
+    #[error("failed to read latest Notion verification request")]
+    LastMessage(#[source] LastRawMessageError),
+    #[error("failed to watch Notion verification requests")]
+    Subscribe(#[source] NatsSubscribeError),
+    #[error("verification request watch ended before receiving a token")]
     WatchEnded,
-}
-
-impl fmt::Display for VerificationTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NoVerificationRequest => {
-                f.write_str("no verification request received yet; trigger 'Verify endpoint' in Notion and retry")
-            }
-            Self::InvalidVerificationRequest(_) => f.write_str("verification request payload is not valid JSON"),
-            Self::MissingVerificationToken => f.write_str("verification request payload is missing verification_token"),
-            Self::InvalidVerificationToken(_) => f.write_str("verification_token must not be empty"),
-            Self::Stream(_) => f.write_str("failed to open Notion JetStream stream"),
-            Self::LastMessage(_) => f.write_str("failed to read latest Notion verification request"),
-            Self::Subscribe(_) => f.write_str("failed to watch Notion verification requests"),
-            Self::WatchEnded => f.write_str("verification request watch ended before receiving a token"),
-        }
-    }
-}
-
-impl std::error::Error for VerificationTokenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidVerificationRequest(error) => Some(error),
-            Self::InvalidVerificationToken(error) => Some(error),
-            Self::Stream(error) => Some(error),
-            Self::LastMessage(error) => Some(error),
-            Self::Subscribe(error) => Some(error),
-            Self::NoVerificationRequest | Self::MissingVerificationToken | Self::WatchEnded => None,
-        }
-    }
 }
 
 pub(crate) async fn latest<J>(js: &J, config: &NotionConfig) -> Result<NotionVerificationToken, VerificationTokenError>

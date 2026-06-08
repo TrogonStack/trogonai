@@ -1,4 +1,3 @@
-use std::fmt;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -15,36 +14,18 @@ const APPS_CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SocketModeError {
+    #[error("slack socket_mode config is missing")]
     MissingSocketModeConfig,
-    Http(reqwest::Error),
+    #[error("Slack Socket Mode HTTP request failed: {0}")]
+    Http(#[source] reqwest::Error),
+    #[error("Slack apps.connections.open failed: {0}")]
     Api(String),
-    WebSocket(tokio_tungstenite::tungstenite::Error),
-    Json(serde_json::Error),
-}
-
-impl fmt::Display for SocketModeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingSocketModeConfig => f.write_str("slack socket_mode config is missing"),
-            Self::Http(error) => write!(f, "Slack Socket Mode HTTP request failed: {error}"),
-            Self::Api(error) => write!(f, "Slack apps.connections.open failed: {error}"),
-            Self::WebSocket(error) => write!(f, "Slack Socket Mode WebSocket failed: {error}"),
-            Self::Json(error) => write!(f, "Slack Socket Mode JSON parsing failed: {error}"),
-        }
-    }
-}
-
-impl std::error::Error for SocketModeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Http(error) => Some(error),
-            Self::WebSocket(error) => Some(error),
-            Self::Json(error) => Some(error),
-            Self::MissingSocketModeConfig | Self::Api(_) => None,
-        }
-    }
+    #[error("Slack Socket Mode WebSocket failed: {0}")]
+    WebSocket(#[source] tokio_tungstenite::tungstenite::Error),
+    #[error("Slack Socket Mode JSON parsing failed: {0}")]
+    Json(#[source] serde_json::Error),
 }
 
 impl From<reqwest::Error> for SocketModeError {

@@ -17,13 +17,14 @@ mod source_status;
 #[cfg_attr(coverage, allow(dead_code))]
 mod streams;
 
-use std::fmt;
 use std::io::Write;
 #[cfg(not(coverage))]
 use std::net::SocketAddr;
 #[cfg(not(coverage))]
 use std::time::Duration;
 
+#[cfg(not(coverage))]
+use anyhow::Context;
 #[cfg(not(coverage))]
 use tokio::task::JoinSet;
 #[cfg(not(coverage))]
@@ -45,25 +46,16 @@ const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
 
 #[cfg(not(coverage))]
-type SourceResult = (&'static str, Result<(), String>);
+type SourceResult = (&'static str, anyhow::Result<()>);
 
 #[cfg(not(coverage))]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("NATS server info is unavailable")]
 struct MissingNatsServerInfo;
 
 #[cfg(not(coverage))]
-impl fmt::Display for MissingNatsServerInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("NATS server info is unavailable")
-    }
-}
-
-#[cfg(not(coverage))]
-impl std::error::Error for MissingNatsServerInfo {}
-
-#[cfg(not(coverage))]
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let cli = CliArgs::<cli::Cli>::new().parse_args();
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
@@ -84,9 +76,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(not(coverage))]
-async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     if !resolved.has_any_source() {
-        return Err("no sources configured — provide a config file with at least one source".into());
+        anyhow::bail!("no sources configured — provide a config file with at least one source");
     }
 
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
@@ -180,7 +172,7 @@ async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::erro
             let result = tokio::select! {
                 _ = trogon_std::signal::shutdown_signal() => Ok(()),
                 result = crate::source::slack::socket_mode::run(p, &slack_cfg) => {
-                    result.map_err(|error| error.to_string())
+                    result.context("slack socket mode")
                 }
             };
             ("slack-socket-mode", result)
@@ -202,7 +194,7 @@ async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::erro
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(trogon_std::signal::shutdown_signal())
             .await;
-        ("http", result.map_err(|e| format!("http server: {e}")))
+        ("http", result.context("http server"))
     });
 
     let task_count = join_set.len();
@@ -229,28 +221,17 @@ async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::erro
     }
 
     if failed == task_count {
-        return Err(format!("all {task_count} task(s) failed").into());
+        anyhow::bail!("all {task_count} task(s) failed");
     }
 
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum NotionVerificationTokenCommandError {
+    #[error("notion integration '{0}' is not configured")]
     IntegrationNotConfigured(source_integration_id::SourceIntegrationId),
 }
-
-impl fmt::Display for NotionVerificationTokenCommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IntegrationNotConfigured(integration) => {
-                write!(f, "notion integration '{integration}' is not configured")
-            }
-        }
-    }
-}
-
-impl std::error::Error for NotionVerificationTokenCommandError {}
 
 async fn notion_verification_token<N, J, W>(
     resolved: &config::ResolvedConfig,
@@ -259,7 +240,7 @@ async fn notion_verification_token<N, J, W>(
     nats: &N,
     js_context: &J,
     out: &mut W,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> anyhow::Result<()>
 where
     N: trogon_nats::SubscribeClient<SubscribeError = async_nats::client::SubscribeError>,
     J: trogon_nats::jetstream::JetStreamGetStream<Error = async_nats::jetstream::context::GetStreamError>,
