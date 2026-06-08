@@ -117,10 +117,18 @@ fn extract_text(resp: &Value) -> String {
 /// Map a model reply to a verdict. DENY wins over ALLOW (conservative); anything
 /// else — including an empty/garbled reply — is PROMPT (fail safe).
 fn parse_verdict(text: &str) -> ClassifierVerdict {
-    let upper = text.to_ascii_uppercase();
-    if upper.contains("DENY") {
+    let upper = text.trim().to_ascii_uppercase();
+    // Refusal phrasings that embed "ALLOW" must be checked before a plain ALLOW match.
+    if upper.contains("DENY")
+        || upper.contains("DISALLOW")
+        || upper.contains("NOT ALLOWED")
+        || upper.contains("NOT ALLOW")
+    {
         ClassifierVerdict::Deny
-    } else if upper.contains("ALLOW") {
+    } else if upper
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|tok| tok == "ALLOW")
+    {
         ClassifierVerdict::Allow
     } else {
         ClassifierVerdict::Prompt
@@ -142,6 +150,17 @@ mod tests {
         assert_eq!(parse_verdict("I'm not sure"), ClassifierVerdict::Prompt);
         // DENY is conservative — wins if both somehow appear.
         assert_eq!(parse_verdict("ALLOW? no, DENY"), ClassifierVerdict::Deny);
+    }
+
+    #[test]
+    fn parse_verdict_rejects_disallow_and_not_allowed_phrasings() {
+        assert_ne!(parse_verdict("DISALLOW"), ClassifierVerdict::Allow);
+        assert_eq!(parse_verdict("DISALLOW"), ClassifierVerdict::Deny);
+        assert_ne!(parse_verdict("NOT ALLOWED"), ClassifierVerdict::Allow);
+        assert_eq!(parse_verdict("NOT ALLOWED"), ClassifierVerdict::Deny);
+        assert_eq!(parse_verdict("ALLOW"), ClassifierVerdict::Allow);
+        assert_eq!(parse_verdict("DENY"), ClassifierVerdict::Deny);
+        assert_eq!(parse_verdict(""), ClassifierVerdict::Prompt);
     }
 
     #[test]
