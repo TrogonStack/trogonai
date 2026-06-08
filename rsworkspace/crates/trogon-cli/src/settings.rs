@@ -99,18 +99,27 @@ impl Settings {
         self.hooks.merge(other.hooks);
     }
 
-    /// Translate `permissions.allow`/`deny` into trogon rule-text (the format
+    /// Translate `permissions.allow`/`deny`/`ask` into trogon rule-text (the format
     /// `PermissionRules::parse` understands), or `None` when there are no
     /// translatable rules. Pushed to the runner via `set_session_config_option`.
     pub fn permission_rules_text(&self) -> Option<String> {
         let mut allow_paths = Vec::new();
         let mut allow_commands = Vec::new();
+        let mut ask_paths = Vec::new();
+        let mut ask_commands = Vec::new();
         let mut deny_paths = Vec::new();
         let mut deny_commands = Vec::new();
         for entry in &self.permissions.allow {
             match translate_rule(entry) {
                 Some((RuleKind::Path, v)) => allow_paths.push(v),
                 Some((RuleKind::Command, v)) => allow_commands.push(v),
+                None => {}
+            }
+        }
+        for entry in &self.permissions.ask {
+            match translate_rule(entry) {
+                Some((RuleKind::Path, v)) => ask_paths.push(v),
+                Some((RuleKind::Command, v)) => ask_commands.push(v),
                 None => {}
             }
         }
@@ -129,6 +138,8 @@ impl Settings {
         };
         push("allow_paths", &allow_paths);
         push("allow_commands", &allow_commands);
+        push("ask_paths", &ask_paths);
+        push("ask_commands", &ask_commands);
         push("deny_paths", &deny_paths);
         push("deny_commands", &deny_commands);
         if lines.is_empty() { None } else { Some(lines.join("\n")) }
@@ -218,13 +229,16 @@ mod tests {
     }
 
     #[test]
-    fn translates_allow_deny_to_rule_text() {
+    fn translates_allow_deny_ask_to_rule_text() {
         let mut s = Settings::default();
         s.permissions.allow = vec!["Bash(cargo test:*)".into(), "Read(src/**)".into()];
+        s.permissions.ask = vec!["Bash(git push:*)".into(), "Read(.env)".into()];
         s.permissions.deny = vec!["Bash(rm -rf:*)".into(), "Edit(.env)".into()];
         let text = s.permission_rules_text().unwrap();
         assert!(text.contains("allow_commands: cargo test"));
         assert!(text.contains("allow_paths: src/**"));
+        assert!(text.contains("ask_commands: git push"));
+        assert!(text.contains("ask_paths: .env"));
         assert!(text.contains("deny_commands: rm -rf"));
         assert!(text.contains("deny_paths: .env"));
     }
