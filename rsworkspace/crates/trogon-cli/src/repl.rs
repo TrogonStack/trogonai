@@ -415,6 +415,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     permission_coordinator: std::sync::Arc<PermissionCoordinator>,
     stream: bool,
+    default_model: Option<String>,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
     plan: bool,
@@ -463,6 +464,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         if resumed && let Err(e) = sup.rebind(&prefix, session.session_id()).await {
             eprintln!("warning: permission client rebind failed: {e}");
         }
+    }
+    if !resumed
+        && let Some(ref m) = default_model
+        && let Err(e) = session.set_model(m).await
+    {
+        eprintln!("warning: could not apply default model {m}: {e}");
     }
 
     let history_path = expand_tilde(HISTORY_PATH);
