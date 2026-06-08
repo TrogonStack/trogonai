@@ -24,12 +24,16 @@ pub enum PrintExitCode {
     MaxTurns = 2,
 }
 
+/// Default `stop_reason` when the event stream ends without `StreamEvent::Done`.
+const INCOMPLETE_STOP_REASON: &str = "incomplete";
+
 impl PrintExitCode {
     pub fn from_stop_reason(reason: &str) -> Self {
         match reason {
             "maxTurnRequests" => Self::MaxTurns,
-            "error" | "cancelled" => Self::Error,
-            _ => Self::Success,
+            "error" | "cancelled" | INCOMPLETE_STOP_REASON => Self::Error,
+            "end_turn" | "max_tokens" | "stop_sequence" => Self::Success,
+            _ => Self::Error,
         }
     }
 }
@@ -82,7 +86,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
         // a final `result` line. Unlike text/json this is always complete (tool
         // events are not gated on `--print-tools`).
         let mut text = String::new();
-        let mut stop_reason = String::from("end_turn");
+        let mut stop_reason = String::from(INCOMPLETE_STOP_REASON);
 
         while let Some(event) = rx.recv().await {
             match event {
@@ -124,7 +128,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
 
     if format == OutputFormat::Json {
         let mut text = String::new();
-        let mut stop_reason = String::from("end_turn");
+        let mut stop_reason = String::from(INCOMPLETE_STOP_REASON);
 
         while let Some(event) = rx.recv().await {
             match event {
@@ -163,7 +167,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
     }
 
     let mut text = String::new();
-    let mut stop_reason = String::from("end_turn");
+    let mut stop_reason = String::from(INCOMPLETE_STOP_REASON);
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -331,6 +335,22 @@ mod tests {
         assert_eq!(
             run(session, "test", OutputFormat::Json, PrintOptions::default()).await,
             PrintExitCode::Error
+        );
+    }
+
+    #[test]
+    fn from_stop_reason_incomplete_maps_to_error() {
+        assert_eq!(
+            PrintExitCode::from_stop_reason(INCOMPLETE_STOP_REASON),
+            PrintExitCode::Error
+        );
+    }
+
+    #[test]
+    fn from_stop_reason_end_turn_maps_to_success() {
+        assert_eq!(
+            PrintExitCode::from_stop_reason("end_turn"),
+            PrintExitCode::Success
         );
     }
 
