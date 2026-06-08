@@ -17,8 +17,9 @@
 //! Evaluation order per tool call:
 //!
 //! 1. If any **deny** rule matches → `Deny` (no interactive prompt).
-//! 2. If any **allow** rule matches → `Allow` (auto-approve, no prompt).
-//! 3. Otherwise → `Ask` (fall through to the interactive permission gate).
+//! 2. If any **ask** rule matches → `Ask` (force interactive prompt).
+//! 3. If any **allow** rule matches → `Allow` (auto-approve, no prompt).
+//! 4. Otherwise → `Ask` (fall through to the interactive permission gate).
 
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -137,6 +138,8 @@ pub struct PermissionRules {
     deny_paths: Vec<String>,
     allow_commands: Vec<String>,
     deny_commands: Vec<String>,
+    ask_paths: Vec<String>,
+    ask_commands: Vec<String>,
 }
 
 fn parse_rule_line(line: &str, rules: &mut PermissionRules) {
@@ -160,6 +163,8 @@ fn parse_rule_line(line: &str, rules: &mut PermissionRules) {
         "deny_paths" => rules.deny_paths.extend(items),
         "allow_commands" => rules.allow_commands.extend(items),
         "deny_commands" => rules.deny_commands.extend(items),
+        "ask_paths" => rules.ask_paths.extend(items),
+        "ask_commands" => rules.ask_commands.extend(items),
         _ => {}
     }
 }
@@ -195,6 +200,8 @@ impl PermissionRules {
         self.deny_paths.extend(other.deny_paths);
         self.allow_commands.extend(other.allow_commands);
         self.deny_commands.extend(other.deny_commands);
+        self.ask_paths.extend(other.ask_paths);
+        self.ask_commands.extend(other.ask_commands);
     }
 
     /// Evaluate rules for a single tool call.
@@ -217,9 +224,11 @@ impl PermissionRules {
     }
 
     fn check_path(&self, path: &str) -> RuleDecision {
-        // Deny beats allow.
         if matches_any_glob(path, &self.deny_paths) {
             return RuleDecision::Deny;
+        }
+        if matches_any_glob(path, &self.ask_paths) {
+            return RuleDecision::Ask;
         }
         if matches_any_glob(path, &self.allow_paths) {
             return RuleDecision::Allow;
@@ -228,9 +237,11 @@ impl PermissionRules {
     }
 
     fn check_command(&self, command: &str) -> RuleDecision {
-        // Deny beats allow.
         if matches_any_prefix(command, &self.deny_commands) {
             return RuleDecision::Deny;
+        }
+        if matches_any_prefix(command, &self.ask_commands) {
+            return RuleDecision::Ask;
         }
         if matches_any_prefix(command, &self.allow_commands) {
             return RuleDecision::Allow;
@@ -238,11 +249,30 @@ impl PermissionRules {
         RuleDecision::Ask
     }
 
+    /// True when an explicit `ask` rule matches this tool call. Used by the mode
+    /// checker to force an interactive prompt even when the mode would auto-allow.
+    pub fn explicitly_asks(&self, tool_name: &str, tool_input: &Value) -> bool {
+        let normalized = normalize_tool_name(tool_name);
+        if FILE_TOOLS.contains(&normalized)
+            && let Some(path) = extract_path_from_input(tool_input)
+        {
+            return matches_any_glob(path, &self.ask_paths);
+        }
+        if normalized == "bash"
+            && let Some(cmd) = extract_command_from_input(tool_input)
+        {
+            return matches_any_prefix(cmd, &self.ask_commands);
+        }
+        false
+    }
+
     pub fn is_empty(&self) -> bool {
         self.allow_paths.is_empty()
             && self.deny_paths.is_empty()
             && self.allow_commands.is_empty()
             && self.deny_commands.is_empty()
+            && self.ask_paths.is_empty()
+            && self.ask_commands.is_empty()
     }
 }
 
@@ -598,5 +628,29 @@ allow_paths: src/**
         assert_eq!(rules.check("write_file", &serde_json::json!({"path": "src/main.rs"})), RuleDecision::Allow);
         assert_eq!(rules.check("write_file", &serde_json::json!({"path": ".env"})), RuleDecision::Deny);
         assert_eq!(rules.check("write_file", &serde_json::json!({"path": "/tmp/other"})), RuleDecision::Ask);
+    }
+
+    #[test]
+    fn ask_command_matches_and_explicitly_asks() {
+        let r = PermissionRules::parse("ask_commands: git push\n");
+        let input = serde_json::json!({"command": "git push -f"});
+        assert_eq!(r.check("bash", &input), RuleDecision::Ask);
+        assert!(r.explicitly_asks("bash", &input));
+        assert!(
+            !r.explicitly_asks("bash", &serde_json::json!({"command": "git pull"}))
+        );
+    }
+
+    #[test]
+    fn ask_path_beats_allow_path() {
+        let r = PermissionRules::parse("allow_paths: src/**\nask_paths: src/secret.rs\n");
+        assert_eq!(
+            r.check("write_file", &serde_json::json!({"path": "src/secret.rs"})),
+            RuleDecision::Ask
+        );
+        assert_eq!(
+            r.check("write_file", &serde_json::json!({"path": "src/main.rs"})),
+            RuleDecision::Allow
+        );
     }
 }

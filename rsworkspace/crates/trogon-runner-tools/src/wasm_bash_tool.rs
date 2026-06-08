@@ -49,6 +49,16 @@ fn release_session_creation_lock(session_id: &str) {
     creation_locks().lock().unwrap().remove(session_id);
 }
 
+fn terminal_env(state: &crate::session_store::SessionState) -> Vec<agent_client_protocol::EnvVariable> {
+    let mut vars: Vec<_> = state
+        .env
+        .iter()
+        .map(|(k, v)| agent_client_protocol::EnvVariable::new(k.clone(), v.clone()))
+        .collect();
+    vars.sort_by(|a, b| a.name.cmp(&b.name));
+    vars
+}
+
 pub const DEFAULT_BASH_TIMEOUT_SECS: u64 = 120;
 pub const MAX_BASH_TIMEOUT_SECS: u64 = 600;
 
@@ -191,7 +201,8 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     tid.clone()
                 } else {
                     let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
-                        .cwd(sandbox_dir.clone());
+                        .cwd(sandbox_dir.clone())
+                        .env(terminal_env(&state));
                     let payload =
                         serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
                     let msg = nats
@@ -372,12 +383,15 @@ async fn start_background_job<S: SessionStore>(
     store: &S,
     command: String,
 ) -> Result<String, String> {
+    let mut state = store.load(session_id).await.map_err(|e| e.to_string())?;
+
     let nonce = new_invocation_nonce();
     let (start_marker, exit_marker_prefix) = invocation_markers(&nonce);
     let job_id = nonce;
 
     let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
-        .cwd(sandbox_dir.to_path_buf());
+        .cwd(sandbox_dir.to_path_buf())
+        .env(terminal_env(&state));
     let payload = serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
     let msg = nats
         .request(format!("{term_base}.create"), payload.into())
@@ -390,7 +404,6 @@ async fn start_background_job<S: SessionStore>(
     let cmd_with_markers = build_cmd_with_markers(&command, &start_marker, &exit_marker_prefix);
     write_terminal_stdin(nats, ext_base, &terminal_id, &cmd_with_markers).await?;
 
-    let mut state = store.load(session_id).await.map_err(|e| e.to_string())?;
     state.background_jobs.push(BashJob {
         id: job_id.clone(),
         command,
@@ -1005,5 +1018,23 @@ mod tests {
             required.iter().any(|v| v.as_str() == Some("id")),
             "schema must require 'id', got: {required:?}"
         );
+    }
+
+    // ── terminal_env ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn terminal_env_sorts_by_name() {
+        use crate::session_store::SessionState;
+        use std::collections::HashMap;
+        let state = SessionState {
+            env: HashMap::from([("B".into(), "2".into()), ("A".into(), "1".into())]),
+            ..Default::default()
+        };
+        let vars = terminal_env(&state);
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars[0].name, "A");
+        assert_eq!(vars[0].value, "1");
+        assert_eq!(vars[1].name, "B");
+        assert_eq!(vars[1].value, "2");
     }
 }

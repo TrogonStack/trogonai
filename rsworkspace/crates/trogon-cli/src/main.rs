@@ -94,9 +94,9 @@ struct Args {
     #[arg(long)]
     doctor: bool,
 
-    /// Stream assistant text live instead of buffering until a tool boundary
+    /// Buffer assistant text until a tool boundary instead of streaming it live
     #[arg(long)]
-    stream: bool,
+    no_stream: bool,
 
     /// Resume the last session for this project (from ~/.local/share/trogon/sessions.json)
     #[arg(long, conflicts_with = "session_id")]
@@ -216,6 +216,7 @@ fn build_session_init(
         // permissions.allow/deny translated to trogon rule-text.
         permission_rules: settings.permission_rules_text(),
         tool_hooks,
+        env: settings.env.clone(),
     }
 }
 
@@ -226,6 +227,13 @@ fn run_dev_stack() -> anyhow::Result<()> {
         std::process::exit(status.code().unwrap_or(1));
     }
     Ok(())
+}
+
+/// The model to use when none is forced on the CLI: an explicit `--model` always
+/// wins; otherwise fall back to `settings.json`'s `model`. `None` means "let the
+/// runner use its default".
+fn effective_model(arg: Option<&str>, settings_model: Option<&str>) -> Option<String> {
+    arg.map(str::to_string).or_else(|| settings_model.map(str::to_string))
 }
 
 #[tokio::main]
@@ -313,11 +321,12 @@ async fn main() -> anyhow::Result<()> {
         let options = PrintOptions {
             print_tools: args.print_tools,
         };
+        let chosen_model = effective_model(args.model.as_deref(), settings.model.as_deref());
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
         // `acp.grok`) route to the correct runner instead of failing with "unknown model".
-        let target_prefix = if let Some(model) = &args.model {
+        let target_prefix = if let Some(model) = &chosen_model {
             let model_id = resolve_model_alias(model);
             let js = async_nats::jetstream::new(nats.clone());
             let reg_store = trogon_registry::ReprovisioningStore::new(js)
@@ -355,7 +364,7 @@ async fn main() -> anyhow::Result<()> {
                 .await,
             );
         }
-        if let Some(model) = &args.model {
+        if let Some(model) = &chosen_model {
             let model_id = resolve_model_alias(model);
             if let Err(e) = session.set_model(&model_id).await {
                 eprintln!("error: could not set model: {e}");
@@ -416,6 +425,10 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("warning: no saved session for this project — starting fresh");
         }
 
+        let repl_default_model =
+            effective_model(args.model.as_deref(), settings.model.as_deref())
+                .map(|m| resolve_model_alias(&m));
+
         trogon_cli::runtime::run_interactive(
             factory,
             &args.prefix,
@@ -426,7 +439,8 @@ async fn main() -> anyhow::Result<()> {
             nats,
             acp_config,
             args.nats_url,
-            args.stream,
+            !args.no_stream,
+            repl_default_model,
             resume,
             args.dangerously_skip_permissions,
             args.plan,
@@ -441,10 +455,19 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, Command, SessionsAction, build_session_init};
+    use super::{Args, Command, SessionsAction, build_session_init, effective_model};
     use clap::Parser;
     use std::path::PathBuf;
     use trogon_cli::Settings;
+
+    #[test]
+    fn no_stream_defaults_off_and_flag_enables() {
+        let args = Args::try_parse_from(["trogon"]).unwrap();
+        assert!(!args.no_stream);
+
+        let args = Args::try_parse_from(["trogon", "--no-stream"]).unwrap();
+        assert!(args.no_stream);
+    }
 
     #[test]
     fn sessions_list_subcommand_parses() {
@@ -493,5 +516,12 @@ mod tests {
         let init = build_session_init(None, None, &[], &settings);
         assert_eq!(init.additional_read_dirs, vec!["/shared".to_string()]);
         assert!(init.permission_rules.unwrap().contains("allow_commands: cargo test"));
+    }
+
+    #[test]
+    fn effective_model_precedence() {
+        assert_eq!(effective_model(Some("a"), Some("b")), Some("a".into()));
+        assert_eq!(effective_model(None, Some("b")), Some("b".into()));
+        assert_eq!(effective_model(None, None), None);
     }
 }
