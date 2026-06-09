@@ -2032,11 +2032,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             messages.push(tool_calls_msg.clone());
             wire_messages.push(tool_calls_msg);
 
-            let ctx = trogon_tools::ToolContext {
-                proxy_url: String::new(),
-                cwd: cwd.clone(),
-                http_client: self.tool_http_client.clone(),
-            };
+            let ctx = trogon_tools::ToolContext::new(
+                String::new(),
+                cwd.clone(),
+                self.tool_http_client.clone(),
+            );
 
             for call in &assembled_calls {
                 let kind = if call.name == "bash" { ToolKind::Execute } else { ToolKind::Other };

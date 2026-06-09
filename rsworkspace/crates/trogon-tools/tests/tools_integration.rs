@@ -17,6 +17,8 @@ fn ctx(dir: &TempDir) -> ToolContext {
         proxy_url: String::new(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     }
 }
 

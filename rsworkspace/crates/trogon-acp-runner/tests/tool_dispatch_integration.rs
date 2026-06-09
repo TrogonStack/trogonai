@@ -9,7 +9,7 @@
 //!   cargo test -p trogon-acp-runner --test tool_dispatch_integration
 
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
@@ -27,6 +27,7 @@ use trogon_acp_runner::{
 };
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
+use trogon_tools;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,11 +57,11 @@ fn make_agent(base_url: &str, cwd: &str) -> AgentLoop {
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
-        tool_context: Arc::new(ToolContext {
-            proxy_url: "http://127.0.0.1:1".to_string(),
-            cwd: cwd.to_string(),
-            http_client: reqwest::Client::new(),
-        }),
+        tool_context: Arc::new(ToolContext::new(
+            "http://127.0.0.1:1",
+            cwd,
+            reqwest::Client::new(),
+        )),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -1117,5 +1118,150 @@ async fn new_session_cwd_overrides_agent_initial_cwd_for_file_tool_dispatch() {
         second_mock.hits(),
         1,
         "second mock (tool_result with sentinel) must be hit — cwd was propagated correctly"
+    );
+}
+
+// ── web_search → ACP wire ─────────────────────────────────────────────────────
+
+static ACP_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+fn acp_env_lock() -> &'static Mutex<()> {
+    ACP_ENV_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Portable `web_search` is registered in trogon-tools and dispatched via ACP wire.
+#[tokio::test]
+async fn acp_web_search_tool_def_present_and_dispatch_works() {
+    use httpmock::prelude::*;
+
+    let _guard = acp_env_lock().lock().unwrap();
+    let search_server = MockServer::start();
+    search_server.mock(|when, then| {
+        when.method(POST).path("/search");
+        then.status(200).json_body(serde_json::json!({
+            "organic": [{
+                "title": "ACP Search Hit",
+                "link": "https://example.com/acp-hit",
+                "snippet": "acp web search result"
+            }]
+        }));
+    });
+    unsafe {
+        std::env::set_var("WEB_SEARCH_API_KEY", "test-key");
+        std::env::set_var("WEB_SEARCH_ENDPOINT", search_server.url("/search"));
+    }
+
+    assert!(
+        trogon_tools::all_tool_defs()
+            .iter()
+            .any(|d| d.name == "web_search"),
+        "web_search must be in all_tool_defs"
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-websearch";
+    let session_id = "sess-acp-websearch-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let api_server = MockServer::start();
+    let second_mock = api_server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("ACP Search Hit");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("searched"));
+    });
+    api_server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_websearch_001",
+                "web_search",
+                serde_json::json!({"query": "trogon portable search"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&api_server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "search the web", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after web_search dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result with web_search output must appear in second Anthropic API call"
+    );
+
+    unsafe {
+        std::env::remove_var("WEB_SEARCH_API_KEY");
+        std::env::remove_var("WEB_SEARCH_ENDPOINT");
+    }
+}
+
+/// Missing search credentials must return a clear error through ACP dispatch.
+#[tokio::test]
+async fn acp_web_search_missing_config_returns_clear_error() {
+    let _guard = acp_env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("WEB_SEARCH_API_KEY");
+        std::env::remove_var("SERPER_API_KEY");
+        std::env::remove_var("WEB_SEARCH_ENDPOINT");
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-websearch-missing";
+    let session_id = "sess-acp-websearch-missing";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let api_server = MockServer::start();
+    let second_mock = api_server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("not configured");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("missing"));
+    });
+    api_server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_websearch_missing",
+                "web_search",
+                serde_json::json!({"query": "anything"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&api_server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "search", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after missing-config web_search; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "missing-config error must flow back as tool_result"
     );
 }
