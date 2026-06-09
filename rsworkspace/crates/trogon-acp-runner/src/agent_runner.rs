@@ -68,11 +68,7 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
     }
 
     fn set_cwd(&mut self, cwd: String) {
-        self.tool_context = Arc::new(trogon_tools::ToolContext {
-            proxy_url: self.tool_context.proxy_url.clone(),
-            cwd,
-            http_client: self.tool_context.http_client.clone(),
-        });
+        self.tool_context = Arc::new(self.tool_context.with_cwd(cwd));
     }
 
     fn add_mcp_tools(
@@ -137,11 +133,7 @@ mod tests {
             model: "claude-opus-4-6".to_string(),
             max_iterations: 10,
             thinking_budget: None,
-            tool_context: Arc::new(ToolContext {
-                proxy_url: String::new(),
-                cwd: String::new(),
-                http_client: reqwest::Client::new(),
-            }),
+            tool_context: Arc::new(ToolContext::new(String::new(), String::new(), reqwest::Client::new())),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,

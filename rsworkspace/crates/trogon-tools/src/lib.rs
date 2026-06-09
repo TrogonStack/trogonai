@@ -32,6 +32,55 @@ pub struct ToolContext {
     pub cwd: String,
     /// Reusable HTTP client for web tools.
     pub http_client: reqwest::Client,
+    /// API key for the portable `web_search` backend (Serper by default).
+    /// Falls back to `WEB_SEARCH_API_KEY` or `SERPER_API_KEY` when unset.
+    pub web_search_api_key: Option<String>,
+    /// Override for the search API endpoint (default: Serper `https://google.serper.dev/search`).
+    /// Falls back to `WEB_SEARCH_ENDPOINT` when unset.
+    pub web_search_endpoint: Option<String>,
+}
+
+/// Load portable web-search credentials from the environment.
+pub fn web_search_config_from_env() -> (Option<String>, Option<String>) {
+    let api_key = std::env::var("WEB_SEARCH_API_KEY")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("SERPER_API_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        });
+    let endpoint = std::env::var("WEB_SEARCH_ENDPOINT")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    (api_key, endpoint)
+}
+
+impl ToolContext {
+    pub fn new(
+        proxy_url: impl Into<String>,
+        cwd: impl Into<String>,
+        http_client: reqwest::Client,
+    ) -> Self {
+        let (web_search_api_key, web_search_endpoint) = web_search_config_from_env();
+        Self {
+            proxy_url: proxy_url.into(),
+            cwd: cwd.into(),
+            http_client,
+            web_search_api_key,
+            web_search_endpoint,
+        }
+    }
+
+    pub fn with_cwd(&self, cwd: impl Into<String>) -> Self {
+        Self {
+            proxy_url: self.proxy_url.clone(),
+            cwd: cwd.into(),
+            http_client: self.http_client.clone(),
+            web_search_api_key: self.web_search_api_key.clone(),
+            web_search_endpoint: self.web_search_endpoint.clone(),
+        }
+    }
 }
 
 pub fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
@@ -214,6 +263,18 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "web_search",
+            "Search the public web for up-to-date information. Returns a list of results with title, URL, and snippet. Requires WEB_SEARCH_API_KEY (Serper) to be configured on the runner.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Search query" },
+                    "num_results": { "type": "integer", "description": "Maximum number of results to return (default: 10, max: 20)" }
+                },
+                "required": ["query"]
+            }),
+        ),
+        tool_def(
             "notebook_edit",
             "Edit a cell in a Jupyter notebook (.ipynb file) by index.",
             json!({
@@ -320,6 +381,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "git_push"         => git::push(ctx, input).await,
         "gh"               => github::gh(ctx, input).await,
         "fetch_url"        => web::fetch_url(ctx, input).await,
+        "web_search"       => web::web_search(ctx, input).await,
         "notebook_edit"    => fs::notebook_edit(ctx, input).await,
         "search_files"     => search::search_files(ctx, input).await,
         "todo_write"       => todo::todo_write(ctx, input).await,
@@ -352,6 +414,8 @@ mod tests {
                 .to_string_lossy()
                 .to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }
     }
 
@@ -399,6 +463,45 @@ mod tests {
         assert!(names.contains(&"todo_read"), "missing todo_read, got: {names:?}");
     }
 
+    #[test]
+    fn all_tool_defs_contains_web_search() {
+        let defs = all_tool_defs();
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"web_search"), "missing web_search, got: {names:?}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_web_search_missing_config_returns_error() {
+        let ctx = test_ctx();
+        let result = dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await;
+        assert!(result.contains("not configured"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_web_search_to_web() {
+        use httpmock::prelude::*;
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/search");
+            then.status(200).json_body(json!({
+                "organic": [{
+                    "title": "Dispatch Test",
+                    "link": "https://example.com/dispatch",
+                    "snippet": "via dispatch_tool"
+                }]
+            }));
+        });
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: Some("test-key".to_string()),
+            web_search_endpoint: Some(server.url("/search")),
+        };
+        let result = dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await;
+        assert!(result.contains("Dispatch Test"), "got: {result}");
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
         let ctx = test_ctx();
@@ -415,6 +518,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "read_file", &json!({"path": "hi.txt"})).await;
         assert!(result.contains("hello"), "got: {result}");
@@ -428,6 +533,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await;
         assert_eq!(result, "OK");
@@ -444,6 +551,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "list_dir", &json!({})).await;
         assert!(result.contains("a.rs"), "got: {result}");
@@ -458,6 +567,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "glob", &json!({"pattern": "*.rs"})).await;
         assert!(result.contains("foo.rs"), "got: {result}");
@@ -472,6 +583,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "str_replace", &json!({"path": "f.txt", "old_str": "aaa", "new_str": "zzz"})).await;
         assert!(!result.starts_with("Error"), "got: {result}");
@@ -519,6 +632,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await;
         assert!(result.contains("dispatched"), "got: {result}");
@@ -548,6 +663,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "notebook_edit", &json!({"path": "nb.ipynb", "cell_index": 0, "content": "new"})).await;
         assert_eq!(result, "OK");
@@ -561,6 +678,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(
             &ctx,
@@ -579,6 +698,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         dispatch_tool(
             &ctx,
@@ -600,6 +721,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = dispatch_tool(&ctx, "search_files", &json!({"pattern": "needle"})).await;
         assert!(result.contains("foo.rs"), "got: {result}");

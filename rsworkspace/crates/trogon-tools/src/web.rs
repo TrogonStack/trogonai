@@ -3,6 +3,128 @@ use serde_json::Value;
 use crate::ToolContext;
 
 const MAX_RESPONSE: usize = 8 * 1024;
+const DEFAULT_SEARCH_ENDPOINT: &str = "https://google.serper.dev/search";
+const DEFAULT_NUM_RESULTS: u32 = 10;
+const MAX_NUM_RESULTS: u32 = 20;
+
+#[derive(Debug)]
+struct SearchHit {
+    title: String,
+    url: String,
+    snippet: String,
+}
+
+fn resolve_search_config(ctx: &ToolContext) -> Result<(String, String), String> {
+    let (env_key, env_endpoint) = crate::web_search_config_from_env();
+    let api_key = ctx
+        .web_search_api_key
+        .clone()
+        .or(env_key)
+        .filter(|k| !k.trim().is_empty());
+    let endpoint = ctx
+        .web_search_endpoint
+        .clone()
+        .or(env_endpoint)
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SEARCH_ENDPOINT.to_string());
+
+    match api_key {
+        Some(key) => Ok((key, endpoint)),
+        None => Err(
+            "Error: web_search is not configured. Set WEB_SEARCH_API_KEY or SERPER_API_KEY on the runner."
+                .to_string(),
+        ),
+    }
+}
+
+fn parse_serper_results(body: &Value) -> Vec<SearchHit> {
+    body.get("organic")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let title = item.get("title")?.as_str()?.trim();
+                    let url = item.get("link")?.as_str()?.trim();
+                    if title.is_empty() || url.is_empty() {
+                        return None;
+                    }
+                    let snippet = item
+                        .get("snippet")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    Some(SearchHit {
+                        title: title.to_string(),
+                        url: url.to_string(),
+                        snippet,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn format_search_results(query: &str, hits: &[SearchHit]) -> String {
+    if hits.is_empty() {
+        return format!("No web results found for \"{query}\".");
+    }
+
+    let mut out = format!("Web search results for \"{query}\":\n");
+    for (idx, hit) in hits.iter().enumerate() {
+        out.push_str(&format!("\n{}. {}\n   URL: {}\n", idx + 1, hit.title, hit.url));
+        if !hit.snippet.is_empty() {
+            out.push_str(&format!("   {snippet}\n", snippet = hit.snippet));
+        }
+    }
+    out
+}
+
+pub async fn web_search(ctx: &ToolContext, input: &Value) -> String {
+    let query = match input.get("query").and_then(|v| v.as_str()) {
+        Some(q) if !q.trim().is_empty() => q.trim(),
+        _ => return "Error: missing required parameter 'query'".to_string(),
+    };
+
+    let num_results = input
+        .get("num_results")
+        .and_then(|v| v.as_u64())
+        .map(|n| n.min(u64::from(MAX_NUM_RESULTS)) as u32)
+        .unwrap_or(DEFAULT_NUM_RESULTS)
+        .clamp(1, MAX_NUM_RESULTS);
+
+    let (api_key, endpoint) = match resolve_search_config(ctx) {
+        Ok(config) => config,
+        Err(msg) => return msg,
+    };
+
+    let payload = serde_json::json!({ "q": query, "num": num_results });
+    let response = match ctx
+        .http_client
+        .post(&endpoint)
+        .header("X-API-KEY", api_key)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return format!("Error searching the web: {e}"),
+    };
+
+    if !response.status().is_success() {
+        return format!("Error: search API returned HTTP {}", response.status());
+    }
+
+    let body: Value = match response.json().await {
+        Ok(v) => v,
+        Err(e) => return format!("Error parsing search response: {e}"),
+    };
+
+    let hits = parse_serper_results(&body);
+    format_search_results(query, &hits)
+}
 
 /// Returns `true` if the IP falls in any SSRF-sensitive range (loopback, private,
 /// link-local, unspecified, or IPv6 unique-local).
@@ -140,6 +262,18 @@ mod tests {
             proxy_url: String::new(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
+        }
+    }
+
+    fn ctx_with_search(endpoint: &str, api_key: &str) -> ToolContext {
+        ToolContext {
+            proxy_url: String::new(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: Some(api_key.to_string()),
+            web_search_endpoint: Some(endpoint.to_string()),
         }
     }
 
@@ -270,5 +404,78 @@ mod tests {
         });
         let result = fetch_url(&ctx(), &json!({"url": server.url("/mb"), "raw": true})).await;
         assert!(result.contains("truncated at 8KB"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn web_search_missing_config_returns_clear_error() {
+        let result = web_search(&ctx(), &json!({"query": "rust programming"})).await;
+        assert!(
+            result.contains("not configured"),
+            "expected clear missing-config error, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn web_search_missing_query_returns_error() {
+        let server = MockServer::start();
+        let result = web_search(
+            &ctx_with_search(&server.url("/search"), "test-key"),
+            &json!({}),
+        )
+        .await;
+        assert!(result.contains("missing required parameter 'query'"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn web_search_returns_parsed_results() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST)
+                .path("/search")
+                .header("X-API-KEY", "test-key")
+                .json_body(json!({"q": "trogon agent", "num": 10}));
+            then.status(200).json_body(json!({
+                "organic": [
+                    {
+                        "title": "Trogon Docs",
+                        "link": "https://example.com/trogon",
+                        "snippet": "Documentation for Trogon agents."
+                    },
+                    {
+                        "title": "Rust Web Search",
+                        "link": "https://example.com/rust",
+                        "snippet": "Building search tools in Rust."
+                    }
+                ]
+            }));
+        });
+
+        let result = web_search(
+            &ctx_with_search(&server.url("/search"), "test-key"),
+            &json!({"query": "trogon agent"}),
+        )
+        .await;
+
+        assert!(result.contains("Trogon Docs"), "got: {result}");
+        assert!(result.contains("https://example.com/trogon"), "got: {result}");
+        assert!(result.contains("Documentation for Trogon agents"), "got: {result}");
+        assert!(result.contains("Rust Web Search"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn web_search_no_results_returns_message() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/search");
+            then.status(200).json_body(json!({"organic": []}));
+        });
+
+        let result = web_search(
+            &ctx_with_search(&server.url("/search"), "test-key"),
+            &json!({"query": "xyzzy-no-match-12345"}),
+        )
+        .await;
+
+        assert!(result.contains("No web results found"), "got: {result}");
     }
 }
