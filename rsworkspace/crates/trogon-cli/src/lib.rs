@@ -1,4 +1,5 @@
 pub mod app;
+pub mod commands;
 pub mod client_supervisor;
 pub mod doctor;
 pub mod env_local;
