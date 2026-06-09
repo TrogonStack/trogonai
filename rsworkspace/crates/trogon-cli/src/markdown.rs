@@ -3,6 +3,16 @@
 /// Handles: headers (# / ## / ###), bold (**), italic (*), inline code (`),
 /// fenced code blocks (```), and horizontal rules (---).
 pub fn render(text: &str) -> String {
+    render_with_ansi(text, true)
+}
+
+/// Render markdown to plain text (no ANSI escapes). Markdown structure is
+/// normalized the same way as [`render`], but without terminal styling.
+pub fn render_plain(text: &str) -> String {
+    render_with_ansi(text, false)
+}
+
+fn render_with_ansi(text: &str, use_ansi: bool) -> String {
     let mut out = String::with_capacity(text.len() + 256);
     let mut in_code_block = false;
 
@@ -21,37 +31,65 @@ pub fn render(text: &str) -> String {
         }
 
         if in_code_block {
-            out.push_str(DIM);
+            push_style(&mut out, Style::Dim, use_ansi);
             out.push_str(line);
-            out.push_str(RESET);
+            push_reset(&mut out, use_ansi);
             continue;
         }
 
         if let Some(rest) = line.strip_prefix("### ") {
-            out.push_str(BOLD);
-            out.push_str(&render_inline(rest));
-            out.push_str(RESET);
+            push_style(&mut out, Style::Bold, use_ansi);
+            out.push_str(&render_inline(rest, use_ansi));
+            push_reset(&mut out, use_ansi);
         } else if let Some(rest) = line.strip_prefix("## ") {
-            out.push_str(BOLD_UNDERLINE);
-            out.push_str(&render_inline(rest));
-            out.push_str(RESET);
+            push_style(&mut out, Style::BoldUnderline, use_ansi);
+            out.push_str(&render_inline(rest, use_ansi));
+            push_reset(&mut out, use_ansi);
         } else if let Some(rest) = line.strip_prefix("# ") {
-            out.push_str(BOLD_CYAN);
-            out.push_str(&render_inline(rest));
-            out.push_str(RESET);
+            push_style(&mut out, Style::BoldCyan, use_ansi);
+            out.push_str(&render_inline(rest, use_ansi));
+            push_reset(&mut out, use_ansi);
         } else if *line == "---" || *line == "***" || *line == "___" {
             // horizontal rule
-            out.push_str(DIM);
+            push_style(&mut out, Style::Dim, use_ansi);
             out.push_str("────────────────────────────────────────");
-            out.push_str(RESET);
+            push_reset(&mut out, use_ansi);
         } else {
-            out.push_str(&render_inline(line));
+            out.push_str(&render_inline(line, use_ansi));
         }
 
         let _ = last; // suppress unused warning when iterating
     }
 
     out
+}
+
+enum Style {
+    Bold,
+    Italic,
+    Dim,
+    Yellow,
+    BoldCyan,
+    BoldUnderline,
+}
+
+fn push_style(out: &mut String, style: Style, use_ansi: bool) {
+    if use_ansi {
+        out.push_str(match style {
+            Style::Bold => BOLD,
+            Style::Italic => ITALIC,
+            Style::Dim => DIM,
+            Style::Yellow => YELLOW,
+            Style::BoldCyan => BOLD_CYAN,
+            Style::BoldUnderline => BOLD_UNDERLINE,
+        });
+    }
+}
+
+fn push_reset(out: &mut String, use_ansi: bool) {
+    if use_ansi {
+        out.push_str(RESET);
+    }
 }
 
 // ── ANSI codes ─────────────────────────────────────────────────────────────────
@@ -66,7 +104,7 @@ const BOLD_UNDERLINE: &str = "\x1b[1;4m";
 
 // ── Inline rendering ───────────────────────────────────────────────────────────
 
-fn render_inline(text: &str) -> String {
+fn render_inline(text: &str, use_ansi: bool) -> String {
     let mut out = String::with_capacity(text.len() + 64);
     let mut rest = text;
 
@@ -76,9 +114,9 @@ fn render_inline(text: &str) -> String {
             && !rest.starts_with("```")
             && let Some(end) = rest[1..].find('`')
         {
-            out.push_str(YELLOW);
+            push_style(&mut out, Style::Yellow, use_ansi);
             out.push_str(&rest[1..1 + end]);
-            out.push_str(RESET);
+            push_reset(&mut out, use_ansi);
             rest = &rest[1 + end + 1..];
             continue;
         }
@@ -86,9 +124,9 @@ fn render_inline(text: &str) -> String {
         if rest.starts_with("**")
             && let Some(end) = rest[2..].find("**")
         {
-            out.push_str(BOLD);
-            out.push_str(&render_inline(&rest[2..2 + end]));
-            out.push_str(RESET);
+            push_style(&mut out, Style::Bold, use_ansi);
+            out.push_str(&render_inline(&rest[2..2 + end], use_ansi));
+            push_reset(&mut out, use_ansi);
             rest = &rest[2 + end + 2..];
             continue;
         }
@@ -99,9 +137,9 @@ fn render_inline(text: &str) -> String {
             && end > 0
             && !rest[1..1 + end].starts_with('*')
         {
-            out.push_str(ITALIC);
+            push_style(&mut out, Style::Italic, use_ansi);
             out.push_str(&rest[1..1 + end]);
-            out.push_str(RESET);
+            push_reset(&mut out, use_ansi);
             rest = &rest[1 + end + 1..];
             continue;
         }
@@ -137,12 +175,29 @@ mod tests {
         out
     }
 
+    fn has_ansi_escapes(s: &str) -> bool {
+        s.contains('\x1b')
+    }
+
     #[test]
     fn bold_renders_with_ansi() {
         let out = render("hello **world** there");
         assert!(out.contains(BOLD), "missing bold escape");
         assert!(out.contains(RESET));
         assert_eq!(strip_ansi(&out), "hello world there");
+    }
+
+    #[test]
+    fn plain_render_has_no_ansi_escapes() {
+        let out = render_plain("hello **world** there");
+        assert!(!has_ansi_escapes(&out));
+        assert_eq!(out, "hello world there");
+    }
+
+    #[test]
+    fn plain_and_ansi_render_same_visible_text() {
+        let text = "# Title\n\nsay **hi** and `code`";
+        assert_eq!(strip_ansi(&render(text)), render_plain(text));
     }
 
     #[test]
