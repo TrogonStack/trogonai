@@ -915,7 +915,7 @@ async fn compact_or_trim_openrouter_history(
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = openrouter_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", model, compactor_model).await {
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, false, "openrouter", model, compactor_model).await {
             *history = openrouter_history_from_wire(compacted);
             return;
         }
@@ -1852,7 +1852,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = openrouter_history_to_wire(&messages);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", &resolved_model, compactor_model.as_deref()).await {
+            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, false, "openrouter", &resolved_model, compactor_model.as_deref()).await {
                 messages = openrouter_history_from_wire(compacted);
                 // Intentionally not writing back to s.history here: the post-turn path
                 // assigns the full messages (including new response) to s.history and
@@ -2549,6 +2549,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     &wire,
                     token_budget,
                     threshold_pct,
+                    true,
                     "openrouter",
                     &resolved_model,
                     compactor_model.as_deref(),

@@ -20,8 +20,9 @@ pub mod wasm_bash_tool;
 pub mod worktree;
 
 pub use compaction::{
-    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold, CompactError,
-    COMPACT_SUBJECT, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET,
+    compaction_requested, compaction_settings_from_env, estimate_tokens, maybe_compact,
+    over_threshold, CompactError, COMPACT_SUBJECT, DEFAULT_COMPACT_THRESHOLD_PCT,
+    DEFAULT_TOKEN_BUDGET,
 };
 pub use egress::EgressPolicy;
 pub use elicitation::{
