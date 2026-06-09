@@ -828,6 +828,7 @@ pub async fn check_tool_permission(
     // always empty. The caller passes a turn-scoped buffer and drains it into the
     // session's audit_log after the turn.
     audit_buf: AuditBuf,
+    extras: PermissionExtras,
 ) -> bool {
     if mode == "bypassPermissions" {
         return true;
@@ -845,8 +846,7 @@ pub async fn check_tool_permission(
         audit_buf,
         // One-shot gate (xai/openrouter): no ExitPlanMode handling, so a throwaway cell.
         Arc::new(Mutex::new(None)),
-        // Containment/classifier not wired for the one-shot path; defaults are inert.
-        PermissionExtras::default(),
+        extras,
     ) else {
         return true;
     };
@@ -1972,6 +1972,34 @@ mod tests {
                 "Prompt/None must route to the interactive channel (dropped rx → false)"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn check_tool_permission_auto_mode_uses_classifier_from_extras() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let extras = PermissionExtras {
+            classifier: Some(Arc::new(MockClassifier(ClassifierVerdict::Deny))),
+            ..PermissionExtras::default()
+        };
+        let allowed = check_tool_permission(
+            "auto",
+            "sess-1",
+            Some(&tx),
+            &[],
+            PermissionRules::default(),
+            &[],
+            "tc",
+            "write_file",
+            &serde_json::json!({"path": "a.rs", "content": "x"}),
+            Arc::new(Mutex::new(vec![])),
+            extras,
+        )
+        .await;
+        assert!(
+            !allowed,
+            "auto mode must consult the classifier passed via PermissionExtras"
+        );
     }
 
     fn pre_hook(matcher: &str, command: &str) -> Vec<crate::hooks::HookMatcher> {

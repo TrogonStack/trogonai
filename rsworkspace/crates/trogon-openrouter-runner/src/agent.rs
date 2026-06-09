@@ -124,6 +124,7 @@ const VALID_MODES: &[&str] = &[
     "default",
     "acceptEdits",
     "plan",
+    "auto",
     "dontAsk",
     "bypassPermissions",
 ];
@@ -320,6 +321,8 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     /// NATS/ACP config used to create a `Bridge` for sub-sessions when `spawn_agent` is invoked.
     /// Set via [`OpenRouterAgent::with_runner_config`]. `None` disables spawn_agent.
     runner_config: Option<acp_nats::Config>,
+    /// `auto`-mode LLM safety classifier for side-effecting tool calls.
+    classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
     /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
@@ -447,6 +450,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             permission_nats: None,
             permission_prefix: None,
             runner_config: None,
+            classifier: None,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -486,6 +490,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
             runner_config: self.runner_config,
+            classifier: self.classifier,
             session_locks: self.session_locks,
         }
     }
@@ -570,6 +575,15 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     /// Without this, `spawn_agent` returns an error.
     pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
         self.runner_config = Some(config);
+        self
+    }
+
+    /// Set the `auto`-mode LLM safety classifier.
+    pub fn with_safety_classifier(
+        mut self,
+        classifier: Arc<dyn trogon_runner_tools::SafetyClassifier>,
+    ) -> Self {
+        self.classifier = Some(classifier);
         self
     }
 
@@ -732,6 +746,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
                 SessionMode::new("default", "Default"),
                 SessionMode::new("acceptEdits", "Accept Edits"),
                 SessionMode::new("plan", "Plan"),
+                SessionMode::new("auto", "Auto"),
                 SessionMode::new("dontAsk", "Don't Ask"),
                 SessionMode::new("bypassPermissions", "Bypass Permissions"),
             ],
@@ -2084,6 +2099,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         rules.merge(PermissionRules::parse(extra));
                     }
                     let allowed_tools = self.permission_store.allowed_tools(&session_id);
+                    let mut extras = trogon_runner_tools::PermissionExtras::default();
+                    extras.classifier = self.classifier.clone();
                     check_tool_permission(
                         &session_mode,
                         &session_id,
@@ -2095,6 +2112,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         &call.name,
                         &tool_input,
                         audit_buf.clone(),
+                        extras,
                     )
                     .await
                 };
@@ -3055,7 +3073,14 @@ mod tests {
         let agent = make_agent();
         let state = agent.session_mode_state("default");
         assert_eq!(state.current_mode_id.0.as_ref(), "default");
-        assert_eq!(state.available_modes.len(), 5);
+        assert_eq!(state.available_modes.len(), 6);
+        assert!(
+            state
+                .available_modes
+                .iter()
+                .any(|m| m.id.0.as_ref() == "auto"),
+            "auto mode must be advertised"
+        );
     }
 
     #[test]
@@ -6881,6 +6906,72 @@ mod tests {
             assert_eq!(audit[0].outcome, AuditOutcome::Denied,
                 "deny rule from permission_rules_text must block the tool");
         }).await;
+    }
+
+    struct MockAutoClassifier(trogon_runner_tools::ClassifierVerdict);
+    impl trogon_runner_tools::SafetyClassifier for MockAutoClassifier {
+        fn classify<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = trogon_runner_tools::ClassifierVerdict> + Send + 'a>,
+        > {
+            let v = self.0;
+            Box::pin(async move { v })
+        }
+    }
+
+    /// PERM-1: `auto` mode must route side-effecting tools through the wired classifier.
+    #[tokio::test]
+    async fn prompt_auto_mode_uses_safety_classifier() {
+        let (perm_tx, _perm_rx) =
+            tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(None))
+            .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new())
+            .with_safety_classifier(Arc::new(MockAutoClassifier(
+                trogon_runner_tools::ClassifierVerdict::Deny,
+            )));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady {
+                calls: vec![crate::client::AssembledToolCall {
+                    id: "cid-auto".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: r#"{"path":"a.rs","content":"x"}"#.to_string(),
+                }],
+            },
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            agent
+                .set_session_mode(SetSessionModeRequest::new(sid.clone(), "auto"))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("write")]))
+                .await
+                .unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(
+                audit[0].outcome,
+                AuditOutcome::Denied,
+                "auto mode must deny side-effecting tools when the classifier returns Deny"
+            );
+        })
+        .await;
     }
 
     // ── spawn_agent interceptor ───────────────────────────────────────────────

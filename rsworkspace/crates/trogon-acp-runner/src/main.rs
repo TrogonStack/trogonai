@@ -140,17 +140,12 @@ async fn main() -> anyhow::Result<()> {
 
     // `auto`-mode LLM safety classifier — uses the same proxy creds as the agent
     // loop, with a small/cheap model. Built before the creds move into AgentLoop.
-    let classifier_model = std::env::var("AUTO_CLASSIFIER_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
-    let safety_classifier: Arc<dyn trogon_runner_tools::SafetyClassifier> =
-        Arc::new(trogon_runner_tools::LlmSafetyClassifier::new(
-            http_client.clone(),
-            &proxy_url,
-            anthropic_base_url.as_deref(),
-            anthropic_token.clone(),
-            classifier_model,
-            vec![],
-        ));
+    let safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
+        http_client.clone(),
+        &proxy_url,
+        anthropic_base_url.as_deref(),
+        anthropic_token.clone(),
+    );
 
     let mut agent_loop = AgentLoop {
         http_client,
