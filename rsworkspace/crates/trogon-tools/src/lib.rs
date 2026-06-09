@@ -167,15 +167,40 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             "str_replace",
-            "Replace an exact string in a file. The old_str must appear exactly once — if it appears 0 or more than once, the edit is rejected. Returns a diff of the changes.",
+            "Replace an exact string in a file. By default old_str must appear exactly once — if it appears 0 or more than once, the edit is rejected unless replace_all is true. Returns a diff of the changes.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path":    { "type": "string", "description": "Path to the file, relative to the working directory" },
-                    "old_str": { "type": "string", "description": "Exact string to replace — must appear exactly once in the file" },
-                    "new_str": { "type": "string", "description": "String to replace it with" }
+                    "path":         { "type": "string",  "description": "Path to the file, relative to the working directory" },
+                    "old_str":      { "type": "string",  "description": "Exact string to replace — must appear exactly once unless replace_all is true" },
+                    "new_str":      { "type": "string",  "description": "String to replace it with" },
+                    "replace_all":  { "type": "boolean", "description": "If true, replace every occurrence of old_str (default: false)" }
                 },
                 "required": ["path", "old_str", "new_str"]
+            }),
+        ),
+        tool_def(
+            "multi_edit",
+            "Apply multiple string replacements to the same file in one call. Edits are applied sequentially to the result of the previous edit. If any edit fails, the whole batch fails atomically and the file is left unchanged. Returns a diff of the changes.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path":  { "type": "string", "description": "Path to the file, relative to the working directory" },
+                    "edits": {
+                        "type": "array",
+                        "description": "Edits to apply in order",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_str":     { "type": "string",  "description": "Exact string to replace" },
+                                "new_str":     { "type": "string",  "description": "String to replace it with" },
+                                "replace_all": { "type": "boolean", "description": "If true, replace every occurrence of old_str in the current content (default: false)" }
+                            },
+                            "required": ["old_str", "new_str"]
+                        }
+                    }
+                },
+                "required": ["path", "edits"]
             }),
         ),
         tool_def(
@@ -373,6 +398,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "list_dir"         => fs::list_dir(ctx, input).await,
         "glob"             => fs::glob_files(ctx, input).await,
         "str_replace"      => editor::str_replace(ctx, input).await,
+        "multi_edit"       => editor::multi_edit(ctx, input).await,
         "git_status"       => git::status(ctx, input).await,
         "git_diff"         => git::diff(ctx, input).await,
         "git_log"          => git::log(ctx, input).await,
@@ -468,6 +494,30 @@ mod tests {
         let defs = all_tool_defs();
         let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"web_search"), "missing web_search, got: {names:?}");
+    }
+
+    #[test]
+    fn all_tool_defs_str_replace_has_replace_all_param() {
+        let def = all_tool_defs()
+            .into_iter()
+            .find(|d| d.name == "str_replace")
+            .expect("str_replace must be in all_tool_defs");
+        assert!(
+            def.input_schema["properties"].get("replace_all").is_some(),
+            "str_replace schema must include replace_all"
+        );
+    }
+
+    #[test]
+    fn all_tool_defs_contains_multi_edit() {
+        let def = all_tool_defs()
+            .into_iter()
+            .find(|d| d.name == "multi_edit")
+            .expect("multi_edit must be in all_tool_defs");
+        assert!(
+            def.input_schema["properties"].get("edits").is_some(),
+            "multi_edit schema must include edits array"
+        );
     }
 
     #[tokio::test]
@@ -590,6 +640,58 @@ mod tests {
         assert!(!result.starts_with("Error"), "got: {result}");
         let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
         assert!(content.contains("zzz"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_str_replace_replace_all_via_dispatch_tool() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.txt"), "x\nx\n").await.unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
+        };
+        let result = dispatch_tool(
+            &ctx,
+            "str_replace",
+            &json!({"path": "f.txt", "old_str": "x", "new_str": "y", "replace_all": true}),
+        )
+        .await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
+        assert_eq!(content, "y\ny\n");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_multi_edit_to_editor() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.txt"), "one two\n").await.unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
+        };
+        let result = dispatch_tool(
+            &ctx,
+            "multi_edit",
+            &json!({
+                "path": "f.txt",
+                "edits": [
+                    {"old_str": "one", "new_str": "1"},
+                    {"old_str": "two", "new_str": "2"}
+                ]
+            }),
+        )
+        .await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
+        assert_eq!(content, "1 2\n");
     }
 
     #[tokio::test]

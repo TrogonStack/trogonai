@@ -780,6 +780,133 @@ async fn acp_str_replace_tool_dispatched_via_wire_format() {
     );
 }
 
+/// Shared `str_replace` schema includes `replace_all`; ACP wire dispatch applies it.
+#[tokio::test]
+async fn acp_str_replace_replace_all_tool_def_and_dispatch() {
+    let str_def = trogon_tools::all_tool_defs()
+        .into_iter()
+        .find(|d| d.name == "str_replace")
+        .expect("str_replace must be in all_tool_defs");
+    assert!(
+        str_def.input_schema["properties"].get("replace_all").is_some(),
+        "str_replace schema must include replace_all"
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("dup.txt"), "x\nx\nx\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-strreplace-all";
+    let session_id = "sess-acp-strreplace-all-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("replaced all"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_strreplace_all_001",
+                "str_replace",
+                serde_json::json!({
+                    "path": "dup.txt",
+                    "old_str": "x",
+                    "new_str": "y",
+                    "replace_all": true
+                }),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "replace all", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after replace_all dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1);
+    let on_disk = std::fs::read_to_string(dir.path().join("dup.txt")).unwrap();
+    assert_eq!(on_disk, "y\ny\ny\n");
+}
+
+/// Shared `multi_edit` tool def and ACP wire dispatch apply edits atomically.
+#[tokio::test]
+async fn acp_multi_edit_tool_def_and_dispatch() {
+    let multi_def = trogon_tools::all_tool_defs()
+        .into_iter()
+        .find(|d| d.name == "multi_edit")
+        .expect("multi_edit must be in all_tool_defs");
+    assert!(
+        multi_def.input_schema["properties"].get("edits").is_some(),
+        "multi_edit schema must include edits"
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("seq.txt"), "aaa bbb\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-multiedit";
+    let session_id = "sess-acp-multiedit-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("multi edited"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_multiedit_001",
+                "multi_edit",
+                serde_json::json!({
+                    "path": "seq.txt",
+                    "edits": [
+                        {"old_str": "aaa", "new_str": "AAA"},
+                        {"old_str": "bbb", "new_str": "BBB"}
+                    ]
+                }),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "multi edit", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after multi_edit dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1);
+    let on_disk = std::fs::read_to_string(dir.path().join("seq.txt")).unwrap();
+    assert_eq!(on_disk, "AAA BBB\n");
+}
+
 // ── glob → ACP wire ───────────────────────────────────────────────────────────
 
 /// `glob` dispatched via ACP wire format — matching filenames appear in the
