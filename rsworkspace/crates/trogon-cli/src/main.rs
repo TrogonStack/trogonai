@@ -1,12 +1,13 @@
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use trogon_cli::Session as _;
 use trogon_cli::{
-    CrossRunnerSwitcher, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry,
-    SessionFactory, SessionIndex, SessionInit, connect_or_start_nats, repl::resolve_model_alias,
-    session::TrogonSession,
+    CrossRunnerSwitcher, McpManager, NatsSessionFactory, OutputFormat, PrintOptions, RealFs,
+    SessionEntry, SessionFactory, SessionIndex, SessionInit, connect_or_start_nats,
+    persist_session, repl::resolve_model_alias, session::TrogonSession, should_use_ansi,
 };
 
 #[derive(Subcommand)]
@@ -98,8 +99,27 @@ struct Args {
     #[arg(long)]
     no_stream: bool,
 
+    /// Force plain-text output in --print (no ANSI markdown rendering)
+    #[arg(long)]
+    plain: bool,
+
+    /// MCP config file(s) for --print. Repeatable; each value may be comma-separated.
+    #[arg(long = "mcp-config", value_name = "PATH")]
+    mcp_config: Vec<PathBuf>,
+
+    /// Use only --mcp-config files in --print (ignore ~/.config/trogon/mcp.json and .mcp.json)
+    #[arg(long = "strict-mcp-config")]
+    strict_mcp_config: bool,
+
     /// Resume the last session for this project (from ~/.local/share/trogon/sessions.json)
-    #[arg(long, conflicts_with = "session_id")]
+    #[arg(
+        long = "continue-session",
+        short = 'c',
+        short_alias = 'r',
+        alias = "continue",
+        visible_alias = "resume",
+        conflicts_with = "session_id"
+    )]
     continue_session: bool,
 
     /// Attach to a specific session id (uses --prefix runner)
@@ -236,6 +256,57 @@ fn effective_model(arg: Option<&str>, settings_model: Option<&str>) -> Option<St
     arg.map(str::to_string).or_else(|| settings_model.map(str::to_string))
 }
 
+fn resolve_resume(continue_session: bool, session_id: Option<&str>, prefix: &str, cwd: &Path) -> Option<SessionEntry> {
+    if continue_session {
+        let index = SessionIndex::load(&RealFs);
+        let canon = match cwd.canonicalize() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("warning: current directory could not be resolved ({e}), session lookup may fail");
+                cwd.to_path_buf()
+            }
+        };
+        index.get_last(&canon).cloned()
+    } else if let Some(id) = session_id {
+        Some(SessionEntry {
+            prefix: prefix.to_string(),
+            session_id: id.to_string(),
+            model: String::new(),
+            updated_at: String::new(),
+            name: None,
+        })
+    } else {
+        None
+    }
+}
+
+async fn start_print_session(
+    nats: async_nats::Client,
+    mcp: &mut McpManager,
+    prefix: &str,
+    cwd: PathBuf,
+    init: &SessionInit,
+) -> anyhow::Result<TrogonSession<async_nats::Client>> {
+    let mcp_servers = mcp.spawn_pending(&RealFs).await;
+    let session = TrogonSession::new_with_init(nats, prefix, cwd, mcp_servers, init).await?;
+    mcp.commit_pending(session.session_id());
+    Ok(session)
+}
+
+async fn resume_print_session(
+    nats: async_nats::Client,
+    mcp: &mut McpManager,
+    prefix: &str,
+    session_id: &str,
+    cwd: &Path,
+) -> anyhow::Result<TrogonSession<async_nats::Client>> {
+    let mcp_servers = mcp.spawn_pending(&RealFs).await;
+    let session = TrogonSession::from_existing(nats, prefix, session_id.to_string());
+    session.load_session(session_id, cwd, mcp_servers).await?;
+    mcp.commit_pending(session_id);
+    Ok(session)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     trogon_cli::env_local::load_env_local();
@@ -320,13 +391,22 @@ async fn main() -> anyhow::Result<()> {
         };
         let options = PrintOptions {
             print_tools: args.print_tools,
+            use_ansi: should_use_ansi(args.plain, std::io::stdout().is_terminal()),
         };
         let chosen_model = effective_model(args.model.as_deref(), settings.model.as_deref());
+        let resume = resolve_resume(args.continue_session, args.session_id.as_deref(), &args.prefix, &cwd);
+        if args.continue_session && resume.is_none() {
+            eprintln!("warning: no saved session for this project — starting fresh");
+        }
+        let resumed = resume.is_some();
+
+        let mut mcp_manager =
+            McpManager::load_for_cli(&RealFs, Some(&cwd), &args.mcp_config, args.strict_mcp_config);
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
         // `acp.grok`) route to the correct runner instead of failing with "unknown model".
-        let target_prefix = if let Some(model) = &chosen_model {
+        let mut target_prefix = if let Some(model) = &chosen_model {
             let model_id = resolve_model_alias(model);
             let js = async_nats::jetstream::new(nats.clone());
             let reg_store = trogon_registry::ReprovisioningStore::new(js)
@@ -340,10 +420,50 @@ async fn main() -> anyhow::Result<()> {
         } else {
             args.prefix.clone()
         };
+        if let Some(entry) = &resume {
+            target_prefix = entry.prefix.clone();
+        }
 
         let nats_for_perm = nats.clone();
-        let session =
-            TrogonSession::new_with_init(nats, &target_prefix, cwd, vec![], &session_init).await?;
+        let session = if let Some(entry) = resume {
+            match resume_print_session(
+                nats,
+                &mut mcp_manager,
+                &target_prefix,
+                &entry.session_id,
+                &cwd,
+            )
+            .await
+            {
+                Ok(s) => {
+                    eprintln!("resumed session {} on {target_prefix}", s.session_id());
+                    s
+                }
+                Err(e) => {
+                    eprintln!(
+                        "warning: could not resume {}: {e} — starting fresh",
+                        entry.session_id
+                    );
+                    start_print_session(
+                        nats_for_perm.clone(),
+                        &mut mcp_manager,
+                        &target_prefix,
+                        cwd.clone(),
+                        &session_init,
+                    )
+                    .await?
+                }
+            }
+        } else {
+            start_print_session(
+                nats,
+                &mut mcp_manager,
+                &target_prefix,
+                cwd.clone(),
+                &session_init,
+            )
+            .await?
+        };
         // Permission handling in non-interactive mode: `--dangerously-skip-permissions`
         // sets `bypassPermissions` (auto-allow, no prompts). Otherwise — since there is
         // no human to answer a prompt — start an auto-DENY responder so approval-gated
@@ -364,16 +484,31 @@ async fn main() -> anyhow::Result<()> {
                 .await,
             );
         }
-        if let Some(model) = &chosen_model {
+        if !resumed
+            && let Some(model) = &chosen_model
+        {
             let model_id = resolve_model_alias(model);
             if let Err(e) = session.set_model(&model_id).await {
                 eprintln!("error: could not set model: {e}");
+                mcp_manager.shutdown_session(session.session_id()).await;
                 // MED-40: drop KillOnDrop guard before exit.
                 drop(nats_server);
                 std::process::exit(1);
             }
         }
+        let session_id = session.session_id().to_string();
+        let session_model = session.current_model();
         let code = trogon_cli::print::run(session, &prompt, format, options).await;
+        let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
+        persist_session(
+            &RealFs,
+            &project_dir,
+            &target_prefix,
+            &session_id,
+            &session_model,
+            args.name.as_deref(),
+        );
+        mcp_manager.shutdown_session(&session_id).await;
         if let Some(task) = deny_task {
             task.abort();
         }
@@ -397,29 +532,7 @@ async fn main() -> anyhow::Result<()> {
         let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
         let factory = NatsSessionFactory::new(nats.clone());
 
-        let resume = if args.continue_session {
-            let index = SessionIndex::load(&RealFs);
-            let canon = match cwd.canonicalize() {
-                Ok(c) => c,
-                Err(e) => {
-                    // LOW-21: warn when the working directory can no longer be resolved
-                    // (e.g. deleted between sessions) so the user knows why lookup may fail.
-                    eprintln!("warning: current directory could not be resolved ({e}), session lookup may fail");
-                    cwd.clone()
-                }
-            };
-            index.get_last(&canon).cloned()
-        } else if let Some(id) = &args.session_id {
-            Some(SessionEntry {
-                prefix: args.prefix.clone(),
-                session_id: id.clone(),
-                model: String::new(),
-                updated_at: String::new(),
-                name: None,
-            })
-        } else {
-            None
-        };
+        let resume = resolve_resume(args.continue_session, args.session_id.as_deref(), &args.prefix, &cwd);
 
         if args.continue_session && resume.is_none() {
             eprintln!("warning: no saved session for this project — starting fresh");
@@ -455,10 +568,10 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, Command, SessionsAction, build_session_init, effective_model};
+    use super::{Args, Command, SessionsAction, build_session_init, effective_model, resolve_resume};
     use clap::Parser;
-    use std::path::PathBuf;
-    use trogon_cli::Settings;
+    use std::path::{Path, PathBuf};
+    use trogon_cli::{Settings, should_use_ansi};
 
     #[test]
     fn no_stream_defaults_off_and_flag_enables() {
@@ -523,5 +636,61 @@ mod tests {
         assert_eq!(effective_model(Some("a"), Some("b")), Some("a".into()));
         assert_eq!(effective_model(None, Some("b")), Some("b".into()));
         assert_eq!(effective_model(None, None), None);
+    }
+
+    #[test]
+    fn continue_aliases_parse() {
+        let cases = [
+            ["trogon", "--continue"],
+            ["trogon", "--continue-session"],
+            ["trogon", "--resume"],
+            ["trogon", "-c"],
+            ["trogon", "-r"],
+        ];
+        for argv in cases {
+            let args = Args::try_parse_from(argv).unwrap();
+            assert!(args.continue_session, "expected continue flag for {argv:?}");
+        }
+    }
+
+    #[test]
+    fn plain_and_mcp_config_flags_parse() {
+        let args = Args::try_parse_from([
+            "trogon",
+            "--plain",
+            "--mcp-config",
+            "a.json,b.json",
+            "--mcp-config",
+            "c.json",
+            "--strict-mcp-config",
+            "-p",
+            "hi",
+        ])
+        .unwrap();
+        assert!(args.plain);
+        assert!(args.strict_mcp_config);
+        assert_eq!(
+            args.mcp_config,
+            vec![PathBuf::from("a.json,b.json"), PathBuf::from("c.json")]
+        );
+    }
+
+    #[test]
+    fn resolve_resume_without_flags_is_none() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(resolve_resume(false, None, "acp.claude", &cwd).is_none());
+    }
+
+    #[test]
+    fn resolve_resume_session_id_builds_entry() {
+        let cwd = Path::new("/tmp/proj");
+        let entry = resolve_resume(false, Some("sess-1"), "acp.claude", cwd).unwrap();
+        assert_eq!(entry.session_id, "sess-1");
+        assert_eq!(entry.prefix, "acp.claude");
+    }
+
+    #[test]
+    fn print_plain_flag_forces_plain_even_on_tty() {
+        assert!(!should_use_ansi(true, true));
     }
 }
