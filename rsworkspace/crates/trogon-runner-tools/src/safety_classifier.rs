@@ -9,6 +9,8 @@
 
 use serde_json::{json, Value};
 
+use std::sync::Arc;
+
 use crate::permission::{ClassifierVerdict, SafetyClassifier};
 
 const SYSTEM_PROMPT: &str = "You are a security classifier for an autonomous coding agent. \
@@ -78,6 +80,28 @@ impl LlmSafetyClassifier {
         };
         parse_verdict(&extract_text(&value))
     }
+}
+
+/// Build the shared `auto`-mode LLM safety classifier used by all Trogon runners.
+///
+/// Reads `AUTO_CLASSIFIER_MODEL` (default: `claude-haiku-4-5-20251001`). Uses the
+/// same proxy + Anthropic credentials as the ACP runner's agent loop.
+pub fn build_auto_safety_classifier(
+    http: reqwest::Client,
+    proxy_url: &str,
+    anthropic_base_url: Option<&str>,
+    anthropic_token: impl Into<String>,
+) -> Arc<dyn SafetyClassifier> {
+    let model = std::env::var("AUTO_CLASSIFIER_MODEL")
+        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
+    Arc::new(LlmSafetyClassifier::new(
+        http,
+        proxy_url,
+        anthropic_base_url,
+        anthropic_token,
+        model,
+        vec![],
+    ))
 }
 
 impl SafetyClassifier for LlmSafetyClassifier {

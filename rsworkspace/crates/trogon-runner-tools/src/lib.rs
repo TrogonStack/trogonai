@@ -36,7 +36,7 @@ pub use permission::{
     RulesPermissionChecker, SafetyClassifier,
 };
 pub use hooks::{run_event_hooks, HookMatcher, HookOutcome, HooksConfig};
-pub use safety_classifier::LlmSafetyClassifier;
+pub use safety_classifier::{build_auto_safety_classifier, LlmSafetyClassifier};
 pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{
