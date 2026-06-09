@@ -21,6 +21,7 @@ telemetry-http = [
 ]
 
 [dependencies]
+thiserror = { workspace = true }
 axum = { workspace = true, optional = true }
 bytesize = "2.3.1"
 clap = { workspace = true, optional = true }

@@ -99,128 +99,94 @@ pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static
     ) -> impl std::future::Future<Output = Result<SubjectState, Self::Error>> + Send;
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Error raised while reading stream events.
 #[allow(missing_docs)]
 pub enum ReadStreamError {
-    QueryStreamInfo { source: InfoError },
-    ReadLatestSubjectPosition { source: InvalidStreamPosition },
-    ReadLatestSubjectMessage { source: LastRawMessageError },
-    ReadStreamMessage { source: RawMessageError },
+    #[error("failed to query stream info: {source}")]
+    QueryStreamInfo {
+        #[source]
+        source: InfoError,
+    },
+    #[error("failed to read latest subject position: {source}")]
+    ReadLatestSubjectPosition {
+        #[source]
+        source: InvalidStreamPosition,
+    },
+    #[error("failed to read latest subject message: {source}")]
+    ReadLatestSubjectMessage {
+        #[source]
+        source: LastRawMessageError,
+    },
+    #[error("failed to read stream message: {source}")]
+    ReadStreamMessage {
+        #[source]
+        source: RawMessageError,
+    },
+    #[error("failed to convert stream message timestamp into recorded event time: {subject}")]
     InvalidMessageTimestamp { subject: String },
-    ReadMessageEventId { source: uuid::Error },
-    ReadMessagePosition { source: InvalidStreamPosition },
+    #[error("failed to read stream message event id: {source}")]
+    ReadMessageEventId {
+        #[source]
+        source: uuid::Error,
+    },
+    #[error("failed to read stream message position: {source}")]
+    ReadMessagePosition {
+        #[source]
+        source: InvalidStreamPosition,
+    },
+    #[error("failed to read stream message event headers: event header '{header_name}' must have exactly one value")]
     InvalidEventHeaderValueCount { header_name: String },
-    ReadMessageEventHeaders { source: FromEntriesError },
+    #[error("failed to read stream message event headers: {source}")]
+    ReadMessageEventHeaders {
+        #[source]
+        source: FromEntriesError,
+    },
+    #[error("failed to read stream message event envelope: stream message is missing {header_name} header")]
     MissingMessageHeader { header_name: &'static str },
 }
 
-impl fmt::Display for ReadStreamError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::QueryStreamInfo { source } => write!(f, "failed to query stream info: {source}"),
-            Self::ReadLatestSubjectPosition { source } => {
-                write!(f, "failed to read latest subject position: {source}")
-            }
-            Self::ReadLatestSubjectMessage { source } => write!(f, "failed to read latest subject message: {source}"),
-            Self::ReadStreamMessage { source } => write!(f, "failed to read stream message: {source}"),
-            Self::InvalidMessageTimestamp { subject } => {
-                write!(
-                    f,
-                    "failed to convert stream message timestamp into recorded event time: {subject}"
-                )
-            }
-            Self::ReadMessageEventId { source } => write!(f, "failed to read stream message event id: {source}"),
-            Self::ReadMessagePosition { source } => {
-                write!(f, "failed to read stream message position: {source}")
-            }
-            Self::InvalidEventHeaderValueCount { header_name } => write!(
-                f,
-                "failed to read stream message event headers: event header '{header_name}' must have exactly one value"
-            ),
-            Self::ReadMessageEventHeaders { source } => {
-                write!(f, "failed to read stream message event headers: {source}")
-            }
-            Self::MissingMessageHeader { header_name } => {
-                write!(
-                    f,
-                    "failed to read stream message event envelope: stream message is missing {header_name} header"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for ReadStreamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::QueryStreamInfo { source } => Some(source),
-            Self::ReadLatestSubjectPosition { source } => Some(source),
-            Self::ReadLatestSubjectMessage { source } => Some(source),
-            Self::ReadStreamMessage { source } => Some(source),
-            Self::InvalidMessageTimestamp { .. } => None,
-            Self::ReadMessageEventId { source } => Some(source),
-            Self::ReadMessagePosition { source } => Some(source),
-            Self::InvalidEventHeaderValueCount { .. } => None,
-            Self::ReadMessageEventHeaders { source } => Some(source),
-            Self::MissingMessageHeader { .. } => None,
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Error raised while appending stream events.
 #[allow(missing_docs)]
 pub enum PublishStreamError {
-    PublishEvent { source: context::PublishError },
+    #[error("failed to publish stream event: {source}")]
+    PublishEvent {
+        #[source]
+        source: context::PublishError,
+    },
+    #[error("failed to publish stream event batch: batch commit ack was not created")]
     MissingBatchCommitAck,
-    AcknowledgeEvent { source: context::PublishError },
-    AcknowledgeBatchCommit { source: context::PublishError },
+    #[error("failed to acknowledge stream event: {source}")]
+    AcknowledgeEvent {
+        #[source]
+        source: context::PublishError,
+    },
+    #[error("failed to acknowledge stream event batch commit: {source}")]
+    AcknowledgeBatchCommit {
+        #[source]
+        source: context::PublishError,
+    },
+    #[error("duplicate event id")]
     DuplicateEventId,
-    ReadAppendPosition { source: InvalidStreamPosition },
+    #[error("failed to read stream append position: {source}")]
+    ReadAppendPosition {
+        #[source]
+        source: InvalidStreamPosition,
+    },
 }
 
-impl fmt::Display for PublishStreamError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PublishEvent { source } => write!(f, "failed to publish stream event: {source}"),
-            Self::MissingBatchCommitAck => {
-                write!(
-                    f,
-                    "failed to publish stream event batch: batch commit ack was not created"
-                )
-            }
-            Self::AcknowledgeEvent { source } => write!(f, "failed to acknowledge stream event: {source}"),
-            Self::AcknowledgeBatchCommit { source } => {
-                write!(f, "failed to acknowledge stream event batch commit: {source}")
-            }
-            Self::DuplicateEventId => write!(f, "duplicate event id"),
-            Self::ReadAppendPosition { source } => write!(f, "failed to read stream append position: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for PublishStreamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::PublishEvent { source } => Some(source),
-            Self::MissingBatchCommitAck => None,
-            Self::AcknowledgeEvent { source } => Some(source),
-            Self::AcknowledgeBatchCommit { source } => Some(source),
-            Self::DuplicateEventId => None,
-            Self::ReadAppendPosition { source } => Some(source),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Error raised while reading or appending stream events.
 pub enum StreamStoreError {
     /// JetStream read operation failed.
-    Read(ReadStreamError),
+    #[error("stream read error: {0}")]
+    Read(#[source] ReadStreamError),
     /// JetStream publish operation failed.
-    Publish(PublishStreamError),
+    #[error("stream publish error: {0}")]
+    Publish(#[source] PublishStreamError),
     /// JetStream rejected the expected last subject sequence.
+    #[error("stream publish error: wrong expected version")]
     WrongExpectedVersion,
 }
 
@@ -233,28 +199,6 @@ impl From<ReadStreamError> for StreamStoreError {
 impl From<PublishStreamError> for StreamStoreError {
     fn from(source: PublishStreamError) -> Self {
         Self::Publish(source)
-    }
-}
-
-impl std::fmt::Display for StreamStoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Read(source) => write!(f, "stream read error: {source}"),
-            Self::Publish(source) => write!(f, "stream publish error: {source}"),
-            Self::WrongExpectedVersion => {
-                write!(f, "stream publish error: wrong expected version")
-            }
-        }
-    }
-}
-
-impl std::error::Error for StreamStoreError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Read(source) => Some(source),
-            Self::Publish(source) => Some(source),
-            Self::WrongExpectedVersion => None,
-        }
     }
 }
 

@@ -358,75 +358,31 @@ where
         })
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
 pub struct PublishOperationError(pub String);
 
-impl std::fmt::Display for PublishOperationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for PublishOperationError {}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum NatsError {
-    Serialize(serde_json::Error),
-    Deserialize(serde_json::Error),
-    Request {
-        subject: String,
-        error: String,
-    },
-    PublishOperation(PublishOperationError),
+    #[error("Failed to serialize request: {0}")]
+    Serialize(#[source] serde_json::Error),
+    #[error("Failed to deserialize response: {0}")]
+    Deserialize(#[source] serde_json::Error),
+    #[error("Request to '{subject}' failed: {error}")]
+    Request { subject: String, error: String },
+    #[error("Publish operation failed: {0}")]
+    PublishOperation(#[source] PublishOperationError),
+    #[error("Publish operation failed after {attempts} attempts on '{subject}': {error}")]
     PublishOperationExhausted {
+        #[source]
         error: PublishOperationError,
         subject: String,
         attempts: u32,
     },
-    Timeout {
-        subject: String,
-    },
+    #[error("Request to '{subject}' timed out. The backend may be overloaded or unresponsive.")]
+    Timeout { subject: String },
+    #[error("NATS error: {0}")]
     Other(String),
-}
-
-impl std::fmt::Display for NatsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Serialize(e) => write!(f, "Failed to serialize request: {}", e),
-            Self::Deserialize(e) => write!(f, "Failed to deserialize response: {}", e),
-            Self::Request { subject, error } => {
-                write!(f, "Request to '{}' failed: {}", subject, error)
-            }
-            Self::PublishOperation(e) => write!(f, "Publish operation failed: {}", e),
-            Self::PublishOperationExhausted {
-                error,
-                subject,
-                attempts,
-            } => write!(
-                f,
-                "Publish operation failed after {} attempts on '{}': {}",
-                attempts, subject, error
-            ),
-            Self::Timeout { subject } => write!(
-                f,
-                "Request to '{}' timed out. The backend may be overloaded or unresponsive.",
-                subject
-            ),
-            Self::Other(msg) => write!(f, "NATS error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for NatsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Serialize(e) => Some(e),
-            Self::Deserialize(e) => Some(e),
-            Self::PublishOperation(e) => Some(e),
-            Self::PublishOperationExhausted { error, .. } => Some(error),
-            Self::Request { .. } | Self::Timeout { .. } | Self::Other(_) => None,
-        }
-    }
 }
 
 #[cfg(test)]

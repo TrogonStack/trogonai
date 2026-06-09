@@ -29,19 +29,12 @@ impl ReadFrom {
 }
 
 /// Error returned when `ReadFrom::after` would overflow `u64`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("cannot read after position {position}: u64 overflow")]
 pub struct ReadAfterOverflow {
     /// Position that could not be advanced.
     pub position: StreamPosition,
 }
-
-impl std::fmt::Display for ReadAfterOverflow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "cannot read after position {}: u64 overflow", self.position)
-    }
-}
-
-impl std::error::Error for ReadAfterOverflow {}
 
 /// Request to read events from one stream.
 #[derive(Debug, Clone, PartialEq)]

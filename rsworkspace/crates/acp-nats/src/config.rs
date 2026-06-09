@@ -341,10 +341,10 @@ mod tests {
     /// and must be rejected with `InvalidCharacter`.
     #[test]
     fn acp_prefix_rejects_carriage_return() {
-        use trogon_nats::SubjectTokenViolation;
+        use crate::acp_prefix::AcpPrefixError;
         let err = AcpPrefix::new("acp\rfoo").err().unwrap();
         assert!(
-            matches!(err.0, SubjectTokenViolation::InvalidCharacter('\r')),
+            matches!(err, AcpPrefixError::InvalidCharacter('\r')),
             "expected InvalidCharacter('\\r'), got: {:?}",
             err
         );
@@ -354,10 +354,10 @@ mod tests {
     /// and must be rejected with `InvalidCharacter`.
     #[test]
     fn acp_prefix_rejects_form_feed() {
-        use trogon_nats::SubjectTokenViolation;
+        use crate::acp_prefix::AcpPrefixError;
         let err = AcpPrefix::new("acp\x0Cfoo").err().unwrap();
         assert!(
-            matches!(err.0, SubjectTokenViolation::InvalidCharacter('\x0C')),
+            matches!(err, AcpPrefixError::InvalidCharacter('\x0C')),
             "expected InvalidCharacter('\\x0C'), got: {:?}",
             err
         );
@@ -365,10 +365,10 @@ mod tests {
 
     #[test]
     fn acp_prefix_rejects_unicode_whitespace() {
-        use trogon_nats::SubjectTokenViolation;
+        use crate::acp_prefix::AcpPrefixError;
         let err = AcpPrefix::new("acp\u{00A0}foo").err().unwrap();
         assert!(
-            matches!(err.0, SubjectTokenViolation::InvalidCharacter('\u{00A0}')),
+            matches!(err, AcpPrefixError::InvalidCharacter('\u{00A0}')),
             "expected InvalidCharacter with U+00A0, got: {:?}",
             err
         );
@@ -379,10 +379,10 @@ mod tests {
 
     #[test]
     fn acp_prefix_consecutive_dots_returns_invalid_character_dot() {
-        use trogon_nats::SubjectTokenViolation;
+        use crate::acp_prefix::AcpPrefixError;
         let err = AcpPrefix::new("acp..foo").err().unwrap();
         assert!(
-            matches!(err.0, SubjectTokenViolation::InvalidCharacter('.')),
+            matches!(err, AcpPrefixError::InvalidCharacter('.')),
             "expected InvalidCharacter('.'), got: {:?}",
             err
         );

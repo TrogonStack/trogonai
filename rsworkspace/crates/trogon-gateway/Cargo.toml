@@ -15,6 +15,8 @@ name = "trogon-gateway"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
 trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["ring", "jetstream"] }
 axum = { workspace = true }

@@ -1,8 +1,8 @@
 mod config;
 
-use std::error::Error;
 use std::future::Future;
 
+use anyhow::Result;
 use rmcp::service::{RoleClient, RoleServer};
 use rmcp::transport::Transport;
 #[cfg(not(coverage))]
@@ -11,8 +11,6 @@ use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::transport::stdio;
 use tracing::{error, info};
 
-type BoxError = Box<dyn Error + Send + Sync>;
-
 #[cfg(not(coverage))]
 use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
 #[cfg(not(coverage))]
@@ -20,7 +18,7 @@ use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 #[cfg(not(coverage))]
 #[tokio::main]
-async fn main() -> Result<(), BoxError> {
+async fn main() -> Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     let config::BridgeConfig {
         mcp,
@@ -65,7 +63,7 @@ async fn main() -> Result<(), BoxError> {
 #[cfg(coverage)]
 fn main() {}
 
-async fn run_bridge<L, R, S>(mut local: L, mut remote: R, shutdown_signal: S) -> Result<(), BoxError>
+async fn run_bridge<L, R, S>(mut local: L, mut remote: R, shutdown_signal: S) -> Result<()>
 where
     L: Transport<RoleServer>,
     R: Transport<RoleClient>,
@@ -83,7 +81,7 @@ where
                         break Ok(());
                     };
                     if let Err(error) = remote.send(local_message).await {
-                        break Err(boxed_error(error));
+                        break Err(error.into());
                     }
                 }
                 remote_message = remote.receive() => {
@@ -92,7 +90,7 @@ where
                         break Ok(());
                     };
                     if let Err(error) = local.send(remote_message).await {
-                        break Err(boxed_error(error));
+                        break Err(error.into());
                     }
                 }
                 _ = &mut shutdown_signal => {
@@ -113,20 +111,12 @@ where
     result
 }
 
-fn boxed_error<E>(error: E) -> BoxError
-where
-    E: Error + Send + Sync + 'static,
-{
-    Box::new(error)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use mcp_nats::{ClientJsonRpcMessage, ServerJsonRpcMessage};
     use rmcp::model::{ClientNotification, RequestId, ServerResult};
     use rmcp::service::{RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
-    use std::fmt::{Display, Formatter};
     use std::marker::PhantomData;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -200,16 +190,9 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
+    #[error("close failed")]
     struct CloseError;
-
-    impl Display for CloseError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(f, "close failed")
-        }
-    }
-
-    impl Error for CloseError {}
 
     struct FailingCloseTransport<R>
     where

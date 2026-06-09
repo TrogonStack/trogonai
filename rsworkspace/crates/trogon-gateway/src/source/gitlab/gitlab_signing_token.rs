@@ -5,34 +5,16 @@ use base64::engine::general_purpose::STANDARD;
 
 const GITLAB_SIGNING_TOKEN_BYTES: usize = 32;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum GitLabSigningTokenError {
+    #[error("signing token must not be empty")]
     Empty,
+    #[error("signing token must start with whsec_")]
     MissingPrefix,
-    InvalidBase64(base64::DecodeError),
+    #[error("signing token must be valid base64")]
+    InvalidBase64(#[source] base64::DecodeError),
+    #[error("signing token must decode to 32 bytes, got {actual}")]
     InvalidLength { actual: usize },
-}
-
-impl fmt::Display for GitLabSigningTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("signing token must not be empty"),
-            Self::MissingPrefix => f.write_str("signing token must start with whsec_"),
-            Self::InvalidBase64(_) => f.write_str("signing token must be valid base64"),
-            Self::InvalidLength { actual } => {
-                write!(f, "signing token must decode to 32 bytes, got {actual}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for GitLabSigningTokenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidBase64(error) => Some(error),
-            Self::Empty | Self::MissingPrefix | Self::InvalidLength { .. } => None,
-        }
-    }
 }
 
 #[derive(Clone)]

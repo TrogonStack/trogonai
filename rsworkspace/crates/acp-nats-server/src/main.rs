@@ -20,7 +20,7 @@ use {
 
 #[cfg(not(coverage))]
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let args = config::Args::parse();
     let server_config = config::config_from_args(args, &SystemEnv)?;
     trogon_telemetry::init_logger(
@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 
-    result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    result.map_err(Into::into)
 }
 
 #[cfg(coverage)]

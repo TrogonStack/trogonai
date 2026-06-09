@@ -11,31 +11,17 @@ pub enum TestEvent {
     Registered,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TestDomainError {
+    #[error("{self:?}")]
     InvalidHistory,
 }
 
-impl std::fmt::Display for TestDomainError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{self:?}")
-    }
-}
-
-impl std::error::Error for TestDomainError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TestDecisionError {
+    #[error("{self:?}")]
     AlreadyRegistered,
 }
-
-impl std::fmt::Display for TestDecisionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{self:?}")
-    }
-}
-
-impl std::error::Error for TestDecisionError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestCommand;

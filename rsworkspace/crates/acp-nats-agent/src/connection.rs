@@ -20,30 +20,13 @@ use std::time::Duration;
 use tracing::{info, warn};
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 
+#[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
-    Subscribe(Box<dyn std::error::Error + Send + Sync>),
-    JetStream(Box<dyn std::error::Error + Send + Sync>),
+    #[error("failed to subscribe: {0}")]
+    Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("jetstream error: {0}")]
+    JetStream(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
-
-impl std::fmt::Debug for ConnectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Subscribe(e) => f.debug_tuple("Subscribe").field(e).finish(),
-            Self::JetStream(e) => f.debug_tuple("JetStream").field(e).finish(),
-        }
-    }
-}
-
-impl std::fmt::Display for ConnectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Subscribe(e) => write!(f, "failed to subscribe: {}", e),
-            Self::JetStream(e) => write!(f, "jetstream error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ConnectionError {}
 
 #[derive(Debug)]
 enum DispatchError {

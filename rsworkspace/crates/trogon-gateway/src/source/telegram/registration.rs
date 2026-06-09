@@ -1,6 +1,5 @@
 #![cfg_attr(coverage, allow(dead_code))]
 
-use std::fmt;
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -14,30 +13,12 @@ const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 const TELEGRAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TELEGRAM_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
-    Request(reqwest::Error),
+    #[error("Telegram webhook registration request failed: {0}")]
+    Request(#[source] reqwest::Error),
+    #[error("Telegram webhook registration rejected with {status}: {description}")]
     Rejected { status: StatusCode, description: String },
-}
-
-impl fmt::Display for RegistrationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Request(error) => write!(f, "Telegram webhook registration request failed: {error}"),
-            Self::Rejected { status, description } => {
-                write!(f, "Telegram webhook registration rejected with {status}: {description}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for RegistrationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Request(error) => Some(error),
-            Self::Rejected { .. } => None,
-        }
-    }
 }
 
 impl From<reqwest::Error> for RegistrationError {
@@ -215,7 +196,8 @@ mod tests {
         body: Value,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
+    #[error("{0}")]
     struct FakeHttpError(String);
 
     impl FakeHttpError {
@@ -223,14 +205,6 @@ mod tests {
             Self(message.into())
         }
     }
-
-    impl fmt::Display for FakeHttpError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str(&self.0)
-        }
-    }
-
-    impl Error for FakeHttpError {}
 
     impl From<serde_json::Error> for FakeHttpError {
         fn from(error: serde_json::Error) -> Self {

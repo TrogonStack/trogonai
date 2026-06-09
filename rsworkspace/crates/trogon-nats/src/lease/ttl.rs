@@ -1,4 +1,3 @@
-use std::fmt;
 use std::time::Duration;
 
 use trogon_std::{NonZeroDuration, ZeroDuration};
@@ -6,22 +5,13 @@ use trogon_std::{NonZeroDuration, ZeroDuration};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LeaseTtl(NonZeroDuration);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LeaseTtlError {
+    #[error("lease ttl must not be zero")]
     ZeroDuration,
+    #[error("lease ttl must be whole seconds")]
     SubsecondPrecisionUnsupported,
 }
-
-impl fmt::Display for LeaseTtlError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ZeroDuration => f.write_str("lease ttl must not be zero"),
-            Self::SubsecondPrecisionUnsupported => f.write_str("lease ttl must be whole seconds"),
-        }
-    }
-}
-
-impl std::error::Error for LeaseTtlError {}
 
 impl LeaseTtl {
     pub fn new(ttl: NonZeroDuration) -> Result<Self, LeaseTtlError> {

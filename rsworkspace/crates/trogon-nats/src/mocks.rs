@@ -6,16 +6,9 @@ use futures::channel::mpsc;
 use futures::stream::BoxStream;
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{0}")]
 pub struct MockError(pub String);
-
-impl std::fmt::Display for MockError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for MockError {}
 
 #[derive(Clone, Debug)]
 pub struct MockNatsClient {

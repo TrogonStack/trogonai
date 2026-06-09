@@ -11,24 +11,25 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::SubjectTokenViolation;
 
 /// Error returned when [`AcpPrefix`] validation fails.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AcpPrefixError(pub SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum AcpPrefixError {
+    #[error("acp_prefix must not be empty")]
+    Empty,
+    #[error("acp_prefix contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("acp_prefix is too long: {0} bytes (max 128)")]
+    TooLong(usize),
+}
 
-impl std::fmt::Display for AcpPrefixError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            SubjectTokenViolation::Empty => write!(f, "acp_prefix must not be empty"),
-            SubjectTokenViolation::InvalidCharacter(ch) => {
-                write!(f, "acp_prefix contains invalid character: {:?}", ch)
-            }
-            SubjectTokenViolation::TooLong(len) => {
-                write!(f, "acp_prefix is too long: {} bytes (max 128)", len)
-            }
+impl From<SubjectTokenViolation> for AcpPrefixError {
+    fn from(v: SubjectTokenViolation) -> Self {
+        match v {
+            SubjectTokenViolation::Empty => Self::Empty,
+            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
         }
     }
 }
-
-impl std::error::Error for AcpPrefixError {}
 
 /// NATS-safe ACP prefix. Guarantees validity at construction—invalid instances are unrepresentable.
 #[derive(Clone, Debug)]
@@ -37,7 +38,7 @@ pub struct AcpPrefix(DottedNatsToken);
 impl AcpPrefix {
     pub fn new(s: impl Into<String>) -> Result<Self, AcpPrefixError> {
         let s = s.into();
-        DottedNatsToken::new(s).map(Self).map_err(AcpPrefixError)
+        DottedNatsToken::new(s).map(Self).map_err(Into::into)
     }
 
     pub fn as_str(&self) -> &str {
@@ -76,28 +77,22 @@ mod tests {
         assert!(AcpPrefix::new("a").is_ok());
         assert!(AcpPrefix::new("my.multi.part").is_ok());
         assert!(AcpPrefix::new("a".repeat(128)).is_ok());
-        assert!(matches!(
-            AcpPrefix::new(""),
-            Err(AcpPrefixError(SubjectTokenViolation::Empty))
-        ));
+        assert!(matches!(AcpPrefix::new(""), Err(AcpPrefixError::Empty)));
         assert!(matches!(
             AcpPrefix::new("a".repeat(129)),
-            Err(AcpPrefixError(SubjectTokenViolation::TooLong(129)))
+            Err(AcpPrefixError::TooLong(129))
         ));
     }
 
     #[test]
     fn acp_prefix_error_display() {
+        assert_eq!(format!("{}", AcpPrefixError::Empty), "acp_prefix must not be empty");
         assert_eq!(
-            format!("{}", AcpPrefixError(SubjectTokenViolation::Empty)),
-            "acp_prefix must not be empty"
-        );
-        assert_eq!(
-            format!("{}", AcpPrefixError(SubjectTokenViolation::InvalidCharacter('*'))),
+            format!("{}", AcpPrefixError::InvalidCharacter('*')),
             "acp_prefix contains invalid character: '*'"
         );
         assert_eq!(
-            format!("{}", AcpPrefixError(SubjectTokenViolation::TooLong(200))),
+            format!("{}", AcpPrefixError::TooLong(200)),
             "acp_prefix is too long: 200 bytes (max 128)"
         );
     }

@@ -17,37 +17,21 @@ pub struct CreateSchedule {
     pub message: ScheduleMessage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CreateScheduleDecideError {
+    #[error("schedule '{id}' already exists")]
     AlreadyExists { id: ScheduleId },
+    #[error("schedule '{id}' was deleted")]
     ScheduleDeleted { id: ScheduleId },
-    DurationConversion { source: DurationConversionError },
+    #[error("schedule duration is invalid: {source}")]
+    DurationConversion {
+        #[source]
+        source: DurationConversionError,
+    },
+    #[error("state value is missing")]
     MissingStateValue,
+    #[error("unknown state value: {value}")]
     UnknownStateValue { value: i32 },
-}
-
-impl std::fmt::Display for CreateScheduleDecideError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AlreadyExists { id } => write!(formatter, "schedule '{id}' already exists"),
-            Self::ScheduleDeleted { id } => write!(formatter, "schedule '{id}' was deleted"),
-            Self::DurationConversion { source } => write!(formatter, "schedule duration is invalid: {source}"),
-            Self::MissingStateValue => formatter.write_str("state value is missing"),
-            Self::UnknownStateValue { value } => write!(formatter, "unknown state value: {value}"),
-        }
-    }
-}
-
-impl std::error::Error for CreateScheduleDecideError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::DurationConversion { source } => Some(source),
-            Self::AlreadyExists { .. }
-            | Self::ScheduleDeleted { .. }
-            | Self::MissingStateValue
-            | Self::UnknownStateValue { .. } => None,
-        }
-    }
 }
 
 impl Decider for CreateSchedule {
