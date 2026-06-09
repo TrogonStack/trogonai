@@ -1,24 +1,15 @@
 use buffa::EnumValue;
 use trogonai_proto::scheduler::schedules::{ScheduleEventCase, ScheduleStatusKind, state_v1, v1};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvolveError {
+    #[error("protobuf state is missing its state value")]
     MissingStateValue,
+    #[error("protobuf schedule event is not supported by command state")]
     UnsupportedEvent,
+    #[error("protobuf state '{value}' is unknown")]
     UnknownStateValue { value: i32 },
 }
-
-impl std::fmt::Display for EvolveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingStateValue => f.write_str("protobuf state is missing its state value"),
-            Self::UnsupportedEvent => f.write_str("protobuf schedule event is not supported by command state"),
-            Self::UnknownStateValue { value } => write!(f, "protobuf state '{value}' is unknown"),
-        }
-    }
-}
-
-impl std::error::Error for EvolveError {}
 
 pub(super) fn initial_state() -> state_v1::State {
     state_v1::State {

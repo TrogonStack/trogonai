@@ -7,6 +7,8 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+thiserror = { workspace = true }
+anyhow = { workspace = true }
 acp-nats = { workspace = true }
 trogon-telemetry = { workspace = true }
 agent-client-protocol = { workspace = true }

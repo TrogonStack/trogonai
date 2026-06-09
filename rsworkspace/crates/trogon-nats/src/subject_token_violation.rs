@@ -1,22 +1,13 @@
 /// Describes what went wrong when validating a NATS subject token: empty, invalid character, or too long.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SubjectTokenViolation {
+    #[error("subject token is empty")]
     Empty,
+    #[error("subject token contains invalid character '{0}'")]
     InvalidCharacter(char),
+    #[error("subject token exceeds maximum length: {0}")]
     TooLong(usize),
 }
-
-impl std::fmt::Display for SubjectTokenViolation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => f.write_str("subject token is empty"),
-            Self::InvalidCharacter(ch) => write!(f, "subject token contains invalid character '{ch}'"),
-            Self::TooLong(length) => write!(f, "subject token exceeds maximum length: {length}"),
-        }
-    }
-}
-
-impl std::error::Error for SubjectTokenViolation {}
 
 #[cfg(test)]
 mod tests {

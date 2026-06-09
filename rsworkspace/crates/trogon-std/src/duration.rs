@@ -1,19 +1,11 @@
-use std::fmt;
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NonZeroDuration(Duration);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("duration must not be zero")]
 pub struct ZeroDuration;
-
-impl fmt::Display for ZeroDuration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("duration must not be zero")
-    }
-}
-
-impl std::error::Error for ZeroDuration {}
 
 impl NonZeroDuration {
     pub fn from_secs(secs: u64) -> Result<Self, ZeroDuration> {

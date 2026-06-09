@@ -8,22 +8,11 @@ use trogon_decider_runtime::{
 use super::{ScheduleEventCase, state_v1, v1};
 use crate::codec::{decode_event_case, event_type, snapshot_type as proto_snapshot_type};
 
-#[derive(Debug)]
-pub struct StateSnapshotPayloadError(buffa::DecodeError);
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct StateSnapshotPayloadError(#[source] buffa::DecodeError);
 
 pub type ScheduleEventPayloadError = EventPayloadError<buffa::DecodeError>;
-
-impl std::fmt::Display for StateSnapshotPayloadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::error::Error for StateSnapshotPayloadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.0)
-    }
-}
 
 impl EventEncode for v1::ScheduleEvent {
     type Error = ScheduleEventPayloadError;

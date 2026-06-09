@@ -36,7 +36,7 @@ use crate::constants::{
 };
 use crate::source_status::SourceStatus;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 struct DurationTooLong {
     max_secs: u64,
 }
@@ -57,20 +57,11 @@ impl fmt::Display for DurationTooLong {
     }
 }
 
-impl std::error::Error for DurationTooLong {}
-
 const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("configure exactly one of webhook or socket_mode")]
 struct SlackTransportConflict;
-
-impl fmt::Display for SlackTransportConflict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("configure exactly one of webhook or socket_mode")
-    }
-}
-
-impl std::error::Error for SlackTransportConflict {}
 
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(untagged)]
@@ -97,24 +88,15 @@ impl SecretInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum SecretInputError {
+    #[error("env var name must not be empty")]
     EmptyEnvName,
+    #[error("env var '{name}' is not set")]
     MissingEnv { name: String },
+    #[error("env var '{name}' is not valid unicode")]
     InvalidUnicodeEnv { name: String },
 }
-
-impl fmt::Display for SecretInputError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyEnvName => f.write_str("env var name must not be empty"),
-            Self::MissingEnv { name } => write!(f, "env var '{name}' is not set"),
-            Self::InvalidUnicodeEnv { name } => write!(f, "env var '{name}' is not valid unicode"),
-        }
-    }
-}
-
-impl std::error::Error for SecretInputError {}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum TelegramWebhookRegistrationMode {
@@ -141,7 +123,8 @@ impl std::str::FromStr for TelegramWebhookRegistrationMode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported registration mode '{value}' ; expected 'manual' or 'startup'")]
 struct TelegramWebhookRegistrationModeError {
     value: String,
 }
@@ -152,48 +135,56 @@ impl TelegramWebhookRegistrationModeError {
     }
 }
 
-impl fmt::Display for TelegramWebhookRegistrationModeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "unsupported registration mode '{}' ; expected 'manual' or 'startup'",
-            self.value
-        )
-    }
-}
-
-impl std::error::Error for TelegramWebhookRegistrationModeError {}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigValidationError {
+    #[error("{source_name}/{integration}: invalid integration id: {error}")]
     InvalidIntegrationId {
-        source: &'static str,
+        source_name: &'static str,
         integration: String,
+        #[source]
         error: SourceIntegrationIdError,
     },
+    #[error("{source_name}: {field} must not be zero")]
+    ZeroField {
+        source_name: &'static str,
+        field: &'static str,
+    },
+    #[error("{source_name}/{integration}: {field} must not be zero")]
+    ZeroIntegrationField {
+        source_name: &'static str,
+        integration: String,
+        field: &'static str,
+    },
+    #[error("{source_name}: invalid {field}: {error}")]
     InvalidField {
-        source: &'static str,
+        source_name: &'static str,
         field: &'static str,
-        error: Box<dyn std::error::Error + 'static>,
+        #[source]
+        error: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
+    #[error("{source_name}/{integration}: invalid {field}: {error}")]
     InvalidIntegrationField {
-        source: &'static str,
+        source_name: &'static str,
         integration: String,
         field: &'static str,
-        error: Box<dyn std::error::Error + 'static>,
+        #[source]
+        error: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
+    #[error("{source_name}/{integration}: missing {field}")]
     MissingIntegrationField {
-        source: &'static str,
+        source_name: &'static str,
         integration: String,
         field: &'static str,
     },
+    #[error("{source_name}: invalid {field}: {violation:?}")]
     InvalidSubjectToken {
-        source: &'static str,
+        source_name: &'static str,
         field: &'static str,
         violation: SubjectTokenViolation,
     },
+    #[error("{source_name}/{integration}: invalid {field}: {violation:?}")]
     InvalidIntegrationSubjectToken {
-        source: &'static str,
+        source_name: &'static str,
         integration: String,
         field: &'static str,
         violation: SubjectTokenViolation,
@@ -207,7 +198,7 @@ impl ConfigValidationError {
         error: SourceIntegrationIdError,
     ) -> Self {
         Self::InvalidIntegrationId {
-            source,
+            source_name: source,
             integration: integration.into(),
             error,
         }
@@ -215,10 +206,17 @@ impl ConfigValidationError {
 
     fn invalid<E>(source: &'static str, field: &'static str, error: E) -> Self
     where
-        E: std::error::Error + 'static,
+        E: std::error::Error + Send + Sync + 'static,
     {
+        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<ZeroDuration>() {
+            return Self::ZeroField {
+                source_name: source,
+                field,
+            };
+        }
+
         Self::InvalidField {
-            source,
+            source_name: source,
             field,
             error: Box::new(error),
         }
@@ -231,10 +229,18 @@ impl ConfigValidationError {
         error: E,
     ) -> Self
     where
-        E: std::error::Error + 'static,
+        E: std::error::Error + Send + Sync + 'static,
     {
+        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<ZeroDuration>() {
+            return Self::ZeroIntegrationField {
+                source_name: source,
+                integration: integration.as_str().to_string(),
+                field,
+            };
+        }
+
         Self::InvalidIntegrationField {
-            source,
+            source_name: source,
             integration: integration.as_str().to_string(),
             field,
             error: Box::new(error),
@@ -243,7 +249,7 @@ impl ConfigValidationError {
 
     fn missing_integration(source: &'static str, integration: &SourceIntegrationId, field: &'static str) -> Self {
         Self::MissingIntegrationField {
-            source,
+            source_name: source,
             integration: integration.as_str().to_string(),
             field,
         }
@@ -251,7 +257,7 @@ impl ConfigValidationError {
 
     fn invalid_subject_token(source: &'static str, field: &'static str, violation: SubjectTokenViolation) -> Self {
         Self::InvalidSubjectToken {
-            source,
+            source_name: source,
             field,
             violation,
         }
@@ -264,7 +270,7 @@ impl ConfigValidationError {
         violation: SubjectTokenViolation,
     ) -> Self {
         Self::InvalidIntegrationSubjectToken {
-            source,
+            source_name: source,
             integration: integration.as_str().to_string(),
             field,
             violation,
@@ -277,88 +283,36 @@ impl ConfigValidationError {
     }
 }
 
-impl fmt::Display for ConfigValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidIntegrationId {
-                source,
-                integration,
-                error,
-            } => write!(f, "{source}/{integration}: invalid integration id: {error}"),
-            Self::InvalidField { source, field, error } => {
-                if error.downcast_ref::<ZeroDuration>().is_some() {
-                    write!(f, "{source}: {field} must not be zero")
-                } else {
-                    write!(f, "{source}: invalid {field}: {error}")
-                }
-            }
-            Self::InvalidIntegrationField {
-                source,
-                integration,
-                field,
-                error,
-            } => {
-                if error.downcast_ref::<ZeroDuration>().is_some() {
-                    write!(f, "{source}/{integration}: {field} must not be zero")
-                } else {
-                    write!(f, "{source}/{integration}: invalid {field}: {error}")
-                }
-            }
-            Self::MissingIntegrationField {
-                source,
-                integration,
-                field,
-            } => write!(f, "{source}/{integration}: missing {field}"),
-            Self::InvalidSubjectToken {
-                source,
-                field,
-                violation,
-            } => write!(f, "{source}: invalid {field}: {violation:?}"),
-            Self::InvalidIntegrationSubjectToken {
-                source,
-                integration,
-                field,
-                violation,
-            } => write!(f, "{source}/{integration}: invalid {field}: {violation:?}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigValidationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidIntegrationId { error, .. } => Some(error),
-            Self::InvalidField { error, .. } => Some(error.as_ref()),
-            Self::InvalidIntegrationField { error, .. } => Some(error.as_ref()),
-            Self::MissingIntegrationField { .. } => None,
-            Self::InvalidSubjectToken { .. } => None,
-            Self::InvalidIntegrationSubjectToken { .. } => None,
-        }
-    }
-}
-
 #[derive(Debug)]
-pub enum ConfigError {
-    Load(confique::Error),
-    Validation(Vec<ConfigValidationError>),
-}
+pub(crate) struct ValidationErrors(Vec<ConfigValidationError>);
 
-impl fmt::Display for ConfigError {
+impl fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Load(e) => write!(f, "failed to load config: {e}"),
-            Self::Validation(errors) => {
-                writeln!(f, "config validation errors:")?;
-                for e in errors {
-                    writeln!(f, "  - {e}")?;
-                }
-                Ok(())
-            }
+        writeln!(f, "config validation errors:")?;
+        for error in &self.0 {
+            writeln!(f, "  - {error}")?;
         }
+        Ok(())
     }
 }
 
-impl std::error::Error for ConfigError {}
+impl std::ops::Deref for ValidationErrors {
+    type Target = [ConfigValidationError];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::error::Error for ValidationErrors {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("failed to load config: {0}")]
+    Load(#[source] confique::Error),
+    #[error(transparent)]
+    Validation(ValidationErrors),
+}
 
 #[derive(Config)]
 struct GatewayConfig {
@@ -672,7 +626,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let sentry = resolve_sentry_integrations(cfg.sources.sentry, &mut errors);
 
     if !errors.is_empty() {
-        return Err(ConfigError::Validation(errors));
+        return Err(ConfigError::Validation(ValidationErrors(errors)));
     }
 
     Ok(ResolvedConfig {
@@ -1878,7 +1832,6 @@ fn resolve_integration_source_status(
 mod tests {
     use super::*;
     use std::error::Error;
-    use std::fmt;
     use std::io::Write;
 
     fn write_toml(content: &str) -> tempfile::NamedTempFile {
@@ -2011,16 +1964,9 @@ client_secret = "{secret}"
         ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
+    #[error("dummy config error")]
     struct DummyConfigError;
-
-    impl fmt::Display for DummyConfigError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("dummy config error")
-        }
-    }
-
-    impl Error for DummyConfigError {}
 
     fn nats_toml_with_creds(creds: &str) -> String {
         format!(
@@ -3260,14 +3206,14 @@ token = "file-token"
 
     #[test]
     fn config_error_display_validation() {
-        let err = ConfigError::Validation(vec![
+        let err = ConfigError::Validation(ValidationErrors(vec![
             ConfigValidationError::invalid("discord", "stream_max_age_secs", ZeroDuration),
             ConfigValidationError::invalid_subject_token(
                 "discord",
                 "subject_prefix",
                 SubjectTokenViolation::InvalidCharacter('.'),
             ),
-        ]);
+        ]));
         let display = format!("{err}");
         assert!(display.contains("config validation errors:"));
         assert!(display.contains("discord: stream_max_age_secs must not be zero"));
@@ -3334,11 +3280,11 @@ status = "maybe"
 
     #[test]
     fn config_error_is_std_error() {
-        let err = ConfigError::Validation(vec![ConfigValidationError::invalid(
+        let err = ConfigError::Validation(ValidationErrors(vec![ConfigValidationError::invalid(
             "discord",
             "stream_max_age_secs",
             ZeroDuration,
-        )]);
+        )]));
         let _: &dyn std::error::Error = &err;
     }
 

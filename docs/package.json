@@ -10,7 +10,9 @@
   },
   "devDependencies": {
     "@types/node": "25.9.1",
+    "gray-matter": "4.0.3",
     "vitepress": "1.6.4",
-    "vue": "3.5.33"
+    "vue": "3.5.33",
+    "zod": "4.4.2"
   }
 }

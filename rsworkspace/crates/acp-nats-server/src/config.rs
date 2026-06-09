@@ -25,34 +25,16 @@ pub struct ServerConfig {
     pub port: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ServerConfigError {
-    InvalidAcpPrefix(AcpPrefixError),
+    #[error("{0}")]
+    InvalidAcpPrefix(#[source] AcpPrefixError),
+    #[error("invalid value for {key}: {value:?} ({message})")]
     InvalidEnvVar {
         key: &'static str,
         value: String,
         message: String,
     },
-}
-
-impl std::fmt::Display for ServerConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidAcpPrefix(error) => write!(f, "{error}"),
-            Self::InvalidEnvVar { key, value, message } => {
-                write!(f, "invalid value for {key}: {value:?} ({message})")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ServerConfigError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidAcpPrefix(error) => Some(error),
-            Self::InvalidEnvVar { .. } => None,
-        }
-    }
 }
 
 impl From<AcpPrefixError> for ServerConfigError {

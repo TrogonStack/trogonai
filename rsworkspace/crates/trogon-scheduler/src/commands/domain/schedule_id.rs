@@ -6,14 +6,18 @@ const MAX_LENGTH: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleId(String);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ScheduleIdViolation {
+    #[error("must not be empty")]
     Empty,
+    #[error("must be at most {max} characters, got {actual}")]
     TooLong { max: usize, actual: usize },
+    #[error("must not have leading or trailing whitespace")]
     SurroundingWhitespace,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("schedule id '{raw}' is invalid: {violation}")]
 pub struct ScheduleIdError {
     raw: String,
     violation: ScheduleIdViolation,
@@ -76,26 +80,6 @@ impl fmt::Display for ScheduleId {
         f.write_str(self.as_str())
     }
 }
-
-impl fmt::Display for ScheduleIdViolation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("must not be empty"),
-            Self::TooLong { max, actual } => {
-                write!(f, "must be at most {max} characters, got {actual}")
-            }
-            Self::SurroundingWhitespace => f.write_str("must not have leading or trailing whitespace"),
-        }
-    }
-}
-
-impl fmt::Display for ScheduleIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "schedule id '{}' is invalid: {}", self.raw, self.violation)
-    }
-}
-
-impl std::error::Error for ScheduleIdError {}
 
 #[cfg(test)]
 mod tests {

@@ -79,16 +79,9 @@ impl AsRef<str> for HeaderValue {
 }
 
 /// Error returned when constructing an invalid [`HeaderValue`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("event header value cannot contain '\\r', '\\n', or '\\0'")]
 pub struct HeaderValueError;
-
-impl std::fmt::Display for HeaderValueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("event header value cannot contain '\\r', '\\n', or '\\0'")
-    }
-}
-
-impl std::error::Error for HeaderValueError {}
 
 impl From<Infallible> for HeaderValueError {
     fn from(value: Infallible) -> Self {

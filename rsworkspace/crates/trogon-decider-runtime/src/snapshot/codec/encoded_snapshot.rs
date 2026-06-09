@@ -95,16 +95,9 @@ mod tests {
         id: String,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
+    #[error("missing snapshot type")]
     struct TestSnapshotTypeError;
-
-    impl std::fmt::Display for TestSnapshotTypeError {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("missing snapshot type")
-        }
-    }
-
-    impl std::error::Error for TestSnapshotTypeError {}
 
     impl SnapshotPayloadEncode for TestPayload {
         type Error = serde_json::Error;

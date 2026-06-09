@@ -49,16 +49,9 @@ impl SentryResource {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported Sentry webhook resource")]
 struct InvalidSentryResource;
-
-impl fmt::Display for InvalidSentryResource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("unsupported Sentry webhook resource")
-    }
-}
-
-impl std::error::Error for InvalidSentryResource {}
 
 impl FromStr for SentryResource {
     type Err = InvalidSentryResource;

@@ -17,6 +17,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers-modules",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -38,6 +39,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers-modules",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -51,6 +53,7 @@ version = "0.1.0"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
+ "anyhow",
  "async-compat",
  "async-nats",
  "axum 0.8.9",
@@ -62,6 +65,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers-modules",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "tower",
@@ -80,6 +84,7 @@ dependencies = [
  "acp-nats",
  "acp-nats-agent",
  "agent-client-protocol",
+ "anyhow",
  "async-compat",
  "async-nats",
  "bytes",
@@ -287,9 +292,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.98"
+version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
+checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "ar_archive_writer"
@@ -3031,6 +3036,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "trogon-nats",
@@ -3041,11 +3047,13 @@ dependencies = [
 name = "mcp-nats-server"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "axum 0.8.9",
  "clap",
  "mcp-nats",
  "rmcp",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tower",
  "tracing",
@@ -3059,11 +3067,13 @@ dependencies = [
 name = "mcp-nats-stdio"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "clap",
  "mcp-nats",
  "rmcp",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "trogon-std",
@@ -5734,6 +5744,7 @@ dependencies = [
 name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
+ "thiserror 2.0.18",
  "trybuild",
 ]
 
@@ -5747,6 +5758,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "trogon-decider-runtime",
@@ -5763,6 +5775,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "trogon-decider",
@@ -5808,6 +5821,7 @@ dependencies = [
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-nats",
  "axum 0.8.9",
  "base64 0.22.1",
@@ -5826,6 +5840,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "testcontainers-modules",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-tungstenite",
@@ -5953,6 +5968,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers-modules",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
@@ -6144,6 +6160,7 @@ dependencies = [
  "cron",
  "proptest",
  "rrule",
+ "thiserror 2.0.18",
  "trogon-decider",
  "trogon-decider-runtime",
  "trogon-nats",
@@ -6213,6 +6230,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tower",
  "tower-http",
@@ -6225,10 +6243,12 @@ dependencies = [
 name = "trogon-telemetry"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "thiserror 2.0.18",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -6414,6 +6434,7 @@ dependencies = [
  "buffa-types",
  "chrono",
  "serde",
+ "thiserror 2.0.18",
  "trogon-decider-runtime",
 ]
 
