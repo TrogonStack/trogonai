@@ -1128,7 +1128,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 session_mode,
                 permission_rules,
                 audit_log: Vec::new(),
-                permission_rules_text: None,
+                permission_rules_text: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("permissionRules"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
                 spawn_depth: 0,
             },
         );
