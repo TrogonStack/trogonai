@@ -335,6 +335,7 @@ where
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
+#[cfg(any(test, not(coverage)))]
 pub(crate) async fn read_subject_stream<S>(
     stream: &S,
     stream_id: &str,

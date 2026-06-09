@@ -282,6 +282,16 @@ impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
 }
 
 #[cfg(not(coverage))]
+impl JetStreamSubjectPurger for jetstream::stream::Stream {
+    type PurgeResponse = stream::PurgeResponse;
+    type Error = stream::PurgeError;
+
+    async fn purge_subject_messages(&self, subject: &str) -> Result<Self::PurgeResponse, Self::Error> {
+        self.purge().filter(subject).await
+    }
+}
+
+#[cfg(not(coverage))]
 impl JetStreamGetStreamInfo for jetstream::stream::Stream {
     async fn get_info(&self) -> Result<stream::Info, stream::InfoError> {
         jetstream::stream::Stream::get_info(self).await
@@ -334,5 +344,35 @@ impl JetStreamConsumer for jetstream::consumer::Consumer<pull::Config> {
 
     async fn messages(&self) -> Result<Self::Messages, Self::StreamError> {
         self.messages().await
+    }
+}
+
+pub trait JetStreamSubjectPurger: Send + Sync + Clone + 'static {
+    type PurgeResponse: PurgeOutcome + Send;
+    type Error: Error + Send + Sync;
+
+    fn purge_subject_messages(
+        &self,
+        subject: &str,
+    ) -> impl Future<Output = Result<Self::PurgeResponse, Self::Error>> + Send;
+}
+
+/// Whether the server acknowledged a purge as successful.
+///
+/// A JetStream purge can complete without a transport error while still
+/// reporting `success: false`; callers must treat that as a failed purge.
+pub trait PurgeOutcome {
+    fn is_success(&self) -> bool;
+}
+
+impl PurgeOutcome for () {
+    fn is_success(&self) -> bool {
+        true
+    }
+}
+
+impl PurgeOutcome for stream::PurgeResponse {
+    fn is_success(&self) -> bool {
+        self.success
     }
 }

@@ -396,6 +396,116 @@ impl ::buffa::ViewReborrow for ScheduleView<'static> {
         this
     }
 }
+/** Self-contained, `'static` owned view of a `Schedule` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`ScheduleView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`ScheduleView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct ScheduleOwnedView(::buffa::OwnedView<ScheduleView<'static>>);
+impl ScheduleOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(ScheduleOwnedView(::buffa::OwnedView::decode(bytes)?))
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ScheduleOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::Schedule,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ScheduleOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`ScheduleView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &ScheduleView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::Schedule {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Oneof `kind`.
+    #[must_use]
+    pub fn kind(
+        &self,
+    ) -> ::core::option::Option<
+        &super::super::__buffa::view::oneof::schedule::Kind<'_>,
+    > {
+        self.0.reborrow().kind.as_ref()
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<ScheduleView<'static>>>
+for ScheduleOwnedView {
+    fn from(inner: ::buffa::OwnedView<ScheduleView<'static>>) -> Self {
+        ScheduleOwnedView(inner)
+    }
+}
+impl ::core::convert::From<ScheduleOwnedView>
+for ::buffa::OwnedView<ScheduleView<'static>> {
+    fn from(wrapper: ScheduleOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<ScheduleView<'static>>>
+for ScheduleOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<ScheduleView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::Schedule {
+    type View<'a> = ScheduleView<'a>;
+    type ViewHandle = ScheduleOwnedView;
+}
+impl ::serde::Serialize for ScheduleOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
 pub mod schedule {
     #[allow(unused_imports)]
     use super::*;
@@ -601,6 +711,113 @@ pub mod schedule {
             this
         }
     }
+    /** Self-contained, `'static` owned view of a `At` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`AtView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`AtView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+    #[derive(Clone, Debug)]
+    pub struct AtOwnedView(::buffa::OwnedView<AtView<'static>>);
+    impl AtOwnedView {
+        /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+        ///
+        /// The view borrows directly from the buffer's data; the buffer is
+        /// retained inside the returned handle.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+        /// protobuf data.
+        pub fn decode(
+            bytes: ::buffa::bytes::Bytes,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(AtOwnedView(::buffa::OwnedView::decode(bytes)?))
+        }
+        /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+        /// max message size).
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+        /// exceeds the configured limits.
+        pub fn decode_with_options(
+            bytes: ::buffa::bytes::Bytes,
+            opts: &::buffa::DecodeOptions,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                AtOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+            )
+        }
+        /// Build from an owned message via an encode → decode round-trip.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// somehow invalid (should not happen for well-formed messages).
+        pub fn from_owned(
+            msg: &super::super::super::schedule::At,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(AtOwnedView(::buffa::OwnedView::from_owned(msg)?))
+        }
+        /// Borrow the full [`AtView`] with its lifetime tied to `&self`.
+        #[must_use]
+        pub fn view(&self) -> &AtView<'_> {
+            self.0.reborrow()
+        }
+        /// Convert to the owned message type.
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::At {
+            self.0.to_owned_message()
+        }
+        /// The underlying bytes buffer.
+        #[must_use]
+        pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+            self.0.bytes()
+        }
+        /// Consume the handle, returning the underlying bytes buffer.
+        #[must_use]
+        pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+            self.0.into_bytes()
+        }
+        /// Single desired fire instant.
+        ///
+        /// Field 1: `at`
+        #[must_use]
+        pub fn at(
+            &self,
+        ) -> &::buffa::MessageFieldView<
+            ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+        > {
+            &self.0.reborrow().at
+        }
+    }
+    impl ::core::convert::From<::buffa::OwnedView<AtView<'static>>> for AtOwnedView {
+        fn from(inner: ::buffa::OwnedView<AtView<'static>>) -> Self {
+            AtOwnedView(inner)
+        }
+    }
+    impl ::core::convert::From<AtOwnedView> for ::buffa::OwnedView<AtView<'static>> {
+        fn from(wrapper: AtOwnedView) -> Self {
+            wrapper.0
+        }
+    }
+    impl ::core::convert::AsRef<::buffa::OwnedView<AtView<'static>>> for AtOwnedView {
+        fn as_ref(&self) -> &::buffa::OwnedView<AtView<'static>> {
+            &self.0
+        }
+    }
+    impl ::buffa::HasMessageView for super::super::super::schedule::At {
+        type View<'a> = AtView<'a>;
+        type ViewHandle = AtOwnedView;
+    }
+    impl ::serde::Serialize for AtOwnedView {
+        fn serialize<__S: ::serde::Serializer>(
+            &self,
+            __s: __S,
+        ) -> ::core::result::Result<__S::Ok, __S::Error> {
+            ::serde::Serialize::serialize(&self.0, __s)
+        }
+    }
     #[derive(Clone, Debug, Default)]
     pub struct EveryView<'a> {
         /// Must be greater than zero; zero cannot be represented as a NATS interval.
@@ -801,6 +1018,120 @@ pub mod schedule {
         type Reborrowed<'b> = EveryView<'b>;
         fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
             this
+        }
+    }
+    /** Self-contained, `'static` owned view of a `Every` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`EveryView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`EveryView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+    #[derive(Clone, Debug)]
+    pub struct EveryOwnedView(::buffa::OwnedView<EveryView<'static>>);
+    impl EveryOwnedView {
+        /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+        ///
+        /// The view borrows directly from the buffer's data; the buffer is
+        /// retained inside the returned handle.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+        /// protobuf data.
+        pub fn decode(
+            bytes: ::buffa::bytes::Bytes,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                EveryOwnedView(::buffa::OwnedView::decode(bytes)?),
+            )
+        }
+        /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+        /// max message size).
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+        /// exceeds the configured limits.
+        pub fn decode_with_options(
+            bytes: ::buffa::bytes::Bytes,
+            opts: &::buffa::DecodeOptions,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                EveryOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+            )
+        }
+        /// Build from an owned message via an encode → decode round-trip.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// somehow invalid (should not happen for well-formed messages).
+        pub fn from_owned(
+            msg: &super::super::super::schedule::Every,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                EveryOwnedView(::buffa::OwnedView::from_owned(msg)?),
+            )
+        }
+        /// Borrow the full [`EveryView`] with its lifetime tied to `&self`.
+        #[must_use]
+        pub fn view(&self) -> &EveryView<'_> {
+            self.0.reborrow()
+        }
+        /// Convert to the owned message type.
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::Every {
+            self.0.to_owned_message()
+        }
+        /// The underlying bytes buffer.
+        #[must_use]
+        pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+            self.0.bytes()
+        }
+        /// Consume the handle, returning the underlying bytes buffer.
+        #[must_use]
+        pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+            self.0.into_bytes()
+        }
+        /// Must be greater than zero; zero cannot be represented as a NATS interval.
+        ///
+        /// Field 1: `every`
+        #[must_use]
+        pub fn every(
+            &self,
+        ) -> &::buffa::MessageFieldView<
+            ::buffa_types::google::protobuf::__buffa::view::DurationView<'_>,
+        > {
+            &self.0.reborrow().every
+        }
+    }
+    impl ::core::convert::From<::buffa::OwnedView<EveryView<'static>>>
+    for EveryOwnedView {
+        fn from(inner: ::buffa::OwnedView<EveryView<'static>>) -> Self {
+            EveryOwnedView(inner)
+        }
+    }
+    impl ::core::convert::From<EveryOwnedView>
+    for ::buffa::OwnedView<EveryView<'static>> {
+        fn from(wrapper: EveryOwnedView) -> Self {
+            wrapper.0
+        }
+    }
+    impl ::core::convert::AsRef<::buffa::OwnedView<EveryView<'static>>>
+    for EveryOwnedView {
+        fn as_ref(&self) -> &::buffa::OwnedView<EveryView<'static>> {
+            &self.0
+        }
+    }
+    impl ::buffa::HasMessageView for super::super::super::schedule::Every {
+        type View<'a> = EveryView<'a>;
+        type ViewHandle = EveryOwnedView;
+    }
+    impl ::serde::Serialize for EveryOwnedView {
+        fn serialize<__S: ::serde::Serializer>(
+            &self,
+            __s: __S,
+        ) -> ::core::result::Result<__S::Ok, __S::Error> {
+            ::serde::Serialize::serialize(&self.0, __s)
         }
     }
     #[derive(Clone, Debug, Default)]
@@ -1032,6 +1363,125 @@ pub mod schedule {
         type Reborrowed<'b> = CronView<'b>;
         fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
             this
+        }
+    }
+    /** Self-contained, `'static` owned view of a `Cron` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`CronView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CronView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+    #[derive(Clone, Debug)]
+    pub struct CronOwnedView(::buffa::OwnedView<CronView<'static>>);
+    impl CronOwnedView {
+        /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+        ///
+        /// The view borrows directly from the buffer's data; the buffer is
+        /// retained inside the returned handle.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+        /// protobuf data.
+        pub fn decode(
+            bytes: ::buffa::bytes::Bytes,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(CronOwnedView(::buffa::OwnedView::decode(bytes)?))
+        }
+        /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+        /// max message size).
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+        /// exceeds the configured limits.
+        pub fn decode_with_options(
+            bytes: ::buffa::bytes::Bytes,
+            opts: &::buffa::DecodeOptions,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                CronOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+            )
+        }
+        /// Build from an owned message via an encode → decode round-trip.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// somehow invalid (should not happen for well-formed messages).
+        pub fn from_owned(
+            msg: &super::super::super::schedule::Cron,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                CronOwnedView(::buffa::OwnedView::from_owned(msg)?),
+            )
+        }
+        /// Borrow the full [`CronView`] with its lifetime tied to `&self`.
+        #[must_use]
+        pub fn view(&self) -> &CronView<'_> {
+            self.0.reborrow()
+        }
+        /// Convert to the owned message type.
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::Cron {
+            self.0.to_owned_message()
+        }
+        /// The underlying bytes buffer.
+        #[must_use]
+        pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+            self.0.bytes()
+        }
+        /// Consume the handle, returning the underlying bytes buffer.
+        #[must_use]
+        pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+            self.0.into_bytes()
+        }
+        /// NATS-compatible cron expression.
+        ///
+        /// Field 1: `expr`
+        #[must_use]
+        pub fn expr(&self) -> &'_ str {
+            self.0.reborrow().expr
+        }
+        /// Optional NATS schedule timezone header value; empty omits the header.
+        ///
+        /// Field 2: `timezone`
+        #[must_use]
+        pub fn timezone(
+            &self,
+        ) -> &::buffa::MessageFieldView<
+            super::super::super::super::super::super::super::google::r#type::__buffa::view::TimeZoneView<
+                '_,
+            >,
+        > {
+            &self.0.reborrow().timezone
+        }
+    }
+    impl ::core::convert::From<::buffa::OwnedView<CronView<'static>>> for CronOwnedView {
+        fn from(inner: ::buffa::OwnedView<CronView<'static>>) -> Self {
+            CronOwnedView(inner)
+        }
+    }
+    impl ::core::convert::From<CronOwnedView> for ::buffa::OwnedView<CronView<'static>> {
+        fn from(wrapper: CronOwnedView) -> Self {
+            wrapper.0
+        }
+    }
+    impl ::core::convert::AsRef<::buffa::OwnedView<CronView<'static>>>
+    for CronOwnedView {
+        fn as_ref(&self) -> &::buffa::OwnedView<CronView<'static>> {
+            &self.0
+        }
+    }
+    impl ::buffa::HasMessageView for super::super::super::schedule::Cron {
+        type View<'a> = CronView<'a>;
+        type ViewHandle = CronOwnedView;
+    }
+    impl ::serde::Serialize for CronOwnedView {
+        fn serialize<__S: ::serde::Serializer>(
+            &self,
+            __s: __S,
+        ) -> ::core::result::Result<__S::Ok, __S::Error> {
+            ::serde::Serialize::serialize(&self.0, __s)
         }
     }
     /// RRule stores a Trogon-owned recurrence rule.
@@ -1437,6 +1887,164 @@ pub mod schedule {
         type Reborrowed<'b> = RRuleView<'b>;
         fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
             this
+        }
+    }
+    /** Self-contained, `'static` owned view of a `RRule` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`RRuleView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`RRuleView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+    #[derive(Clone, Debug)]
+    pub struct RRuleOwnedView(::buffa::OwnedView<RRuleView<'static>>);
+    impl RRuleOwnedView {
+        /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+        ///
+        /// The view borrows directly from the buffer's data; the buffer is
+        /// retained inside the returned handle.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+        /// protobuf data.
+        pub fn decode(
+            bytes: ::buffa::bytes::Bytes,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                RRuleOwnedView(::buffa::OwnedView::decode(bytes)?),
+            )
+        }
+        /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+        /// max message size).
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+        /// exceeds the configured limits.
+        pub fn decode_with_options(
+            bytes: ::buffa::bytes::Bytes,
+            opts: &::buffa::DecodeOptions,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                RRuleOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+            )
+        }
+        /// Build from an owned message via an encode → decode round-trip.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+        /// somehow invalid (should not happen for well-formed messages).
+        pub fn from_owned(
+            msg: &super::super::super::schedule::RRule,
+        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+            ::core::result::Result::Ok(
+                RRuleOwnedView(::buffa::OwnedView::from_owned(msg)?),
+            )
+        }
+        /// Borrow the full [`RRuleView`] with its lifetime tied to `&self`.
+        #[must_use]
+        pub fn view(&self) -> &RRuleView<'_> {
+            self.0.reborrow()
+        }
+        /// Convert to the owned message type.
+        #[must_use]
+        pub fn to_owned_message(&self) -> super::super::super::schedule::RRule {
+            self.0.to_owned_message()
+        }
+        /// The underlying bytes buffer.
+        #[must_use]
+        pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+            self.0.bytes()
+        }
+        /// Consume the handle, returning the underlying bytes buffer.
+        #[must_use]
+        pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+            self.0.into_bytes()
+        }
+        /// Recurrence seed instant.
+        ///
+        /// Field 1: `dtstart`
+        #[must_use]
+        pub fn dtstart(
+            &self,
+        ) -> &::buffa::MessageFieldView<
+            ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+        > {
+            &self.0.reborrow().dtstart
+        }
+        /// Single RFC 5545 RRULE value; writers should omit the RRULE: prefix.
+        ///
+        /// Field 2: `rrule`
+        #[must_use]
+        pub fn rrule(&self) -> &'_ str {
+            self.0.reborrow().rrule
+        }
+        /// IANA timezone used for wall-clock expansion; empty means UTC.
+        ///
+        /// Field 3: `timezone`
+        #[must_use]
+        pub fn timezone(
+            &self,
+        ) -> &::buffa::MessageFieldView<
+            super::super::super::super::super::super::super::google::r#type::__buffa::view::TimeZoneView<
+                '_,
+            >,
+        > {
+            &self.0.reborrow().timezone
+        }
+        /// Instants that are included even when they are not generated by rrule.
+        ///
+        /// Field 4: `rdate`
+        #[must_use]
+        pub fn rdate(
+            &self,
+        ) -> &::buffa::RepeatedView<
+            '_,
+            ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+        > {
+            &self.0.reborrow().rdate
+        }
+        /// Instants that suppress matching generated or included occurrences.
+        ///
+        /// Field 5: `exdate`
+        #[must_use]
+        pub fn exdate(
+            &self,
+        ) -> &::buffa::RepeatedView<
+            '_,
+            ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+        > {
+            &self.0.reborrow().exdate
+        }
+    }
+    impl ::core::convert::From<::buffa::OwnedView<RRuleView<'static>>>
+    for RRuleOwnedView {
+        fn from(inner: ::buffa::OwnedView<RRuleView<'static>>) -> Self {
+            RRuleOwnedView(inner)
+        }
+    }
+    impl ::core::convert::From<RRuleOwnedView>
+    for ::buffa::OwnedView<RRuleView<'static>> {
+        fn from(wrapper: RRuleOwnedView) -> Self {
+            wrapper.0
+        }
+    }
+    impl ::core::convert::AsRef<::buffa::OwnedView<RRuleView<'static>>>
+    for RRuleOwnedView {
+        fn as_ref(&self) -> &::buffa::OwnedView<RRuleView<'static>> {
+            &self.0
+        }
+    }
+    impl ::buffa::HasMessageView for super::super::super::schedule::RRule {
+        type View<'a> = RRuleView<'a>;
+        type ViewHandle = RRuleOwnedView;
+    }
+    impl ::serde::Serialize for RRuleOwnedView {
+        fn serialize<__S: ::serde::Serializer>(
+            &self,
+            __s: __S,
+        ) -> ::core::result::Result<__S::Ok, __S::Error> {
+            ::serde::Serialize::serialize(&self.0, __s)
         }
     }
 }

@@ -1102,11 +1102,19 @@ pub mod schedule {
     #[doc(inline)]
     pub use super::__buffa::view::schedule::AtView;
     #[doc(inline)]
+    pub use super::__buffa::view::schedule::AtOwnedView;
+    #[doc(inline)]
     pub use super::__buffa::view::schedule::EveryView;
+    #[doc(inline)]
+    pub use super::__buffa::view::schedule::EveryOwnedView;
     #[doc(inline)]
     pub use super::__buffa::view::schedule::CronView;
     #[doc(inline)]
+    pub use super::__buffa::view::schedule::CronOwnedView;
+    #[doc(inline)]
     pub use super::__buffa::view::schedule::RRuleView;
+    #[doc(inline)]
+    pub use super::__buffa::view::schedule::RRuleOwnedView;
     #[doc(inline)]
     pub use super::__buffa::view::oneof::schedule::Kind as KindView;
 }
