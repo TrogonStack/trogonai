@@ -76,6 +76,7 @@ const VALID_MODES: &[&str] = &[
     "default",
     "acceptEdits",
     "plan",
+    "auto",
     "dontAsk",
     "bypassPermissions",
 ];
@@ -302,6 +303,8 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     /// NATS/ACP config for this runner (prefix + NATS URL). Used by the
     /// spawn_agent interceptor to build a Bridge for sub-agent sessions.
     runner_config: Option<acp_nats::Config>,
+    /// `auto`-mode LLM safety classifier for side-effecting tool calls.
+    classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
     /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
@@ -496,6 +499,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             permission_nats: None,
             permission_prefix: None,
             runner_config: None,
+            classifier: None,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -545,6 +549,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
             runner_config: self.runner_config,
+            classifier: self.classifier,
             session_locks: self.session_locks,
         }
     }
@@ -624,6 +629,15 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     /// Bridge for sub-agent sessions. Without this, `spawn_agent` returns an error.
     pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
         self.runner_config = Some(config);
+        self
+    }
+
+    /// Set the `auto`-mode LLM safety classifier.
+    pub fn with_safety_classifier(
+        mut self,
+        classifier: Arc<dyn trogon_runner_tools::SafetyClassifier>,
+    ) -> Self {
+        self.classifier = Some(classifier);
         self
     }
 
@@ -823,6 +837,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 SessionMode::new("default", "Default"),
                 SessionMode::new("acceptEdits", "Accept Edits"),
                 SessionMode::new("plan", "Plan"),
+                SessionMode::new("auto", "Auto"),
                 SessionMode::new("dontAsk", "Don't Ask"),
                 SessionMode::new("bypassPermissions", "Bypass Permissions"),
             ],
@@ -1637,6 +1652,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 &wire,
                 token_budget,
                 threshold_pct,
+                false,
                 "xai",
                 &resolved_model,
                 compactor_model.as_deref(),
@@ -2206,6 +2222,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             rules.merge(PermissionRules::parse(extra));
                         }
                         let allowed_tools = self.permission_store.allowed_tools(&session_id);
+                        let mut extras = trogon_runner_tools::PermissionExtras::default();
+                        extras.classifier = self.classifier.clone();
                         check_tool_permission(
                             &session_mode,
                             &session_id,
@@ -2217,6 +2235,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             &name,
                             &tool_input,
                             audit_buf.clone(),
+                            extras,
                         )
                         .await
                     };
@@ -2816,6 +2835,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 &wire,
                 token_budget,
                 threshold_pct,
+                true,
                 "xai",
                 &resolved_model,
                 compactor_model.as_deref(),
@@ -2934,7 +2954,7 @@ async fn compact_or_trim_xai_history(
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
         if let Ok(Some(compacted)) =
-            maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", model, compactor_model)
+            maybe_compact(nats, &wire, token_budget, threshold_pct, false, "xai", model, compactor_model)
                 .await
         {
             *history = xai_history_from_wire(compacted);
@@ -8764,6 +8784,69 @@ mod tests {
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].outcome, AuditOutcome::Denied,
             "deny rule from permission_rules_text must block the tool");
+    }
+
+    struct MockAutoClassifier(trogon_runner_tools::ClassifierVerdict);
+    impl trogon_runner_tools::SafetyClassifier for MockAutoClassifier {
+        fn classify<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = trogon_runner_tools::ClassifierVerdict> + Send + 'a>,
+        > {
+            let v = self.0;
+            Box::pin(async move { v })
+        }
+    }
+
+    /// PERM-1: `auto` mode must route side-effecting tools through the wired classifier.
+    #[tokio::test]
+    async fn prompt_auto_mode_uses_safety_classifier() {
+        let (perm_tx, _perm_rx) =
+            tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+        let agent = make_agent()
+            .with_md_loader(MockTrogonMdLoader(None))
+            .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new())
+            .with_safety_classifier(Arc::new(MockAutoClassifier(
+                trogon_runner_tools::ClassifierVerdict::Deny,
+            )));
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+        agent
+            .set_session_mode(SetSessionModeRequest::new(sid.clone(), "auto"))
+            .await
+            .unwrap();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId {
+                id: "r-auto".to_string(),
+            },
+            XaiEvent::FunctionCall {
+                call_id: "cid-auto".to_string(),
+                name: "write_file".to_string(),
+                arguments: r#"{"path":"a.rs","content":"x"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("write")]))
+            .await
+            .unwrap();
+
+        let audit = agent.test_session_audit_log(&sid).await;
+        assert_eq!(audit.len(), 1);
+        assert_eq!(
+            audit[0].outcome,
+            AuditOutcome::Denied,
+            "auto mode must deny side-effecting tools when the classifier returns Deny"
+        );
     }
 
     // ── spawn_agent interceptor ───────────────────────────────────────────────

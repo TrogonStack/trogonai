@@ -20,8 +20,9 @@ pub mod wasm_bash_tool;
 pub mod worktree;
 
 pub use compaction::{
-    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold, CompactError,
-    COMPACT_SUBJECT, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET,
+    compaction_requested, compaction_settings_from_env, estimate_tokens, maybe_compact,
+    over_threshold, CompactError, COMPACT_SUBJECT, DEFAULT_COMPACT_THRESHOLD_PCT,
+    DEFAULT_TOKEN_BUDGET,
 };
 pub use egress::EgressPolicy;
 pub use elicitation::{
@@ -35,7 +36,7 @@ pub use permission::{
     RulesPermissionChecker, SafetyClassifier,
 };
 pub use hooks::{run_event_hooks, HookMatcher, HookOutcome, HooksConfig};
-pub use safety_classifier::LlmSafetyClassifier;
+pub use safety_classifier::{build_auto_safety_classifier, LlmSafetyClassifier};
 pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{
