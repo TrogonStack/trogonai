@@ -3,6 +3,36 @@ use serde_json::Value;
 use crate::ToolContext;
 use crate::fs::{resolve_path, unique_tmp_path};
 
+fn apply_str_replace(
+    content: &str,
+    old_str: &str,
+    new_str: &str,
+    replace_all: bool,
+) -> Result<String, String> {
+    let count = content.matches(old_str).count();
+    match count {
+        0 => Err("'old_str' not found in file (0 occurrences)".to_string()),
+        1 => Ok(content.replacen(old_str, new_str, 1)),
+        _ if replace_all => Ok(content.replace(old_str, new_str)),
+        n => Err(format!(
+            "'old_str' is not unique — found {n} occurrences. \
+             Add more surrounding context to make it unique, or set replace_all to true."
+        )),
+    }
+}
+
+async fn write_file_atomically(full_path: &std::path::Path, content: &str) -> Result<(), String> {
+    let tmp = unique_tmp_path(full_path);
+    if let Err(e) = tokio::fs::write(&tmp, content).await {
+        return Err(format!("Error writing file: {e}"));
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, full_path).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!("Error saving file: {e}"));
+    }
+    Ok(())
+}
+
 pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
     let path = match input.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
@@ -16,6 +46,10 @@ pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
         Some(s) => s,
         None => return "Error: missing required parameter 'new_str'".to_string(),
     };
+    let replace_all = input
+        .get("replace_all")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
@@ -27,27 +61,84 @@ pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
         Err(e) => return format!("Error reading {path}: {e}"),
     };
 
-    let count = content.matches(old_str).count();
-    match count {
-        0 => return "Error: 'old_str' not found in file (0 occurrences)".to_string(),
-        1 => {}
-        n => {
-            return format!(
-                "Error: 'old_str' is not unique — found {n} occurrences. \
-                 Add more surrounding context to make it unique."
-            )
-        }
+    let updated = match apply_str_replace(&content, old_str, new_str, replace_all) {
+        Ok(u) => u,
+        Err(e) => return format!("Error: {e}"),
+    };
+
+    if let Err(e) = write_file_atomically(&full_path, &updated).await {
+        return e;
     }
 
-    let updated = content.replacen(old_str, new_str, 1);
+    diff_context(
+        &content.lines().collect::<Vec<_>>(),
+        &updated.lines().collect::<Vec<_>>(),
+        3,
+    )
+}
 
-    let tmp = unique_tmp_path(&full_path);
-    if let Err(e) = tokio::fs::write(&tmp, &updated).await {
-        return format!("Error writing file: {e}");
+pub async fn multi_edit(ctx: &ToolContext, input: &Value) -> String {
+    let path = match input.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return "Error: missing required parameter 'path'".to_string(),
+    };
+    let edits = match input.get("edits").and_then(|v| v.as_array()) {
+        Some(e) if !e.is_empty() => e,
+        Some(_) => return "Error: 'edits' must be a non-empty array".to_string(),
+        None => return "Error: missing required parameter 'edits'".to_string(),
+    };
+
+    let full_path = match resolve_path(&ctx.cwd, path) {
+        Ok(p) => p,
+        Err(e) => return format!("Error: {e}"),
+    };
+
+    let content = match tokio::fs::read_to_string(&full_path).await {
+        Ok(c) => c,
+        Err(e) => return format!("Error reading {path}: {e}"),
+    };
+
+    let mut updated = content.clone();
+    for (i, edit) in edits.iter().enumerate() {
+        let old_str = match edit.get("old_str").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => {
+                return format!(
+                    "Error: edit {} of {} missing required parameter 'old_str'",
+                    i + 1,
+                    edits.len()
+                )
+            }
+        };
+        let new_str = match edit.get("new_str").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => {
+                return format!(
+                    "Error: edit {} of {} missing required parameter 'new_str'",
+                    i + 1,
+                    edits.len()
+                )
+            }
+        };
+        let replace_all = edit
+            .get("replace_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        updated = match apply_str_replace(&updated, old_str, new_str, replace_all) {
+            Ok(u) => u,
+            Err(e) => {
+                return format!(
+                    "Error: edit {} of {} failed — {e}. No changes were written.",
+                    i + 1,
+                    edits.len()
+                )
+            }
+        };
     }
-    if let Err(e) = tokio::fs::rename(&tmp, &full_path).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return format!("Error saving file: {e}");
+
+    if let Err(e) = write_file_atomically(&full_path, &updated).await {
+        return e;
     }
 
     diff_context(
@@ -193,6 +284,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn str_replace_replace_all_replaces_every_occurrence() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.rs"), "foo\nfoo\nfoo\n")
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = str_replace(
+            &ctx,
+            &json!({
+                "path": "f.rs",
+                "old_str": "foo",
+                "new_str": "bar",
+                "replace_all": true
+            }),
+        )
+        .await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "bar\nbar\nbar\n");
+    }
+
+    #[tokio::test]
     async fn str_replace_on_nonexistent_file_returns_error() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
@@ -250,5 +365,89 @@ mod tests {
         assert!(result.contains("+ b1") && result.contains("+ b2"), "got: {result}");
         assert!(!result.contains("- c"), "c must stay unchanged, got: {result}");
         assert!(!result.contains("- d"), "d must stay unchanged, got: {result}");
+    }
+
+    #[tokio::test]
+    async fn multi_edit_applies_edits_sequentially() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.rs"), "aaa bbb ccc\n")
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = multi_edit(
+            &ctx,
+            &json!({
+                "path": "f.rs",
+                "edits": [
+                    {"old_str": "aaa", "new_str": "AAA"},
+                    {"old_str": "ccc", "new_str": "CCC"}
+                ]
+            }),
+        )
+        .await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "AAA bbb CCC\n");
+    }
+
+    #[tokio::test]
+    async fn multi_edit_atomic_failure_leaves_file_unchanged() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.rs"), "keep me\n")
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = multi_edit(
+            &ctx,
+            &json!({
+                "path": "f.rs",
+                "edits": [
+                    {"old_str": "keep", "new_str": "changed"},
+                    {"old_str": "missing", "new_str": "x"}
+                ]
+            }),
+        )
+        .await;
+        assert!(result.contains("edit 2 of 2 failed"), "got: {result}");
+        assert!(result.contains("No changes were written"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "keep me\n");
+    }
+
+    #[tokio::test]
+    async fn multi_edit_supports_replace_all_per_edit() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.rs"), "x=1\nx=2\ny=3\n")
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = multi_edit(
+            &ctx,
+            &json!({
+                "path": "f.rs",
+                "edits": [
+                    {"old_str": "x", "new_str": "z", "replace_all": true},
+                    {"old_str": "y=3", "new_str": "y=9"}
+                ]
+            }),
+        )
+        .await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.rs"))
+            .await
+            .unwrap();
+        assert_eq!(content, "z=1\nz=2\ny=9\n");
+    }
+
+    #[tokio::test]
+    async fn multi_edit_rejects_empty_edits_array() {
+        let dir = TempDir::new().unwrap();
+        let ctx = ctx(&dir);
+        let result = multi_edit(&ctx, &json!({"path": "f.rs", "edits": []})).await;
+        assert!(result.contains("non-empty array"), "got: {result}");
     }
 }
