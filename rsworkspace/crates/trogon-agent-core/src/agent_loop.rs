@@ -945,11 +945,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 if name == "change_directory"
                     && let Some(new_path) = output.strip_prefix(CD_PREFIX)
                 {
-                    current_ctx = Arc::new(ToolContext {
-                        proxy_url: current_ctx.proxy_url.clone(),
-                        cwd: new_path.to_string(),
-                        http_client: current_ctx.http_client.clone(),
-                    });
+                    current_ctx = Arc::new(current_ctx.with_cwd(new_path));
                 }
 
                 let _ = event_tx

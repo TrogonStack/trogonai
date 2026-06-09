@@ -2467,19 +2467,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                                     format!("fetch_url: URL blocked by egress policy: {url}")
                                 } else {
-                                    let ctx = trogon_tools::ToolContext {
-                                        proxy_url: String::new(),
-                                        cwd: cwd.clone(),
-                                        http_client: self.tool_http_client.clone(),
-                                    };
+                                    let ctx = trogon_tools::ToolContext::new(
+                                        String::new(),
+                                        cwd.clone(),
+                                        self.tool_http_client.clone(),
+                                    );
                                     trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
                                 }
                             } else {
-                                let ctx = trogon_tools::ToolContext {
-                                    proxy_url: String::new(),
-                                    cwd: cwd.clone(),
-                                    http_client: self.tool_http_client.clone(),
-                                };
+                                let ctx = trogon_tools::ToolContext::new(
+                                    String::new(),
+                                    cwd.clone(),
+                                    self.tool_http_client.clone(),
+                                );
                                 trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
                             }
                         }

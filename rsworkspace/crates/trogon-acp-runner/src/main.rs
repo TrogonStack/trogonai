@@ -129,10 +129,13 @@ async fn main() -> anyhow::Result<()> {
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
+    let (web_search_api_key, web_search_endpoint) = trogon_tools::web_search_config_from_env();
     let tool_context = Arc::new(ToolContext {
         proxy_url: proxy_url.clone(),
         cwd,
         http_client: http_client.clone(),
+        web_search_api_key,
+        web_search_endpoint,
     });
 
     // `auto`-mode LLM safety classifier — uses the same proxy creds as the agent
