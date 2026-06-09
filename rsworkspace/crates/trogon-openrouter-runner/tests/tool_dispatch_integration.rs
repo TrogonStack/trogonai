@@ -1365,3 +1365,134 @@ async fn or_request_has_required_openai_compatible_fields() {
         })
         .await;
 }
+
+// ── web_search → OR wire ──────────────────────────────────────────────────────
+
+/// Portable `web_search` is registered in trogon-tools and dispatched via OR wire.
+#[tokio::test]
+async fn or_web_search_tool_def_present_and_dispatch_works() {
+    use httpmock::prelude::*;
+
+    let _guard = or_env_lock().lock().unwrap();
+    let search_server = MockServer::start();
+    search_server.mock(|when, then| {
+        when.method(POST).path("/search");
+        then.status(200).json_body(serde_json::json!({
+            "organic": [{
+                "title": "OR Search Hit",
+                "link": "https://example.com/or-hit",
+                "snippet": "openrouter web search result"
+            }]
+        }));
+    });
+    unsafe {
+        std::env::set_var("WEB_SEARCH_API_KEY", "test-key");
+        std::env::set_var("WEB_SEARCH_ENDPOINT", search_server.url("/search"));
+    }
+
+    assert!(
+        trogon_tools::all_tool_defs()
+            .iter()
+            .any(|d| d.name == "web_search"),
+        "web_search must be in all_tool_defs"
+    );
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "web_search",
+        r#"{"query":"trogon portable search"}"#,
+        "call_web_search_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let sid = resp.session_id;
+
+            let result = agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("search")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "expected end_turn: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+                .expect("second call must have tool-role message");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "web_search must be dispatched; got: {}",
+                tool_msg.content
+            );
+            assert!(
+                tool_msg.content.contains("OR Search Hit"),
+                "web_search result must contain mocked title; got: {}",
+                tool_msg.content
+            );
+        })
+        .await;
+
+    unsafe {
+        std::env::remove_var("WEB_SEARCH_API_KEY");
+        std::env::remove_var("WEB_SEARCH_ENDPOINT");
+    }
+}
+
+/// Missing search credentials must return a clear error through OR dispatch.
+#[tokio::test]
+async fn or_web_search_missing_config_returns_clear_error() {
+    let _guard = or_env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("WEB_SEARCH_API_KEY");
+        std::env::remove_var("SERPER_API_KEY");
+        std::env::remove_var("WEB_SEARCH_ENDPOINT");
+    }
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "web_search",
+        r#"{"query":"anything"}"#,
+        "call_web_search_missing",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let sid = resp.session_id;
+
+            let result = agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("search")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "expected end_turn: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2);
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+                .expect("second call must have tool result");
+            assert!(
+                tool_msg.content.contains("not configured"),
+                "missing-config web_search must return clear error; got: {}",
+                tool_msg.content
+            );
+        })
+        .await;
+}

@@ -479,6 +479,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }
     }
 
@@ -813,6 +815,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: inner.to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = list_dir(&inner_ctx, &json!({})).await;
         assert_eq!(result, "(empty directory)");
