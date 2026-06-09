@@ -14,6 +14,13 @@ pub enum OutputFormat {
 #[derive(Clone, Copy, Default)]
 pub struct PrintOptions {
     pub print_tools: bool,
+    /// When false, emit plain text instead of ANSI-rendered markdown.
+    pub use_ansi: bool,
+}
+
+/// Whether `--print` text mode should apply ANSI markdown rendering.
+pub fn should_use_ansi(force_plain: bool, stdout_is_tty: bool) -> bool {
+    !force_plain && stdout_is_tty
 }
 
 /// Exit code for `--print` mode (mirrors shell conventions in the plan).
@@ -102,7 +109,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
                         serde_json::json!({ "type": "result", "stop_reason": "error", "text": text })
                     );
                     let _ = stdout.flush();
-                    session.close().await;
                     return PrintExitCode::Error;
                 }
                 other => {
@@ -122,7 +128,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
             serde_json::json!({ "type": "result", "stop_reason": stop_reason, "text": text })
         );
         let _ = stdout.flush();
-        session.close().await;
         return PrintExitCode::from_stop_reason(&stop_reason);
     }
 
@@ -152,7 +157,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
                     break;
                 }
                 StreamEvent::Error(msg) => {
-                    session.close().await;
                     eprintln!("error: {msg}");
                     return PrintExitCode::Error;
                 }
@@ -162,7 +166,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
 
         let out = serde_json::json!({"text": text, "stop_reason": stop_reason});
         let _ = writeln!(stdout, "{out}");
-        session.close().await;
         return PrintExitCode::from_stop_reason(&stop_reason);
     }
 
@@ -191,7 +194,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
                 break;
             }
             StreamEvent::Error(msg) => {
-                session.close().await;
                 eprintln!("error: {msg}");
                 return PrintExitCode::Error;
             }
@@ -203,13 +205,16 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
         }
     }
 
-    let rendered = crate::markdown::render(&text);
+    let rendered = if options.use_ansi {
+        crate::markdown::render(&text)
+    } else {
+        crate::markdown::render_plain(&text)
+    };
     print!("{rendered}");
     if !rendered.ends_with('\n') {
         println!();
     }
     let _ = stdout.flush();
-    session.close().await;
     PrintExitCode::from_stop_reason(&stop_reason)
 }
 
@@ -446,8 +451,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn should_use_ansi_respects_tty_and_plain_flag() {
+        assert!(should_use_ansi(false, true));
+        assert!(!should_use_ansi(true, true));
+        assert!(!should_use_ansi(false, false));
+        assert!(!should_use_ansi(true, false));
+    }
+
     #[tokio::test]
-    async fn text_mode_closes_session_on_completion() {
+    async fn text_mode_plain_output_has_no_ansi_escapes() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![
+            StreamEvent::Text("hello **world**\n".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let options = PrintOptions {
+            print_tools: false,
+            use_ansi: false,
+        };
+        assert_eq!(
+            run(session, "test", OutputFormat::Text, options).await,
+            PrintExitCode::Success
+        );
+    }
+
+    #[tokio::test]
+    async fn text_mode_does_not_close_session() {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
@@ -458,26 +488,11 @@ mod tests {
             PrintOptions::default(),
         )
         .await;
-        assert_eq!(session.close_count(), 1);
+        assert_eq!(session.close_count(), 0);
     }
 
     #[tokio::test]
-    async fn text_mode_closes_session_on_error_stop_reason() {
-        use std::sync::Arc;
-        let session = Arc::new(MockSession::new("s"));
-        session.queue_turn(vec![StreamEvent::Done("error".into())]);
-        run(
-            Arc::clone(&session),
-            "test",
-            OutputFormat::Text,
-            PrintOptions::default(),
-        )
-        .await;
-        assert_eq!(session.close_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn json_mode_closes_session_on_completion() {
+    async fn json_mode_does_not_close_session() {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![
@@ -491,6 +506,6 @@ mod tests {
             PrintOptions::default(),
         )
         .await;
-        assert_eq!(session.close_count(), 1);
+        assert_eq!(session.close_count(), 0);
     }
 }

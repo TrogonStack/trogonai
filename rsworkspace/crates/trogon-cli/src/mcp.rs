@@ -92,10 +92,25 @@ impl McpManager {
     }
 
     pub fn load<F: Fs>(fs: &F) -> Self {
-        let config = match fs.read_to_string(&Self::path()) {
-            Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).unwrap_or_default(),
-            _ => McpConfig::default(),
-        };
+        Self::load_for_cli(fs, None, &[], false)
+    }
+
+    /// Load MCP config for a CLI run.
+    ///
+    /// When `strict` is false (default), merges the user config
+    /// (`~/.config/trogon/mcp.json`), an optional project `.mcp.json`, and any
+    /// `--mcp-config` paths. When `strict` is true, only the CLI paths are used.
+    pub fn load_for_cli<F: Fs>(fs: &F, cwd: Option<&Path>, cli_paths: &[PathBuf], strict: bool) -> Self {
+        let mut config = McpConfig::default();
+        if !strict {
+            merge_config(&mut config, read_config_file(fs, &Self::path()));
+            if let Some(cwd) = cwd {
+                merge_config(&mut config, read_config_file(fs, &cwd.join(".mcp.json")));
+            }
+        }
+        for path in expand_mcp_config_paths(cli_paths) {
+            merge_config(&mut config, read_config_file(fs, &path));
+        }
         Self {
             config,
             active: HashMap::new(),
@@ -547,6 +562,40 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn read_config_file<F: Fs>(fs: &F, path: &Path) -> McpConfig {
+    match fs.read_to_string(path) {
+        Ok(raw) if !raw.trim().is_empty() => match serde_json::from_str(&raw) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("warning: {} is invalid ({e}) — ignoring", path.display());
+                McpConfig::default()
+            }
+        },
+        _ => McpConfig::default(),
+    }
+}
+
+fn merge_config(into: &mut McpConfig, from: McpConfig) {
+    for server in from.servers {
+        into.servers.retain(|s| s.name != server.name);
+        into.servers.push(server);
+    }
+}
+
+/// Expand CLI `--mcp-config` values, supporting repeatable flags and comma lists.
+pub fn expand_mcp_config_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for path in paths {
+        for part in path.to_string_lossy().split(',') {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                out.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,5 +833,67 @@ mod tests {
         let loaded = McpManager::load(&fs);
         assert_eq!(loaded.configured_servers().len(), 1);
         assert_eq!(loaded.configured_servers()[0].name, "test");
+    }
+
+    #[test]
+    fn expand_mcp_config_paths_splits_commas() {
+        let paths = expand_mcp_config_paths(&[
+            PathBuf::from("a.json,b.json"),
+            PathBuf::from("c.json"),
+        ]);
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("a.json"),
+                PathBuf::from("b.json"),
+                PathBuf::from("c.json"),
+            ]
+        );
+    }
+
+    #[test]
+    fn load_for_cli_strict_uses_only_cli_paths() {
+        let fs = MockFs::new();
+        fs.write(
+            &McpManager::path(),
+            br#"{"servers":[{"name":"user","command":"echo","args":[]}]}"#,
+        )
+        .unwrap();
+        let cli_path = PathBuf::from("/tmp/cli-mcp.json");
+        fs.write(
+            &cli_path,
+            br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#,
+        )
+        .unwrap();
+
+        let mgr = McpManager::load_for_cli(&fs, None, &[cli_path], true);
+        assert_eq!(mgr.configured_servers().len(), 1);
+        assert_eq!(mgr.configured_servers()[0].name, "cli");
+    }
+
+    #[test]
+    fn load_for_cli_merges_user_project_and_cli_paths() {
+        let fs = MockFs::new();
+        fs.write(
+            &McpManager::path(),
+            br#"{"servers":[{"name":"user","command":"echo","args":[]}]}"#,
+        )
+        .unwrap();
+        let project = PathBuf::from("/tmp/project");
+        fs.write(
+            &project.join(".mcp.json"),
+            br#"{"servers":[{"name":"project","command":"ls","args":[]}]}"#,
+        )
+        .unwrap();
+        let cli_path = PathBuf::from("/tmp/cli-mcp.json");
+        fs.write(
+            &cli_path,
+            br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#,
+        )
+        .unwrap();
+
+        let mgr = McpManager::load_for_cli(&fs, Some(&project), &[cli_path], false);
+        let names: Vec<_> = mgr.configured_servers().iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["user", "project", "cli"]);
     }
 }
