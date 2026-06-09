@@ -86,6 +86,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
+    let proxy_url =
+        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
+    let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
+    let classifier_http = reqwest::Client::new();
+    let safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
+        classifier_http,
+        &proxy_url,
+        anthropic_base_url.as_deref(),
+        anthropic_token,
+    );
     let mut agent = OpenRouterAgent::new(
         notifier,
         cfg.default_model,
@@ -95,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     agent = agent.with_compactor(nats.clone());
     agent = agent.with_permissions(nats.clone(), acp_prefix.clone());
     agent = agent.with_runner_config(runner_config);
+    agent = agent.with_safety_classifier(safety_classifier);
 
     {
         let js = js_ctx;
