@@ -538,6 +538,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // Messages typed while a response was streaming. Auto-submitted in order
     // (one per turn) once the current turn finishes.
     let mut queued_prompts: VecDeque<String> = VecDeque::new();
+    let custom_commands = crate::commands::load_commands(&project_dir);
 
     loop {
         permission_coordinator.cancel_pending();
@@ -1133,6 +1134,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 }
                             }
                         }
+                    } else if let Some(dispatch) = custom_commands.dispatch(cmd, arg) {
+                        if dispatch.model.is_some() || !dispatch.allowed_tools.is_empty() {
+                            eprintln!(
+                                "note: per-command model/allowed-tools from {} are not applied yet",
+                                cmd
+                            );
+                        }
+                        queued_prompts.push_back(dispatch.prompt);
                     } else {
                         println!(
                             "{}",
@@ -1144,6 +1153,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 &session.current_model(),
                                 &cwd,
                                 &fs,
+                                Some(&custom_commands),
                             )
                         );
                     }
@@ -1878,12 +1888,13 @@ pub fn handle_slash_command<F: Fs>(
     session_model: &str,
     _cwd: &Path,
     fs: &F,
+    custom_commands: Option<&crate::commands::CustomCommandRegistry>,
 ) -> String {
     match cmd {
         "/help" => {
             let m = "\x1b[35m";
             let r = "\x1b[0m";
-            format!("\
+            let mut help = format!("\
 Commands:
   {m}/help{r}               show this help
   {m}/doctor{r}             run health checks (same as `trogon doctor`)
@@ -1919,7 +1930,11 @@ Commands:
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
-Ctrl+D    quit")
+Ctrl+D    quit");
+            if let Some(registry) = custom_commands {
+                help.push_str(&crate::commands::format_custom_commands_help(registry));
+            }
+            help
         }
 
         "/cost" => {
@@ -2926,7 +2941,7 @@ mod tests {
     #[test]
     fn slash_help_lists_all_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
         assert!(out.contains("/clear"));
@@ -2942,9 +2957,49 @@ mod tests {
     }
 
     #[test]
+    fn slash_help_lists_custom_commands_when_provided() {
+        let fs = MockFs::new();
+        let registry = crate::commands::CustomCommandRegistry::new([crate::commands::CustomCommand {
+            name: "ship".into(),
+            description: "Ship it".into(),
+            body: String::new(),
+            model: None,
+            allowed_tools: Vec::new(),
+            source: PathBuf::from("/x.md"),
+        }]);
+        let out = handle_slash_command(
+            "/help",
+            "",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+            Some(&registry),
+        );
+        assert!(out.contains("/ship"));
+        assert!(out.contains("Ship it"));
+    }
+
+    #[test]
+    fn custom_command_dispatch_beats_unknown_fallback() {
+        let registry = crate::commands::CustomCommandRegistry::new([crate::commands::CustomCommand {
+            name: "echo".into(),
+            description: String::new(),
+            body: "Say: $ARGUMENTS".into(),
+            model: None,
+            allowed_tools: Vec::new(),
+            source: PathBuf::from("/x.md"),
+        }]);
+        assert!(registry.dispatch("/echo", "hi").is_some());
+        let unknown = handle_slash_command("/echo-not-real", "", 0, 0, "m", Path::new("/tmp"), &MockFs::new(), None);
+        assert!(unknown.contains("unknown command"));
+    }
+
+    #[test]
     fn slash_cost_no_data_yet() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/cost", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("no usage data"), "got: {out}");
     }
 
@@ -2959,6 +3014,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
@@ -3093,7 +3149,7 @@ mod tests {
     fn informational_commands_are_recognised_not_unknown() {
         let fs = MockFs::new();
         for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/release-notes", "/bug"] {
-            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
             assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
             assert!(!out.is_empty());
         }
@@ -3102,7 +3158,7 @@ mod tests {
     #[test]
     fn help_lists_new_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         for c in ["/plan", "/allowed-tools", "/vim", "/review", "/pr-comments", "/bug"] {
             assert!(out.contains(c), "/help must mention {c}");
         }
@@ -3158,14 +3214,14 @@ mod tests {
     #[test]
     fn slash_unknown_suggests_help() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/nope", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/nope", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("unknown command") && out.contains("/help"), "got: {out}");
     }
 
     #[test]
     fn slash_model_without_arg_shows_registry_hint() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/model", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/model", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("registry listing"), "got: {out}");
     }
 
@@ -3180,6 +3236,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         assert!(out.contains("cost estimates updated"), "got: {out}");
@@ -3196,6 +3253,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         let cost_out = handle_slash_command(
             "/cost",
@@ -3205,6 +3263,7 @@ mod tests {
             "claude-haiku-4-5",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
         assert!(cost_out.contains("1.60") || cost_out.contains("1.6"), "got: {cost_out}");
@@ -3221,6 +3280,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         assert!(out.contains("100%"), "got: {out}");
     }
@@ -3228,7 +3288,7 @@ mod tests {
     #[test]
     fn slash_cost_rounds_down() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 1, 3, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/cost", "", 1, 3, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("33%"), "got: {out}");
     }
 
