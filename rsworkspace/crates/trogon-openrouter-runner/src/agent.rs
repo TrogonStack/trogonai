@@ -273,6 +273,10 @@ struct OpenRouterSession {
     /// Restrictive subagent tool allowlist (empty = no restriction).
     #[serde(default)]
     tool_allowlist: Vec<String>,
+    /// Extra environment variables applied to the session's bash terminal, from
+    /// settings.json `env` (received via `_meta.env` at session creation). CFG-2.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    env: std::collections::HashMap<String, String>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -1087,6 +1091,17 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     .and_then(|v| v.as_array())
                     .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
                     .unwrap_or_default(),
+                env: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("env"))
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
@@ -1206,6 +1221,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterSession {
                         cwd,
                         model,
+                        env: std::collections::HashMap::new(),
                         compactor_model,
                         api_key,
                         history,
@@ -1326,6 +1342,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 cwd,
                 model: inherited_model.clone(),
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,
@@ -1651,6 +1668,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             session_mcp_servers,
             _permission_rules,
             permission_rules_text,
+            session_env,
         ) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
@@ -1673,6 +1691,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.mcp_servers.clone(),
                 s.permission_rules.clone(),
                 s.permission_rules_text.clone(),
+                s.env.clone(),
             )
         };
         let offered_tools =
@@ -2121,7 +2140,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         }
                     } else if let Some(nats) = &self.execution_nats {
                         let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                        let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &call.arguments).await;
+                        let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &session_env, &call.arguments).await;
                         // Persist terminal_id back to session if it was just created
                         if terminal_id.is_some() {
                             let mut sessions = self.sessions.lock().await;
@@ -2571,6 +2590,7 @@ async fn execute_bash_stateful(
     session_id: &str,
     terminal_id: &mut Option<String>,
     cwd: &str,
+    env: &std::collections::HashMap<String, String>,
     arguments: &str,
 ) -> String {
     use agent_client_protocol::{
@@ -2594,8 +2614,14 @@ async fn execute_bash_stateful(
     let tid: String = if let Some(ref id) = *terminal_id {
         id.clone()
     } else {
+        let mut env_vars: Vec<agent_client_protocol::EnvVariable> = env
+            .iter()
+            .map(|(k, v)| agent_client_protocol::EnvVariable::new(k.clone(), v.clone()))
+            .collect();
+        env_vars.sort_by(|a, b| a.name.cmp(&b.name));
         let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
-            .cwd(std::path::PathBuf::from(cwd));
+            .cwd(std::path::PathBuf::from(cwd))
+            .env(env_vars);
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
@@ -2723,6 +2749,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
     ) {
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
             tool_allowlist: Vec::new(),
+            env: std::collections::HashMap::new(),
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
@@ -2985,6 +3012,7 @@ mod tests {
     fn make_session() -> OpenRouterSession {
         OpenRouterSession {
             tool_allowlist: Vec::new(),
+            env: std::collections::HashMap::new(),
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,

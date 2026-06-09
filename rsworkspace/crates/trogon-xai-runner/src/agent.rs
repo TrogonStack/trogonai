@@ -196,6 +196,10 @@ struct XaiSession {
     /// Restrictive subagent tool allowlist (empty = no restriction).
     #[serde(default)]
     tool_allowlist: Vec<String>,
+    /// Extra environment variables applied to the session's bash terminal, from
+    /// settings.json `env` (received via `_meta.env` at session creation). CFG-2.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    env: std::collections::HashMap<String, String>,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -713,6 +717,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd,
                 model: snap.model.clone(),
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 compactor_model: snap.compactor_model.clone(),
                 api_key: self.global_api_key.clone(),
                 history,
@@ -1087,6 +1092,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     .and_then(|v| v.as_array())
                     .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
                     .unwrap_or_default(),
+                env: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("env"))
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
@@ -1247,6 +1263,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 cwd,
                 model: inherited_model.clone(),
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,
@@ -1564,6 +1581,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             session_tool_policies,
             session_mcp_servers,
             mut terminal_id,
+            session_env,
         ) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
@@ -1586,6 +1604,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.tool_policies.clone(),
                 s.mcp_servers.clone(),
                 s.terminal_id.clone(),
+                s.env.clone(),
             )
         };
         let offered_tools =
@@ -2249,7 +2268,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 }
                             } else if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                                let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &arguments).await;
+                                let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &session_env, &arguments).await;
                                 // Persist terminal_id back to session if it was just created
                                 if terminal_id.is_some() {
                                     let mut sessions = self.sessions.lock().await;
@@ -2978,6 +2997,7 @@ async fn execute_bash_stateful(
     session_id: &str,
     terminal_id: &mut Option<String>,
     cwd: &str,
+    env: &std::collections::HashMap<String, String>,
     arguments: &str,
 ) -> String {
     use agent_client_protocol::{
@@ -3001,8 +3021,14 @@ async fn execute_bash_stateful(
     let tid: String = if let Some(id) = terminal_id.as_deref() {
         id.to_string()
     } else {
+        let mut env_vars: Vec<agent_client_protocol::EnvVariable> = env
+            .iter()
+            .map(|(k, v)| agent_client_protocol::EnvVariable::new(k.clone(), v.clone()))
+            .collect();
+        env_vars.sort_by(|a, b| a.name.cmp(&b.name));
         let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
-            .cwd(std::path::PathBuf::from(cwd));
+            .cwd(std::path::PathBuf::from(cwd))
+            .env(env_vars);
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
@@ -3127,6 +3153,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             id.to_string(),
             XaiSession {
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
@@ -3162,6 +3189,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             id.to_string(),
             XaiSession {
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3250,6 +3278,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             id.to_string(),
             XaiSession {
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
@@ -3285,6 +3314,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             id.to_string(),
             XaiSession {
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3320,6 +3350,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             id.to_string(),
             XaiSession {
                 tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
