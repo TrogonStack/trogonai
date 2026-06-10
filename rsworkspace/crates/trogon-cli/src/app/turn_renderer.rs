@@ -152,7 +152,7 @@ impl TurnRenderer {
                         "\n\x1b[33m[max tool rounds reached — try rephrasing or using \x1b[35m/compact\x1b[33m]\x1b[0m"
                     );
                 } else if metrics.context_size > 0 {
-                    let pct = metrics.used_tokens * 100 / metrics.context_size;
+                    let pct = (metrics.used_tokens * 100).checked_div(metrics.context_size).unwrap_or(0);
                     eprintln!(
                         "\x1b[90m── {}/{} tokens ({}%) ──\x1b[0m",
                         fmt_tokens(metrics.used_tokens),

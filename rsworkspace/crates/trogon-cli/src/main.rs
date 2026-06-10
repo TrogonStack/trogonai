@@ -267,16 +267,14 @@ fn resolve_resume(continue_session: bool, session_id: Option<&str>, prefix: &str
             }
         };
         index.get_last(&canon).cloned()
-    } else if let Some(id) = session_id {
-        Some(SessionEntry {
+    } else {
+        session_id.map(|id| SessionEntry {
             prefix: prefix.to_string(),
             session_id: id.to_string(),
             model: String::new(),
             updated_at: String::new(),
             name: None,
         })
-    } else {
-        None
     }
 }
 
@@ -498,6 +496,9 @@ async fn main() -> anyhow::Result<()> {
         }
         let session_id = session.session_id().to_string();
         let session_model = session.current_model();
+        // RUN-2: codex is descoped to observational-only — warn on stderr (keeps
+        // --print stdout clean) when the resolved runner routes to codex.
+        trogon_cli::app::warn_if_codex_observational(&target_prefix);
         let code = trogon_cli::print::run(session, &prompt, format, options).await;
         let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
         persist_session(
