@@ -129,12 +129,11 @@ fn collect_commands(base: &Path, dir: &Path, out: &mut Vec<CustomCommand>) {
         let path = entry.path();
         if path.is_dir() {
             collect_commands(base, &path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            if let Ok(content) = std::fs::read_to_string(&path)
-                && let Some(cmd) = parse_command_file(&content, &path, base)
-            {
-                out.push(cmd);
-            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md")
+            && let Ok(content) = std::fs::read_to_string(&path)
+            && let Some(cmd) = parse_command_file(&content, &path, base)
+        {
+            out.push(cmd);
         }
     }
 }

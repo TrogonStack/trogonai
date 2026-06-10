@@ -1,6 +1,7 @@
 use crate::RunnerSwitcher;
 use crate::app::{
     TurnMetrics, TurnRenderer, TurnStop, print_command_echo, print_startup_banner, print_user_line,
+    warn_if_codex_observational,
 };
 use crate::fs::Fs;
 use crate::mcp::McpManager;
@@ -512,6 +513,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // Tracks rustyline edit mode toggled by /vim (false = emacs, true = vi).
     let mut vim_mode = false;
     print_startup_banner(session.session_id(), &prefix, &session_mode);
+    // RUN-2: codex is descoped to observational-only — warn prominently at startup.
+    warn_if_codex_observational(&prefix);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
     if let Some(helper) = rl.helper_mut() {
@@ -1880,6 +1883,7 @@ fn bug_report_text() -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
@@ -1941,7 +1945,7 @@ Ctrl+D    quit");
             if context_size == 0 {
                 "no usage data yet — send a message first".to_string()
             } else {
-                let pct = used_tokens * 100 / context_size;
+                let pct = (used_tokens * 100).checked_div(context_size).unwrap_or(0);
                 let cost = estimate_cost(used_tokens, session_model);
                 format!(
                     "context: {}/{} tokens ({}%)  |  ~${cost}",
@@ -2332,7 +2336,7 @@ pub(crate) async fn format_status<RS: RegistryStore>(
             used = fmt_tokens(used_tokens)
         )
     } else {
-        let pct = used_tokens * 100 / context_size;
+        let pct = (used_tokens * 100).checked_div(context_size).unwrap_or(0);
         format!(
             "{used}/{ctx} tokens ({pct}%)",
             used = fmt_tokens(used_tokens),

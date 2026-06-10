@@ -110,6 +110,7 @@ pub fn compaction_requested(
 ///
 /// Returns `Ok(None)` when under threshold (unless `force`) or the compactor chose not to compact.
 /// Returns `Ok(Some(messages))` when compaction succeeded.
+#[allow(clippy::too_many_arguments)]
 pub async fn maybe_compact(
     nats: &async_nats::Client,
     messages: &[Message],

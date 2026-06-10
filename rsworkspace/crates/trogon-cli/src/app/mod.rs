@@ -9,6 +9,9 @@ mod display;
 mod permission_prompt;
 mod turn_renderer;
 
-pub use display::{print_command_echo, print_startup_banner, print_user_line, runner_label};
+pub use display::{
+    print_command_echo, print_startup_banner, print_user_line, runner_label,
+    warn_if_codex_observational,
+};
 pub use permission_prompt::{PermissionDisplay, permission_from_request, print_permission_prompt};
 pub use turn_renderer::{CwdSync, TurnMetrics, TurnRenderer, TurnStop};
