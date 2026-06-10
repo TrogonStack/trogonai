@@ -601,6 +601,16 @@ where
 {
     pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
         let stream_id = self.command.stream_id();
+        if has_no_stream_write_precondition::<C>() {
+            let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
+
+            return Ok(ExecutionResult {
+                stream_position: append_outcome.stream_position,
+                events,
+                state,
+            });
+        }
+
         let stream_read = self
             .event_store
             .read_stream(ReadStreamRequest {
@@ -641,6 +651,29 @@ where
 {
     pub async fn execute(self) -> CommandWithSnapshotsResult<E, S, C> {
         let stream_id = self.command.stream_id();
+        if has_no_stream_write_precondition::<C>() {
+            let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
+
+            maybe_take_snapshot(
+                &self.snapshots,
+                stream_id,
+                DecideSnapshot {
+                    command: self.command,
+                    stream_position: append_outcome.stream_position,
+                    snapshot_position: None,
+                    state: &state,
+                    events: &events,
+                    replayed_event_count: 0,
+                },
+            );
+
+            return Ok(ExecutionResult {
+                stream_position: append_outcome.stream_position,
+                events,
+                state,
+            });
+        }
+
         let snapshot = self
             .snapshots
             .snapshot_store
@@ -664,40 +697,26 @@ where
         let current_position = stream_read.current_position;
 
         if let Some(snapshot_position) = snapshot_position {
-            match current_position {
-                Some(stream_position) if snapshot_position <= stream_position => {}
-                stream_position => {
-                    return Err(CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                        snapshot_position,
-                        stream_position,
-                    }));
-                }
-            }
+            ensure_snapshot_not_ahead(snapshot_position, current_position)
+                .map_err(CommandError::SnapshotAheadOfStream)?;
         }
 
         let state = evolve_state_from_stream_events::<C>(state, &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
         let replayed_event_count = stream_read.events.len() as u64;
 
-        // Keep the policy decision inline: for frequency policies it is cheaper
-        // than spawning, and only the storage mutation needs to be best-effort.
-        let snapshot_decision = self.snapshots.policy.decide_snapshot(DecideSnapshot {
-            command: self.command,
-            stream_position: append_outcome.stream_position,
-            snapshot_position,
-            state: &state,
-            events: &events,
-            replayed_event_count,
-        });
-
-        if snapshot_decision == SnapshotDecision::Take {
-            schedule_snapshot_write(
-                &self.snapshots.schedule_snapshot_task,
-                self.snapshots.snapshot_store,
-                stream_id,
-                Snapshot::new(append_outcome.stream_position, state.clone()),
-            );
-        }
+        maybe_take_snapshot(
+            &self.snapshots,
+            stream_id,
+            DecideSnapshot {
+                command: self.command,
+                stream_position: append_outcome.stream_position,
+                snapshot_position,
+                state: &state,
+                events: &events,
+                replayed_event_count,
+            },
+        );
 
         Ok(ExecutionResult {
             stream_position: append_outcome.stream_position,
@@ -714,6 +733,51 @@ impl From<WritePrecondition> for StreamWritePrecondition {
             WritePrecondition::StreamExists => Self::StreamExists,
             WritePrecondition::NoStream => Self::NoStream,
         }
+    }
+}
+
+fn has_no_stream_write_precondition<C: Decider>() -> bool {
+    C::WRITE_PRECONDITION == Some(WritePrecondition::NoStream)
+}
+
+fn ensure_snapshot_not_ahead(
+    snapshot_position: StreamPosition,
+    current_position: Option<StreamPosition>,
+) -> Result<(), SnapshotAheadOfStream> {
+    match current_position {
+        Some(stream_position) if snapshot_position <= stream_position => Ok(()),
+        stream_position => Err(SnapshotAheadOfStream {
+            snapshot_position,
+            stream_position,
+        }),
+    }
+}
+
+fn maybe_take_snapshot<S, C, P, Spawn>(
+    snapshots: &Snapshots<'_, S, P, Spawn>,
+    stream_id: &C::StreamId,
+    context: DecideSnapshot<'_, C>,
+) where
+    C: Decider,
+    C::State: Clone + SnapshotType + Send + 'static,
+    C::StreamId: AsRef<str> + ToOwned,
+    <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
+    S: Clone + SnapshotWrite<C::State, C::StreamId> + 'static,
+    S::Error: std::fmt::Display + Send + 'static,
+    P: SnapshotPolicy<C>,
+    Spawn: SnapshotTaskScheduler + Send + Sync,
+{
+    let stream_position = context.stream_position;
+    let state = context.state;
+    let snapshot_decision = snapshots.policy.decide_snapshot(context);
+
+    if snapshot_decision == SnapshotDecision::Take {
+        schedule_snapshot_write(
+            &snapshots.schedule_snapshot_task,
+            snapshots.snapshot_store,
+            stream_id,
+            Snapshot::new(stream_position, state.clone()),
+        );
     }
 }
 
@@ -1084,6 +1148,12 @@ mod tests {
         const SNAPSHOT_POLICY: Self::SnapshotPolicy = NoSnapshot;
     }
 
+    impl CommandSnapshotPolicy for RequiredRegisterCommand {
+        type SnapshotPolicy = NoSnapshot;
+
+        const SNAPSHOT_POLICY: Self::SnapshotPolicy = NoSnapshot;
+    }
+
     impl Decider for RequiredRegisterCommand {
         type StreamId = str;
         type State = TestState;
@@ -1223,6 +1293,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(request.stream_write_precondition);
+            match request.stream_write_precondition {
+                StreamWritePrecondition::Any => {}
+                StreamWritePrecondition::StreamExists if self.current_position.is_some() => {}
+                StreamWritePrecondition::NoStream if self.current_position.is_none() => {}
+                StreamWritePrecondition::At(position) if self.current_position == Some(position) => {}
+                _ => return Err(TestInfraError::Append),
+            }
             self.appended_events.lock().unwrap().extend(request.events);
             Ok(AppendStreamResponse {
                 stream_position: self.stream_position,
@@ -1825,7 +1902,7 @@ mod tests {
     }
 
     #[test]
-    fn required_register_rejects_existing_state() {
+    fn no_stream_command_rejects_existing_stream_during_append_without_replay() {
         let runtime = FakeRuntime {
             current_position: Some(position(1)),
             stream_events: vec![stream_event(
@@ -1841,10 +1918,12 @@ mod tests {
 
         let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
-        assert!(matches!(
-            error,
-            CommandError::Decide(TestDecisionError::AlreadyRegistered)
-        ));
+        assert!(matches!(error, CommandError::Append(TestInfraError::Append)));
+        assert!(runtime.reads_from.lock().unwrap().is_empty());
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
+        );
     }
 
     #[test]
@@ -1972,6 +2051,34 @@ mod tests {
     }
 
     #[test]
+    fn explicit_stream_exists_precondition_allows_existing_stream() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_write_precondition(StreamWritePrecondition::StreamExists)
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::StreamExists]
+        );
+    }
+
+    #[test]
     fn required_command_rule_uses_required_stream_write_precondition() {
         let runtime = FakeRuntime {
             stream_position: position(1),
@@ -1989,6 +2096,65 @@ mod tests {
         assert_eq!(
             runtime.stream_write_preconditions.lock().unwrap().as_slice(),
             &[StreamWritePrecondition::NoStream]
+        );
+        assert!(runtime.reads_from.lock().unwrap().is_empty());
+        assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn required_register_decision_rejects_present_state() {
+        let command = RequiredRegisterCommand::new("alpha");
+
+        let error = RequiredRegisterCommand::decide(&TestState::Present { enabled: true }, &command).unwrap_err();
+
+        assert_eq!(error, TestDecisionError::AlreadyRegistered);
+    }
+
+    #[test]
+    fn no_stream_command_with_snapshots_skips_snapshot_and_stream_reads() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = RequiredRegisterCommand::new("alpha");
+
+        let result = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(result.state, TestState::Present { enabled: true });
+        assert!(runtime.reads_from.lock().unwrap().is_empty());
+        assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
+        );
+    }
+
+    #[test]
+    fn no_stream_command_with_snapshots_writes_snapshot_when_policy_takes() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = RequiredRegisterCommand::new("alpha");
+
+        let result = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(result.state, TestState::Present { enabled: true });
+        assert!(runtime.reads_from.lock().unwrap().is_empty());
+        assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
+        assert_eq!(
+            runtime.written_snapshots.lock().unwrap().as_slice(),
+            &[Snapshot::new(position(1), TestState::Present { enabled: true })]
         );
     }
 
