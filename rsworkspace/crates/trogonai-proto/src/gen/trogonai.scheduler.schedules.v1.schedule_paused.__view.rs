@@ -162,3 +162,115 @@ impl ::buffa::ViewReborrow for SchedulePausedView<'static> {
         this
     }
 }
+/** Self-contained, `'static` owned view of a `SchedulePaused` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`SchedulePausedView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`SchedulePausedView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct SchedulePausedOwnedView(::buffa::OwnedView<SchedulePausedView<'static>>);
+impl SchedulePausedOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            SchedulePausedOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            SchedulePausedOwnedView(
+                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+            ),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::SchedulePaused,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            SchedulePausedOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`SchedulePausedView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &SchedulePausedView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::SchedulePaused {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Stable NATS token for the schedule stream being paused.
+    ///
+    /// Field 1: `schedule_id`
+    #[must_use]
+    pub fn schedule_id(&self) -> &'_ str {
+        self.0.reborrow().schedule_id
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<SchedulePausedView<'static>>>
+for SchedulePausedOwnedView {
+    fn from(inner: ::buffa::OwnedView<SchedulePausedView<'static>>) -> Self {
+        SchedulePausedOwnedView(inner)
+    }
+}
+impl ::core::convert::From<SchedulePausedOwnedView>
+for ::buffa::OwnedView<SchedulePausedView<'static>> {
+    fn from(wrapper: SchedulePausedOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<SchedulePausedView<'static>>>
+for SchedulePausedOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<SchedulePausedView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::SchedulePaused {
+    type View<'a> = SchedulePausedView<'a>;
+    type ViewHandle = SchedulePausedOwnedView;
+}
+impl ::serde::Serialize for SchedulePausedOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}

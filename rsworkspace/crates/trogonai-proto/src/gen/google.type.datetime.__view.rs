@@ -575,6 +575,172 @@ impl ::buffa::ViewReborrow for DateTimeView<'static> {
         this
     }
 }
+/** Self-contained, `'static` owned view of a `DateTime` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`DateTimeView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`DateTimeView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct DateTimeOwnedView(::buffa::OwnedView<DateTimeView<'static>>);
+impl DateTimeOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(DateTimeOwnedView(::buffa::OwnedView::decode(bytes)?))
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DateTimeOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::DateTime,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DateTimeOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`DateTimeView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &DateTimeView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::DateTime {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Optional. Year of date. Must be from 1 to 9999, or 0 if specifying a
+    /// datetime without a year.
+    ///
+    /// Field 1: `year`
+    #[must_use]
+    pub fn year(&self) -> i32 {
+        self.0.reborrow().year
+    }
+    /// Optional. Month of year. Must be from 1 to 12, or 0 if specifying a
+    /// datetime without a month.
+    ///
+    /// Field 2: `month`
+    #[must_use]
+    pub fn month(&self) -> i32 {
+        self.0.reborrow().month
+    }
+    /// Optional. Day of month. Must be from 1 to 31 and valid for the year and
+    /// month, or 0 if specifying a datetime without a day.
+    ///
+    /// Field 3: `day`
+    #[must_use]
+    pub fn day(&self) -> i32 {
+        self.0.reborrow().day
+    }
+    /// Optional. Hours of day in 24 hour format. Should be from 0 to 23, defaults
+    /// to 0 (midnight). An API may choose to allow the value "24:00:00" for
+    /// scenarios like business closing time.
+    ///
+    /// Field 4: `hours`
+    #[must_use]
+    pub fn hours(&self) -> i32 {
+        self.0.reborrow().hours
+    }
+    /// Optional. Minutes of hour of day. Must be from 0 to 59, defaults to 0.
+    ///
+    /// Field 5: `minutes`
+    #[must_use]
+    pub fn minutes(&self) -> i32 {
+        self.0.reborrow().minutes
+    }
+    /// Optional. Seconds of minutes of the time. Must normally be from 0 to 59,
+    /// defaults to 0. An API may allow the value 60 if it allows leap-seconds.
+    ///
+    /// Field 6: `seconds`
+    #[must_use]
+    pub fn seconds(&self) -> i32 {
+        self.0.reborrow().seconds
+    }
+    /// Optional. Fractions of seconds in nanoseconds. Must be from 0 to
+    /// 999,999,999, defaults to 0.
+    ///
+    /// Field 7: `nanos`
+    #[must_use]
+    pub fn nanos(&self) -> i32 {
+        self.0.reborrow().nanos
+    }
+    /// Oneof `time_offset`.
+    #[must_use]
+    pub fn time_offset(
+        &self,
+    ) -> ::core::option::Option<
+        &super::super::__buffa::view::oneof::date_time::TimeOffset<'_>,
+    > {
+        self.0.reborrow().time_offset.as_ref()
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<DateTimeView<'static>>>
+for DateTimeOwnedView {
+    fn from(inner: ::buffa::OwnedView<DateTimeView<'static>>) -> Self {
+        DateTimeOwnedView(inner)
+    }
+}
+impl ::core::convert::From<DateTimeOwnedView>
+for ::buffa::OwnedView<DateTimeView<'static>> {
+    fn from(wrapper: DateTimeOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<DateTimeView<'static>>>
+for DateTimeOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<DateTimeView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::DateTime {
+    type View<'a> = DateTimeView<'a>;
+    type ViewHandle = DateTimeOwnedView;
+}
+impl ::serde::Serialize for DateTimeOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
 /// Represents a time zone from the
 /// [IANA Time Zone Database](https://www.iana.org/time-zones).
 #[derive(Clone, Debug, Default)]
@@ -771,5 +937,120 @@ impl ::buffa::ViewReborrow for TimeZoneView<'static> {
     type Reborrowed<'b> = TimeZoneView<'b>;
     fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
         this
+    }
+}
+/** Self-contained, `'static` owned view of a `TimeZone` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`TimeZoneView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`TimeZoneView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct TimeZoneOwnedView(::buffa::OwnedView<TimeZoneView<'static>>);
+impl TimeZoneOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(TimeZoneOwnedView(::buffa::OwnedView::decode(bytes)?))
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            TimeZoneOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::TimeZone,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            TimeZoneOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`TimeZoneView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &TimeZoneView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::TimeZone {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// IANA Time Zone Database time zone. For example "America/New_York".
+    ///
+    /// Field 1: `id`
+    #[must_use]
+    pub fn id(&self) -> &'_ str {
+        self.0.reborrow().id
+    }
+    /// Optional. IANA Time Zone Database version number. For example "2019a".
+    ///
+    /// Field 2: `version`
+    #[must_use]
+    pub fn version(&self) -> &'_ str {
+        self.0.reborrow().version
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<TimeZoneView<'static>>>
+for TimeZoneOwnedView {
+    fn from(inner: ::buffa::OwnedView<TimeZoneView<'static>>) -> Self {
+        TimeZoneOwnedView(inner)
+    }
+}
+impl ::core::convert::From<TimeZoneOwnedView>
+for ::buffa::OwnedView<TimeZoneView<'static>> {
+    fn from(wrapper: TimeZoneOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<TimeZoneView<'static>>>
+for TimeZoneOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<TimeZoneView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::TimeZone {
+    type View<'a> = TimeZoneView<'a>;
+    type ViewHandle = TimeZoneOwnedView;
+}
+impl ::serde::Serialize for TimeZoneOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
     }
 }

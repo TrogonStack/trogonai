@@ -1,5 +1,9 @@
 mod codec;
 
+pub mod checkpoints_v1 {
+    pub use crate::r#gen::trogonai::scheduler::schedules::checkpoints::v1::*;
+}
+
 pub mod state_v1 {
     pub use crate::r#gen::trogonai::scheduler::schedules::state::v1::*;
 }

@@ -33,6 +33,7 @@ async-nats = { version = "=0.49.0", default-features = false }
 async-trait = "=0.1.89"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.11.1"
+base64 = "=0.22.1"
 buffa = { version = "=0.7.0", features = ["json"] }
 buffa-types = { version = "=0.7.0", features = ["json"] }
 futures = "=0.3.32"

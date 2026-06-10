@@ -10,6 +10,23 @@ pub enum StateValue {
     STATE_VALUE_PRESENT_DISABLED = 3i32,
     STATE_VALUE_DELETED = 4i32,
 }
+impl StateValue {
+    ///Idiomatic alias for [`Self::STATE_VALUE_UNSPECIFIED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Unspecified: Self = Self::STATE_VALUE_UNSPECIFIED;
+    ///Idiomatic alias for [`Self::STATE_VALUE_MISSING`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Missing: Self = Self::STATE_VALUE_MISSING;
+    ///Idiomatic alias for [`Self::STATE_VALUE_PRESENT_ENABLED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const PresentEnabled: Self = Self::STATE_VALUE_PRESENT_ENABLED;
+    ///Idiomatic alias for [`Self::STATE_VALUE_PRESENT_DISABLED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const PresentDisabled: Self = Self::STATE_VALUE_PRESENT_DISABLED;
+    ///Idiomatic alias for [`Self::STATE_VALUE_DELETED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Deleted: Self = Self::STATE_VALUE_DELETED;
+}
 impl ::core::default::Default for StateValue {
     fn default() -> Self {
         Self::STATE_VALUE_UNSPECIFIED

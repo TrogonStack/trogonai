@@ -30,9 +30,64 @@ use super::traits::{
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
     JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher,
+    JetStreamPublisher, JetStreamSubjectPurger,
 };
 use crate::mocks::MockError;
+
+#[derive(Clone, Debug)]
+pub struct MockJetStreamPurger {
+    purged_subjects: Arc<Mutex<Vec<String>>>,
+    purge_fail_count: Arc<Mutex<u32>>,
+}
+
+impl MockJetStreamPurger {
+    pub fn new() -> Self {
+        Self {
+            purged_subjects: Arc::new(Mutex::new(Vec::new())),
+            purge_fail_count: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    pub fn fail_next_purge(&self) {
+        *self.purge_fail_count.lock().unwrap() += 1;
+    }
+
+    pub fn fail_purge_count(&self, n: u32) {
+        *self.purge_fail_count.lock().unwrap() = n;
+    }
+
+    pub fn purged_subjects(&self) -> Vec<String> {
+        self.purged_subjects.lock().unwrap().clone()
+    }
+}
+
+impl Default for MockJetStreamPurger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JetStreamSubjectPurger for MockJetStreamPurger {
+    type PurgeResponse = ();
+    type Error = MockError;
+
+    async fn purge_subject_messages(&self, subject: &str) -> Result<Self::PurgeResponse, MockError> {
+        let should_fail = {
+            let mut count = self.purge_fail_count.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if should_fail {
+            return Err(MockError("simulated purge failure".to_string()));
+        }
+        self.purged_subjects.lock().unwrap().push(subject.to_string());
+        Ok(())
+    }
+}
 
 pub struct MockJsMessage {
     inner: async_nats::Message,
@@ -2343,5 +2398,32 @@ mod tests {
 
         let result = ObjectStoreGet::get(&store, "key").await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn mock_jetstream_purger_default_and_failures() {
+        let purger = MockJetStreamPurger::default();
+        assert!(purger.purged_subjects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn mock_jetstream_purger_records_success_and_failure() {
+        let purger = MockJetStreamPurger::new();
+        purger.purge_subject_messages("test.subject").await.unwrap();
+        assert_eq!(purger.purged_subjects(), vec!["test.subject".to_string()]);
+
+        purger.fail_purge_count(1);
+        assert!(purger.purge_subject_messages("retry.subject").await.is_err());
+        purger.purge_subject_messages("retry.subject").await.unwrap();
+    }
+
+    #[test]
+    fn mock_jetstream_kv_store_default() {
+        let _ = MockJetStreamKvStore::default();
+    }
+
+    #[test]
+    fn mock_jetstream_kv_client_default() {
+        let _ = MockJetStreamKvClient::default();
     }
 }
