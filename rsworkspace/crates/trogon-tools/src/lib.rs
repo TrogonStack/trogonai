@@ -328,15 +328,27 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             "todo_write",
-            "Create or update a todo item. Status must be 'pending', 'in_progress', or 'completed'.",
+            "Create or update todo item(s). Pass id/content/status for a single upsert, or todos[] to replace the full session list in one call. Status must be 'pending', 'in_progress', or 'completed'.",
             json!({
                 "type": "object",
                 "properties": {
-                    "id":      { "type": "string", "description": "Unique identifier for the todo" },
-                    "content": { "type": "string", "description": "Description of the task" },
-                    "status":  { "type": "string", "description": "One of: pending, in_progress, completed" }
-                },
-                "required": ["id", "content", "status"]
+                    "id":      { "type": "string", "description": "Unique identifier for the todo (single-item write)" },
+                    "content": { "type": "string", "description": "Description of the task (single-item write)" },
+                    "status":  { "type": "string", "description": "One of: pending, in_progress, completed (single-item write)" },
+                    "todos": {
+                        "type": "array",
+                        "description": "Batch write: replaces the session todo list with these items",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id":      { "type": "string", "description": "Unique identifier for the todo" },
+                                "content": { "type": "string", "description": "Description of the task" },
+                                "status":  { "type": "string", "description": "One of: pending, in_progress, completed" }
+                            },
+                            "required": ["id", "content", "status"]
+                        }
+                    }
+                }
             }),
         ),
         tool_def(
