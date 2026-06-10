@@ -13,7 +13,8 @@ pub mod types;
 pub mod web;
 
 pub use types::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolOutput,
+    ToolResult,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,40 +391,43 @@ pub fn exit_plan_mode_tool_def() -> ToolDef {
     )
 }
 
-pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> String {
+pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> ToolOutput {
     match name {
         "read_file"        => fs::read_file(ctx, input).await,
-        "write_file"       => fs::write_file(ctx, input).await,
-        "delete_file"      => fs::delete_file(ctx, input).await,
-        "list_dir"         => fs::list_dir(ctx, input).await,
-        "glob"             => fs::glob_files(ctx, input).await,
-        "str_replace"      => editor::str_replace(ctx, input).await,
-        "multi_edit"       => editor::multi_edit(ctx, input).await,
-        "git_status"       => git::status(ctx, input).await,
-        "git_diff"         => git::diff(ctx, input).await,
-        "git_log"          => git::log(ctx, input).await,
-        "git_commit"       => git::commit(ctx, input).await,
-        "git_create_branch" => git::create_branch(ctx, input).await,
-        "git_push"         => git::push(ctx, input).await,
-        "gh"               => github::gh(ctx, input).await,
-        "fetch_url"        => web::fetch_url(ctx, input).await,
-        "web_search"       => web::web_search(ctx, input).await,
-        "notebook_edit"    => fs::notebook_edit(ctx, input).await,
-        "search_files"     => search::search_files(ctx, input).await,
-        "todo_write"       => todo::todo_write(ctx, input).await,
-        "todo_read"        => todo::todo_read(ctx, input).await,
+        "write_file"       => ToolOutput::Text(fs::write_file(ctx, input).await),
+        "delete_file"      => ToolOutput::Text(fs::delete_file(ctx, input).await),
+        "list_dir"         => ToolOutput::Text(fs::list_dir(ctx, input).await),
+        "glob"             => ToolOutput::Text(fs::glob_files(ctx, input).await),
+        "str_replace"      => ToolOutput::Text(editor::str_replace(ctx, input).await),
+        "multi_edit"       => ToolOutput::Text(editor::multi_edit(ctx, input).await),
+        "git_status"       => ToolOutput::Text(git::status(ctx, input).await),
+        "git_diff"         => ToolOutput::Text(git::diff(ctx, input).await),
+        "git_log"          => ToolOutput::Text(git::log(ctx, input).await),
+        "git_commit"       => ToolOutput::Text(git::commit(ctx, input).await),
+        "git_create_branch" => ToolOutput::Text(git::create_branch(ctx, input).await),
+        "git_push"         => ToolOutput::Text(git::push(ctx, input).await),
+        "gh"               => ToolOutput::Text(github::gh(ctx, input).await),
+        "fetch_url"        => ToolOutput::Text(web::fetch_url(ctx, input).await),
+        "web_search"       => ToolOutput::Text(web::web_search(ctx, input).await),
+        "notebook_edit"    => ToolOutput::Text(fs::notebook_edit(ctx, input).await),
+        "search_files"     => ToolOutput::Text(search::search_files(ctx, input).await),
+        "todo_write"       => ToolOutput::Text(todo::todo_write(ctx, input).await),
+        "todo_read"        => ToolOutput::Text(todo::todo_read(ctx, input).await),
         // Reached only when the user approved leaving plan mode (a denial / "keep
         // planning" never dispatches). The actual mode switch is applied by the
         // runner from the exit-plan dialog selection.
-        "ExitPlanMode"     => "Plan approved by the user. Plan mode is now exited; proceed with the approved plan.".to_string(),
+        "ExitPlanMode" => ToolOutput::Text(
+            "Plan approved by the user. Plan mode is now exited; proceed with the approved plan."
+                .to_string(),
+        ),
         "change_directory" => {
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            match fs::resolve_directory_target(&ctx.cwd, path) {
+            ToolOutput::Text(match fs::resolve_directory_target(&ctx.cwd, path) {
                 Ok(resolved) => format!("Working directory is now {}", resolved.display()),
                 Err(e) => e,
-            }
+            })
         }
-        _ => format!("Unknown tool: {name}"),
+        _ => ToolOutput::Text(format!("Unknown tool: {name}")),
     }
 }
 
@@ -431,6 +435,10 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn out_text(output: ToolOutput) -> String {
+        output.display_text()
+    }
 
     fn test_ctx() -> ToolContext {
         ToolContext {
@@ -523,7 +531,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_web_search_missing_config_returns_error() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await;
+        let result = out_text(dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await);
         assert!(result.contains("not configured"), "got: {result}");
     }
 
@@ -548,14 +556,14 @@ mod tests {
             web_search_api_key: Some("test-key".to_string()),
             web_search_endpoint: Some(server.url("/search")),
         };
-        let result = dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await;
+        let result = out_text(dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await);
         assert!(result.contains("Dispatch Test"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await);
         assert!(result.contains("Unknown tool"));
     }
 
@@ -571,7 +579,7 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "read_file", &json!({"path": "hi.txt"})).await;
+        let result = out_text(dispatch_tool(&ctx, "read_file", &json!({"path": "hi.txt"})).await);
         assert!(result.contains("hello"), "got: {result}");
     }
 
@@ -586,7 +594,9 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await;
+        let result = out_text(
+            dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await,
+        );
         assert_eq!(result, "OK");
         let content = tokio::fs::read_to_string(dir.path().join("out.txt")).await.unwrap();
         assert_eq!(content, "data");
@@ -604,7 +614,7 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "list_dir", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "list_dir", &json!({})).await);
         assert!(result.contains("a.rs"), "got: {result}");
     }
 
@@ -620,7 +630,7 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "glob", &json!({"pattern": "*.rs"})).await;
+        let result = out_text(dispatch_tool(&ctx, "glob", &json!({"pattern": "*.rs"})).await);
         assert!(result.contains("foo.rs"), "got: {result}");
     }
 
@@ -636,7 +646,14 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "str_replace", &json!({"path": "f.txt", "old_str": "aaa", "new_str": "zzz"})).await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "str_replace",
+                &json!({"path": "f.txt", "old_str": "aaa", "new_str": "zzz"}),
+            )
+            .await,
+        );
         assert!(!result.starts_with("Error"), "got: {result}");
         let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
         assert!(content.contains("zzz"));
@@ -654,12 +671,14 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(
-            &ctx,
-            "str_replace",
-            &json!({"path": "f.txt", "old_str": "x", "new_str": "y", "replace_all": true}),
-        )
-        .await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "str_replace",
+                &json!({"path": "f.txt", "old_str": "x", "new_str": "y", "replace_all": true}),
+            )
+            .await,
+        );
         assert!(!result.starts_with("Error"), "got: {result}");
         let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
         assert_eq!(content, "y\ny\n");
@@ -677,18 +696,20 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(
-            &ctx,
-            "multi_edit",
-            &json!({
-                "path": "f.txt",
-                "edits": [
-                    {"old_str": "one", "new_str": "1"},
-                    {"old_str": "two", "new_str": "2"}
-                ]
-            }),
-        )
-        .await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "multi_edit",
+                &json!({
+                    "path": "f.txt",
+                    "edits": [
+                        {"old_str": "one", "new_str": "1"},
+                        {"old_str": "two", "new_str": "2"}
+                    ]
+                }),
+            )
+            .await,
+        );
         assert!(!result.starts_with("Error"), "got: {result}");
         let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
         assert_eq!(content, "1 2\n");
@@ -697,28 +718,28 @@ mod tests {
     #[tokio::test]
     async fn dispatch_routes_git_status_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_status", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_status", &json!({})).await);
         assert!(!result.starts_with("Error running git"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_routes_git_diff_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_diff", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_diff", &json!({})).await);
         assert!(!result.starts_with("Error running git"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_routes_git_log_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_log", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_log", &json!({})).await);
         assert!(!result.starts_with("Error running git"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_routes_git_commit_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_commit", &json!({"message": "test"})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_commit", &json!({"message": "test"})).await);
         assert!(!result.contains("Unknown tool"), "got: {result}");
     }
 
@@ -737,7 +758,9 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await;
+        let result = out_text(
+            dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await,
+        );
         assert!(result.contains("dispatched"), "got: {result}");
     }
 
@@ -747,7 +770,7 @@ mod tests {
         // asserts only that the name routes to the github module — not "Unknown
         // tool". Argv parsing is covered by github.rs's own tests.
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "gh", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "gh", &json!({})).await);
         assert!(!result.contains("Unknown tool"), "gh not routed: {result}");
         assert!(result.starts_with("Error:"), "expected parse error, got: {result}");
     }
@@ -768,7 +791,14 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "notebook_edit", &json!({"path": "nb.ipynb", "cell_index": 0, "content": "new"})).await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "notebook_edit",
+                &json!({"path": "nb.ipynb", "cell_index": 0, "content": "new"}),
+            )
+            .await,
+        );
         assert_eq!(result, "OK");
     }
 
@@ -783,12 +813,14 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(
-            &ctx,
-            "todo_write",
-            &json!({"id": "t1", "content": "do stuff", "status": "pending"}),
-        )
-        .await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "todo_write",
+                &json!({"id": "t1", "content": "do stuff", "status": "pending"}),
+            )
+            .await,
+        );
         assert_eq!(result, "OK");
     }
 
@@ -809,7 +841,7 @@ mod tests {
             &json!({"id": "t1", "content": "pending task", "status": "pending"}),
         )
         .await;
-        let result = dispatch_tool(&ctx, "todo_read", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "todo_read", &json!({})).await);
         assert!(result.contains("t1"), "got: {result}");
     }
 
@@ -826,7 +858,7 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "search_files", &json!({"pattern": "needle"})).await;
+        let result = out_text(dispatch_tool(&ctx, "search_files", &json!({"pattern": "needle"})).await);
         assert!(result.contains("foo.rs"), "got: {result}");
     }
 }

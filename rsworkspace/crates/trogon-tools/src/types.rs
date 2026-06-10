@@ -58,6 +58,7 @@ impl Message {
                 .map(|r| ContentBlock::ToolResult {
                     tool_use_id: r.tool_use_id,
                     content: r.content,
+                    blocks: r.blocks,
                 })
                 .collect(),
         }
@@ -88,15 +89,52 @@ pub enum ContentBlock {
     },
     ToolResult {
         tool_use_id: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         content: String,
+        /// Rich blocks (e.g. images from `read_file`) returned alongside or instead of `content`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        blocks: Vec<ContentBlock>,
     },
 }
 
-/// Pair of tool-use ID and the string result to feed back to the model.
+/// Output from a tool dispatch — plain text or rich content blocks.
+#[derive(Debug, Clone)]
+pub enum ToolOutput {
+    Text(String),
+    Blocks(Vec<ContentBlock>),
+}
+
+impl ToolOutput {
+    pub fn into_tool_result(self, tool_use_id: String) -> ToolResult {
+        match self {
+            Self::Text(content) => ToolResult {
+                tool_use_id,
+                content,
+                blocks: vec![],
+            },
+            Self::Blocks(blocks) => ToolResult {
+                tool_use_id,
+                content: String::new(),
+                blocks,
+            },
+        }
+    }
+
+    /// Text representation for logging and legacy callers.
+    pub fn display_text(&self) -> String {
+        match self {
+            Self::Text(s) => s.clone(),
+            Self::Blocks(blocks) => serde_json::to_string(blocks).unwrap_or_default(),
+        }
+    }
+}
+
+/// Pair of tool-use ID and the result to feed back to the model.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub tool_use_id: String,
     pub content: String,
+    pub blocks: Vec<ContentBlock>,
 }
 
 #[cfg(test)]
@@ -161,6 +199,7 @@ mod tests {
         let r = ToolResult {
             tool_use_id: "call-abc".to_string(),
             content: "the result".to_string(),
+            blocks: vec![],
         };
         assert_eq!(r.tool_use_id, "call-abc");
         assert_eq!(r.content, "the result");
@@ -171,6 +210,7 @@ mod tests {
         let r = ToolResult {
             tool_use_id: "id".to_string(),
             content: "content".to_string(),
+            blocks: vec![],
         };
         let mut cloned = r.clone();
         cloned.content = "changed".to_string();
@@ -182,6 +222,7 @@ mod tests {
         let r = ToolResult {
             tool_use_id: "id".to_string(),
             content: "c".to_string(),
+            blocks: vec![],
         };
         assert!(!format!("{r:?}").is_empty());
     }
@@ -314,11 +355,12 @@ mod tests {
         let block = ContentBlock::ToolResult {
             tool_use_id: "call-1".to_string(),
             content: "command output".to_string(),
+            blocks: vec![],
         };
         let json = serde_json::to_string(&block).unwrap();
         let back: ContentBlock = serde_json::from_str(&json).unwrap();
         match back {
-            ContentBlock::ToolResult { tool_use_id, content } => {
+            ContentBlock::ToolResult { tool_use_id, content, .. } => {
                 assert_eq!(tool_use_id, "call-1");
                 assert_eq!(content, "command output");
             }
@@ -331,6 +373,7 @@ mod tests {
         let block = ContentBlock::ToolResult {
             tool_use_id: "c".to_string(),
             content: "out".to_string(),
+            blocks: vec![],
         };
         let json = serde_json::to_string(&block).unwrap();
         assert!(json.contains("\"type\":\"tool_result\""), "must have type tag: {json}");
@@ -341,14 +384,14 @@ mod tests {
     #[test]
     fn message_tool_results_builds_user_message_with_tool_result_blocks() {
         let results = vec![
-            ToolResult { tool_use_id: "c1".to_string(), content: "out1".to_string() },
-            ToolResult { tool_use_id: "c2".to_string(), content: "out2".to_string() },
+            ToolResult { tool_use_id: "c1".to_string(), content: "out1".to_string(), blocks: vec![] },
+            ToolResult { tool_use_id: "c2".to_string(), content: "out2".to_string(), blocks: vec![] },
         ];
         let msg = Message::tool_results(results);
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content.len(), 2);
         match &msg.content[0] {
-            ContentBlock::ToolResult { tool_use_id, content } => {
+            ContentBlock::ToolResult { tool_use_id, content, .. } => {
                 assert_eq!(tool_use_id, "c1");
                 assert_eq!(content, "out1");
             }
