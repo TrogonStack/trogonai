@@ -864,7 +864,11 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandError::Decide(crate::CreateScheduleError::ScheduleDeleted { .. })
+            CommandError::Append(SchedulerError::OptimisticConcurrencyConflict {
+                expected: StreamWritePrecondition::NoStream,
+                current_position: Some(_),
+                ..
+            })
         ));
     }
 
