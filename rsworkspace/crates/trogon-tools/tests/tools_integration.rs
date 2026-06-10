@@ -12,6 +12,10 @@ use serde_json::json;
 use tempfile::TempDir;
 use trogon_tools::{ToolContext, dispatch_tool};
 
+async fn dispatch(ctx: &ToolContext, name: &str, input: &serde_json::Value) -> String {
+    dispatch_tool(ctx, name, input).await.display_text()
+}
+
 fn ctx(dir: &TempDir) -> ToolContext {
     ToolContext {
         proxy_url: String::new(),
@@ -69,7 +73,7 @@ async fn list_dir_respects_gitignore() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(&ctx(&dir), "list_dir", &json!({})).await;
+    let result = dispatch(&ctx(&dir), "list_dir", &json!({})).await;
 
     assert!(
         result.contains("visible.rs"),
@@ -94,7 +98,7 @@ async fn list_dir_respects_gitignore_glob_pattern() {
     tokio::fs::write(dir.path().join("app.log.bak"), "backup").await.unwrap();
     tokio::fs::write(dir.path().join("main.rs"), "fn main() {}").await.unwrap();
 
-    let result = dispatch_tool(&ctx(&dir), "list_dir", &json!({})).await;
+    let result = dispatch(&ctx(&dir), "list_dir", &json!({})).await;
 
     assert!(result.contains("main.rs"), "main.rs must be listed; got: {result}");
     assert!(
@@ -114,7 +118,7 @@ async fn list_dir_respects_gitignore_glob_pattern() {
 async fn read_file_path_traversal_rejected_via_dispatch() {
     let dir = TempDir::new().unwrap();
     let result =
-        dispatch_tool(&ctx(&dir), "read_file", &json!({"path": "../../etc/passwd"})).await;
+        dispatch(&ctx(&dir), "read_file", &json!({"path": "../../etc/passwd"})).await;
     assert!(
         result.starts_with("Error"),
         "path traversal must be rejected; got: {result}"
@@ -134,7 +138,7 @@ async fn read_file_offset_and_limit_via_dispatch() {
         .unwrap();
 
     // offset=1 (0-indexed), limit=2 → lines 2 and 3
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "read_file",
         &json!({"path": "lines.txt", "offset": 1, "limit": 2}),
@@ -157,7 +161,7 @@ async fn str_replace_zero_occurrences_rejected_via_dispatch() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "str_replace",
         &json!({"path": "f.rs", "old_str": "fn missing() {}", "new_str": "fn x() {}"}),
@@ -178,7 +182,7 @@ async fn str_replace_duplicate_occurrences_rejected_via_dispatch() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "str_replace",
         &json!({"path": "f.rs", "old_str": "todo!()", "new_str": "unimplemented!()"}),
@@ -207,7 +211,7 @@ async fn fetch_url_html_to_text_via_dispatch() {
     });
 
     let dir = TempDir::new().unwrap();
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "fetch_url",
         &json!({"url": server.url("/page")}),
@@ -237,7 +241,7 @@ async fn fetch_url_truncates_large_response_via_dispatch() {
     });
 
     let dir = TempDir::new().unwrap();
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "fetch_url",
         &json!({"url": server.url("/big"), "raw": true}),
@@ -287,7 +291,7 @@ async fn git_diff_truncates_large_output_via_dispatch() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "git_diff",
         &json!({"args": "--staged"}),
@@ -308,7 +312,7 @@ async fn git_diff_truncates_large_output_via_dispatch() {
 async fn write_file_creates_file_and_returns_ok_via_dispatch() {
     let dir = TempDir::new().unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "write_file",
         &json!({"path": "output.rs", "content": "fn main() {}\n"}),
@@ -334,7 +338,7 @@ async fn str_replace_applies_edit_via_dispatch() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "str_replace",
         &json!({"path": "src.rs", "old_str": "fn old_name()", "new_str": "fn new_name()"}),
@@ -367,7 +371,7 @@ async fn str_replace_applies_edit_via_dispatch() {
 async fn write_file_creates_intermediate_directories_via_dispatch() {
     let dir = TempDir::new().unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "write_file",
         &json!({"path": "a/b/c/nested.rs", "content": "fn main() {}\n"}),
@@ -394,7 +398,7 @@ async fn list_dir_truncates_at_500_entries_via_dispatch() {
         tokio::fs::write(dir.path().join(format!("f{i:04}.txt")), "").await.unwrap();
     }
 
-    let result = dispatch_tool(&ctx(&dir), "list_dir", &json!({})).await;
+    let result = dispatch(&ctx(&dir), "list_dir", &json!({})).await;
 
     assert!(
         result.contains("truncated at 500 entries"),
@@ -415,7 +419,7 @@ async fn glob_matches_files_recursively_via_dispatch() {
     tokio::fs::write(dir.path().join("src/nested/util.rs"), "fn util() {}").await.unwrap();
     tokio::fs::write(dir.path().join("build.sh"), "#!/bin/sh").await.unwrap();
 
-    let result = dispatch_tool(&ctx(&dir), "glob", &json!({"pattern": "**/*.rs"})).await;
+    let result = dispatch(&ctx(&dir), "glob", &json!({"pattern": "**/*.rs"})).await;
 
     assert!(
         result.contains("main.rs"),
@@ -441,7 +445,7 @@ async fn git_status_shows_untracked_file_via_dispatch() {
 
     tokio::fs::write(dir.path().join("status_sentinel.rs"), "fn main() {}").await.unwrap();
 
-    let result = dispatch_tool(&ctx(&dir), "git_status", &json!({})).await;
+    let result = dispatch(&ctx(&dir), "git_status", &json!({})).await;
 
     assert!(
         result.contains("status_sentinel.rs"),
@@ -471,7 +475,7 @@ async fn git_log_shows_commit_message_via_dispatch() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(&ctx(&dir), "git_log", &json!({})).await;
+    let result = dispatch(&ctx(&dir), "git_log", &json!({})).await;
 
     assert!(
         result.contains("log-sentinel-commit-abc123"),
@@ -507,7 +511,7 @@ async fn notebook_edit_writes_new_cell_source_to_disk_via_dispatch() {
     .await
     .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "notebook_edit",
         &json!({"path": "notebook.ipynb", "cell_index": 0, "content": "print('edited-sentinel')"}),
@@ -547,7 +551,7 @@ async fn search_files_returns_matching_lines_via_dispatch() {
         .unwrap();
 
     let result =
-        dispatch_tool(&ctx(&dir), "search_files", &json!({"pattern": "search_needle_sentinel"}))
+        dispatch(&ctx(&dir), "search_files", &json!({"pattern": "search_needle_sentinel"}))
             .await;
 
     assert!(
