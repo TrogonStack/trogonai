@@ -12,7 +12,11 @@ pub struct PortableMessage {
 impl PortableMessage {
     /// Convenience constructor for text-only turns (codex, xai history).
     pub fn text_only(role: impl Into<String>, text: impl Into<String>) -> Self {
-        Self { role: role.into(), text: text.into(), blocks: vec![] }
+        Self {
+            role: role.into(),
+            text: text.into(),
+            blocks: vec![],
+        }
     }
 }
 
@@ -21,7 +25,9 @@ pub const EXPORT_VERSION_V2: u32 = 2;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PortableBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -71,12 +77,9 @@ fn truncate_str(s: &str, max: usize) -> String {
 /// Returns `true` when any block is richer than plain text.
 pub fn messages_need_v2(messages: &[Message]) -> bool {
     messages.iter().any(|m| {
-        m.content.iter().any(|b| {
-            !matches!(
-                b,
-                ContentBlock::Text { .. } | ContentBlock::Image { .. }
-            )
-        })
+        m.content
+            .iter()
+            .any(|b| !matches!(b, ContentBlock::Text { .. } | ContentBlock::Image { .. }))
     })
 }
 
@@ -91,19 +94,12 @@ pub fn message_to_v2(m: &Message) -> PortableMessageV2 {
                 name: name.clone(),
                 input_summary: summarize_value(input),
             },
-            ContentBlock::ToolResult {
-                tool_use_id,
-                content,
-            } => PortableBlock::ToolResult {
+            ContentBlock::ToolResult { tool_use_id, content } => PortableBlock::ToolResult {
                 id: tool_use_id.clone(),
                 output_summary: truncate_str(content, 500),
             },
-            ContentBlock::Thinking { thinking } => PortableBlock::Thinking {
-                text: thinking.clone(),
-            },
-            ContentBlock::Image { .. } => PortableBlock::Text {
-                text: "[image]".into(),
-            },
+            ContentBlock::Thinking { thinking } => PortableBlock::Thinking { text: thinking.clone() },
+            ContentBlock::Image { .. } => PortableBlock::Text { text: "[image]".into() },
         })
         .collect();
     PortableMessageV2 {
@@ -140,16 +136,11 @@ pub fn v2_to_messages(export: &PortableExportV2) -> Vec<Message> {
                         input: serde_json::Value::String(input_summary.clone()),
                         parent_tool_use_id: None,
                     },
-                    PortableBlock::ToolResult {
-                        id,
-                        output_summary,
-                    } => ContentBlock::ToolResult {
+                    PortableBlock::ToolResult { id, output_summary } => ContentBlock::ToolResult {
                         tool_use_id: id.clone(),
                         content: output_summary.clone(),
                     },
-                    PortableBlock::Thinking { text } => ContentBlock::Thinking {
-                        thinking: text.clone(),
-                    },
+                    PortableBlock::Thinking { text } => ContentBlock::Thinking { thinking: text.clone() },
                 })
                 .collect();
             Message {
@@ -203,9 +194,7 @@ pub fn text_to_v2(role: &str, text: &str) -> PortableMessageV2 {
     PortableMessageV2 {
         version: EXPORT_VERSION_V2,
         role: role.to_string(),
-        blocks: vec![PortableBlock::Text {
-            text: text.to_string(),
-        }],
+        blocks: vec![PortableBlock::Text { text: text.to_string() }],
     }
 }
 
@@ -215,13 +204,9 @@ pub fn v2_message_to_text(m: &PortableMessageV2) -> PortableMessage {
         match block {
             PortableBlock::Text { text } => parts.push(text.clone()),
             PortableBlock::ToolUse {
-                name,
-                input_summary,
-                ..
+                name, input_summary, ..
             } => parts.push(format!("[tool:{name}] {input_summary}")),
-            PortableBlock::ToolResult {
-                output_summary, ..
-            } => parts.push(output_summary.clone()),
+            PortableBlock::ToolResult { output_summary, .. } => parts.push(output_summary.clone()),
             PortableBlock::Thinking { text } => parts.push(text.clone()),
         }
     }
@@ -309,10 +294,7 @@ mod tests {
         match parsed {
             ParsedExport::V2(exp) => {
                 assert_eq!(exp.version, 2);
-                assert!(matches!(
-                    exp.messages[0].blocks[0],
-                    PortableBlock::ToolUse { .. }
-                ));
+                assert!(matches!(exp.messages[0].blocks[0], PortableBlock::ToolUse { .. }));
             }
             ParsedExport::V1(_) => panic!("expected v2 export"),
         }
@@ -410,14 +392,25 @@ mod tests {
                 name: "read_file".into(),
                 input_summary: serde_json::json!({"path": "/foo"}).to_string(),
             },
-            PortableBlock::ToolResult { id: "c1".into(), output_summary: "file contents".into() },
+            PortableBlock::ToolResult {
+                id: "c1".into(),
+                output_summary: "file contents".into(),
+            },
         ];
-        let msg = PortableMessage { role: "assistant".into(), text: "hello".into(), blocks };
+        let msg = PortableMessage {
+            role: "assistant".into(),
+            text: "hello".into(),
+            blocks,
+        };
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: PortableMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.blocks.len(), 3);
         match &decoded.blocks[1] {
-            PortableBlock::ToolUse { id, name, input_summary } => {
+            PortableBlock::ToolUse {
+                id,
+                name,
+                input_summary,
+            } => {
                 assert_eq!(id, "c1");
                 assert_eq!(name, "read_file");
                 assert!(input_summary.contains("/foo"));

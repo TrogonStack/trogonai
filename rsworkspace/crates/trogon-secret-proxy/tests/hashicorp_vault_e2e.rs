@@ -200,16 +200,10 @@ async fn hashicorp_vault_store_rotate_revoke_lifecycle() {
     let token = tok("tok_anthropic_prod_lifecycle1");
 
     store.store(&token, "initial-key").await.unwrap();
-    assert_eq!(
-        store.resolve(&token).await.unwrap(),
-        Some("initial-key".to_string()),
-    );
+    assert_eq!(store.resolve(&token).await.unwrap(), Some("initial-key".to_string()),);
 
     store.rotate(&token, "rotated-key").await.unwrap();
-    assert_eq!(
-        store.resolve(&token).await.unwrap(),
-        Some("rotated-key".to_string()),
-    );
+    assert_eq!(store.resolve(&token).await.unwrap(), Some("rotated-key".to_string()),);
 
     store.revoke(&token).await.unwrap();
     assert_eq!(store.resolve(&token).await.unwrap(), None);
@@ -242,10 +236,7 @@ async fn vault_admin_hashicorp_store_persists_token() {
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
     assert_eq!(v["ok"], true, "expected ok:true, got: {v}");
 
-    let resolved = store
-        .resolve(&tok("tok_anthropic_prod_natsstoretest"))
-        .await
-        .unwrap();
+    let resolved = store.resolve(&tok("tok_anthropic_prod_natsstoretest")).await.unwrap();
     assert_eq!(resolved, Some("sk-ant-via-nats".to_string()));
 }
 
@@ -486,9 +477,7 @@ async fn hashicorp_vault_proxy_worker_pipeline_resolves_real_key() {
     // Send an HTTP request through the proxy using the opaque token.
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_hvpipeline1")
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)

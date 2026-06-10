@@ -6,9 +6,7 @@
 //! trait impl that the Claude agent loop expects, delegating to the shared
 //! `elicit_via_channel`.
 
-pub use trogon_runner_tools::elicitation::{
-    handle_elicitation_request_nats, ElicitationReq, ElicitationTx,
-};
+pub use trogon_runner_tools::elicitation::{ElicitationReq, ElicitationTx, handle_elicitation_request_nats};
 
 use trogon_agent_core::agent_loop::ElicitationProvider;
 use trogon_runner_tools::elicitation::elicit_via_channel;
@@ -38,8 +36,7 @@ mod tests {
     #[tokio::test]
     async fn provider_returns_answer() {
         use agent_client_protocol::{
-            ElicitationAcceptAction, ElicitationAction, ElicitationContentValue,
-            ElicitationResponse,
+            ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationResponse,
         };
         use std::collections::BTreeMap;
 
@@ -52,10 +49,7 @@ mod tests {
         let task = tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
                 let mut content = BTreeMap::new();
-                content.insert(
-                    "answer".to_string(),
-                    ElicitationContentValue::String("hi".to_string()),
-                );
+                content.insert("answer".to_string(), ElicitationContentValue::String("hi".to_string()));
                 let resp = ElicitationResponse::new(ElicitationAction::Accept(
                     ElicitationAcceptAction::new().content(content),
                 ));

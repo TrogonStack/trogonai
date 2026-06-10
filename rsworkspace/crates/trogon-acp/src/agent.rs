@@ -9,36 +9,43 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    AvailableCommand, AvailableCommandsUpdate, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ConfigOptionUpdate,
-    ContentBlock, ContentChunk, CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification,
-    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, McpCapabilities, ModelInfo, NewSessionRequest,
-    NewSessionResponse, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptCapabilities,
-    PromptRequest, PromptResponse, ProtocolVersion, Result, ResumeSessionRequest,
-    ResumeSessionResponse, SessionCapabilities, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue, SessionForkCapabilities, SessionId, SessionInfo,
-    SessionListCapabilities, SessionMode, SessionModeState, SessionModelState, SessionNotification,
-    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse, TextContent, ToolCall, ToolCallContent,
-    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
+    AvailableCommandsUpdate, CancelNotification, CloseSessionRequest, CloseSessionResponse, ConfigOptionUpdate,
+    ContentBlock, ContentChunk, CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
+    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities, ModelInfo,
+    NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptCapabilities,
+    PromptRequest, PromptResponse, ProtocolVersion, Result, ResumeSessionRequest, ResumeSessionResponse,
+    SessionCapabilities, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode, SessionModeState,
+    SessionModelState, SessionNotification, SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
+    SetSessionModelResponse, TextContent, ToolCall, ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind,
 };
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{info, warn};
 
-use acp_nats::{AcpPrefix, AcpSessionId, Bridge};
 use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session as session_subjects};
-use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage, JsMessageOf};
+use acp_nats::{AcpPrefix, AcpSessionId, Bridge};
 use agent_client_protocol::McpServer;
-use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, SessionNotifier, SessionState, SessionStore, StoredMcpServer};
+use trogon_acp_runner::{
+    GatewayConfig, NatsSessionNotifier, NatsSessionStore, SessionNotifier, SessionState, SessionStore, StoredMcpServer,
+};
 use trogon_agent_core::agent_loop::ContentBlock as AgentContentBlock;
+use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsMessageOf, JsRequestMessage};
+use trogon_runner_tools::{compactor_model_config_option, parse_compactor_config, session_window_from_catalog};
 use trogon_std::time::GetElapsed;
+use trogonai_catalog_client::{CatalogClient, CatalogClientConfig, CatalogSnapshot};
 
 const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 
+/// Catalog inputs for building config options.
+pub(crate) struct ConfigCatalogCtx<'a> {
+    pub catalog: Option<&'a CatalogSnapshot>,
+    pub callable_providers: Option<&'a [String]>,
+    pub margin: f64,
+}
 
 /// Hardcoded available Claude models exposed by this agent.
 /// Built-in Claude Code slash commands sent in `available_commands_update`.
@@ -48,19 +55,10 @@ const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 /// release-notes, todos).
 const BUILTIN_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("bug", "Submit feedback about Claude"),
-    (
-        "clear",
-        "Clear conversation history and free context window",
-    ),
-    (
-        "compact",
-        "Compact conversation with optional focus instructions",
-    ),
+    ("clear", "Clear conversation history and free context window"),
+    ("compact", "Compact conversation with optional focus instructions"),
     ("config", "Open config panel"),
-    (
-        "doctor",
-        "Check the health of your Claude Code installation",
-    ),
+    ("doctor", "Check the health of your Claude Code installation"),
     ("help", "Get help with using Claude Code"),
     ("init", "Initialize Claude Code in a new project"),
     ("memory", "Edit CLAUDE.md memory files"),
@@ -103,6 +101,9 @@ where
     /// Per-session stdio MCP bridges. Keyed by session_id.
     /// Spawned in `new_session`/`fork_session`, shut down in `close_session`.
     stdio_bridges: Arc<Mutex<HashMap<String, Vec<trogon_cli::StdioMcpBridge>>>>,
+    /// Cached model catalog for cross-provider compaction picker (M3b).
+    catalog_client: Option<Arc<CatalogClient<async_nats::jetstream::kv::Store>>>,
+    catalog_margin: f64,
 }
 
 impl<N, C, J, S: SessionStore + 'static, Notif: SessionNotifier + 'static> TrogonAcpAgent<N, C, J, S, Notif>
@@ -131,23 +132,36 @@ where
             gateway_config,
             terminal_output_cap: std::cell::Cell::new(false),
             stdio_bridges: Arc::new(Mutex::new(HashMap::new())),
+            catalog_client: None,
+            catalog_margin: CatalogClientConfig::default().margin,
         }
+    }
+
+    /// Attach the NATS-backed model catalog for the compaction picker.
+    pub fn with_catalog(mut self, client: CatalogClient<async_nats::jetstream::kv::Store>) -> Self {
+        self.catalog_client = Some(Arc::new(client));
+        self
+    }
+
+    fn catalog_snapshot(&self) -> Option<CatalogSnapshot> {
+        self.catalog_client.as_ref().and_then(|c| c.cached_snapshot())
+    }
+
+    fn callable_providers(&self) -> Option<Vec<String>> {
+        self.catalog_client.as_ref().and_then(|c| c.cached_providers())
     }
 
     /// Build the `SessionModeState` for a session.
     fn build_mode_state(current_mode: &str, allow_bypass: bool) -> SessionModeState {
         let mut modes = vec![
             SessionMode::new("default", "Default").description("Standard behavior"),
-            SessionMode::new("acceptEdits", "Accept Edits")
-                .description("Auto-accept file edit operations"),
-            SessionMode::new("plan", "Plan Mode")
-                .description("Planning mode, no actual tool execution"),
+            SessionMode::new("acceptEdits", "Accept Edits").description("Auto-accept file edit operations"),
+            SessionMode::new("plan", "Plan Mode").description("Planning mode, no actual tool execution"),
             SessionMode::new("dontAsk", "Don't Ask").description("Don't prompt for permissions"),
         ];
         if allow_bypass {
             modes.push(
-                SessionMode::new("bypassPermissions", "Bypass Permissions")
-                    .description("Bypass all permission checks"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions").description("Bypass all permission checks"),
             );
         }
         SessionModeState::new(current_mode.to_string(), modes)
@@ -164,10 +178,35 @@ where
 
     /// Build the `SessionConfigOption` list for a session.
     pub(crate) fn build_config_options(
+        &self,
         current_mode: &str,
         current_model: &str,
         allow_bypass: bool,
+        compactor_provider: Option<&str>,
         compactor_model: Option<&str>,
+    ) -> Vec<SessionConfigOption> {
+        Self::build_config_options_with_catalog(
+            current_mode,
+            current_model,
+            allow_bypass,
+            compactor_provider,
+            compactor_model,
+            ConfigCatalogCtx {
+                catalog: self.catalog_snapshot().as_ref(),
+                callable_providers: self.callable_providers().as_deref(),
+                margin: self.catalog_margin,
+            },
+        )
+    }
+
+    /// Static builder used by tests and permission relay (no catalog client).
+    pub(crate) fn build_config_options_with_catalog(
+        current_mode: &str,
+        current_model: &str,
+        allow_bypass: bool,
+        compactor_provider: Option<&str>,
+        compactor_model: Option<&str>,
+        catalog_ctx: ConfigCatalogCtx<'_>,
     ) -> Vec<SessionConfigOption> {
         use agent_client_protocol::SessionConfigSelectOption;
         let mut mode_options: Vec<SessionConfigSelectOption> = vec![
@@ -187,37 +226,29 @@ where
             .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
             .collect();
 
-        // Compaction model: "default" means same as session model (compactor_model = None).
-        // All options are Claude models (same Anthropic provider) so the select
-        // naturally enforces the same-provider constraint.
-        let mut compactor_options: Vec<SessionConfigSelectOption> =
-            vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
-        compactor_options.extend(
-            AVAILABLE_MODELS
-                .iter()
-                .map(|(id, name)| SessionConfigSelectOption::new(*id, *name)),
+        let session_window = session_window_from_catalog(catalog_ctx.catalog, "anthropic", current_model, 200_000);
+        let compactor_option = compactor_model_config_option(
+            compactor_provider,
+            compactor_model,
+            catalog_ctx.catalog,
+            catalog_ctx.callable_providers,
+            session_window,
+            catalog_ctx.margin,
         );
-        let current_compactor = compactor_model.unwrap_or("");
 
         vec![
             SessionConfigOption::select("mode", "Mode", current_mode.to_string(), mode_options)
                 .category(SessionConfigOptionCategory::Mode),
             SessionConfigOption::select("model", "Model", current_model.to_string(), model_options)
                 .category(SessionConfigOptionCategory::Model),
-            SessionConfigOption::select(
-                "compactor_model",
-                "Compaction Model",
-                current_compactor.to_string(),
-                compactor_options,
-            ),
+            compactor_option,
         ]
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn publish_session_ready(&self, session_id: &str) {
         let subject = format!("{}.{}.agent.ext.session.ready", self.prefix, session_id);
-        let body =
-            serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap_or_default();
+        let body = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap_or_default();
         self.notifier
             .schedule_publish(subject, bytes::Bytes::from(body), SESSION_READY_DELAY);
     }
@@ -265,8 +296,7 @@ where
     #[cfg_attr(coverage, coverage(off))]
     async fn replay_history(&self, session_id: &SessionId, state: &SessionState) {
         // Track TodoWrite tool-use ids so we skip their tool_result replays
-        let mut todo_write_ids: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut todo_write_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Track Bash tool-use ids for terminal streaming replay
         let mut bash_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         // id → (name, input) for content/diff/location reconstruction on ToolResult
@@ -282,9 +312,9 @@ where
                             AgentContentBlock::Text { text } if !text.is_empty() => {
                                 let n = SessionNotification::new(
                                     session_id.clone(),
-                                    SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                        ContentBlock::Text(TextContent::new(text.clone())),
-                                    )),
+                                    SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                                        TextContent::new(text.clone()),
+                                    ))),
                                 );
                                 if self.notification_sender.send(n).await.is_err() {
                                     return;
@@ -293,17 +323,15 @@ where
                             AgentContentBlock::Thinking { thinking } if !thinking.is_empty() => {
                                 let n = SessionNotification::new(
                                     session_id.clone(),
-                                    SessionUpdate::AgentThoughtChunk(ContentChunk::new(
-                                        ContentBlock::Text(TextContent::new(thinking.clone())),
-                                    )),
+                                    SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(
+                                        TextContent::new(thinking.clone()),
+                                    ))),
                                 );
                                 if self.notification_sender.send(n).await.is_err() {
                                     return;
                                 }
                             }
-                            AgentContentBlock::ToolUse {
-                                id, name, input, ..
-                            } => {
+                            AgentContentBlock::ToolUse { id, name, input, .. } => {
                                 // TodoWrite → replay as Plan update, not a tool_call
                                 if name == "TodoWrite"
                                     && let Some(entries) = replay_todo_write_to_plan(input)
@@ -320,29 +348,18 @@ where
                                 }
                                 // Standard tool — show as InProgress then Completed
                                 let mut cc = serde_json::Map::new();
-                                cc.insert(
-                                    "toolName".to_string(),
-                                    serde_json::Value::String(name.clone()),
-                                );
+                                cc.insert("toolName".to_string(), serde_json::Value::String(name.clone()));
                                 let mut meta = serde_json::Map::new();
-                                meta.insert(
-                                    "claudeCode".to_string(),
-                                    serde_json::Value::Object(cc),
-                                );
+                                meta.insert("claudeCode".to_string(), serde_json::Value::Object(cc));
                                 // Cache (name, input) for ToolResult content reconstruction
                                 tool_replay_cache.insert(id.clone(), (name.clone(), input.clone()));
 
                                 if name == "Bash" && supports_terminal {
                                     bash_tool_ids.insert(id.clone());
                                     let mut terminal_info = serde_json::Map::new();
-                                    terminal_info.insert(
-                                        "terminal_id".to_string(),
-                                        serde_json::Value::String(id.clone()),
-                                    );
-                                    meta.insert(
-                                        "terminal_info".to_string(),
-                                        serde_json::Value::Object(terminal_info),
-                                    );
+                                    terminal_info
+                                        .insert("terminal_id".to_string(), serde_json::Value::String(id.clone()));
+                                    meta.insert("terminal_info".to_string(), serde_json::Value::Object(terminal_info));
                                 }
                                 let kind = replay_tool_kind_for(name);
                                 let locations = replay_tool_locations(name, input);
@@ -352,10 +369,8 @@ where
                                     .locations(locations)
                                     .raw_input(input.clone())
                                     .meta(meta);
-                                let n = SessionNotification::new(
-                                    session_id.clone(),
-                                    SessionUpdate::ToolCall(tool_call),
-                                );
+                                let n =
+                                    SessionNotification::new(session_id.clone(), SessionUpdate::ToolCall(tool_call));
                                 if self.notification_sender.send(n).await.is_err() {
                                     return;
                                 }
@@ -366,11 +381,7 @@ where
                 }
                 "user" => {
                     for block in &msg.content {
-                        if let AgentContentBlock::ToolResult {
-                            tool_use_id,
-                            content,
-                        } = block
-                        {
+                        if let AgentContentBlock::ToolResult { tool_use_id, content } = block {
                             // Skip result for TodoWrite — Plan was already replayed
                             if todo_write_ids.contains(tool_use_id) {
                                 continue;
@@ -382,20 +393,16 @@ where
                                     "terminal_id".to_string(),
                                     serde_json::Value::String(tool_use_id.clone()),
                                 );
-                                terminal_output_map.insert(
-                                    "data".to_string(),
-                                    serde_json::Value::String(content.clone()),
-                                );
+                                terminal_output_map
+                                    .insert("data".to_string(), serde_json::Value::String(content.clone()));
                                 let mut output_meta = serde_json::Map::new();
                                 output_meta.insert(
                                     "terminal_output".to_string(),
                                     serde_json::Value::Object(terminal_output_map),
                                 );
-                                let output_update = ToolCallUpdate::new(
-                                    tool_use_id.clone(),
-                                    ToolCallUpdateFields::new(),
-                                )
-                                .meta(output_meta);
+                                let output_update =
+                                    ToolCallUpdate::new(tool_use_id.clone(), ToolCallUpdateFields::new())
+                                        .meta(output_meta);
                                 let n = SessionNotification::new(
                                     session_id.clone(),
                                     SessionUpdate::ToolCallUpdate(output_update),
@@ -413,8 +420,7 @@ where
                                     "exit_code".to_string(),
                                     serde_json::Value::Number(serde_json::Number::from(0)),
                                 );
-                                terminal_exit_map
-                                    .insert("signal".to_string(), serde_json::Value::Null);
+                                terminal_exit_map.insert("signal".to_string(), serde_json::Value::Null);
                                 let mut exit_meta = serde_json::Map::new();
                                 exit_meta.insert(
                                     "terminal_exit".to_string(),
@@ -423,9 +429,7 @@ where
                                 let exit_fields = ToolCallUpdateFields::new()
                                     .status(ToolCallStatus::Completed)
                                     .raw_output(serde_json::Value::String(content.clone()));
-                                let exit_update =
-                                    ToolCallUpdate::new(tool_use_id.clone(), exit_fields)
-                                        .meta(exit_meta);
+                                let exit_update = ToolCallUpdate::new(tool_use_id.clone(), exit_fields).meta(exit_meta);
                                 let n = SessionNotification::new(
                                     session_id.clone(),
                                     SessionUpdate::ToolCallUpdate(exit_update),
@@ -447,10 +451,7 @@ where
                                 .locations(locations)
                                 .raw_output(serde_json::Value::String(content.clone()));
                             let update = ToolCallUpdate::new(tool_use_id.clone(), fields);
-                            let n = SessionNotification::new(
-                                session_id.clone(),
-                                SessionUpdate::ToolCallUpdate(update),
-                            );
+                            let n = SessionNotification::new(session_id.clone(), SessionUpdate::ToolCallUpdate(update));
                             if self.notification_sender.send(n).await.is_err() {
                                 return;
                             }
@@ -526,20 +527,12 @@ where
                 McpServer::Http(h) => Some(StoredMcpServer {
                     name: h.name.clone(),
                     url: h.url.clone(),
-                    headers: h
-                        .headers
-                        .iter()
-                        .map(|hv| (hv.name.clone(), hv.value.clone()))
-                        .collect(),
+                    headers: h.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
                 }),
                 McpServer::Sse(s) => Some(StoredMcpServer {
                     name: s.name.clone(),
                     url: s.url.clone(),
-                    headers: s
-                        .headers
-                        .iter()
-                        .map(|hv| (hv.name.clone(), hv.value.clone()))
-                        .collect(),
+                    headers: s.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
                 }),
                 _ => None, // Stdio not supported in NATS model
             })
@@ -559,18 +552,9 @@ where
         let mut bridges = Vec::new();
         for s in servers {
             if let agent_client_protocol::McpServer::Stdio(stdio) = s {
-                let env: Vec<(String, String)> = stdio
-                    .env
-                    .iter()
-                    .map(|ev| (ev.name.clone(), ev.value.clone()))
-                    .collect();
-                match trogon_cli::StdioMcpBridge::spawn(
-                    &stdio.command.to_string_lossy(),
-                    &stdio.args,
-                    &env,
-                )
-                .await
-                {
+                let env: Vec<(String, String)> =
+                    stdio.env.iter().map(|ev| (ev.name.clone(), ev.value.clone())).collect();
+                match trogon_cli::StdioMcpBridge::spawn(&stdio.command.to_string_lossy(), &stdio.args, &env).await {
                     Ok(bridge) => {
                         stored.push(StoredMcpServer {
                             name: stdio.name.clone(),
@@ -601,7 +585,8 @@ where
         let acp_session_id = AcpSessionId::new(session_id).expect("valid session_id");
         let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &acp_session_id).to_string();
         self.notifier.publish(cancel_subject, bytes::Bytes::new()).await;
-        let cancelled_subject = session_subjects::agent::CancelledSubject::new(&acp_prefix, &acp_session_id).to_string();
+        let cancelled_subject =
+            session_subjects::agent::CancelledSubject::new(&acp_prefix, &acp_session_id).to_string();
         self.notifier.publish(cancelled_subject, bytes::Bytes::new()).await;
         if let Err(e) = self.store.delete(session_id).await {
             Self::warn_delete_session_failed(session_id, &e);
@@ -637,14 +622,7 @@ where
 #[async_trait::async_trait(?Send)]
 impl<N, C, J, S, Notif> agent_client_protocol::Agent for TrogonAcpAgent<N, C, J, S, Notif>
 where
-    N: RequestClient
-        + PublishClient
-        + SubscribeClient
-        + FlushClient
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient + Clone + Send + Sync + 'static,
     C: GetElapsed + Send + Sync + 'static,
     J: JetStreamPublisher + JetStreamGetStream + Send + Sync + 'static,
     JsMessageOf<J>: JsRequestMessage,
@@ -652,11 +630,7 @@ where
     Notif: SessionNotifier + Send + Sync + 'static,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
-        let client = args
-            .client_info
-            .as_ref()
-            .map(|c| c.name.as_str())
-            .unwrap_or("unknown");
+        let client = args.client_info.as_ref().map(|c| c.name.as_str()).unwrap_or("unknown");
         info!(client = %client, "ACP initialize");
 
         let terminal_output = args
@@ -681,19 +655,14 @@ where
             .meta(caps_meta);
 
         let mut meta = serde_json::Map::new();
-        meta.insert(
-            "claudeCode".to_string(),
-            serde_json::json!({ "promptQueueing": true }),
-        );
+        meta.insert("claudeCode".to_string(), serde_json::json!({ "promptQueueing": true }));
 
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(true)
                     .session_capabilities(session_caps)
-                    .prompt_capabilities(
-                        PromptCapabilities::new().image(true).embedded_context(true),
-                    )
+                    .prompt_capabilities(PromptCapabilities::new().image(true).embedded_context(true))
                     .mcp_capabilities(McpCapabilities::new().http(true).sse(true))
                     .meta(meta),
             )
@@ -759,25 +728,17 @@ where
         info!(session_id = %session_id, cwd = ?args.cwd, "New ACP session");
 
         let cwd = args.cwd.to_string_lossy().to_string();
-        let system_prompt = args
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("systemPrompt"))
-            .and_then(|v| {
-                v.as_str()
-                    .or_else(|| v.get("append").and_then(|a| a.as_str()))
-                    .map(|s| s.to_string())
-            });
+        let system_prompt = args.meta.as_ref().and_then(|m| m.get("systemPrompt")).and_then(|v| {
+            v.as_str()
+                .or_else(|| v.get("append").and_then(|a| a.as_str()))
+                .map(|s| s.to_string())
+        });
         let additional_roots: Vec<String> = args
             .meta
             .as_ref()
             .and_then(|m| m.get("additionalRoots"))
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_default();
         let disable_builtin_tools = args
             .meta
@@ -785,8 +746,7 @@ where
             .and_then(|m| m.get("disableBuiltInTools"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let (stdio_servers, session_bridges) =
-            Self::spawn_stdio_bridges(&args.mcp_servers).await;
+        let (stdio_servers, session_bridges) = Self::spawn_stdio_bridges(&args.mcp_servers).await;
         let mut mcp_servers = Self::convert_mcp_servers(&args.mcp_servers);
         mcp_servers.extend(stdio_servers);
         let state = SessionState {
@@ -803,19 +763,26 @@ where
             Self::warn_init_session_kv_failed(&session_id, &e);
         }
         if !session_bridges.is_empty() {
-            self.stdio_bridges.lock().await.insert(session_id.clone(), session_bridges);
+            self.stdio_bridges
+                .lock()
+                .await
+                .insert(session_id.clone(), session_bridges);
         }
 
         let sid = SessionId::from(session_id.clone());
         self.publish_session_ready(&session_id).await;
-        self.send_available_commands_update(&sid, &state.mcp_servers)
-            .await;
+        self.send_available_commands_update(&sid, &state.mcp_servers).await;
 
         let allow_bypass = !is_running_as_root();
         let modes = Self::build_mode_state(&state.mode, allow_bypass);
         let models = Self::build_model_state(&self.default_model);
-        let config_options =
-            Self::build_config_options(&state.mode, &self.default_model, allow_bypass, state.compactor_model.as_deref());
+        let config_options = self.build_config_options(
+            &state.mode,
+            &self.default_model,
+            allow_bypass,
+            state.compactor_provider.as_deref(),
+            state.compactor_model.as_deref(),
+        );
 
         Ok(NewSessionResponse::new(sid)
             .modes(modes)
@@ -829,12 +796,7 @@ where
 
         let state = self.store.load(&session_id).await.map_err(
             #[cfg_attr(coverage, coverage(off))]
-            |e| {
-                Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("Failed to load session: {e}"),
-                )
-            },
+            |e| Error::new(ErrorCode::InternalError.into(), format!("Failed to load session: {e}")),
         )?;
 
         self.replay_history(&args.session_id, &state).await;
@@ -842,17 +804,19 @@ where
         self.send_available_commands_update(&args.session_id, &state.mcp_servers)
             .await;
 
-        let current_mode = if state.mode.is_empty() {
-            "default"
-        } else {
-            &state.mode
-        };
+        let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
 
         let allow_bypass = !is_running_as_root();
         let modes = Self::build_mode_state(current_mode, allow_bypass);
         let models = Self::build_model_state(current_model);
-        let config_options = Self::build_config_options(current_mode, current_model, allow_bypass, state.compactor_model.as_deref());
+        let config_options = self.build_config_options(
+            current_mode,
+            current_model,
+            allow_bypass,
+            state.compactor_provider.as_deref(),
+            state.compactor_model.as_deref(),
+        );
 
         Ok(LoadSessionResponse::new()
             .modes(modes)
@@ -860,21 +824,12 @@ where
             .config_options(config_options))
     }
 
-    async fn set_session_mode(
-        &self,
-        args: SetSessionModeRequest,
-    ) -> Result<SetSessionModeResponse> {
+    async fn set_session_mode(&self, args: SetSessionModeRequest) -> Result<SetSessionModeResponse> {
         let session_id = args.session_id.to_string();
         let mode_id = args.mode_id.to_string();
         info!(session_id = %session_id, mode = %mode_id, "Set session mode");
 
-        const VALID_MODES: &[&str] = &[
-            "default",
-            "acceptEdits",
-            "plan",
-            "dontAsk",
-            "bypassPermissions",
-        ];
+        const VALID_MODES: &[&str] = &["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
         if !VALID_MODES.contains(&mode_id.as_str()) {
             return Err(Error::new(
                 ErrorCode::InvalidParams.into(),
@@ -890,12 +845,7 @@ where
 
         let mut state = self.store.load(&session_id).await.map_err(
             #[cfg_attr(coverage, coverage(off))]
-            |e| {
-                Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("Failed to load session: {e}"),
-                )
-            },
+            |e| Error::new(ErrorCode::InternalError.into(), format!("Failed to load session: {e}")),
         )?;
         state.mode = mode_id.clone();
         if let Err(e) = self.store.save(&session_id, &state).await {
@@ -912,8 +862,13 @@ where
         let _ = self.notification_sender.send(mode_notification).await;
 
         // Send updated config options
-        let config_options =
-            Self::build_config_options(&mode_id, current_model, !is_running_as_root(), state.compactor_model.as_deref());
+        let config_options = self.build_config_options(
+            &mode_id,
+            current_model,
+            !is_running_as_root(),
+            state.compactor_provider.as_deref(),
+            state.compactor_model.as_deref(),
+        );
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
             SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -936,22 +891,11 @@ where
 
         let mut state = self.store.load(&session_id).await.map_err(
             #[cfg_attr(coverage, coverage(off))]
-            |e| {
-                Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("Failed to load session: {e}"),
-                )
-            },
+            |e| Error::new(ErrorCode::InternalError.into(), format!("Failed to load session: {e}")),
         )?;
 
         if config_id == "mode" {
-            const VALID_MODES: &[&str] = &[
-                "default",
-                "acceptEdits",
-                "plan",
-                "dontAsk",
-                "bypassPermissions",
-            ];
+            const VALID_MODES: &[&str] = &["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
             if !VALID_MODES.contains(&value.as_str()) {
                 return Err(Error::new(
                     ErrorCode::InvalidParams.into(),
@@ -976,12 +920,7 @@ where
         } else if config_id == "model" {
             let resolved = Self::resolve_model(&value).ok_or_else(
                 #[cfg_attr(coverage, coverage(off))]
-                || {
-                    Error::new(
-                        ErrorCode::InvalidParams.into(),
-                        format!("Unknown model: {value}"),
-                    )
-                },
+                || Error::new(ErrorCode::InvalidParams.into(), format!("Unknown model: {value}")),
             )?;
             state.model = Some(resolved.to_string());
             if let Err(e) = self.store.save(&session_id, &state).await {
@@ -990,22 +929,21 @@ where
         } else if config_id == "compactor_model" {
             // Write to the shared KV store so TrogonAgent (acp-runner) picks it up
             // on the next prompt — both share the same NatsSessionStore instance.
-            state.compactor_model = if value.is_empty() { None } else { Some(value.clone()) };
+            let (provider, model) = parse_compactor_config(&value);
+            state.compactor_provider = provider;
+            state.compactor_model = model;
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "agent: failed to persist compactor_model");
             }
         }
 
-        let current_mode = if state.mode.is_empty() {
-            "default"
-        } else {
-            &state.mode
-        };
+        let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
-        let config_options = Self::build_config_options(
+        let config_options = self.build_config_options(
             current_mode,
             current_model,
             !is_running_as_root(),
+            state.compactor_provider.as_deref(),
             state.compactor_model.as_deref(),
         );
 
@@ -1018,10 +956,7 @@ where
         Ok(SetSessionConfigOptionResponse::new(config_options))
     }
 
-    async fn set_session_model(
-        &self,
-        args: SetSessionModelRequest,
-    ) -> Result<SetSessionModelResponse> {
+    async fn set_session_model(&self, args: SetSessionModelRequest) -> Result<SetSessionModelResponse> {
         let session_id = args.session_id.to_string();
         let raw_model = args.model_id.0.to_string();
         let model = Self::resolve_model(&raw_model)
@@ -1031,25 +966,21 @@ where
 
         let mut state = self.store.load(&session_id).await.map_err(
             #[cfg_attr(coverage, coverage(off))]
-            |e| {
-                Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("Failed to load session: {e}"),
-                )
-            },
+            |e| Error::new(ErrorCode::InternalError.into(), format!("Failed to load session: {e}")),
         )?;
         state.model = Some(model.clone());
         if let Err(e) = self.store.save(&session_id, &state).await {
             Self::warn_save_session_model_failed(&session_id, &e);
         }
 
-        let current_mode = if state.mode.is_empty() {
-            "default"
-        } else {
-            &state.mode
-        };
-        let config_options =
-            Self::build_config_options(current_mode, &model, !is_running_as_root(), state.compactor_model.as_deref());
+        let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
+        let config_options = self.build_config_options(
+            current_mode,
+            &model,
+            !is_running_as_root(),
+            state.compactor_provider.as_deref(),
+            state.compactor_model.as_deref(),
+        );
         let config_notification = SessionNotification::new(
             args.session_id.clone(),
             SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
@@ -1062,12 +993,7 @@ where
     async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
         let ids = self.store.list_ids().await.map_err(
             #[cfg_attr(coverage, coverage(off))]
-            |e| {
-                Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("Failed to list sessions: {e}"),
-                )
-            },
+            |e| Error::new(ErrorCode::InternalError.into(), format!("Failed to list sessions: {e}")),
         )?;
 
         let mut sessions = Vec::with_capacity(ids.len());
@@ -1082,10 +1008,7 @@ where
                 }
                 None => "",
             };
-            if !requested_cwd.is_empty()
-                && requested_cwd != "/"
-                && !state.cwd.starts_with(requested_cwd)
-            {
+            if !requested_cwd.is_empty() && requested_cwd != "/" && !state.cwd.starts_with(requested_cwd) {
                 continue;
             }
             if state.cwd.is_empty() {
@@ -1109,12 +1032,10 @@ where
             }
             let mut session_meta = serde_json::Map::new();
             if let Some(ref parent_id) = state.parent_session_id {
-                session_meta
-                    .insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                session_meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
             }
             if let Some(idx) = state.branched_at_index {
-                session_meta
-                    .insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                session_meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
             }
             if !session_meta.is_empty() {
                 info = info.meta(session_meta);
@@ -1162,11 +1083,7 @@ where
             .as_ref()
             .and_then(|m| m.get("additionalRoots"))
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_else(|| src_state.additional_roots.clone());
         let disable_builtin_tools = args
             .meta
@@ -1178,13 +1095,13 @@ where
         if let Some(idx) = branch_at {
             messages.truncate(idx);
         }
-        let (stdio_servers, fork_bridges) =
-            Self::spawn_stdio_bridges(&args.mcp_servers).await;
+        let (stdio_servers, fork_bridges) = Self::spawn_stdio_bridges(&args.mcp_servers).await;
         let mut mcp_servers = Self::convert_mcp_servers(&args.mcp_servers);
         mcp_servers.extend(stdio_servers);
         let new_state = SessionState {
             messages,
             model: src_state.model.clone(),
+            compactor_provider: src_state.compactor_provider.clone(),
             compactor_model: src_state.compactor_model.clone(),
             mode: src_state.mode.clone(),
             cwd,
@@ -1221,8 +1138,7 @@ where
 
         let sid = SessionId::from(new_id.clone());
         self.publish_session_ready(&new_id).await;
-        self.send_available_commands_update(&sid, &new_state.mcp_servers)
-            .await;
+        self.send_available_commands_update(&sid, &new_state.mcp_servers).await;
 
         let current_mode = if new_state.mode.is_empty() {
             "default"
@@ -1235,10 +1151,11 @@ where
         Ok(ForkSessionResponse::new(sid)
             .modes(Self::build_mode_state(current_mode, allow_bypass))
             .models(Self::build_model_state(current_model))
-            .config_options(Self::build_config_options(
+            .config_options(self.build_config_options(
                 current_mode,
                 current_model,
                 allow_bypass,
+                new_state.compactor_provider.as_deref(),
                 new_state.compactor_model.as_deref(),
             )))
     }
@@ -1249,33 +1166,25 @@ where
 
         let state = self.store.load(&session_id).await.map_err(
             #[cfg_attr(coverage, coverage(off))]
-            |e| {
-                Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("Failed to load session: {e}"),
-                )
-            },
+            |e| Error::new(ErrorCode::InternalError.into(), format!("Failed to load session: {e}")),
         )?;
 
         self.publish_session_ready(&session_id).await;
         self.send_available_commands_update(&args.session_id, &state.mcp_servers)
             .await;
 
-        let current_mode = if state.mode.is_empty() {
-            "default"
-        } else {
-            &state.mode
-        };
+        let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
 
         let allow_bypass = !is_running_as_root();
         Ok(ResumeSessionResponse::new()
             .modes(Self::build_mode_state(current_mode, allow_bypass))
             .models(Self::build_model_state(current_model))
-            .config_options(Self::build_config_options(
+            .config_options(self.build_config_options(
                 current_mode,
                 current_model,
                 allow_bypass,
+                state.compactor_provider.as_deref(),
                 state.compactor_model.as_deref(),
             )))
     }
@@ -1293,37 +1202,24 @@ where
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
         // Handle session/close — not yet in agent-client-protocol 0.9.5
         if args.method.as_ref().contains("close") {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
             if let Some(sid) = params.get("sessionId").and_then(|v| v.as_str()) {
                 info!(session_id = %sid, "Close ACP session (ext_method)");
                 self.close_session_impl(sid).await;
             }
-            return Ok(ExtResponse::new(
-                serde_json::value::RawValue::NULL.to_owned().into(),
-            ));
+            return Ok(ExtResponse::new(serde_json::value::RawValue::NULL.to_owned().into()));
         }
         if args.method.as_ref() == "session/list_children" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params
-                .get("sessionId")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params.get("sessionId").and_then(|v| v.as_str()).unwrap_or_default();
             let children = self
                 .store
                 .list_children(session_id)
                 .await
-                .map_err(|e| {
-                    Error::new(
-                        ErrorCode::InternalError.into(),
-                        format!("list_children failed: {e}"),
-                    )
-                })?;
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("list_children failed: {e}")))?;
             let result = serde_json::json!({ "children": children });
-            let raw = serde_json::value::RawValue::from_string(result.to_string()).map_err(|e| {
-                Error::new(ErrorCode::InternalError.into(), e.to_string())
-            })?;
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
         Err(Error::new(
@@ -1362,11 +1258,7 @@ fn replay_todo_write_to_plan(input: &serde_json::Value) -> Option<Vec<PlanEntry>
             Some(PlanEntry::new(content, priority, status))
         })
         .collect();
-    if entries.is_empty() {
-        None
-    } else {
-        Some(entries)
-    }
+    if entries.is_empty() { None } else { Some(entries) }
 }
 
 /// Sanitize a session title: collapse whitespace, trim, truncate to 256 chars.
@@ -1433,22 +1325,14 @@ fn replay_tool_result_content(
             } else {
                 let new = inp.get("new_string").and_then(|v| v.as_str());
                 let old = inp.get("old_string").and_then(|v| v.as_str());
-                if let Some(new) = new {
-                    vec![(old, new)]
-                } else {
-                    vec![]
-                }
+                if let Some(new) = new { vec![(old, new)] } else { vec![] }
             };
             if pairs.is_empty() {
                 return (vec![], vec![]);
             }
             let content = pairs
                 .into_iter()
-                .map(|(old, new)| {
-                    ToolCallContent::Diff(
-                        Diff::new(file_path, new).old_text(old.map(str::to_string)),
-                    )
-                })
+                .map(|(old, new)| ToolCallContent::Diff(Diff::new(file_path, new).old_text(old.map(str::to_string))))
                 .collect();
             (content, vec![ToolCallLocation::new(file_path)])
         }
@@ -1482,9 +1366,7 @@ fn replay_tool_result_content(
                 if output.ends_with('\n') { "" } else { "\n" }
             );
             (
-                vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(
-                    fenced,
-                )))],
+                vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(fenced)))],
                 vec![],
             )
         }
@@ -1589,9 +1471,7 @@ fn is_running_as_root() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_nats::jetstream::{
-        MockJetStreamConsumerFactory, MockJetStreamPublisher, MockJetStreamStream,
-    };
+    use trogon_nats::jetstream::{MockJetStreamConsumerFactory, MockJetStreamPublisher, MockJetStreamStream};
     use trogon_nats::mocks::MockError;
 
     #[derive(Clone)]
@@ -1612,9 +1492,7 @@ mod tests {
 
     impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         type PublishError = MockError;
-        type AckFuture = std::future::Ready<
-            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-        >;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
         async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
             &self,
@@ -1622,9 +1500,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 
@@ -1632,16 +1508,12 @@ mod tests {
         type Error = trogon_nats::jetstream::GetStreamError;
         type Stream = MockJetStreamStream;
 
-        async fn get_stream<T: AsRef<str> + Send>(
-            &self,
-            stream_name: T,
-        ) -> Result<MockJetStreamStream, Self::Error> {
+        async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<MockJetStreamStream, Self::Error> {
             self.consumer_factory.get_stream(stream_name).await
         }
     }
 
-    type TestAgent =
-        TrogonAcpAgent<trogon_nats::AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>;
+    type TestAgent = TrogonAcpAgent<trogon_nats::AdvancedMockNatsClient, trogon_std::time::SystemClock, MockJs>;
 
     // ── slash commands ────────────────────────────────────────────────────────
 
@@ -1759,14 +1631,36 @@ mod tests {
 
     #[test]
     fn build_config_options_returns_two_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         // mode + model + compactor_model
         assert_eq!(opts.len(), 3);
     }
 
     #[test]
     fn build_config_options_first_option_is_mode() {
-        let opts = TestAgent::build_config_options("plan", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "plan",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         assert_eq!(opts[0].id.0.as_ref(), "mode");
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             assert_eq!(s.current_value.0.as_ref(), "plan");
@@ -1777,7 +1671,18 @@ mod tests {
 
     #[test]
     fn build_config_options_second_option_is_model() {
-        let opts = TestAgent::build_config_options("default", "claude-opus-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-opus-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         assert_eq!(opts[1].id.0.as_ref(), "model");
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[1].kind {
             assert_eq!(s.current_value.0.as_ref(), "claude-opus-4-6");
@@ -1788,7 +1693,18 @@ mod tests {
 
     #[test]
     fn build_config_options_with_bypass_mode_has_five_select_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", true, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            true,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
                 agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
@@ -1805,7 +1721,18 @@ mod tests {
 
     #[test]
     fn build_config_options_without_bypass_mode_has_four_select_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
                 agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
@@ -1824,14 +1751,8 @@ mod tests {
 
     #[test]
     fn resolve_model_exact_id_match() {
-        assert_eq!(
-            TestAgent::resolve_model("claude-opus-4-6"),
-            Some("claude-opus-4-6")
-        );
-        assert_eq!(
-            TestAgent::resolve_model("claude-sonnet-4-6"),
-            Some("claude-sonnet-4-6")
-        );
+        assert_eq!(TestAgent::resolve_model("claude-opus-4-6"), Some("claude-opus-4-6"));
+        assert_eq!(TestAgent::resolve_model("claude-sonnet-4-6"), Some("claude-sonnet-4-6"));
         assert_eq!(
             TestAgent::resolve_model("claude-haiku-4-5-20251001"),
             Some("claude-haiku-4-5-20251001")
@@ -1840,27 +1761,15 @@ mod tests {
 
     #[test]
     fn resolve_model_case_insensitive_name() {
-        assert_eq!(
-            TestAgent::resolve_model("claude opus 4"),
-            Some("claude-opus-4-6")
-        );
-        assert_eq!(
-            TestAgent::resolve_model("CLAUDE OPUS 4"),
-            Some("claude-opus-4-6")
-        );
+        assert_eq!(TestAgent::resolve_model("claude opus 4"), Some("claude-opus-4-6"));
+        assert_eq!(TestAgent::resolve_model("CLAUDE OPUS 4"), Some("claude-opus-4-6"));
     }
 
     #[test]
     fn resolve_model_substring_match() {
         assert_eq!(TestAgent::resolve_model("opus"), Some("claude-opus-4-6"));
-        assert_eq!(
-            TestAgent::resolve_model("sonnet"),
-            Some("claude-sonnet-4-6")
-        );
-        assert_eq!(
-            TestAgent::resolve_model("haiku"),
-            Some("claude-haiku-4-5-20251001")
-        );
+        assert_eq!(TestAgent::resolve_model("sonnet"), Some("claude-sonnet-4-6"));
+        assert_eq!(TestAgent::resolve_model("haiku"), Some("claude-haiku-4-5-20251001"));
     }
 
     #[test]
@@ -2024,11 +1933,7 @@ mod tests {
     fn build_mode_state_with_bypass_has_5_modes() {
         let state = TestAgent::build_mode_state("plan", true);
         assert_eq!(state.available_modes.len(), 5);
-        let ids: Vec<String> = state
-            .available_modes
-            .iter()
-            .map(|m| m.id.to_string())
-            .collect();
+        let ids: Vec<String> = state.available_modes.iter().map(|m| m.id.to_string()).collect();
         assert!(ids.iter().any(|id| id == "bypassPermissions"));
     }
 
@@ -2039,11 +1944,7 @@ mod tests {
         let state = TestAgent::build_model_state("claude-sonnet-4-6");
         assert_eq!(state.current_model_id.to_string(), "claude-sonnet-4-6");
         assert_eq!(state.available_models.len(), 3);
-        let ids: Vec<String> = state
-            .available_models
-            .iter()
-            .map(|m| m.model_id.to_string())
-            .collect();
+        let ids: Vec<String> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
         assert!(ids.iter().any(|id| id == "claude-opus-4-6"));
         assert!(ids.iter().any(|id| id == "claude-sonnet-4-6"));
         assert!(ids.iter().any(|id| id == "claude-haiku-4-5-20251001"));
@@ -2053,7 +1954,18 @@ mod tests {
 
     #[test]
     fn build_config_options_returns_mode_and_model() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         // mode + model + compactor_model
         assert_eq!(opts.len(), 3);
         let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
@@ -2067,10 +1979,7 @@ mod tests {
     #[test]
     fn convert_mcp_servers_http_server_included() {
         use agent_client_protocol::McpServerHttp;
-        let servers = vec![McpServer::Http(McpServerHttp::new(
-            "myserver",
-            "http://localhost:8080",
-        ))];
+        let servers = vec![McpServer::Http(McpServerHttp::new("myserver", "http://localhost:8080"))];
         let stored = TestAgent::convert_mcp_servers(&servers);
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].name, "myserver");
@@ -2156,8 +2065,7 @@ mod tests {
         use super::MockJs;
         use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
         use agent_client_protocol::{
-            Agent, NewSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
-            SetSessionModeRequest,
+            Agent, NewSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest, SetSessionModeRequest,
         };
         use std::sync::Arc;
         use tokio::sync::{RwLock, mpsc};
@@ -2166,13 +2074,8 @@ mod tests {
         use trogon_nats::AdvancedMockNatsClient;
         use trogon_std::time::SystemClock;
 
-        type MockAgent = TrogonAcpAgent<
-            AdvancedMockNatsClient,
-            SystemClock,
-            MockJs,
-            MemorySessionStore,
-            MockSessionNotifier,
-        >;
+        type MockAgent =
+            TrogonAcpAgent<AdvancedMockNatsClient, SystemClock, MockJs, MemorySessionStore, MockSessionNotifier>;
 
         async fn run_in_local<F, Fut>(f: F)
         where
@@ -2191,7 +2094,10 @@ mod tests {
             let gateway_config = Arc::new(RwLock::new(None));
             let config = Config::new(
                 AcpPrefix::new("acp").unwrap(),
-                NatsConfig { servers: vec!["unused".into()], auth: NatsAuth::None },
+                NatsConfig {
+                    servers: vec!["unused".into()],
+                    auth: NatsAuth::None,
+                },
             );
             let js_client = js.clone();
             let bridge = Bridge::new(
@@ -2227,7 +2133,8 @@ mod tests {
                 let state = agent.store.load(&sid).await.unwrap();
                 assert_eq!(state.cwd, "/test/cwd");
                 assert_eq!(state.mode, "default");
-            }).await;
+            })
+            .await;
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2247,7 +2154,8 @@ mod tests {
 
                 let state = agent.store.load(&sid.to_string()).await.unwrap();
                 assert_eq!(state.mode, "plan");
-            }).await;
+            })
+            .await;
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2269,7 +2177,8 @@ mod tests {
 
                 let state = agent.store.load(&sid.to_string()).await.unwrap();
                 assert_eq!(state.model.as_deref(), Some("claude-sonnet-4-6"));
-            }).await;
+            })
+            .await;
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2286,7 +2195,8 @@ mod tests {
                     .set_session_mode(SetSessionModeRequest::new(sid, "invalid_mode"))
                     .await;
                 assert!(result.is_err(), "invalid mode must return error");
-            }).await;
+            })
+            .await;
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2307,7 +2217,8 @@ mod tests {
                     .await
                     .unwrap();
                 assert_eq!(resp.sessions.len(), 2);
-            }).await;
+            })
+            .await;
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2349,7 +2260,8 @@ mod tests {
                     .find(|s| s.session_id.to_string() == parent_id)
                     .expect("root session must appear in list");
                 assert!(root_info.meta.is_none(), "root must not have branch _meta");
-            }).await;
+            })
+            .await;
         }
 
         // ── stdio MCP bridge ──────────────────────────────────────────────────
@@ -2384,10 +2296,7 @@ mod tests {
 
                 let stdio = McpServerStdio::new("test-server", script.as_path());
                 let resp = agent
-                    .new_session(
-                        NewSessionRequest::new("/cwd")
-                            .mcp_servers(vec![McpServer::Stdio(stdio)]),
-                    )
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![McpServer::Stdio(stdio)]))
                     .await
                     .unwrap();
                 let sid = resp.session_id.to_string();
@@ -2405,8 +2314,12 @@ mod tests {
                 let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
                 let params: std::sync::Arc<serde_json::value::RawValue> =
                     serde_json::value::RawValue::from_string(params_json).unwrap().into();
-                agent.ext_method(ExtRequest::new("session/close", params)).await.unwrap();
-            }).await;
+                agent
+                    .ext_method(ExtRequest::new("session/close", params))
+                    .await
+                    .unwrap();
+            })
+            .await;
         }
 
         /// After `session/close`, the stdio bridge must no longer accept connections.
@@ -2419,10 +2332,7 @@ mod tests {
 
                 let stdio = McpServerStdio::new("srv", script.as_path());
                 let resp = agent
-                    .new_session(
-                        NewSessionRequest::new("/cwd")
-                            .mcp_servers(vec![McpServer::Stdio(stdio)]),
-                    )
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![McpServer::Stdio(stdio)]))
                     .await
                     .unwrap();
                 let sid = resp.session_id.to_string();
@@ -2438,7 +2348,10 @@ mod tests {
                 let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
                 let params: std::sync::Arc<serde_json::value::RawValue> =
                     serde_json::value::RawValue::from_string(params_json).unwrap().into();
-                agent.ext_method(ExtRequest::new("session/close", params)).await.unwrap();
+                agent
+                    .ext_method(ExtRequest::new("session/close", params))
+                    .await
+                    .unwrap();
 
                 // Brief wait for the OS to release the port.
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2446,7 +2359,8 @@ mod tests {
                 // Bridge must be dead after close.
                 let dead = client.post(&url).json(&body).send().await;
                 assert!(dead.is_err(), "bridge must be unreachable after close");
-            }).await;
+            })
+            .await;
         }
 
         // ── prompt / cancel delegation ────────────────────────────────────────
@@ -2468,7 +2382,8 @@ mod tests {
                     .to_string();
                 let result = agent.prompt(PromptRequest::new(sid, vec![])).await;
                 assert!(result.is_err(), "prompt must return Err when no runner is connected");
-            }).await;
+            })
+            .await;
         }
 
         /// `cancel` is fire-and-forget via publish.  With the mock NATS client,
@@ -2487,7 +2402,8 @@ mod tests {
                     .to_string();
                 let result = agent.cancel(CancelNotification::new(sid)).await;
                 assert!(result.is_ok(), "cancel must succeed; got: {result:?}");
-            }).await;
+            })
+            .await;
         }
 
         // ── spawn_stdio_bridges — failing command ─────────────────────────────
@@ -2500,15 +2416,10 @@ mod tests {
             use agent_client_protocol::{McpServer, McpServerStdio};
             run_in_local(|| async {
                 let (agent, _rx) = make_mock_agent();
-                let stdio = McpServerStdio::new(
-                    "bad-srv",
-                    std::path::Path::new("/nonexistent/command/xyz_trogon_test"),
-                );
+                let stdio =
+                    McpServerStdio::new("bad-srv", std::path::Path::new("/nonexistent/command/xyz_trogon_test"));
                 let resp = agent
-                    .new_session(
-                        NewSessionRequest::new("/cwd")
-                            .mcp_servers(vec![McpServer::Stdio(stdio)]),
-                    )
+                    .new_session(NewSessionRequest::new("/cwd").mcp_servers(vec![McpServer::Stdio(stdio)]))
                     .await
                     .unwrap();
                 let sid = resp.session_id.to_string();
@@ -2519,7 +2430,8 @@ mod tests {
                     "failed stdio spawn must be skipped, not registered, got: {:?}",
                     state.mcp_servers
                 );
-            }).await;
+            })
+            .await;
         }
     }
 
@@ -2532,10 +2444,9 @@ mod tests {
         use super::super::*;
         use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
         use agent_client_protocol::{
-            Agent, AuthenticateRequest, ClientCapabilities, ExtRequest, ForkSessionRequest,
-            InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
-            ResumeSessionRequest, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
-            SetSessionModeRequest, SetSessionModelRequest, ToolCallStatus,
+            Agent, AuthenticateRequest, ClientCapabilities, ExtRequest, ForkSessionRequest, InitializeRequest,
+            ListSessionsRequest, LoadSessionRequest, NewSessionRequest, ResumeSessionRequest, SessionId, SessionUpdate,
+            SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, ToolCallStatus,
         };
         use async_nats::jetstream;
         use futures_util::StreamExt as _;
@@ -2630,10 +2541,7 @@ mod tests {
 
             let req = InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST);
             let resp = agent.initialize(req).await.unwrap();
-            assert_eq!(
-                resp.protocol_version,
-                agent_client_protocol::ProtocolVersion::LATEST
-            );
+            assert_eq!(resp.protocol_version, agent_client_protocol::ProtocolVersion::LATEST);
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2653,16 +2561,11 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let req =
-                InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST).client_info(
-                    agent_client_protocol::Implementation::new("test-client", "1.0.0"),
-                );
+            let req = InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)
+                .client_info(agent_client_protocol::Implementation::new("test-client", "1.0.0"));
             // Should succeed without error — exercises the client_info Some branch
             let resp = agent.initialize(req).await.unwrap();
-            assert_eq!(
-                resp.protocol_version,
-                agent_client_protocol::ProtocolVersion::LATEST
-            );
+            assert_eq!(resp.protocol_version, agent_client_protocol::ProtocolVersion::LATEST);
         }
 
         /// `TrogonAcpAgent::initialize` with `_meta.terminal_output: true` must
@@ -2675,8 +2578,7 @@ mod tests {
             let mut meta = serde_json::Map::new();
             meta.insert("terminal_output".to_string(), serde_json::Value::Bool(true));
             let caps = ClientCapabilities::new().meta(meta);
-            let req = InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST)
-                .client_capabilities(caps);
+            let req = InitializeRequest::new(agent_client_protocol::ProtocolVersion::LATEST).client_capabilities(caps);
             agent.initialize(req).await.unwrap();
 
             assert!(
@@ -2741,9 +2643,8 @@ mod tests {
                     "headers": { "Authorization": "Bearer tok-abc123" }
                 }
             });
-            let req = AuthenticateRequest::new("gateway").meta(
-                serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(meta).unwrap(),
-            );
+            let req = AuthenticateRequest::new("gateway")
+                .meta(serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(meta).unwrap());
             agent.authenticate(req).await.unwrap();
 
             let cfg = agent.gateway_config.read().await;
@@ -2777,11 +2678,7 @@ mod tests {
             }
 
             let acu = cmd_update.expect("expected AvailableCommandsUpdate notification");
-            let names: Vec<&str> = acu
-                .available_commands
-                .iter()
-                .map(|c| c.name.as_ref())
-                .collect();
+            let names: Vec<&str> = acu.available_commands.iter().map(|c| c.name.as_ref()).collect();
 
             for cmd in &[
                 "bug",
@@ -2865,13 +2762,11 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
-                serde_json::json!({
-                    "systemPrompt": "You are helpful.",
-                    "additionalRoots": ["/extra/root"],
-                    "disableBuiltInTools": true,
-                }),
-            )
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(serde_json::json!({
+                "systemPrompt": "You are helpful.",
+                "additionalRoots": ["/extra/root"],
+                "disableBuiltInTools": true,
+            }))
             .unwrap();
             let req = NewSessionRequest::new("/proj").meta(meta);
             let resp = agent.new_session(req).await.unwrap();
@@ -2885,10 +2780,7 @@ mod tests {
                 "system_prompt must be stored"
             );
             assert_eq!(state.additional_roots, vec!["/extra/root".to_string()]);
-            assert!(
-                state.disable_builtin_tools,
-                "disable_builtin_tools must be true"
-            );
+            assert!(state.disable_builtin_tools, "disable_builtin_tools must be true");
         }
 
         /// Covers line 519 (and fork line 882): `or_else(|| v.get("append").and_then(|a| a.as_str()))` —
@@ -2898,11 +2790,9 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
-                serde_json::json!({
-                    "systemPrompt": { "append": "Appended prompt." }
-                }),
-            )
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(serde_json::json!({
+                "systemPrompt": { "append": "Appended prompt." }
+            }))
             .unwrap();
             let req = NewSessionRequest::new("/proj").meta(meta);
             let resp = agent.new_session(req).await.unwrap();
@@ -2931,9 +2821,7 @@ mod tests {
             let script = echo_mcp_script().await;
             let stdio = McpServerStdio::new("echo-srv", script.as_path());
             let resp = agent
-                .new_session(
-                    NewSessionRequest::new("/tmp").mcp_servers(vec![McpServer::Stdio(stdio)]),
-                )
+                .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![McpServer::Stdio(stdio)]))
                 .await
                 .unwrap();
             let sid = resp.session_id.to_string();
@@ -2960,9 +2848,7 @@ mod tests {
             let script = echo_mcp_script().await;
             let stdio = McpServerStdio::new("echo-srv", script.as_path());
             let resp = agent
-                .new_session(
-                    NewSessionRequest::new("/tmp").mcp_servers(vec![McpServer::Stdio(stdio)]),
-                )
+                .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![McpServer::Stdio(stdio)]))
                 .await
                 .unwrap();
             let sid = resp.session_id.to_string();
@@ -3013,10 +2899,7 @@ mod tests {
             let (agent, _rx) = make_agent(nats, &js).await;
 
             // Create session first
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let load_req = LoadSessionRequest::new(sid.clone(), "/tmp");
@@ -3045,10 +2928,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id.clone();
 
             let req = SetSessionModeRequest::new(sid.clone(), "acceptEdits");
@@ -3064,10 +2944,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let req = SetSessionModeRequest::new(sid, "invalidMode");
@@ -3082,10 +2959,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let req = SetSessionConfigOptionRequest::new(sid.clone(), "mode", "plan");
@@ -3101,10 +2975,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, mut rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
             // drain notifications from new_session (including any async-spawned ones)
             while rx.try_recv().is_ok() {}
@@ -3128,10 +2999,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let req = SetSessionConfigOptionRequest::new(sid, "mode", "invalidMode");
@@ -3144,10 +3012,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let req = SetSessionConfigOptionRequest::new(sid.clone(), "model", "claude-opus-4-6");
@@ -3163,10 +3028,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             // Unknown config IDs are silently ignored and return current state
@@ -3203,10 +3065,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let req = SetSessionModelRequest::new(sid.clone(), "sonnet");
@@ -3224,19 +3083,10 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            agent
-                .new_session(NewSessionRequest::new("/workspace/a"))
-                .await
-                .unwrap();
-            agent
-                .new_session(NewSessionRequest::new("/workspace/b"))
-                .await
-                .unwrap();
+            agent.new_session(NewSessionRequest::new("/workspace/a")).await.unwrap();
+            agent.new_session(NewSessionRequest::new("/workspace/b")).await.unwrap();
 
-            let resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
             assert_eq!(resp.sessions.len(), 2);
         }
 
@@ -3245,10 +3095,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            agent
-                .new_session(NewSessionRequest::new("/project/api"))
-                .await
-                .unwrap();
+            agent.new_session(NewSessionRequest::new("/project/api")).await.unwrap();
             agent
                 .new_session(NewSessionRequest::new("/other/service"))
                 .await
@@ -3257,10 +3104,7 @@ mod tests {
             let req = ListSessionsRequest::new().cwd(Some(std::path::PathBuf::from("/project")));
             let resp = agent.list_sessions(req).await.unwrap();
             assert_eq!(resp.sessions.len(), 1);
-            assert_eq!(
-                resp.sessions[0].cwd,
-                std::path::PathBuf::from("/project/api")
-            );
+            assert_eq!(resp.sessions[0].cwd, std::path::PathBuf::from("/project/api"));
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -3283,15 +3127,9 @@ mod tests {
                 .unwrap();
 
             // Also create a normal session
-            agent
-                .new_session(NewSessionRequest::new("/real/path"))
-                .await
-                .unwrap();
+            agent.new_session(NewSessionRequest::new("/real/path")).await.unwrap();
 
-            let resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
             // Only the session with a real cwd should appear
             assert_eq!(resp.sessions.len(), 1);
             assert_eq!(resp.sessions[0].cwd, std::path::PathBuf::from("/real/path"));
@@ -3304,10 +3142,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             // Patch source session's mode and model via store
@@ -3332,10 +3167,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             let fork_resp = agent
@@ -3356,19 +3188,14 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
-            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
-                serde_json::json!({
-                    "systemPrompt": "Fork override.",
-                    "additionalRoots": ["/fork/root"],
-                    "disableBuiltInTools": true,
-                }),
-            )
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(serde_json::json!({
+                "systemPrompt": "Fork override.",
+                "additionalRoots": ["/fork/root"],
+                "disableBuiltInTools": true,
+            }))
             .unwrap();
             let fork_req = ForkSessionRequest::new(src_id, "/forked-with-meta").meta(meta);
             let fork_resp = agent.fork_session(fork_req).await.unwrap();
@@ -3392,10 +3219,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id;
 
             let req = ResumeSessionRequest::new(sid, "/tmp");
@@ -3410,10 +3234,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/workspace"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/workspace")).await.unwrap();
             let sid = new_resp.session_id.clone();
 
             // Update mode and model in the store before resuming
@@ -3451,10 +3272,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             // Inject some message history into the source session
@@ -3506,10 +3324,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             let fork_resp = agent
@@ -3538,10 +3353,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             let store = NatsSessionStore::open(&js).await.unwrap();
@@ -3567,11 +3379,7 @@ mod tests {
             let forked_id = fork_resp.session_id.to_string();
 
             let forked_state = store.load(&forked_id).await.unwrap();
-            assert_eq!(
-                forked_state.messages.len(),
-                2,
-                "branch must contain only messages 0..2"
-            );
+            assert_eq!(forked_state.messages.len(), 2, "branch must contain only messages 0..2");
             assert_eq!(forked_state.branched_at_index, Some(2));
             assert_eq!(
                 forked_state.parent_session_id.as_deref(),
@@ -3589,10 +3397,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             let store = NatsSessionStore::open(&js).await.unwrap();
@@ -3633,10 +3438,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let src_id = new_resp.session_id.clone();
 
             let store = NatsSessionStore::open(&js).await.unwrap();
@@ -3684,19 +3486,13 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/parent"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
             let parent_id = parent_resp.session_id.clone();
 
             let script = echo_mcp_script().await;
             let stdio = McpServerStdio::new("echo-srv", script.as_path());
             let fork_resp = agent
-                .fork_session(
-                    ForkSessionRequest::new(parent_id, "/fork")
-                        .mcp_servers(vec![McpServer::Stdio(stdio)]),
-                )
+                .fork_session(ForkSessionRequest::new(parent_id, "/fork").mcp_servers(vec![McpServer::Stdio(stdio)]))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -3721,19 +3517,13 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/parent"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
             let parent_id = parent_resp.session_id.clone();
 
             let script = echo_mcp_script().await;
             let stdio = McpServerStdio::new("echo-srv", script.as_path());
             let fork_resp = agent
-                .fork_session(
-                    ForkSessionRequest::new(parent_id, "/fork")
-                        .mcp_servers(vec![McpServer::Stdio(stdio)]),
-                )
+                .fork_session(ForkSessionRequest::new(parent_id, "/fork").mcp_servers(vec![McpServer::Stdio(stdio)]))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -3783,17 +3573,12 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id.to_string();
 
             let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
             let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(params_json)
-                    .unwrap()
-                    .into();
+                serde_json::value::RawValue::from_string(params_json).unwrap().into();
             agent
                 .ext_method(ExtRequest::new("session/close", params))
                 .await
@@ -3809,10 +3594,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats.clone(), &js).await;
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let sid = new_resp.session_id.to_string();
 
             // Subscribe to cancel and cancelled NATS subjects BEFORE calling close.
@@ -3824,9 +3606,7 @@ mod tests {
             // Close the session via ext_method.
             let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
             let params: std::sync::Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(params_json)
-                    .unwrap()
-                    .into();
+                serde_json::value::RawValue::from_string(params_json).unwrap().into();
             agent
                 .ext_method(ExtRequest::new("session/close", params))
                 .await
@@ -3851,10 +3631,9 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string("{}".to_string())
-                    .unwrap()
-                    .into();
+            let params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string("{}".to_string())
+                .unwrap()
+                .into();
             let err = agent
                 .ext_method(ExtRequest::new("session/unknown_action", params))
                 .await
@@ -3867,10 +3646,7 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/parent"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let fork1 = agent
@@ -3884,9 +3660,7 @@ mod tests {
 
             let params_json = format!(r#"{{"sessionId":"{}"}}"#, parent_id);
             let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(params_json)
-                    .unwrap()
-                    .into();
+                serde_json::value::RawValue::from_string(params_json).unwrap().into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/list_children", params))
                 .await
@@ -3901,8 +3675,7 @@ mod tests {
                 .collect();
             children.sort();
 
-            let mut expected =
-                vec![fork1.session_id.to_string(), fork2.session_id.to_string()];
+            let mut expected = vec![fork1.session_id.to_string(), fork2.session_id.to_string()];
             expected.sort();
             assert_eq!(children, expected);
         }
@@ -3912,17 +3685,12 @@ mod tests {
             let (_c, nats, js) = start_nats().await;
             let (agent, _rx) = make_agent(nats, &js).await;
 
-            let resp = agent
-                .new_session(NewSessionRequest::new("/root"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/root")).await.unwrap();
             let sid = resp.session_id.to_string();
 
             let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
             let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(params_json)
-                    .unwrap()
-                    .into();
+                serde_json::value::RawValue::from_string(params_json).unwrap().into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/list_children", params))
                 .await
@@ -3961,9 +3729,7 @@ mod tests {
             let call_list_children = |sid: String| {
                 let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
                 let params: Arc<serde_json::value::RawValue> =
-                    serde_json::value::RawValue::from_string(params_json)
-                        .unwrap()
-                        .into();
+                    serde_json::value::RawValue::from_string(params_json).unwrap().into();
                 ExtRequest::new("session/list_children", params)
             };
             let parse = |resp: agent_client_protocol::ExtResponse| -> Vec<String> {
@@ -3976,19 +3742,13 @@ mod tests {
                     .collect()
             };
 
-            let children_a = parse(
-                agent.ext_method(call_list_children(a.clone())).await.unwrap(),
-            );
+            let children_a = parse(agent.ext_method(call_list_children(a.clone())).await.unwrap());
             assert_eq!(children_a, vec![b.clone()], "A must have only B as child");
 
-            let children_b = parse(
-                agent.ext_method(call_list_children(b.clone())).await.unwrap(),
-            );
+            let children_b = parse(agent.ext_method(call_list_children(b.clone())).await.unwrap());
             assert_eq!(children_b, vec![c.clone()], "B must have only C as child");
 
-            let children_c = parse(
-                agent.ext_method(call_list_children(c.clone())).await.unwrap(),
-            );
+            let children_c = parse(agent.ext_method(call_list_children(c.clone())).await.unwrap());
             assert!(children_c.is_empty(), "C must have no children");
         }
 
@@ -4009,9 +3769,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("replay-text"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("replay-text"), &state).await;
 
             let notif = rx.try_recv().expect("expected notification");
             assert!(matches!(notif.update, SessionUpdate::AgentMessageChunk(_)));
@@ -4032,9 +3790,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("replay-think"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("replay-think"), &state).await;
 
             let notif = rx.try_recv().expect("expected notification");
             assert!(matches!(notif.update, SessionUpdate::AgentThoughtChunk(_)));
@@ -4058,9 +3814,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("replay-tool"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("replay-tool"), &state).await;
 
             let notif = rx.try_recv().expect("expected notification");
             assert!(matches!(notif.update, SessionUpdate::ToolCall(_)));
@@ -4093,9 +3847,7 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("replay-result"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("replay-result"), &state).await;
 
             // First: ToolCall from the assistant tool_use block
             let notif1 = rx.try_recv().expect("expected ToolCall notification");
@@ -4127,9 +3879,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("replay-todo"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("replay-todo"), &state).await;
 
             let notif = rx.try_recv().expect("expected Plan notification");
             assert!(matches!(notif.update, SessionUpdate::Plan(_)));
@@ -4160,9 +3910,7 @@ mod tests {
                 ..Default::default()
             };
             // Should return early without panic when sender is dropped
-            agent
-                .replay_history(&SessionId::from("dropped-text"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("dropped-text"), &state).await;
         }
 
         /// Covers lines 239, 263, 266: early return in replay_history when notification_sender
@@ -4196,9 +3944,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("dropped-tool-use"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("dropped-tool-use"), &state).await;
         }
 
         /// Covers lines 279, 290, 292-296: early return in replay_history when notification_sender
@@ -4251,9 +3997,7 @@ mod tests {
                     role: "assistant".to_string(),
                     content: vec![
                         // Empty text — guard `!text.is_empty()` is false → falls to `_ => {}`
-                        AgentCb::Text {
-                            text: String::new(),
-                        },
+                        AgentCb::Text { text: String::new() },
                         // Non-empty thinking — send attempted → fails → return at line 228
                         AgentCb::Thinking {
                             thinking: "deep thought".to_string(),
@@ -4262,9 +4006,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("dropped-thinking"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("dropped-thinking"), &state).await;
         }
 
         /// Covers line 269: `_ => {}` fallthrough for assistant content blocks
@@ -4286,9 +4028,7 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("empty-text"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("empty-text"), &state).await;
             // No notifications should be sent (empty text is skipped)
             assert!(rx.try_recv().is_err(), "no notifications expected");
         }
@@ -4324,17 +4064,12 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("todo-skip"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("todo-skip"), &state).await;
 
             // Only the Plan notification from TodoWrite; the ToolResult is skipped
             let notif = rx.try_recv().expect("expected Plan notification");
             assert!(matches!(notif.update, SessionUpdate::Plan(_)));
-            assert!(
-                rx.try_recv().is_err(),
-                "ToolResult for TodoWrite must be skipped"
-            );
+            assert!(rx.try_recv().is_err(), "ToolResult for TodoWrite must be skipped");
         }
 
         /// Covers line 293: `return` when notification_sender is closed while
@@ -4352,9 +4087,7 @@ mod tests {
                     // Assistant with empty text: no send attempted → no early-return here
                     AgentMsg {
                         role: "assistant".to_string(),
-                        content: vec![AgentCb::Text {
-                            text: String::new(),
-                        }],
+                        content: vec![AgentCb::Text { text: String::new() }],
                     },
                     // User ToolResult: send attempted → fails → return at line 293
                     AgentMsg {
@@ -4401,9 +4134,7 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("bash-result"), &state)
-                .await;
+            agent.replay_history(&SessionId::from("bash-result"), &state).await;
 
             // First notification: ToolCall(InProgress) from the assistant ToolUse block
             let first = rx.try_recv().expect("expected ToolCall notification");
@@ -4485,15 +4216,10 @@ mod tests {
             }
 
             // 2. First ToolCallUpdate must carry terminal_output with the content
-            let second = rx
-                .try_recv()
-                .expect("expected terminal_output ToolCallUpdate");
+            let second = rx.try_recv().expect("expected terminal_output ToolCallUpdate");
             match &second.update {
                 SessionUpdate::ToolCallUpdate(u) => {
-                    let meta = u
-                        .meta
-                        .as_ref()
-                        .expect("terminal_output update must have meta");
+                    let meta = u.meta.as_ref().expect("terminal_output update must have meta");
                     assert!(
                         meta.contains_key("terminal_output"),
                         "first update meta must contain terminal_output, got: {meta:?}"
@@ -4509,15 +4235,10 @@ mod tests {
             }
 
             // 3. Second ToolCallUpdate must carry terminal_exit with Completed status
-            let third = rx
-                .try_recv()
-                .expect("expected terminal_exit ToolCallUpdate");
+            let third = rx.try_recv().expect("expected terminal_exit ToolCallUpdate");
             match &third.update {
                 SessionUpdate::ToolCallUpdate(u) => {
-                    let meta = u
-                        .meta
-                        .as_ref()
-                        .expect("terminal_exit update must have meta");
+                    let meta = u.meta.as_ref().expect("terminal_exit update must have meta");
                     assert!(
                         meta.contains_key("terminal_exit"),
                         "second update meta must contain terminal_exit, got: {meta:?}"
@@ -4551,13 +4272,8 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            agent
-                .replay_history(&SessionId::from("unknown-role"), &state)
-                .await;
-            assert!(
-                rx.try_recv().is_err(),
-                "no notifications expected for system role"
-            );
+            agent.replay_history(&SessionId::from("unknown-role"), &state).await;
+            assert!(rx.try_recv().is_err(), "no notifications expected for system role");
         }
     }
 
@@ -4570,24 +4286,15 @@ mod tests {
         assert!(matches!(replay_tool_kind_for("Edit"), ToolKind::Edit));
         assert!(matches!(replay_tool_kind_for("MultiEdit"), ToolKind::Edit));
         assert!(matches!(replay_tool_kind_for("Write"), ToolKind::Edit));
-        assert!(matches!(
-            replay_tool_kind_for("NotebookEdit"),
-            ToolKind::Edit
-        ));
+        assert!(matches!(replay_tool_kind_for("NotebookEdit"), ToolKind::Edit));
         assert!(matches!(replay_tool_kind_for("Bash"), ToolKind::Execute));
         assert!(matches!(replay_tool_kind_for("Glob"), ToolKind::Search));
         assert!(matches!(replay_tool_kind_for("Grep"), ToolKind::Search));
         assert!(matches!(replay_tool_kind_for("WebSearch"), ToolKind::Fetch));
         assert!(matches!(replay_tool_kind_for("WebFetch"), ToolKind::Fetch));
         assert!(matches!(replay_tool_kind_for("Think"), ToolKind::Think));
-        assert!(matches!(
-            replay_tool_kind_for("ExitPlanMode"),
-            ToolKind::SwitchMode
-        ));
-        assert!(matches!(
-            replay_tool_kind_for("EnterPlanMode"),
-            ToolKind::SwitchMode
-        ));
+        assert!(matches!(replay_tool_kind_for("ExitPlanMode"), ToolKind::SwitchMode));
+        assert!(matches!(replay_tool_kind_for("EnterPlanMode"), ToolKind::SwitchMode));
         assert!(matches!(replay_tool_kind_for("Unknown"), ToolKind::Other));
     }
 
@@ -4714,9 +4421,9 @@ mod tests {
 
     use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
     use agent_client_protocol::{
-        Agent as _, AuthenticateRequest, ExtRequest, ForkSessionRequest, InitializeRequest,
-        ListSessionsRequest, LoadSessionRequest, NewSessionRequest, ProtocolVersion,
-        ResumeSessionRequest, SetSessionModeRequest, SetSessionModelRequest,
+        Agent as _, AuthenticateRequest, ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
+        LoadSessionRequest, NewSessionRequest, ProtocolVersion, ResumeSessionRequest, SetSessionModeRequest,
+        SetSessionModelRequest,
     };
     use async_nats::jetstream;
     use testcontainers_modules::nats::Nats;
@@ -4731,9 +4438,7 @@ mod tests {
             .await
             .expect("Docker must be running for this test");
         let port = container.get_host_port_ipv4(4222).await.unwrap();
-        let nats = async_nats::connect(format!("127.0.0.1:{port}"))
-            .await
-            .unwrap();
+        let nats = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
         let js = jetstream::new(nats.clone());
         (container, nats, js)
     }
@@ -4781,10 +4486,7 @@ mod tests {
 
         let req = InitializeRequest::new(ProtocolVersion::LATEST);
         let resp = agent.initialize(req).await.unwrap();
-        assert!(
-            resp.agent_capabilities.load_session,
-            "must advertise loadSession"
-        );
+        assert!(resp.agent_capabilities.load_session, "must advertise loadSession");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -4840,9 +4542,7 @@ mod tests {
         agent.authenticate(req).await.unwrap();
 
         let cfg = gateway_config.read().await;
-        let cfg = cfg
-            .as_ref()
-            .expect("gateway config must be set after authenticate");
+        let cfg = cfg.as_ref().expect("gateway config must be set after authenticate");
         assert_eq!(cfg.base_url, "https://gateway.example.com");
         assert_eq!(cfg.token, "tok-abc");
     }
@@ -4927,10 +4627,7 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = agent
-            .list_sessions(ListSessionsRequest::new())
-            .await
-            .unwrap();
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
         assert_eq!(resp.sessions.len(), 2);
     }
 
@@ -4965,11 +4662,7 @@ mod tests {
 
         let req = SetSessionModeRequest::new(session_id, "nonexistent-mode");
         let err = agent.set_session_mode(req).await.unwrap_err();
-        assert!(
-            err.message.contains("Invalid mode"),
-            "unexpected: {}",
-            err.message
-        );
+        assert!(err.message.contains("Invalid mode"), "unexpected: {}", err.message);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -5004,11 +4697,7 @@ mod tests {
         let req = ForkSessionRequest::new(src_id, "/forked").mcp_servers(vec![]);
         let fork = agent.fork_session(req).await.unwrap();
 
-        let state = agent
-            .store
-            .load(&fork.session_id.to_string())
-            .await
-            .unwrap();
+        let state = agent.store.load(&fork.session_id.to_string()).await.unwrap();
         assert_eq!(state.cwd, "/forked");
     }
 
@@ -5048,10 +4737,7 @@ mod tests {
             .session_id
             .to_string();
 
-        let list_resp = agent
-            .list_sessions(ListSessionsRequest::new())
-            .await
-            .unwrap();
+        let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
         let fork_info = list_resp
             .sessions

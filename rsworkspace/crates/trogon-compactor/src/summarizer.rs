@@ -146,6 +146,7 @@ pub(crate) trait SummarizationClient: Send + Sync {
     ) -> impl Future<Output = Result<SumResponse, CompactorError>> + Send + 'a;
 }
 
+#[allow(clippy::manual_async_fn)]
 impl SummarizationClient for reqwest::Client {
     fn call<'a>(
         &'a self,
@@ -182,7 +183,10 @@ pub struct AnthropicLlmProvider<C = reqwest::Client> {
 
 impl AnthropicLlmProvider<reqwest::Client> {
     pub fn new(config: LlmConfig) -> Self {
-        Self { config, client: reqwest::Client::new() }
+        Self {
+            config,
+            client: reqwest::Client::new(),
+        }
     }
 }
 
@@ -194,13 +198,13 @@ impl<C: SummarizationClient> AnthropicLlmProvider<C> {
 }
 
 #[allow(private_bounds)]
+#[allow(clippy::manual_async_fn)]
 impl<C: SummarizationClient> crate::traits::LlmProvider for AnthropicLlmProvider<C> {
     fn generate_summary<'a>(
         &'a self,
         messages: &'a [crate::types::Message],
         previous_summary: Option<&'a str>,
-    ) -> impl std::future::Future<Output = Result<String, crate::error::CompactorError>> + Send + 'a
-    {
+    ) -> impl std::future::Future<Output = Result<String, crate::error::CompactorError>> + Send + 'a {
         generate_summary(messages, previous_summary, &self.config, &self.client)
     }
 }
@@ -248,6 +252,7 @@ pub(crate) trait ChatCompletionsClient: Send + Sync {
     ) -> impl Future<Output = Result<ChatResponse, CompactorError>> + Send + 'a;
 }
 
+#[allow(clippy::manual_async_fn)]
 impl ChatCompletionsClient for reqwest::Client {
     fn call<'a>(
         &'a self,
@@ -280,7 +285,10 @@ pub struct OpenAICompatLlmProvider<C = reqwest::Client> {
 
 impl OpenAICompatLlmProvider<reqwest::Client> {
     pub fn new(config: LlmConfig) -> Self {
-        Self { config, client: reqwest::Client::new() }
+        Self {
+            config,
+            client: reqwest::Client::new(),
+        }
     }
 }
 
@@ -291,14 +299,13 @@ impl<C: ChatCompletionsClient> OpenAICompatLlmProvider<C> {
     }
 }
 
-#[allow(private_bounds)]
+#[allow(private_bounds, clippy::manual_async_fn)]
 impl<C: ChatCompletionsClient> crate::traits::LlmProvider for OpenAICompatLlmProvider<C> {
     fn generate_summary<'a>(
         &'a self,
         messages: &'a [crate::types::Message],
         previous_summary: Option<&'a str>,
-    ) -> impl std::future::Future<Output = Result<String, crate::error::CompactorError>> + Send + 'a
-    {
+    ) -> impl std::future::Future<Output = Result<String, crate::error::CompactorError>> + Send + 'a {
         async move {
             let conversation = serialize_for_prompt(messages);
             let prompt = build_prompt(&conversation, previous_summary);
@@ -306,19 +313,21 @@ impl<C: ChatCompletionsClient> crate::traits::LlmProvider for OpenAICompatLlmPro
                 model: &self.config.model,
                 max_tokens: self.config.max_summary_tokens,
                 messages: [
-                    ChatMessage { role: "system", content: SYSTEM_PROMPT },
-                    ChatMessage { role: "user", content: &prompt },
+                    ChatMessage {
+                        role: "system",
+                        content: SYSTEM_PROMPT,
+                    },
+                    ChatMessage {
+                        role: "user",
+                        content: &prompt,
+                    },
                 ],
             };
             // OpenAI-compatible endpoints always use Bearer auth.
             let auth_value = format!("Bearer {}", self.config.api_key);
             let resp = self.client.call(&self.config.api_url, &auth_value, &req).await?;
 
-            let choice = resp
-                .choices
-                .into_iter()
-                .next()
-                .ok_or(CompactorError::EmptyResponse)?;
+            let choice = resp.choices.into_iter().next().ok_or(CompactorError::EmptyResponse)?;
             if !choice.finish_reason.is_empty() && choice.finish_reason != "stop" {
                 return Err(CompactorError::UnexpectedStopReason(choice.finish_reason));
             }
@@ -423,7 +432,10 @@ mod tests {
         }
 
         fn enqueue_err(self, msg: impl Into<String>) -> Self {
-            self.responses.lock().unwrap().push_back(Err(CompactorError::Http(msg.into())));
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(Err(CompactorError::Http(msg.into())));
             self
         }
 
@@ -436,11 +448,17 @@ mod tests {
         }
 
         fn text_block(text: &str) -> SumBlock {
-            SumBlock { kind: "text".into(), text: text.into() }
+            SumBlock {
+                kind: "text".into(),
+                text: text.into(),
+            }
         }
 
         fn tool_block() -> SumBlock {
-            SumBlock { kind: "tool_use".into(), text: String::new() }
+            SumBlock {
+                kind: "tool_use".into(),
+                text: String::new(),
+            }
         }
     }
 
@@ -454,12 +472,12 @@ mod tests {
         ) -> impl Future<Output = Result<SumResponse, CompactorError>> + Send + 'a {
             *self.last_auth_header.lock().unwrap() = Some(auth_header.to_string());
             *self.last_auth_value.lock().unwrap() = Some(auth_value.to_string());
-            let result = self
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or_else(|| Ok(SumResponse { stop_reason: "end_turn".into(), content: vec![] }));
+            let result = self.responses.lock().unwrap().pop_front().unwrap_or_else(|| {
+                Ok(SumResponse {
+                    stop_reason: "end_turn".into(),
+                    content: vec![],
+                })
+            });
             async move { result }
         }
     }
@@ -504,7 +522,7 @@ mod tests {
 
     #[test]
     fn build_prompt_initial_and_update_use_different_suffixes() {
-        let init   = build_prompt("conv", None);
+        let init = build_prompt("conv", None);
         let update = build_prompt("conv", Some("prev"));
         assert_ne!(init, update, "initial and update prompts must differ");
         assert!(init.contains(INITIAL_PROMPT));
@@ -515,7 +533,7 @@ mod tests {
     fn build_prompt_wraps_conversation_in_tags() {
         let prompt = build_prompt("hello world", None);
         let start = prompt.find("<conversation>").unwrap();
-        let end   = prompt.find("</conversation>").unwrap();
+        let end = prompt.find("</conversation>").unwrap();
         let inner = &prompt[start..=end + "</conversation>".len() - 1];
         assert!(inner.contains("hello world"));
     }
@@ -524,8 +542,8 @@ mod tests {
 
     #[tokio::test]
     async fn generate_summary_returns_text_on_success() {
-        let mock = MockSumClient::default()
-            .enqueue_ok("end_turn", vec![MockSumClient::text_block("## Summary\nDone.")]);
+        let mock =
+            MockSumClient::default().enqueue_ok("end_turn", vec![MockSumClient::text_block("## Summary\nDone.")]);
         let result = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap();
         assert!(result.contains("## Summary"));
     }
@@ -539,8 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn generate_summary_returns_unexpected_stop_reason() {
-        let mock = MockSumClient::default()
-            .enqueue_ok("max_tokens", vec![MockSumClient::text_block("partial")]);
+        let mock = MockSumClient::default().enqueue_ok("max_tokens", vec![MockSumClient::text_block("partial")]);
         let err = generate_summary(&one_msg(), None, &config(), &mock).await.unwrap_err();
         assert!(matches!(err, CompactorError::UnexpectedStopReason(r) if r == "max_tokens"));
     }
@@ -575,9 +592,11 @@ mod tests {
 
     #[tokio::test]
     async fn generate_summary_sends_x_api_key_header_for_anthropic_auth() {
-        let mock = MockSumClient::default()
-            .enqueue_ok("end_turn", vec![MockSumClient::text_block("summary text")]);
-        let cfg = LlmConfig { api_key: "my-key".into(), ..config() };
+        let mock = MockSumClient::default().enqueue_ok("end_turn", vec![MockSumClient::text_block("summary text")]);
+        let cfg = LlmConfig {
+            api_key: "my-key".into(),
+            ..config()
+        };
         generate_summary(&one_msg(), None, &cfg, &mock).await.unwrap();
         assert_eq!(mock.last_auth_header().as_deref(), Some("x-api-key"));
         assert_eq!(mock.last_auth_value().as_deref(), Some("my-key"));
@@ -585,8 +604,7 @@ mod tests {
 
     #[tokio::test]
     async fn generate_summary_sends_authorization_header_for_bearer_auth() {
-        let mock = MockSumClient::default()
-            .enqueue_ok("end_turn", vec![MockSumClient::text_block("summary text")]);
+        let mock = MockSumClient::default().enqueue_ok("end_turn", vec![MockSumClient::text_block("summary text")]);
         let cfg = LlmConfig {
             api_key: "my-token".into(),
             auth_style: AuthStyle::Bearer,
@@ -620,7 +638,9 @@ mod tests {
     fn chat_resp(content: &str, finish: &str) -> ChatResponse {
         ChatResponse {
             choices: vec![ChatChoice {
-                message: ChatRespMessage { content: content.into() },
+                message: ChatRespMessage {
+                    content: content.into(),
+                },
                 finish_reason: finish.into(),
             }],
         }
@@ -633,7 +653,10 @@ mod tests {
             response: Mutex::new(Some(Ok(chat_resp("## Summary\nok", "stop")))),
             last_auth: Mutex::new(None),
         };
-        let cfg = LlmConfig { api_key: "tok_xai".into(), ..config() };
+        let cfg = LlmConfig {
+            api_key: "tok_xai".into(),
+            ..config()
+        };
         let provider = OpenAICompatLlmProvider::with_client(cfg, mock);
         let out = provider.generate_summary(&one_msg(), None).await.unwrap();
         assert!(out.contains("## Summary"));

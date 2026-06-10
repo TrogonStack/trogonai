@@ -66,16 +66,9 @@ async fn worker_processes_message_and_publishes_reply() {
     let http = MockHttpClient::new();
     http.push_ok(r#"{"id":"msg_1"}"#);
 
-    worker::run(
-        js,
-        nats.clone(),
-        vault,
-        http,
-        "proxy-workers",
-        "PROXY_REQUESTS",
-    )
-    .await
-    .unwrap();
+    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 1);
@@ -103,16 +96,9 @@ async fn worker_returns_401_for_unknown_token() {
     let nats = MockNatsClient::new();
     let http = MockHttpClient::new(); // no responses queued — must not be called
 
-    worker::run(
-        js,
-        nats.clone(),
-        vault,
-        http,
-        "proxy-workers",
-        "PROXY_REQUESTS",
-    )
-    .await
-    .unwrap();
+    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 1);
@@ -131,16 +117,9 @@ async fn worker_nacks_and_skips_malformed_json() {
     let nats = MockNatsClient::new();
     let http = MockHttpClient::new();
 
-    worker::run(
-        js,
-        nats.clone(),
-        vault,
-        http,
-        "proxy-workers",
-        "PROXY_REQUESTS",
-    )
-    .await
-    .unwrap();
+    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
 
     // malformed message gets nacked and skipped — no reply published
     assert!(nats.published().is_empty());
@@ -166,16 +145,9 @@ async fn worker_skips_jetstream_error_and_continues() {
     let http = MockHttpClient::new();
     http.push_ok(r#"{"choices":[]}"#);
 
-    worker::run(
-        js,
-        nats.clone(),
-        vault,
-        http,
-        "proxy-workers",
-        "PROXY_REQUESTS",
-    )
-    .await
-    .unwrap();
+    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
 
     // The error message is skipped; the valid message after it is processed.
     let published = nats.published();
@@ -210,16 +182,9 @@ async fn worker_processes_multiple_messages_in_order() {
     http.push_ok(r#"{"id":"msg_1"}"#);
     http.push_ok(r#"{"id":"msg_2"}"#);
 
-    worker::run(
-        js,
-        nats.clone(),
-        vault,
-        http,
-        "proxy-workers",
-        "PROXY_REQUESTS",
-    )
-    .await
-    .unwrap();
+    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 2);
@@ -256,16 +221,9 @@ async fn worker_strips_real_key_from_upstream_response_headers() {
         body: b"{}".to_vec(),
     });
 
-    worker::run(
-        js,
-        nats.clone(),
-        vault,
-        http,
-        "proxy-workers",
-        "PROXY_REQUESTS",
-    )
-    .await
-    .unwrap();
+    worker::run(js, nats.clone(), vault, http, "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
 
     let published = nats.published();
     let resp: OutboundHttpResponse = serde_json::from_slice(&published[0].1).unwrap();
@@ -297,9 +255,16 @@ async fn worker_injects_user_agent_when_absent() {
     let http = MockHttpClient::new();
     http.push_ok(r#"{"id":"msg_1"}"#);
 
-    worker::run(js, nats, Arc::clone(&vault), http.clone(), "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats,
+        Arc::clone(&vault),
+        http.clone(),
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     let calls = http.captured_headers.lock().unwrap();
     assert_eq!(calls.len(), 1, "expected exactly one HTTP call");
@@ -325,7 +290,9 @@ async fn worker_preserves_caller_user_agent() {
         "Bearer tok_anthropic_prod_abc123",
         "test.reply",
     );
-    request.headers.push(("user-agent".to_string(), "my-cli/2.0".to_string()));
+    request
+        .headers
+        .push(("user-agent".to_string(), "my-cli/2.0".to_string()));
     let payload = serde_json::to_vec(&request).unwrap();
 
     let js = MockJetStreamConsumerClient::new();
@@ -335,9 +302,16 @@ async fn worker_preserves_caller_user_agent() {
     let http = MockHttpClient::new();
     http.push_ok(r#"{"id":"msg_1"}"#);
 
-    worker::run(js, nats, Arc::clone(&vault), http.clone(), "proxy-workers", "PROXY_REQUESTS")
-        .await
-        .unwrap();
+    worker::run(
+        js,
+        nats,
+        Arc::clone(&vault),
+        http.clone(),
+        "proxy-workers",
+        "PROXY_REQUESTS",
+    )
+    .await
+    .unwrap();
 
     let calls = http.captured_headers.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -346,7 +320,11 @@ async fn worker_preserves_caller_user_agent() {
         .filter(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
         .map(|(_, v)| v.as_str())
         .collect();
-    assert_eq!(ua_values, vec!["my-cli/2.0"], "caller User-Agent must be preserved, not doubled");
+    assert_eq!(
+        ua_values,
+        vec!["my-cli/2.0"],
+        "caller User-Agent must be preserved, not doubled"
+    );
 }
 
 // ── vault_admin tests ─────────────────────────────────────────────────────────
@@ -370,11 +348,7 @@ async fn vault_admin_store_token_publishes_ok_reply() {
 
     nats.seed_messages(
         "trogon.vault.store",
-        vec![make_nats_message(
-            "trogon.vault.store",
-            Some("test.reply"),
-            &payload,
-        )],
+        vec![make_nats_message("trogon.vault.store", Some("test.reply"), &payload)],
     );
 
     tokio::time::timeout(
@@ -410,12 +384,8 @@ async fn mock_nats_client_records_published_messages() {
     use trogon_secret_proxy::NatsClient;
 
     let nats = MockNatsClient::new();
-    nats.publish("foo.bar".to_string(), Bytes::from("hello"))
-        .await
-        .unwrap();
-    nats.publish("baz.qux".to_string(), Bytes::from("world"))
-        .await
-        .unwrap();
+    nats.publish("foo.bar".to_string(), Bytes::from("hello")).await.unwrap();
+    nats.publish("baz.qux".to_string(), Bytes::from("world")).await.unwrap();
 
     let published = nats.published();
     assert_eq!(published.len(), 2);
@@ -461,16 +431,10 @@ async fn mock_http_client_returns_queued_responses_in_order() {
     http.push_ok(r#"{"first":true}"#);
     http.push_error(503, "service unavailable");
 
-    let r1 = http
-        .send_request("POST", "http://any", &[], b"")
-        .await
-        .unwrap();
+    let r1 = http.send_request("POST", "http://any", &[], b"").await.unwrap();
     assert_eq!(r1.status, 200);
 
-    let r2 = http
-        .send_request("POST", "http://any", &[], b"")
-        .await
-        .unwrap();
+    let r2 = http.send_request("POST", "http://any", &[], b"").await.unwrap();
     assert_eq!(r2.status, 503);
 
     // Queue exhausted — next call returns an error.

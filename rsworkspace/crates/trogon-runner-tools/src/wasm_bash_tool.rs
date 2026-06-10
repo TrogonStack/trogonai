@@ -2,16 +2,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use agent_client_protocol::{
-    CreateTerminalRequest, CreateTerminalResponse, TerminalOutputRequest,
-};
+use agent_client_protocol::{CreateTerminalRequest, CreateTerminalResponse, TerminalOutputRequest};
 use serde_json::Value;
-use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
+use trogon_tools::ToolDef;
 
 use crate::session_store::SessionStore;
 
@@ -98,8 +96,7 @@ impl<S: SessionStore> WasmRuntimeBashTool<S> {
     pub fn tool_def() -> ToolDef {
         ToolDef {
             name: "bash".to_string(),
-            description: "Run a shell command in the session sandbox and return its output."
-                .to_string(),
+            description: "Run a shell command in the session sandbox and return its output.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -154,9 +151,7 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
 
                 let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
                 let cwd_str = sandbox_dir.to_string_lossy().into_owned();
-                if state.terminal_id.is_some()
-                    && state.terminal_cwd.as_deref() != Some(cwd_str.as_str())
-                {
+                if state.terminal_id.is_some() && state.terminal_cwd.as_deref() != Some(cwd_str.as_str()) {
                     state.terminal_id = None;
                     state.terminal_cwd = None;
                 }
@@ -164,10 +159,8 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                 let tid = if let Some(tid) = &state.terminal_id {
                     tid.clone()
                 } else {
-                    let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
-                        .cwd(sandbox_dir.clone());
-                    let payload =
-                        serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
+                    let create_req = CreateTerminalRequest::new(session_id.clone(), "bash").cwd(sandbox_dir.clone());
+                    let payload = serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
                     let msg = nats
                         .request(format!("{term_base}.create"), payload.into())
                         .await
@@ -224,12 +217,9 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                 "data": cmd_with_markers.as_bytes()
             });
             let payload = serde_json::to_vec(&write_req).map_err(|e| e.to_string())?;
-            nats.request(
-                format!("{ext_base}.terminal.write_stdin"),
-                payload.into(),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+            nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into())
+                .await
+                .map_err(|e| e.to_string())?;
 
             // ── Poll for output until marker found or timeout ─────────────────
             let deadline = tokio::time::Instant::now() + timeout;
@@ -237,17 +227,13 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             loop {
                 tokio::time::sleep(POLL_INTERVAL).await;
 
-                let req = TerminalOutputRequest::new(
-                    session_id.clone(),
-                    terminal_id.clone(),
-                );
+                let req = TerminalOutputRequest::new(session_id.clone(), terminal_id.clone());
                 let payload = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
                 let msg = nats
                     .request(format!("{term_base}.output"), payload.into())
                     .await
                     .map_err(|e| e.to_string())?;
-                let resp: serde_json::Value =
-                    serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
+                let resp: serde_json::Value = serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
                 let full_output = terminal_output_from_response(&resp)?;
 
                 if let Some(output) = extract_output(&full_output, &start_marker, &exit_marker_prefix) {
@@ -256,8 +242,7 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
 
                 if tokio::time::Instant::now() >= deadline {
                     // Return whatever comes after the start marker (if present), or empty.
-                    let partial = extract_after_start_marker(&full_output, &start_marker)
-                        .unwrap_or_default();
+                    let partial = extract_after_start_marker(&full_output, &start_marker).unwrap_or_default();
                     return Err(format!(
                         "timeout after {}s. Partial output:\n{partial}",
                         timeout.as_secs()
@@ -267,7 +252,6 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
         })
     }
 }
-
 
 /// Wrap `s` in single quotes for safe use as one POSIX-shell word, escaping any
 /// embedded single quote as the standard `'\''` sequence (close-quote, escaped
@@ -403,10 +387,7 @@ mod tests {
     #[test]
     fn terminal_output_from_response_returns_output_field() {
         let resp = serde_json::json!({ "output": "hello" });
-        assert_eq!(
-            terminal_output_from_response(&resp).unwrap(),
-            "hello"
-        );
+        assert_eq!(terminal_output_from_response(&resp).unwrap(), "hello");
     }
 
     #[test]
@@ -530,9 +511,7 @@ mod tests {
         // for the real, nonce-scoped exit marker. Only the nonce prefix matches.
         let start = "__START_deadbeef__";
         let exit_prefix = "__EXIT_deadbeef_";
-        let output = format!(
-            "old\n{start}\nfake __EXIT_0__ printed by user\nreal output\n{exit_prefix}0__\n"
-        );
+        let output = format!("old\n{start}\nfake __EXIT_0__ printed by user\nreal output\n{exit_prefix}0__\n");
         assert_eq!(
             extract_output(&output, start, exit_prefix),
             Some("fake __EXIT_0__ printed by user\nreal output".to_string())

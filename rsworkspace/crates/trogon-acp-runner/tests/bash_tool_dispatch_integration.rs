@@ -21,10 +21,10 @@ use futures_util::StreamExt as _;
 use httpmock::prelude::*;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use trogon_agent_core::agent_loop::{AgentEvent, AgentLoop, Message};
-use trogon_agent_core::tools::ToolContext;
 use trogon_acp_runner::session_store::mock::MemorySessionStore;
 use trogon_acp_runner::wasm_bash_tool::WasmRuntimeBashTool;
+use trogon_agent_core::agent_loop::{AgentEvent, AgentLoop, Message};
+use trogon_agent_core::tools::ToolContext;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,28 +90,43 @@ fn sse_event(event_type: &str, data: serde_json::Value) -> String {
 /// SSE stream: the LLM requests a `bash` tool call with the given command.
 fn sse_bash_tool_use(command: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "tool_use", "id": "bash_001", "name": "bash"}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {
-                "type": "input_json_delta",
-                "partial_json": serde_json::json!({"command": command}).to_string()
-            }
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "bash_001", "name": "bash"}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": serde_json::json!({"command": command}).to_string()
+                }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -120,25 +135,40 @@ fn sse_bash_tool_use(command: &str) -> String {
 /// SSE stream: the LLM finishes with a text reply.
 fn sse_end_turn(text: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 15, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 8}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 15, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 8}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -195,28 +225,43 @@ fn spawn_terminal_responders(
 /// sequential bash calls so the agent can distinguish tool_results by ID).
 fn sse_bash_tool_use_with_id(command: &str, tool_id: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "tool_use", "id": tool_id, "name": "bash"}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {
-                "type": "input_json_delta",
-                "partial_json": serde_json::json!({"command": command}).to_string()
-            }
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": tool_id, "name": "bash"}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": serde_json::json!({"command": command}).to_string()
+                }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -263,20 +308,14 @@ fn spawn_two_bash_responders(
             nats.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
         if let Some(msg) = output_sub.next().await {
-            let p = serde_json::to_vec(
-                &serde_json::json!({"output": "first-out\n__EXIT_0__\n"}),
-            )
-            .unwrap();
+            let p = serde_json::to_vec(&serde_json::json!({"output": "first-out\n__EXIT_0__\n"})).unwrap();
             nats.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
 
         // ── Second bash call: NO create → baseline → write → poll ─────────
         if let Some(msg) = output_sub.next().await {
             // Baseline = accumulated output from first call.
-            let p = serde_json::to_vec(
-                &serde_json::json!({"output": "first-out\n__EXIT_0__\n"}),
-            )
-            .unwrap();
+            let p = serde_json::to_vec(&serde_json::json!({"output": "first-out\n__EXIT_0__\n"})).unwrap();
             nats.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
         if let Some(msg) = write_sub.next().await {
@@ -369,9 +408,7 @@ async fn agent_loop_dispatches_bash_tool_via_nats_and_returns_output() {
     //   call 2 (tool_result in body)    → end_turn
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("Command completed successfully."));
@@ -387,13 +424,7 @@ async fn agent_loop_dispatches_bash_tool_via_nats_and_returns_output() {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     let result = agent
-        .run_chat_streaming(
-            vec![Message::user_text("run echo hello")],
-            &[],
-            None,
-            tx,
-            None,
-        )
+        .run_chat_streaming(vec![Message::user_text("run echo hello")], &[], None, tx, None)
         .await;
 
     assert!(
@@ -441,13 +472,7 @@ async fn bash_sandbox_dir_passed_as_cwd_in_create_terminal_request() {
     let base = format!("{prefix}.session.{session_id}.client.terminal");
     let ext_base = format!("{prefix}.session.{session_id}.client.ext");
 
-    let captured = spawn_terminal_responders_capture_create(
-        nats.clone(),
-        base,
-        ext_base,
-        "tid-cwd",
-        "cwd-out\n",
-    );
+    let captured = spawn_terminal_responders_capture_create(nats.clone(), base, ext_base, "tid-cwd", "cwd-out\n");
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let server = MockServer::start();
@@ -532,8 +557,7 @@ async fn bash_terminal_reuse_skips_create_on_second_call() {
     let base = format!("{prefix}.session.{session_id}.client.terminal");
     let ext_base = format!("{prefix}.session.{session_id}.client.ext");
 
-    let create_count =
-        spawn_two_bash_responders(nats.clone(), base, ext_base, "tid-reuse");
+    let create_count = spawn_two_bash_responders(nats.clone(), base, ext_base, "tid-reuse");
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // 3 mock LLM responses:
@@ -564,13 +588,7 @@ async fn bash_terminal_reuse_skips_create_on_second_call() {
 
     let (tx, _rx) = tokio::sync::mpsc::channel(64);
     agent
-        .run_chat_streaming(
-            vec![Message::user_text("run two commands")],
-            &[],
-            None,
-            tx,
-            None,
-        )
+        .run_chat_streaming(vec![Message::user_text("run two commands")], &[], None, tx, None)
         .await
         .expect("run_chat_streaming must succeed");
 
@@ -651,14 +669,7 @@ async fn bash_nonzero_exit_code_in_marker_completes_and_strips_marker() {
     let base = format!("{prefix}.session.{session_id}.client.terminal");
     let ext_base = format!("{prefix}.session.{session_id}.client.ext");
 
-    spawn_terminal_responders_with_exit_code(
-        nats.clone(),
-        base,
-        ext_base,
-        "tid-exit1",
-        cmd_output,
-        1,
-    );
+    spawn_terminal_responders_with_exit_code(nats.clone(), base, ext_base, "tid-exit1", cmd_output, 1);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let server = MockServer::start();
@@ -678,13 +689,7 @@ async fn bash_nonzero_exit_code_in_marker_completes_and_strips_marker() {
     let agent = make_agent(&server.base_url(), nats, prefix, session_id);
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     let result = agent
-        .run_chat_streaming(
-            vec![Message::user_text("run failing command")],
-            &[],
-            None,
-            tx,
-            None,
-        )
+        .run_chat_streaming(vec![Message::user_text("run failing command")], &[], None, tx, None)
         .await;
 
     assert!(
@@ -729,9 +734,7 @@ async fn agent_loop_handles_bash_tool_nats_error_without_crashing() {
     let server = MockServer::start();
     // After the tool error the loop sends another turn; return end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("Handled the error."));
@@ -747,13 +750,7 @@ async fn agent_loop_handles_bash_tool_nats_error_without_crashing() {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     let result = agent
-        .run_chat_streaming(
-            vec![Message::user_text("run a command")],
-            &[],
-            None,
-            tx,
-            None,
-        )
+        .run_chat_streaming(vec![Message::user_text("run a command")], &[], None, tx, None)
         .await;
 
     assert!(
@@ -777,9 +774,7 @@ async fn agent_loop_handles_bash_tool_nats_error_without_crashing() {
 
     // ToolCallFinished must be emitted (with an error message, not a crash).
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolCallFinished { .. })),
+        events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { .. })),
         "expected ToolCallFinished after NATS error, got: {events:?}"
     );
 }

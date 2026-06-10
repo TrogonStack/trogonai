@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use acp_nats::{acp_prefix::AcpPrefix, client_proxy::NatsClientProxy, session_id::AcpSessionId};
 use agent_client_protocol::{
-    ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationFormMode,
-    ElicitationMode, ElicitationRequest, ElicitationResponse, ElicitationSchema,
+    ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationFormMode, ElicitationMode,
+    ElicitationRequest, ElicitationResponse, ElicitationSchema,
 };
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
@@ -37,8 +37,7 @@ pub type ElicitationTx = mpsc::Sender<ElicitationReq>;
 pub fn answer_from_response(response: ElicitationResponse) -> Option<String> {
     match response.action {
         ElicitationAction::Accept(ElicitationAcceptAction {
-            content: Some(fields),
-            ..
+            content: Some(fields), ..
         }) => fields.get("answer").map(|v| match v {
             ElicitationContentValue::String(s) => s.clone(),
             ElicitationContentValue::Integer(n) => n.to_string(),
@@ -54,11 +53,7 @@ pub fn answer_from_response(response: ElicitationResponse) -> Option<String> {
 /// Ask the user `question` for `session_id` by round-tripping an elicitation
 /// request through `tx`. Returns the answer, or `None` if the user cancelled or
 /// the bridge failed (channel closed, dropped response, NATS error).
-pub async fn elicit_via_channel(
-    tx: &ElicitationTx,
-    session_id: &str,
-    question: &str,
-) -> Option<String> {
+pub async fn elicit_via_channel(tx: &ElicitationTx, session_id: &str, question: &str) -> Option<String> {
     let (response_tx, response_rx) = oneshot::channel();
     let schema = ElicitationSchema::new().string("answer", true);
     let request = ElicitationRequest::new(
@@ -66,14 +61,7 @@ pub async fn elicit_via_channel(
         ElicitationMode::Form(ElicitationFormMode::new(schema)),
         question,
     );
-    if tx
-        .send(ElicitationReq {
-            request,
-            response_tx,
-        })
-        .await
-        .is_err()
-    {
+    if tx.send(ElicitationReq { request, response_tx }).await.is_err() {
         return None;
     }
     match response_rx.await {

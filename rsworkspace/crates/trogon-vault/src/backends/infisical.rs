@@ -135,9 +135,7 @@ pub struct InfisicalVaultStore<H: HttpClient = reqwest::Client> {
 
 impl InfisicalVaultStore<reqwest::Client> {
     pub fn new(config: InfisicalConfig) -> Self {
-        let token = match config.auth {
-            InfisicalAuth::ServiceToken(t) => t,
-        };
+        let InfisicalAuth::ServiceToken(token) = config.auth;
         Self {
             client: reqwest::Client::new(),
             base_url: config.base_url,
@@ -150,9 +148,7 @@ impl InfisicalVaultStore<reqwest::Client> {
 
 impl<H: HttpClient> InfisicalVaultStore<H> {
     pub fn new_with(config: InfisicalConfig, http: H) -> Self {
-        let token = match config.auth {
-            InfisicalAuth::ServiceToken(t) => t,
-        };
+        let InfisicalAuth::ServiceToken(token) = config.auth;
         Self {
             client: http,
             base_url: config.base_url,

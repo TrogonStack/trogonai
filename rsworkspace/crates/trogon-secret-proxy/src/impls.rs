@@ -12,8 +12,7 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 
 use crate::traits::{
-    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
-    StreamingHttpResponse,
+    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient, StreamingHttpResponse,
 };
 
 // ── NatsClient for async_nats::Client ─────────────────────────────────────────
@@ -59,20 +58,14 @@ impl<T: JetStreamPublisher> JetStreamPublisher for Arc<T> {
         headers: async_nats::HeaderMap,
         payload: Bytes,
     ) -> Result<(), String> {
-        (**self)
-            .publish_with_headers(subject, headers, payload)
-            .await
+        (**self).publish_with_headers(subject, headers, payload).await
     }
 }
 
 impl<T: JetStreamConsumerClient> JetStreamConsumerClient for Arc<T> {
     type Messages = T::Messages;
 
-    async fn get_messages(
-        &self,
-        stream_name: &str,
-        consumer_name: &str,
-    ) -> Result<Self::Messages, String> {
+    async fn get_messages(&self, stream_name: &str, consumer_name: &str) -> Result<Self::Messages, String> {
         (**self).get_messages(stream_name, consumer_name).await
     }
 }
@@ -108,11 +101,7 @@ impl HttpClient for reqwest::Client {
         let resp_headers: Vec<(String, String)> = resp
             .headers()
             .iter()
-            .filter_map(|(k, v)| {
-                v.to_str()
-                    .ok()
-                    .map(|v_str| (k.as_str().to_string(), v_str.to_string()))
-            })
+            .filter_map(|(k, v)| v.to_str().ok().map(|v_str| (k.as_str().to_string(), v_str.to_string())))
             .collect();
         let resp_body = resp
             .bytes()
@@ -155,16 +144,10 @@ impl HttpClient for reqwest::Client {
         let resp_headers: Vec<(String, String)> = resp
             .headers()
             .iter()
-            .filter_map(|(k, v)| {
-                v.to_str()
-                    .ok()
-                    .map(|v_str| (k.as_str().to_string(), v_str.to_string()))
-            })
+            .filter_map(|(k, v)| v.to_str().ok().map(|v_str| (k.as_str().to_string(), v_str.to_string())))
             .collect();
 
-        let chunks = resp
-            .bytes_stream()
-            .map(|r| r.map_err(|e| e.to_string()));
+        let chunks = resp.bytes_stream().map(|r| r.map_err(|e| e.to_string()));
 
         Ok(StreamingHttpResponse {
             status,
@@ -197,15 +180,8 @@ impl Unpin for JsMessages {}
 impl JetStreamConsumerClient for jetstream::Context {
     type Messages = JsMessages;
 
-    async fn get_messages(
-        &self,
-        stream_name: &str,
-        consumer_name: &str,
-    ) -> Result<Self::Messages, String> {
-        let stream = self
-            .get_stream(stream_name)
-            .await
-            .map_err(|e| e.to_string())?;
+    async fn get_messages(&self, stream_name: &str, consumer_name: &str) -> Result<Self::Messages, String> {
+        let stream = self.get_stream(stream_name).await.map_err(|e| e.to_string())?;
 
         let consumer: jetstream::consumer::Consumer<pull::Config> = stream
             .get_or_create_consumer(

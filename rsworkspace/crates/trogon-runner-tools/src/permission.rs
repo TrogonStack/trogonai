@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 use trogon_tools::PermissionChecker;
 
 use crate::permission_rules::{
-    extract_path_from_input, is_always_allowed, normalize_tool_name, PermissionRules, RuleDecision,
+    PermissionRules, RuleDecision, extract_path_from_input, is_always_allowed, normalize_tool_name,
 };
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
@@ -60,12 +60,7 @@ fn extract_input_summary(tool_name: &str, tool_input: &Value) -> String {
                 tool_input
                     .get("args")
                     .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" "))
             })
             .unwrap_or_default();
         return format!("gh {}", cmd.chars().take(60).collect::<String>());
@@ -171,11 +166,7 @@ impl PermissionChecker for ChannelPermissionChecker {
 ///
 /// Evaluation order: Deny beats Allow beats RequireApproval. Returns `None`
 /// when no policy matches (caller should fall through to interactive ask).
-fn eval_tool_policies(
-    policies: &[ToolPolicy],
-    tool_name: &str,
-    tool_input: &Value,
-) -> Option<PolicyAction> {
+fn eval_tool_policies(policies: &[ToolPolicy], tool_name: &str, tool_input: &Value) -> Option<PolicyAction> {
     let normalized = normalize_tool_name(tool_name);
     // MED-10: bash calls carry no path/file_path/notebook_path, so matching an
     // empty string made every path-scoped policy silently ineffective for bash.
@@ -256,9 +247,7 @@ impl PermissionChecker for RulesPermissionChecker {
                 push_audit(&self.inner.audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
-            Some(PolicyAction::RequireApproval) | None => {
-                self.inner.check(tool_call_id, tool_name, tool_input)
-            }
+            Some(PolicyAction::RequireApproval) | None => self.inner.check(tool_call_id, tool_name, tool_input),
         }
     }
 }
@@ -322,15 +311,28 @@ fn is_read_only_bash_command(tool_input: &Value) -> bool {
     {
         return false;
     }
-    let base = cmd
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .trim_start_matches('(');
+    let base = cmd.split_whitespace().next().unwrap_or("").trim_start_matches('(');
     matches!(
         base,
-        "pwd" | "ls" | "ll" | "dir" | "find" | "echo" | "cat" | "head" | "tail" | "wc"
-            | "which" | "file" | "stat" | "du" | "df" | "test" | "rg" | "grep" | "tree"
+        "pwd"
+            | "ls"
+            | "ll"
+            | "dir"
+            | "find"
+            | "echo"
+            | "cat"
+            | "head"
+            | "tail"
+            | "wc"
+            | "which"
+            | "file"
+            | "stat"
+            | "du"
+            | "df"
+            | "test"
+            | "rg"
+            | "grep"
+            | "tree"
     )
 }
 
@@ -340,8 +342,7 @@ fn is_edit_tool(tool_name: &str) -> bool {
 
 fn is_plan_denied_tool(tool_name: &str) -> bool {
     let n = normalize_tool_name(tool_name);
-    PLAN_DENIED_TOOLS.contains(&n)
-        || matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Bash")
+    PLAN_DENIED_TOOLS.contains(&n) || matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Bash")
 }
 
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
@@ -488,9 +489,7 @@ pub async fn check_tool_permission(
     ) else {
         return true;
     };
-    checker
-        .check(tool_call_id, tool_name, tool_input)
-        .await
+    checker.check(tool_call_id, tool_name, tool_input).await
 }
 
 #[cfg(test)]
@@ -507,11 +506,7 @@ mod tests {
         }
     }
 
-    fn make_checker_with_buf(
-        tx: PermissionTx,
-        allowed_tools: Vec<String>,
-        buf: AuditBuf,
-    ) -> ChannelPermissionChecker {
+    fn make_checker_with_buf(tx: PermissionTx, allowed_tools: Vec<String>, buf: AuditBuf) -> ChannelPermissionChecker {
         ChannelPermissionChecker {
             session_id: "sess-1".to_string(),
             tx,
@@ -524,9 +519,7 @@ mod tests {
     async fn auto_allows_tool_in_allowed_list() {
         let (tx, _rx) = mpsc::channel(1);
         let checker = make_checker(tx, vec!["Bash".to_string()]);
-        let result = checker
-            .check("tc-1", "Bash", &serde_json::Value::Null)
-            .await;
+        let result = checker.check("tc-1", "Bash", &serde_json::Value::Null).await;
         assert!(result, "Bash should be auto-allowed");
     }
 
@@ -535,9 +528,7 @@ mod tests {
         // "Bash" in the allowed list must match the "bash" invocation after normalization.
         let (tx, _rx) = mpsc::channel(1);
         let checker = make_checker(tx, vec!["Bash".to_string()]);
-        let result = checker
-            .check("tc-1", "bash", &serde_json::Value::Null)
-            .await;
+        let result = checker.check("tc-1", "bash", &serde_json::Value::Null).await;
         assert!(result, "normalized bash should be auto-allowed via Bash entry");
     }
 
@@ -550,9 +541,7 @@ mod tests {
                 let _ = req.response_tx.send(true);
             }
         });
-        let result = checker
-            .check("tc-2", "Edit", &serde_json::Value::Null)
-            .await;
+        let result = checker.check("tc-2", "Edit", &serde_json::Value::Null).await;
         assert!(result, "channel returned allow");
     }
 
@@ -565,9 +554,7 @@ mod tests {
                 let _ = req.response_tx.send(false);
             }
         });
-        let result = checker
-            .check("tc-3", "Write", &serde_json::Value::Null)
-            .await;
+        let result = checker.check("tc-3", "Write", &serde_json::Value::Null).await;
         assert!(!result, "channel returned deny");
     }
 
@@ -576,9 +563,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(1);
         drop(rx); // close the receiver
         let checker = make_checker(tx, vec![]);
-        let result = checker
-            .check("tc-4", "Read", &serde_json::Value::Null)
-            .await;
+        let result = checker.check("tc-4", "Read", &serde_json::Value::Null).await;
         assert!(!result, "closed channel should default to deny");
     }
 
@@ -611,9 +596,7 @@ mod tests {
                 drop(req.response_tx); // drop without sending — triggers Err on resp_rx
             }
         });
-        let result = checker
-            .check("tc-x", "Read", &serde_json::Value::Null)
-            .await;
+        let result = checker.check("tc-x", "Read", &serde_json::Value::Null).await;
         assert!(!result, "dropped response_tx should return false");
     }
 
@@ -679,11 +662,7 @@ mod tests {
         };
         assert!(
             checker
-                .check(
-                    "tc-dr",
-                    "Read",
-                    &serde_json::json!({"file_path": "src/main.rs"}),
-                )
+                .check("tc-dr", "Read", &serde_json::json!({"file_path": "src/main.rs"}),)
                 .await
         );
     }
@@ -920,21 +899,33 @@ mod tests {
     #[test]
     fn no_matching_tool_returns_none() {
         let policies = vec![make_policy("read_file", "/workspace/**", PolicyAction::Allow)];
-        let result = eval_tool_policies(&policies, "write_file", &serde_json::json!({"path": "/workspace/foo.rs"}));
+        let result = eval_tool_policies(
+            &policies,
+            "write_file",
+            &serde_json::json!({"path": "/workspace/foo.rs"}),
+        );
         assert_eq!(result, None);
     }
 
     #[test]
     fn matching_allow_policy_returns_allow() {
         let policies = vec![make_policy("write_file", "/workspace/**", PolicyAction::Allow)];
-        let result = eval_tool_policies(&policies, "write_file", &serde_json::json!({"path": "/workspace/src/main.rs"}));
+        let result = eval_tool_policies(
+            &policies,
+            "write_file",
+            &serde_json::json!({"path": "/workspace/src/main.rs"}),
+        );
         assert_eq!(result, Some(PolicyAction::Allow));
     }
 
     #[test]
     fn matching_deny_policy_returns_deny() {
         let policies = vec![make_policy("write_file", "/workspace/**", PolicyAction::Deny)];
-        let result = eval_tool_policies(&policies, "write_file", &serde_json::json!({"path": "/workspace/src/main.rs"}));
+        let result = eval_tool_policies(
+            &policies,
+            "write_file",
+            &serde_json::json!({"path": "/workspace/src/main.rs"}),
+        );
         assert_eq!(result, Some(PolicyAction::Deny));
     }
 
@@ -942,11 +933,7 @@ mod tests {
     fn policy_tool_name_normalized_on_both_sides() {
         // B14: policy authored as "Bash" matches an incoming "bash" invocation.
         let policies = vec![make_policy("Bash", "**", PolicyAction::Deny)];
-        let result = eval_tool_policies(
-            &policies,
-            "bash",
-            &serde_json::json!({"command": "rm -rf /"}),
-        );
+        let result = eval_tool_policies(&policies, "bash", &serde_json::json!({"command": "rm -rf /"}));
         assert_eq!(result, Some(PolicyAction::Deny));
     }
 
@@ -956,7 +943,11 @@ mod tests {
             make_policy("write_file", "/workspace/**", PolicyAction::Allow),
             make_policy("write_file", "/workspace/secrets/**", PolicyAction::Deny),
         ];
-        let result = eval_tool_policies(&policies, "write_file", &serde_json::json!({"path": "/workspace/secrets/key.txt"}));
+        let result = eval_tool_policies(
+            &policies,
+            "write_file",
+            &serde_json::json!({"path": "/workspace/secrets/key.txt"}),
+        );
         assert_eq!(result, Some(PolicyAction::Deny));
     }
 
@@ -1007,7 +998,10 @@ mod tests {
         let result = checker
             .check("tc-p3", "write_file", &serde_json::json!({"path": "/tmp/foo.txt"}))
             .await;
-        assert!(result, "RequireApproval should fall through to channel (which approved)");
+        assert!(
+            result,
+            "RequireApproval should fall through to channel (which approved)"
+        );
     }
 
     // ── extract_input_summary ────────────────────────────────────────────────────
@@ -1027,10 +1021,7 @@ mod tests {
     #[test]
     fn input_summary_bash_uses_command_prefix() {
         let input = serde_json::json!({"command": "cargo test --workspace"});
-        assert_eq!(
-            extract_input_summary("bash", &input),
-            "cargo test --workspace"
-        );
+        assert_eq!(extract_input_summary("bash", &input), "cargo test --workspace");
     }
 
     #[test]
@@ -1059,8 +1050,7 @@ mod tests {
     async fn auto_allow_records_allowed_outcome() {
         let (tx, _rx) = mpsc::channel(1);
         let buf: AuditBuf = Arc::new(Mutex::new(vec![]));
-        let checker =
-            make_checker_with_buf(tx, vec!["Read".to_string()], buf.clone());
+        let checker = make_checker_with_buf(tx, vec!["Read".to_string()], buf.clone());
         let input = serde_json::json!({"path": "/etc/hosts"});
         checker.check("tc-1", "Read", &input).await;
         let entries = buf.lock().unwrap();
@@ -1115,9 +1105,7 @@ mod tests {
         drop(rx);
         let buf: AuditBuf = Arc::new(Mutex::new(vec![]));
         let checker = make_checker_with_buf(tx, vec![], buf.clone());
-        checker
-            .check("tc-4", "Edit", &serde_json::Value::Null)
-            .await;
+        checker.check("tc-4", "Edit", &serde_json::Value::Null).await;
         let entries = buf.lock().unwrap();
         assert!(entries.iter().any(|e| e.outcome == AuditOutcome::DeniedByUser));
     }
@@ -1175,11 +1163,7 @@ mod tests {
     #[test]
     fn eval_tool_policies_require_approval_only_returns_some() {
         let policies = vec![make_policy("write_file", "/tmp/**", PolicyAction::RequireApproval)];
-        let result = eval_tool_policies(
-            &policies,
-            "write_file",
-            &serde_json::json!({"path": "/tmp/foo.txt"}),
-        );
+        let result = eval_tool_policies(&policies, "write_file", &serde_json::json!({"path": "/tmp/foo.txt"}));
         assert_eq!(result, Some(PolicyAction::RequireApproval));
     }
 
@@ -1216,7 +1200,11 @@ mod tests {
             inner,
         };
         checker
-            .check("tc-tpa", "read_file", &serde_json::json!({"path": "/workspace/main.rs"}))
+            .check(
+                "tc-tpa",
+                "read_file",
+                &serde_json::json!({"path": "/workspace/main.rs"}),
+            )
             .await;
         let entries = buf.lock().unwrap();
         assert_eq!(entries.len(), 1, "tool-policy Allow must record one audit entry");
@@ -1243,10 +1231,7 @@ mod tests {
         // Drop rx so any inner channel send would return an error — but it should
         // never be reached for a Deny decision.
         drop(rx);
-        let checker = make_rules_checker(
-            "## Permissions\ndeny_commands: bash\n",
-            tx,
-        );
+        let checker = make_rules_checker("## Permissions\ndeny_commands: bash\n", tx);
         let result = checker
             .check("tc-d1", "bash", &serde_json::json!({"command": "rm -rf /"}))
             .await;
@@ -1259,10 +1244,7 @@ mod tests {
         // Allow all read_file calls.
         let (tx, rx) = mpsc::channel(1);
         drop(rx); // inner channel closed — would deny if reached
-        let checker = make_rules_checker(
-            "## Permissions\nallow_paths: **\n",
-            tx,
-        );
+        let checker = make_rules_checker("## Permissions\nallow_paths: **\n", tx);
         let result = checker
             .check(
                 "tc-a1",
@@ -1311,16 +1293,9 @@ mod tests {
     async fn rules_deny_beats_allow() {
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
-        let checker = make_rules_checker(
-            "## Permissions\nallow_paths: **\ndeny_paths: /etc/**\n",
-            tx,
-        );
+        let checker = make_rules_checker("## Permissions\nallow_paths: **\ndeny_paths: /etc/**\n", tx);
         let result = checker
-            .check(
-                "tc-db",
-                "read_file",
-                &serde_json::json!({"path": "/etc/passwd"}),
-            )
+            .check("tc-db", "read_file", &serde_json::json!({"path": "/etc/passwd"}))
             .await;
         assert!(!result, "Deny must beat Allow");
     }

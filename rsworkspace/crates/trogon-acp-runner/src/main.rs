@@ -36,7 +36,7 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use async_nats::jetstream;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tokio::task::LocalSet;
 use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
@@ -61,20 +61,16 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Config from environment ───────────────────────────────────────────────
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let acp_prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let proxy_url =
-        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
     let model = std::env::var("AGENT_MODEL").unwrap_or_else(|_| "claude-opus-4-6".to_string());
     let max_iterations: u32 = std::env::var("AGENT_MAX_ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
-    let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
-        .ok()
-        .and_then(|v| v.parse().ok());
+    let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS").ok().and_then(|v| v.parse().ok());
     let anthropic_base_url: Option<String> = std::env::var("ANTHROPIC_BASE_URL").ok();
 
     // ── NATS connection ───────────────────────────────────────────────────────
@@ -94,7 +90,8 @@ async fn main() -> anyhow::Result<()> {
     // ── Registry self-registration ────────────────────────────────────────────
 
     let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "claude".to_string());
-    let reg_store = trogon_registry::provision(&js).await
+    let reg_store = trogon_registry::provision(&js)
+        .await
         .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
@@ -107,7 +104,9 @@ async fn main() -> anyhow::Result<()> {
             "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
         }),
     };
-    registry.register(&cap).await
+    registry
+        .register(&cap)
+        .await
         .map_err(|e| anyhow::anyhow!("initial registry registration failed: {e}"))?;
     info!(agent_type, acp_prefix, "registered in agent registry");
     let registry_for_agent = registry.clone();
@@ -217,10 +216,9 @@ async fn main() -> anyhow::Result<()> {
         },
     );
     let js_client = NatsJetStreamClient::new(js);
-    let (_conn, io_task) =
-        AgentSideNatsConnection::with_jetstream(agent, nats, js_client, acp_prefix_parsed, |fut| {
-            tokio::task::spawn_local(fut);
-        });
+    let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js_client, acp_prefix_parsed, |fut| {
+        tokio::task::spawn_local(fut);
+    });
 
     info!("trogon-acp-runner started");
 

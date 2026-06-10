@@ -1,16 +1,18 @@
 mod agent;
 pub mod agent_loader;
-pub mod compaction;
-pub mod spawn_handler;
 mod client;
+pub mod compaction;
 mod http_client;
 mod session_notifier;
 pub mod session_store;
 pub mod skill_loader;
+pub mod spawn_handler;
 
 pub use agent::OpenRouterAgent;
 pub use agent_loader::{AgentConfig, AgentLoader, AgentLoading};
-pub use client::{AssembledToolCall, FinishReason, Message, OpenRouterClient, OpenRouterEvent, ToolCallMessage, ToolDef};
+pub use client::{
+    AssembledToolCall, FinishReason, Message, OpenRouterClient, OpenRouterEvent, ToolCallMessage, ToolDef,
+};
 pub use http_client::OpenRouterHttpClient;
 pub use session_notifier::{NatsSessionNotifier, SessionNotifier};
 pub use session_store::{NatsSessionStore, SessionStoring};

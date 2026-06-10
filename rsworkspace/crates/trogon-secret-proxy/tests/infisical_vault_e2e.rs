@@ -15,7 +15,9 @@ use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, vault_admin, worker,
 };
-use trogon_vault::{ApiKeyToken, DualWriteVault, InfisicalAuth, InfisicalConfig, InfisicalVaultStore, MemoryVault, VaultStore};
+use trogon_vault::{
+    ApiKeyToken, DualWriteVault, InfisicalAuth, InfisicalConfig, InfisicalVaultStore, MemoryVault, VaultStore,
+};
 use trogon_vault_nats::{CryptoCtx, NatsKvVault, ensure_vault_bucket};
 
 const PREFIX: &str = "test";
@@ -131,8 +133,7 @@ async fn vault_admin_infisical_rotate_via_nats() {
             when.method(httpmock::Method::PATCH)
                 .path("/api/v3/secrets/raw/openai_xyz789")
                 .json_body_partial(r#"{"secretValue":"sk-new-key"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         })
         .await;
 
@@ -169,8 +170,7 @@ async fn vault_admin_infisical_revoke_via_nats() {
             when.method(httpmock::Method::DELETE)
                 .path("/api/v3/secrets/raw/gemini_aabbcc")
                 .json_body_partial(r#"{"environment":"staging"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         })
         .await;
 
@@ -282,9 +282,7 @@ async fn infisical_proxy_worker_pipeline_resolves_real_key() {
     // Send an HTTP request through the proxy using the opaque token.
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_abc123")
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)
@@ -308,9 +306,7 @@ async fn infisical_proxy_worker_pipeline_resolves_real_key() {
 // ── Section 3: DualWriteVault + vault_admin ───────────────────────────────────
 
 fn kv_crypto() -> std::sync::Arc<CryptoCtx> {
-    std::sync::Arc::new(
-        CryptoCtx::derive(b"infisical-e2e-pw", b"infisical-salt16").unwrap(),
-    )
+    std::sync::Arc::new(CryptoCtx::derive(b"infisical-e2e-pw", b"infisical-salt16").unwrap())
 }
 
 /// vault_admin backed by DualWriteVault<InfisicalVaultStore, NatsKvVault>:
@@ -344,7 +340,9 @@ async fn vault_admin_dual_write_stores_to_both_backends() {
 
     tokio::spawn({
         let nc = nats.clone();
-        async move { vault_admin::run(nc, dual, PREFIX, None).await.ok(); }
+        async move {
+            vault_admin::run(nc, dual, PREFIX, None).await.ok();
+        }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -388,8 +386,7 @@ async fn dual_write_cache_hit_does_not_call_infisical() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::GET)
                 .path("/api/v3/secrets/raw/anthropic_ch0001");
-            then.status(404)
-                .json_body(serde_json::json!({"message": "not found"}));
+            then.status(404).json_body(serde_json::json!({"message": "not found"}));
         })
         .await;
 
@@ -510,8 +507,12 @@ async fn worker_fallback_on_401_uses_rotated_nats_kv_key() {
     tokio::time::sleep(Duration::from_millis(200)).await; // watcher creates rotation slot
 
     let (current, previous) = vault.resolve_with_previous(&token).await.unwrap();
-    assert_eq!(current.as_deref(),  Some("sk-new"), "current key must be sk-new");
-    assert_eq!(previous.as_deref(), Some("sk-old"), "previous key must be sk-old in grace period");
+    assert_eq!(current.as_deref(), Some("sk-new"), "current key must be sk-new");
+    assert_eq!(
+        previous.as_deref(),
+        Some("sk-old"),
+        "previous key must be sk-old in grace period"
+    );
 
     // ── AI provider mock ──────────────────────────────────────────────────────
     let ai_server = httpmock::MockServer::start_async().await;
@@ -543,11 +544,11 @@ async fn worker_fallback_on_401_uses_rotated_nats_kv_key() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats:             nats.clone(),
-        jetstream:        jetstream.clone(),
-        prefix:           "rotation".to_string(),
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "rotation".to_string(),
         outbound_subject: outbound_subject.clone(),
-        worker_timeout:   Duration::from_secs(15),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(format!("http://{}", ai_server.address())),
     };
     tokio::spawn(async move {
@@ -561,7 +562,7 @@ async fn worker_fallback_on_401_uses_rotated_nats_kv_key() {
     let worker_stream = stream::stream_name("rotation");
     tokio::spawn({
         let js2 = jetstream.clone();
-        let nc  = nats.clone();
+        let nc = nats.clone();
         async move {
             worker::run(js2, nc, vault, http_client, "rotation-worker", &worker_stream)
                 .await
@@ -614,8 +615,7 @@ async fn vault_admin_dual_write_rotate_updates_both_backends() {
             when.method(httpmock::Method::PATCH)
                 .path("/api/v3/secrets/raw/anthropic_dw0002")
                 .json_body_partial(r#"{"secretValue":"sk-ant-rotated"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         })
         .await;
 
@@ -635,7 +635,9 @@ async fn vault_admin_dual_write_rotate_updates_both_backends() {
 
     tokio::spawn({
         let nc = nats.clone();
-        async move { vault_admin::run(nc, dual, PREFIX, None).await.ok(); }
+        async move {
+            vault_admin::run(nc, dual, PREFIX, None).await.ok();
+        }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -682,8 +684,7 @@ async fn vault_admin_dual_write_revoke_removes_from_both_backends() {
             when.method(httpmock::Method::DELETE)
                 .path("/api/v3/secrets/raw/anthropic_dw0003")
                 .json_body_partial(r#"{"environment":"prod"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         })
         .await;
 
@@ -708,7 +709,9 @@ async fn vault_admin_dual_write_revoke_removes_from_both_backends() {
 
     tokio::spawn({
         let nc = nats.clone();
-        async move { vault_admin::run(nc, dual, PREFIX, None).await.ok(); }
+        async move {
+            vault_admin::run(nc, dual, PREFIX, None).await.ok();
+        }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -733,8 +736,7 @@ async fn vault_admin_dual_write_revoke_removes_from_both_backends() {
     // Getting None proves the cache was cleared.
     let resolved = dual_for_check.resolve(&token).await.unwrap();
     assert_eq!(
-        resolved,
-        None,
+        resolved, None,
         "token must be gone from both backends after revocation; \
          a non-None result means the NatsKvVault cache was not cleared"
     );
@@ -768,13 +770,12 @@ async fn dual_write_proxy_worker_pipeline_resolves_from_cache() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::GET)
                 .path("/api/v3/secrets/raw/anthropic_dw0004");
-            then.status(200)
-                .json_body(serde_json::json!({
-                    "secret": {
-                        "secretKey":   "anthropic_dw0004",
-                        "secretValue": "sk-from-infisical-not-expected"
-                    }
-                }));
+            then.status(200).json_body(serde_json::json!({
+                "secret": {
+                    "secretKey":   "anthropic_dw0004",
+                    "secretValue": "sk-from-infisical-not-expected"
+                }
+            }));
         })
         .await;
 
@@ -796,7 +797,9 @@ async fn dual_write_proxy_worker_pipeline_resolves_from_cache() {
     // Spawn vault_admin backed by DualWriteVault.
     tokio::spawn({
         let nc = nats.clone();
-        async move { vault_admin::run(nc, dual, PREFIX, None).await.ok(); }
+        async move {
+            vault_admin::run(nc, dual, PREFIX, None).await.ok();
+        }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -841,11 +844,11 @@ async fn dual_write_proxy_worker_pipeline_resolves_from_cache() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats:              nats.clone(),
-        jetstream:         jetstream.clone(),
-        prefix:            "dw-cache".to_string(),
-        outbound_subject:  outbound_subject.clone(),
-        worker_timeout:    Duration::from_secs(15),
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "dw-cache".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(15),
         base_url_override: Some(format!("http://{}", ai_server.address())),
     };
     tokio::spawn(async move {
@@ -859,7 +862,7 @@ async fn dual_write_proxy_worker_pipeline_resolves_from_cache() {
     let worker_stream = stream::stream_name("dw-cache");
     tokio::spawn({
         let js2 = jetstream.clone();
-        let nc  = nats.clone();
+        let nc = nats.clone();
         async move {
             worker::run(js2, nc, dual_for_worker, http_client, "dw-cache-worker", &worker_stream)
                 .await
@@ -932,11 +935,11 @@ async fn infisical_401_on_resolve_propagates_error_through_worker() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats:              nats.clone(),
-        jetstream:         jetstream.clone(),
-        prefix:            "e401".to_string(),
-        outbound_subject:  outbound_subject.clone(),
-        worker_timeout:    Duration::from_secs(10),
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "e401".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(10),
         base_url_override: Some("http://127.0.0.1:1".to_string()), // never reached
     };
     tokio::spawn(async move {
@@ -944,13 +947,18 @@ async fn infisical_401_on_resolve_propagates_error_through_worker() {
     });
 
     let store = Arc::new(make_store(&infisical));
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
     let worker_stream = stream::stream_name("e401");
     tokio::spawn({
         let js = jetstream.clone();
         let nc = nats.clone();
         async move {
-            worker::run(js, nc, store, http_client, "e401-worker", &worker_stream).await.ok();
+            worker::run(js, nc, store, http_client, "e401-worker", &worker_stream)
+                .await
+                .ok();
         }
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1051,11 +1059,11 @@ async fn infisical_empty_secret_value_returns_error_through_worker() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
-        nats:              nats.clone(),
-        jetstream:         jetstream.clone(),
-        prefix:            "emptyval".to_string(),
-        outbound_subject:  outbound_subject.clone(),
-        worker_timeout:    Duration::from_secs(10),
+        nats: nats.clone(),
+        jetstream: jetstream.clone(),
+        prefix: "emptyval".to_string(),
+        outbound_subject: outbound_subject.clone(),
+        worker_timeout: Duration::from_secs(10),
         base_url_override: Some("http://127.0.0.1:1".to_string()), // never reached
     };
     tokio::spawn(async move {
@@ -1063,13 +1071,18 @@ async fn infisical_empty_secret_value_returns_error_through_worker() {
     });
 
     let store = Arc::new(make_store(&infisical));
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap();
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
     let worker_stream = stream::stream_name("emptyval");
     tokio::spawn({
         let js = jetstream.clone();
         let nc = nats.clone();
         async move {
-            worker::run(js, nc, store, http_client, "emptyval-worker", &worker_stream).await.ok();
+            worker::run(js, nc, store, http_client, "emptyval-worker", &worker_stream)
+                .await
+                .ok();
         }
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1110,9 +1123,7 @@ async fn named_vault_admin_with_infisical_routes_and_maps_correctly() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/api/v3/secrets/raw/stripe_paymt001")
-                .json_body_partial(
-                    r#"{"environment":"prod","secretValue":"sk-stripe-payments"}"#,
-                );
+                .json_body_partial(r#"{"environment":"prod","secretValue":"sk-stripe-payments"}"#);
             then.status(200)
                 .json_body(serde_json::json!({"secret": {"secretKey": "stripe_paymt001"}}));
         })
@@ -1125,16 +1136,20 @@ async fn named_vault_admin_with_infisical_routes_and_maps_correctly() {
     let flat_vault = Arc::new(MemoryVault::new());
     tokio::spawn({
         let nc = nats.clone();
-        let v  = flat_vault.clone();
-        async move { vault_admin::run(nc, v, PREFIX, None).await.ok(); }
+        let v = flat_vault.clone();
+        async move {
+            vault_admin::run(nc, v, PREFIX, None).await.ok();
+        }
     });
 
     // Named vault_admin (InfisicalVaultStore) — handles {prefix}.vault.payments.{*} only.
     let payments_vault = Arc::new(make_store(&infisical));
     tokio::spawn({
         let nc = nats.clone();
-        let v  = payments_vault.clone();
-        async move { vault_admin::run(nc, v, PREFIX, Some("payments")).await.ok(); }
+        let v = payments_vault.clone();
+        async move {
+            vault_admin::run(nc, v, PREFIX, Some("payments")).await.ok();
+        }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -1240,9 +1255,7 @@ async fn infisical_proxy_worker_unknown_token_returns_error() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_unknown1")
         .header("Content-Type", "application/json")
         .body("{}")
@@ -1277,9 +1290,7 @@ async fn custom_secret_path_is_threaded_through_all_infisical_requests() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/api/v3/secrets/raw/anthropic_scpath1")
-                .json_body_partial(
-                    r#"{"secretPath":"/payment-keys","secretValue":"sk-ant-path-test"}"#,
-                );
+                .json_body_partial(r#"{"secretPath":"/payment-keys","secretValue":"sk-ant-path-test"}"#);
             then.status(200)
                 .json_body(serde_json::json!({"secret": {"secretKey": "anthropic_scpath1"}}));
         })
@@ -1299,11 +1310,8 @@ async fn custom_secret_path_is_threaded_through_all_infisical_requests() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::PATCH)
                 .path("/api/v3/secrets/raw/anthropic_scpath1")
-                .json_body_partial(
-                    r#"{"secretPath":"/payment-keys","secretValue":"sk-ant-path-v2"}"#,
-                );
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+                .json_body_partial(r#"{"secretPath":"/payment-keys","secretValue":"sk-ant-path-v2"}"#);
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         })
         .await;
 
@@ -1328,8 +1336,7 @@ async fn custom_secret_path_is_threaded_through_all_infisical_requests() {
             when.method(httpmock::Method::DELETE)
                 .path("/api/v3/secrets/raw/anthropic_scpath1")
                 .json_body_partial(r#"{"secretPath":"/payment-keys"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         })
         .await;
 

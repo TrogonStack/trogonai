@@ -57,24 +57,15 @@ pub mod mock {
         }
 
         pub fn push_response(&self, events: Vec<OpenRouterEvent>) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(MockResponse::Events(events));
+            self.responses.lock().unwrap().push_back(MockResponse::Events(events));
         }
 
         pub fn push_slow_response(&self, first: OpenRouterEvent) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(MockResponse::Slow(first));
+            self.responses.lock().unwrap().push_back(MockResponse::Slow(first));
         }
 
         pub fn push_pending_response(&self) {
-            self.responses
-                .lock()
-                .unwrap()
-                .push_back(MockResponse::Pending);
+            self.responses.lock().unwrap().push_back(MockResponse::Pending);
         }
     }
 
@@ -97,11 +88,14 @@ pub mod mock {
                 model: model.to_string(),
                 messages: messages.to_vec(),
                 api_key: api_key.to_string(),
-                tools: tools.iter().map(|t| ToolDef {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    parameters: t.parameters.clone(),
-                }).collect(),
+                tools: tools
+                    .iter()
+                    .map(|t| ToolDef {
+                        name: t.name.clone(),
+                        description: t.description.clone(),
+                        parameters: t.parameters.clone(),
+                    })
+                    .collect(),
             });
 
             let response = self

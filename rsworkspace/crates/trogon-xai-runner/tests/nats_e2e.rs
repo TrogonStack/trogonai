@@ -16,15 +16,13 @@ use std::time::Duration;
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    Agent, CloseSessionRequest, ForkSessionRequest, LoadSessionRequest, NewSessionRequest,
-    SessionConfigKind, SetSessionConfigOptionRequest,
+    Agent, CloseSessionRequest, ForkSessionRequest, LoadSessionRequest, NewSessionRequest, SessionConfigKind,
+    SetSessionConfigOptionRequest,
 };
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use trogon_xai_runner::{
-    Message, MockXaiHttpClient, NatsSessionNotifier, NatsSessionStore, SessionStoring, XaiAgent,
-};
+use trogon_xai_runner::{Message, MockXaiHttpClient, NatsSessionNotifier, NatsSessionStore, SessionStoring, XaiAgent};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,7 +54,9 @@ async fn start_agent(nats: async_nats::Client) {
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats_for_thread, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
     // Give the agent time to subscribe before the test sends requests.
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -121,15 +121,14 @@ async fn e2e_nats_session_new_returns_session_id() {
 async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
     let (_container, nats) = start_nats().await;
     let js = async_nats::jetstream::new(nats.clone());
-    let store: Arc<dyn SessionStoring> =
-        Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
+    let store: Arc<dyn SessionStoring> = Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
 
     let session_id = {
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let prefix = AcpPrefix::new("acp").unwrap();
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-        let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
-            .with_session_store(Arc::clone(&store));
+        let agent =
+            XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
         let new_resp = agent
             .new_session(NewSessionRequest::new("/tmp"))
@@ -138,11 +137,7 @@ async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
         let sid = new_resp.session_id.to_string();
 
         agent
-            .set_session_config_option(SetSessionConfigOptionRequest::new(
-                sid.clone(),
-                "web_search",
-                "on",
-            ))
+            .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
             .await
             .expect("set_config_option must succeed");
 
@@ -179,8 +174,8 @@ async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let prefix = AcpPrefix::new("acp").unwrap();
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-        let agent2 = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
-            .with_session_store(Arc::clone(&store));
+        let agent2 =
+            XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
         let load_resp = agent2
             .load_session(LoadSessionRequest::new(session_id.clone(), "/tmp"))
@@ -208,15 +203,14 @@ async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
 async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
     let (_container, nats) = start_nats().await;
     let js = async_nats::jetstream::new(nats.clone());
-    let store: Arc<dyn SessionStoring> =
-        Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
+    let store: Arc<dyn SessionStoring> = Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
 
     let fork_id = {
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let prefix = AcpPrefix::new("acp").unwrap();
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-        let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
-            .with_session_store(Arc::clone(&store));
+        let agent =
+            XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
         let new_resp = agent
             .new_session(NewSessionRequest::new("/tmp"))
@@ -225,11 +219,7 @@ async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
         let src_id = new_resp.session_id.to_string();
 
         agent
-            .set_session_config_option(SetSessionConfigOptionRequest::new(
-                src_id.clone(),
-                "web_search",
-                "on",
-            ))
+            .set_session_config_option(SetSessionConfigOptionRequest::new(src_id.clone(), "web_search", "on"))
             .await
             .expect("set_config_option must succeed");
 
@@ -266,8 +256,8 @@ async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let prefix = AcpPrefix::new("acp").unwrap();
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-        let agent2 = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
-            .with_session_store(Arc::clone(&store));
+        let agent2 =
+            XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
         let load_resp = agent2
             .load_session(LoadSessionRequest::new(fork_id.clone(), "/fork"))
@@ -300,15 +290,14 @@ async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
 async fn history_and_model_survive_kv_round_trip() {
     let (_container, nats) = start_nats().await;
     let js = async_nats::jetstream::new(nats.clone());
-    let store: Arc<dyn SessionStoring> =
-        Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
+    let store: Arc<dyn SessionStoring> = Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
 
     let session_id = {
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let prefix = AcpPrefix::new("acp").unwrap();
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-        let agent = XaiAgent::with_deps(notifier, "grok-3-mini", "test-key", mock_http)
-            .with_session_store(Arc::clone(&store));
+        let agent =
+            XaiAgent::with_deps(notifier, "grok-3-mini", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
         let new_resp = agent
             .new_session(NewSessionRequest::new("/tmp"))
@@ -348,8 +337,8 @@ async fn history_and_model_survive_kv_round_trip() {
     let mock_http = Arc::new(MockXaiHttpClient::new());
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-    let agent2 = XaiAgent::with_deps(notifier, "grok-3-mini", "test-key", mock_http)
-        .with_session_store(Arc::clone(&store));
+    let agent2 =
+        XaiAgent::with_deps(notifier, "grok-3-mini", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
     let load_resp = agent2
         .load_session(LoadSessionRequest::new(session_id.clone(), "/tmp"))
@@ -424,8 +413,7 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
     let mock_http = Arc::new(MockXaiHttpClient::new());
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
-    let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
-        .with_session_store(Arc::clone(&store));
+    let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http).with_session_store(Arc::clone(&store));
 
     let load_resp = agent
         .load_session(LoadSessionRequest::new(session_id, "/tmp"))
@@ -484,7 +472,9 @@ async fn e2e_ext_session_get_state_returns_cwd() {
     .expect("timed out waiting for session/new")
     .expect("NATS request failed");
     let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
-    let session_id = new_resp["sessionId"].as_str().expect("session/new must return sessionId");
+    let session_id = new_resp["sessionId"]
+        .as_str()
+        .expect("session/new must return sessionId");
 
     let ext_payload = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap();
     let ext_msg = tokio::time::timeout(
@@ -598,7 +588,9 @@ async fn xai_runner_registers_with_explore_plan_capabilities_and_model_ids() {
         entry.capabilities
     );
 
-    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let models = entry.metadata["models"]
+        .as_array()
+        .expect("metadata.models must be array");
     let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         model_strings.contains(&"grok-4"),

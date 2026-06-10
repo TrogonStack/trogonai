@@ -3,8 +3,8 @@
 //! Run with:
 //!   cargo test -p trogon-runner-tools --test spawn_agent_integration
 
-use std::sync::Arc;
 use futures_util::StreamExt as _;
+use std::sync::Arc;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_mcp::McpCallTool as _;
@@ -66,25 +66,18 @@ async fn call_tool_delivers_request_and_returns_reply() {
     let registry_client = nats_client(port).await;
 
     // Spawn a mock registry that echoes capability+prompt back.
-    let mut sub = registry_client
-        .subscribe("trogon.agent.spawn")
-        .await
-        .unwrap();
+    let mut sub = registry_client.subscribe("trogon.agent.spawn").await.unwrap();
 
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
-            let payload: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let response = format!(
                 "ran {} with: {}",
                 payload["capability"].as_str().unwrap_or(""),
                 payload["prompt"].as_str().unwrap_or("")
             );
             if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, response.into())
-                    .await
-                    .unwrap();
+                registry_client.publish(reply, response.into()).await.unwrap();
             }
         }
     });
@@ -110,19 +103,13 @@ async fn call_tool_uses_correct_subject_prefix() {
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
 
-    let mut sub = registry_client
-        .subscribe("myteam.agent.spawn")
-        .await
-        .unwrap();
+    let mut sub = registry_client.subscribe("myteam.agent.spawn").await.unwrap();
 
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
         {
-            registry_client
-                .publish(reply, "ack".into())
-                .await
-                .unwrap();
+            registry_client.publish(reply, "ack".into()).await.unwrap();
         }
     });
 
@@ -148,15 +135,11 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
 
-    let mut sub = registry_client
-        .subscribe("t.agent.spawn")
-        .await
-        .unwrap();
+    let mut sub = registry_client.subscribe("t.agent.spawn").await.unwrap();
 
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
-            let v: serde_json::Value =
-                serde_json::from_slice(&msg.payload).expect("payload must be JSON");
+            let v: serde_json::Value = serde_json::from_slice(&msg.payload).expect("payload must be JSON");
 
             assert_eq!(v["capability"].as_str().unwrap(), "explore");
             assert_eq!(v["prompt"].as_str().unwrap(), "list files");
@@ -195,10 +178,7 @@ async fn call_tool_errors_on_missing_capability() {
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "prompt": "do something" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "prompt": "do something" }))
         .await;
 
     assert!(result.is_err());
@@ -216,17 +196,11 @@ async fn call_tool_errors_on_missing_prompt() {
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "capability": "explore" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "capability": "explore" }))
         .await;
 
     assert!(result.is_err());
-    assert!(
-        result.unwrap_err().contains("prompt"),
-        "error should mention 'prompt'"
-    );
+    assert!(result.unwrap_err().contains("prompt"), "error should mention 'prompt'");
 }
 
 /// `call_tool` returns an error when arguments are an empty object.
@@ -236,9 +210,7 @@ async fn call_tool_errors_on_empty_arguments() {
     let client = nats_client(port).await;
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
-    let result = tool
-        .call_tool("spawn_agent", &serde_json::json!({}))
-        .await;
+    let result = tool.call_tool("spawn_agent", &serde_json::json!({})).await;
 
     assert!(result.is_err());
 }
@@ -280,7 +252,10 @@ fn spawn_timeout_is_120_seconds() {
     // If this fails the format string in call_tool must be updated too.
     let def = SpawnAgentTool::tool_def();
     // The description should reference the registry resolving the agent.
-    assert!(def.description.contains("registry"), "description must reference the registry");
+    assert!(
+        def.description.contains("registry"),
+        "description must reference the registry"
+    );
 }
 
 // ── call_tool — response passthrough ─────────────────────────────────────────
@@ -299,10 +274,7 @@ async fn call_tool_returns_registry_reply_verbatim() {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
         {
-            registry_client
-                .publish(reply, expected.into())
-                .await
-                .unwrap();
+            registry_client.publish(reply, expected.into()).await.unwrap();
         }
     });
 
@@ -333,10 +305,7 @@ async fn call_tool_handles_multiline_registry_reply() {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
         {
-            registry_client
-                .publish(reply, expected.into())
-                .await
-                .unwrap();
+            registry_client.publish(reply, expected.into()).await.unwrap();
         }
     });
 
@@ -364,14 +333,10 @@ async fn call_tool_handles_concurrent_requests() {
 
     tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
-            let v: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let reply_body = format!("done:{}", v["capability"].as_str().unwrap_or("?"));
             if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, reply_body.into())
-                    .await
-                    .unwrap();
+                registry_client.publish(reply, reply_body.into()).await.unwrap();
             }
         }
     });

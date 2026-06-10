@@ -50,10 +50,7 @@ impl AgentLoader {
         let bytes = match self.agents_kv.get(agent_id).await {
             Ok(Some(b)) => b,
             Ok(None) => {
-                warn!(
-                    agent_id,
-                    "agent not found in CONSOLE_AGENTS — no config injected"
-                );
+                warn!(agent_id, "agent not found in CONSOLE_AGENTS — no config injected");
                 return AgentConfig::empty();
             }
             Err(e) => {
@@ -75,11 +72,7 @@ impl AgentLoader {
 pub(crate) fn parse_agent_config(val: &serde_json::Value) -> AgentConfig {
     let skill_ids = val["skill_ids"]
         .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
     let system_prompt = val["system_prompt"]
@@ -138,8 +131,7 @@ pub mod mock {
         }
 
         pub fn insert(&mut self, agent_id: &str, skill_ids: Vec<String>) {
-            self.configs
-                .insert(agent_id.to_string(), (skill_ids, None, None));
+            self.configs.insert(agent_id.to_string(), (skill_ids, None, None));
         }
 
         pub fn insert_full(
@@ -184,9 +176,7 @@ mod tests {
 
     #[test]
     fn parse_full_config() {
-        let cfg = parse(
-            r#"{"skill_ids":["s1","s2"],"system_prompt":"Be helpful","model":{"id":"grok-4"}}"#,
-        );
+        let cfg = parse(r#"{"skill_ids":["s1","s2"],"system_prompt":"Be helpful","model":{"id":"grok-4"}}"#);
         assert_eq!(cfg.skill_ids, vec!["s1", "s2"]);
         assert_eq!(cfg.system_prompt.as_deref(), Some("Be helpful"));
         assert_eq!(cfg.model_id.as_deref(), Some("grok-4"));

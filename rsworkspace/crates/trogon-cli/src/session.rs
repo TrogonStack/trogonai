@@ -1,9 +1,8 @@
 use crate::nats::NatsClient;
 use crate::tool_update::map_tool_call_update;
 use agent_client_protocol::{
-    ContentBlock, ExtRequest, ExtResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, McpServer, NewSessionRequest, PromptRequest, SessionNotification,
-    SessionUpdate, TextContent, ToolCallStatus,
+    ContentBlock, ExtRequest, ExtResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, McpServer,
+    NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, TextContent, ToolCallStatus,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -23,30 +22,25 @@ pub struct CompactResult {
     pub tokens_after: usize,
 }
 
-async fn ext_method<N: NatsClient>(
-    nats: &N,
-    prefix: &str,
-    method: &str,
-    params: Value,
-) -> anyhow::Result<Value> {
+async fn ext_method<N: NatsClient>(nats: &N, prefix: &str, method: &str, params: Value) -> anyhow::Result<Value> {
     let params_raw = serde_json::value::RawValue::from_string(params.to_string())
         .map_err(|e| anyhow::anyhow!("invalid ext params: {e}"))?;
     let req = ExtRequest::new(method, params_raw.into());
     let subject = format!("{prefix}.agent.ext.{method}");
     let payload = serde_json::to_vec(&req)?;
 
-    let bytes = tokio::time::timeout(
-        EXT_METHOD_TIMEOUT,
-        nats.request_bytes(subject, payload.into()),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("timed out waiting for ext method `{method}`"))?
-    .map_err(|e| anyhow::anyhow!("NATS error on ext method `{method}`: {e}"))?;
+    let bytes = tokio::time::timeout(EXT_METHOD_TIMEOUT, nats.request_bytes(subject, payload.into()))
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for ext method `{method}`"))?
+        .map_err(|e| anyhow::anyhow!("NATS error on ext method `{method}`: {e}"))?;
 
     // New discriminated envelope: {"result": <body>} | {"error": {code,message,...}}
     if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
         if let Some(err) = env.get("error") {
-            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("ext method error");
+            let msg = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("ext method error");
             return Err(anyhow::anyhow!("{msg}"));
         }
         if let Some(result) = env.get("result") {
@@ -59,8 +53,7 @@ async fn ext_method<N: NatsClient>(
         return Err(anyhow::anyhow!("{}", err.message));
     }
     if let Ok(resp) = serde_json::from_slice::<ExtResponse>(&bytes) {
-        return serde_json::from_str(resp.0.get())
-            .map_err(|e| anyhow::anyhow!("invalid ext response body: {e}"));
+        return serde_json::from_str(resp.0.get()).map_err(|e| anyhow::anyhow!("invalid ext response body: {e}"));
     }
     serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid ext response: {e}"))
 }
@@ -90,10 +83,7 @@ pub trait Session: Send + Sync + 'static {
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 
-    fn set_model(
-        &self,
-        model_id: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+    fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_;
 
@@ -105,24 +95,14 @@ pub trait Session: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     /// Update the runner session working directory (e.g. after `/cd`).
-    fn set_cwd(
-        &self,
-        cwd: &Path,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+    fn set_cwd(&self, cwd: &Path) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
-    fn list_sessions(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_;
+    fn list_sessions(&self) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_;
 
     /// Runner-reported cwd for this session (may differ from the REPL shell until synced).
-    fn session_cwd(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_;
+    fn session_cwd(&self) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_;
 
-    fn set_mode(
-        &self,
-        mode: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+    fn set_mode(&self, mode: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn set_session_config_option(
         &self,
@@ -185,8 +165,9 @@ impl<N: NatsClient + Clone> SessionFactory for NatsSessionFactory<N> {
 pub fn default_model_for_prefix(prefix: &str) -> String {
     match prefix {
         "acp.grok" => std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-4".into()),
-        "acp.openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        "acp.openrouter" => {
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4".into())
+        }
         "acp.codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
         _ => "claude-sonnet-4-6".into(),
     }
@@ -244,30 +225,18 @@ impl<N: NatsClient> TrogonSession<N> {
         self
     }
 
-    pub async fn new(
-        nats: N,
-        prefix: &str,
-        cwd: PathBuf,
-        mcp_servers: Vec<McpServer>,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(nats: N, prefix: &str, cwd: PathBuf, mcp_servers: Vec<McpServer>) -> anyhow::Result<Self> {
         let subject = format!("{prefix}.agent.session.new");
         let req = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
         let payload = serde_json::to_vec(&req)?;
 
-        let reply_bytes = tokio::time::timeout(
-            SESSION_NEW_TIMEOUT,
-            nats.request_bytes(subject, payload.into()),
-        )
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "timed out waiting for session creation (is trogon-acp-runner running?)"
-            )
-        })?
-        .map_err(|e| anyhow::anyhow!("NATS error creating session: {e}"))?;
+        let reply_bytes = tokio::time::timeout(SESSION_NEW_TIMEOUT, nats.request_bytes(subject, payload.into()))
+            .await
+            .map_err(|_| anyhow::anyhow!("timed out waiting for session creation (is trogon-acp-runner running?)"))?
+            .map_err(|e| anyhow::anyhow!("NATS error creating session: {e}"))?;
 
-        let resp: Value = serde_json::from_slice(&reply_bytes)
-            .map_err(|e| anyhow::anyhow!("invalid session response: {e}"))?;
+        let resp: Value =
+            serde_json::from_slice(&reply_bytes).map_err(|e| anyhow::anyhow!("invalid session response: {e}"))?;
 
         let session_id = resp["sessionId"]
             .as_str()
@@ -302,8 +271,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
     fn prompt(
         &self,
         text: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
-    {
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
         // Clone text upfront so the returned future owns it (no captured &str across awaits).
         let text = text.to_string();
         let nats = &self.nats;
@@ -312,20 +280,16 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let prompt_timeout = self.prompt_timeout;
         async move {
             let req_id = Uuid::now_v7().to_string();
-            let notif_subject =
-                format!("{prefix}.session.{session_id}.client.session.update");
-            let prompt_subject =
-                format!("{prefix}.session.{session_id}.agent.prompt");
-            let resp_subject =
-                format!("{prefix}.session.{session_id}.agent.prompt.response.{req_id}");
+            let notif_subject = format!("{prefix}.session.{session_id}.client.session.update");
+            let prompt_subject = format!("{prefix}.session.{session_id}.agent.prompt");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.prompt.response.{req_id}");
 
             // MED-35: prefer a durable JetStream ordered consumer so tool-call
             // notifications published during a brief NATS reconnect are replayed
             // (the *_CLIENT_OPS stream captures `{prefix}.session.*.client.>`). Fall
             // back to core pub-sub if the stream isn't available, so behavior never
             // regresses. Stream name normalization mirrors AcpStream::stream_name.
-            let client_ops_stream =
-                format!("{}_CLIENT_OPS", prefix.to_uppercase().replace('.', "_"));
+            let client_ops_stream = format!("{}_CLIENT_OPS", prefix.to_uppercase().replace('.', "_"));
             let mut notif_rx = match nats
                 .subscribe_jetstream_bytes(client_ops_stream, notif_subject.clone())
                 .await
@@ -342,10 +306,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .await
                 .map_err(|e| anyhow::anyhow!("subscribe response: {e}"))?;
 
-            let req = PromptRequest::new(
-                session_id,
-                vec![ContentBlock::Text(TextContent::new(&text))],
-            );
+            let req = PromptRequest::new(session_id, vec![ContentBlock::Text(TextContent::new(&text))]);
             let payload = serde_json::to_vec(&req)?;
 
             nats.publish_with_req_id_bytes(prompt_subject, req_id, payload.into())
@@ -475,11 +436,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn set_model(
-        &self,
-        model_id: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-    {
+    fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let model_id = model_id.to_string();
         let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
@@ -510,7 +467,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
             let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
             if v.get("stopReason").is_none() && v.get("code").is_some() {
-                let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("model update failed");
+                let msg = v
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("model update failed");
                 return Err(anyhow::anyhow!("{}", msg));
             }
             *model.lock().unwrap() = model_id;
@@ -522,8 +482,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         &self,
         config_id: &str,
         value: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-    {
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let config_id = config_id.to_string();
         let value = value.to_string();
         let prefix = self.prefix.clone();
@@ -556,11 +515,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn set_mode(
-        &self,
-        mode: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-    {
+    fn set_mode(&self, mode: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let mode = mode.to_string();
         let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
@@ -586,7 +541,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
             let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
             if v.get("stopReason").is_none() && v.get("code").is_some() {
-                let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("mode update failed");
+                let msg = v
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("mode update failed");
                 return Err(anyhow::anyhow!("{}", msg));
             }
             Ok(())
@@ -649,8 +607,8 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .map_err(|_| anyhow::anyhow!("timed out waiting for session load"))?
                 .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
 
-            let v: Value = serde_json::from_slice(&bytes)
-                .map_err(|e| anyhow::anyhow!("invalid load session response: {e}"))?;
+            let v: Value =
+                serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid load session response: {e}"))?;
             if v.get("code").is_some() {
                 let msg = v
                     .get("message")
@@ -663,16 +621,11 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn set_cwd(
-        &self,
-        cwd: &Path,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+    fn set_cwd(&self, cwd: &Path) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         self.load_session(self.session_id(), cwd, vec![])
     }
 
-    fn list_sessions(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
+    fn list_sessions(&self) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
         let prefix = self.prefix.clone();
         let nats = &self.nats;
         async move {
@@ -680,16 +633,13 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let req = ListSessionsRequest::new();
             let payload = serde_json::to_vec(&req)?;
 
-            let bytes = tokio::time::timeout(
-                LIST_SESSIONS_TIMEOUT,
-                nats.request_bytes(subject, payload.into()),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("timed out waiting for session list"))?
-            .map_err(|e| anyhow::anyhow!("NATS error listing sessions: {e}"))?;
+            let bytes = tokio::time::timeout(LIST_SESSIONS_TIMEOUT, nats.request_bytes(subject, payload.into()))
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out waiting for session list"))?
+                .map_err(|e| anyhow::anyhow!("NATS error listing sessions: {e}"))?;
 
-            let resp: ListSessionsResponse = serde_json::from_slice(&bytes)
-                .map_err(|e| anyhow::anyhow!("invalid list sessions response: {e}"))?;
+            let resp: ListSessionsResponse =
+                serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid list sessions response: {e}"))?;
 
             Ok(resp
                 .sessions
@@ -704,9 +654,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn session_cwd(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+    fn session_cwd(&self) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
         let session_id = self.session_id.clone();
         async move {
             let sessions = self.list_sessions().await?;
@@ -729,7 +677,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             // the runner can respond.
             let resp_rx = self.nats.subscribe_bytes(resp_subject).await;
             if let Ok(payload) = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })) {
-                let _ = self.nats.publish_with_req_id_bytes(subject, req_id, payload.into()).await;
+                let _ = self
+                    .nats
+                    .publish_with_req_id_bytes(subject, req_id, payload.into())
+                    .await;
             }
             // Drop explicitly after publish — keeps the subscription alive long enough.
             drop(resp_rx);
@@ -754,7 +705,10 @@ pub enum StreamEvent {
         status: ToolCallStatus,
     },
     /// Token usage update at the end of a turn.
-    Usage { used_tokens: u64, context_size: u64 },
+    Usage {
+        used_tokens: u64,
+        context_size: u64,
+    },
     /// Runner returned an error response (e.g. API failure).
     Error(String),
     Done(String),
@@ -822,10 +776,7 @@ fn render_diff(tool_name: &str, input: Option<&serde_json::Value>) -> Option<Str
             Some(format!("{DIM}[read: {path}]{RESET}"))
         }
         "bash" | "Bash" => {
-            let cmd = input
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
             let preview: String = cmd.chars().take(80).collect();
             Some(format!("{DIM}[bash: {preview}]{RESET}"))
         }
@@ -946,8 +897,7 @@ pub mod mock {
         fn prompt(
             &self,
             text: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
-        {
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
             *self.last_prompt_text.lock().unwrap() = Some(text.to_string());
             let events = self
                 .turns
@@ -971,11 +921,7 @@ pub mod mock {
             }
         }
 
-        fn set_model(
-            &self,
-            model_id: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-        {
+        fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             let model_id = model_id.to_string();
             async move {
                 if let Some(err) = self.set_model_error.lock().unwrap().clone() {
@@ -1011,10 +957,7 @@ pub mod mock {
             }
         }
 
-        fn set_cwd(
-            &self,
-            cwd: &Path,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        fn set_cwd(&self, cwd: &Path) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             self.load_session(self.session_id(), cwd, vec![])
         }
 
@@ -1022,9 +965,7 @@ pub mod mock {
             Ok(vec![])
         }
 
-        fn session_cwd(
-            &self,
-        ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+        fn session_cwd(&self) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
             let cwd = self.last_cwd.lock().unwrap().clone();
             async move { Ok(cwd) }
         }
@@ -1033,10 +974,7 @@ pub mod mock {
         // only (`+ '_`). `async fn` would tie the future to `_mode`'s lifetime and
         // break the delegating `Arc<MockSession>` impl below.
         #[allow(clippy::manual_async_fn)]
-        fn set_mode(
-            &self,
-            _mode: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        fn set_mode(&self, _mode: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             async move { Ok(()) }
         }
 
@@ -1044,8 +982,7 @@ pub mod mock {
             &self,
             _config_id: &str,
             _value: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-        {
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             async move { Ok(()) }
         }
 
@@ -1068,8 +1005,7 @@ pub mod mock {
         fn prompt(
             &self,
             text: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
-        {
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
             (**self).prompt(text)
         }
 
@@ -1077,11 +1013,7 @@ pub mod mock {
             (**self).cancel()
         }
 
-        fn set_model(
-            &self,
-            model_id: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-        {
+        fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             (**self).set_model(model_id)
         }
 
@@ -1098,30 +1030,19 @@ pub mod mock {
             (**self).load_session(session_id, cwd, mcp_servers)
         }
 
-        fn set_cwd(
-            &self,
-            cwd: &Path,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        fn set_cwd(&self, cwd: &Path) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             (**self).set_cwd(cwd)
         }
 
-        fn list_sessions(
-            &self,
-        ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
+        fn list_sessions(&self) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
             (**self).list_sessions()
         }
 
-        fn session_cwd(
-            &self,
-        ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+        fn session_cwd(&self) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
             (**self).session_cwd()
         }
 
-        fn set_mode(
-            &self,
-            mode: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-        {
+        fn set_mode(&self, mode: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             (**self).set_mode(mode)
         }
 
@@ -1129,8 +1050,7 @@ pub mod mock {
             &self,
             config_id: &str,
             value: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-        {
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             (**self).set_session_config_option(config_id, value)
         }
 
@@ -1168,7 +1088,11 @@ pub mod mock {
             _cwd: PathBuf,
             _mcp_servers: Vec<McpServer>,
         ) -> anyhow::Result<std::sync::Arc<MockSession>> {
-            let session = self.sessions.lock().unwrap().pop_front()
+            let session = self
+                .sessions
+                .lock()
+                .unwrap()
+                .pop_front()
                 .unwrap_or_else(|| std::sync::Arc::new(MockSession::new(&self.default_id)));
             Ok(session)
         }
@@ -1215,7 +1139,10 @@ mod tests {
         let input = json!({"file_path": "new.rs", "old_string": "", "new_string": "fn main() {}"});
         let diff = render_diff("Edit", Some(&input)).unwrap();
         assert!(diff.contains("+fn main() {}"));
-        assert!(!diff.contains(&format!("{RED}-")), "no removal lines for empty old_string");
+        assert!(
+            !diff.contains(&format!("{RED}-")),
+            "no removal lines for empty old_string"
+        );
     }
 
     #[test]
@@ -1291,8 +1218,7 @@ mod tests {
                 "size": 200000
             }
         });
-        let notif: agent_client_protocol::SessionNotification =
-            serde_json::from_value(json).expect("must deserialize");
+        let notif: agent_client_protocol::SessionNotification = serde_json::from_value(json).expect("must deserialize");
         match notif.update {
             agent_client_protocol::SessionUpdate::UsageUpdate(u) => {
                 assert_eq!(u.used, 12345);
@@ -1317,8 +1243,7 @@ mod tests {
                 }
             }
         });
-        let notif: agent_client_protocol::SessionNotification =
-            serde_json::from_value(json).expect("must deserialize");
+        let notif: agent_client_protocol::SessionNotification = serde_json::from_value(json).expect("must deserialize");
         match notif.update {
             agent_client_protocol::SessionUpdate::ToolCall(tc) => {
                 assert_eq!(tc.title, "Edit");
@@ -1352,8 +1277,9 @@ mod tests {
     async fn set_model_sends_nats_request_and_returns_ok() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         // set_model uses subscribe_bytes + publish_with_req_id_bytes
         let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(1);
@@ -1368,8 +1294,9 @@ mod tests {
     async fn set_model_returns_error_on_nats_failure() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         // No subscription queued — subscribe_bytes returns an error
         let err = session.set_model("claude-opus-4-7").await.unwrap_err();
@@ -1402,8 +1329,9 @@ mod tests {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "test-session-42").await;
 
-        let session =
-            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
         assert_eq!(session.session_id(), "test-session-42");
     }
 
@@ -1443,8 +1371,9 @@ mod tests {
         nats.add_subscription(notif_rx);
         nats.add_subscription(reply_rx);
 
-        let session =
-            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         let mut events_rx = session.prompt("hello").await.unwrap();
 
@@ -1456,7 +1385,10 @@ mod tests {
                 "content": {"type": "text", "text": "hello world"}
             }
         });
-        notif_tx.send(Bytes::from(serde_json::to_vec(&text_notif).unwrap())).await.unwrap();
+        notif_tx
+            .send(Bytes::from(serde_json::to_vec(&text_notif).unwrap()))
+            .await
+            .unwrap();
 
         // Yield so the spawned task processes the notification before we send Done.
         // Without this, the biased select! would pick the Done reply first if both
@@ -1465,14 +1397,24 @@ mod tests {
 
         // Send done reply.
         let done = json!({"stopReason": "end_turn"});
-        reply_tx.send(Bytes::from(serde_json::to_vec(&done).unwrap())).await.unwrap();
+        reply_tx
+            .send(Bytes::from(serde_json::to_vec(&done).unwrap()))
+            .await
+            .unwrap();
 
         let mut got_text = false;
         let mut got_done = false;
         while let Some(ev) = events_rx.recv().await {
             match ev {
-                StreamEvent::Text(t) => { assert_eq!(t, "hello world"); got_text = true; }
-                StreamEvent::Done(r) => { assert_eq!(r, "end_turn"); got_done = true; break; }
+                StreamEvent::Text(t) => {
+                    assert_eq!(t, "hello world");
+                    got_text = true;
+                }
+                StreamEvent::Done(r) => {
+                    assert_eq!(r, "end_turn");
+                    got_done = true;
+                    break;
+                }
                 _ => {}
             }
         }
@@ -1496,8 +1438,8 @@ mod tests {
         nats.add_subscription(notif_rx);
         nats.add_subscription(reply_rx);
 
-        let session = TrogonSession::from_existing(nats, "acp", "s1".to_string())
-            .with_prompt_timeout(Duration::from_millis(50));
+        let session =
+            TrogonSession::from_existing(nats, "acp", "s1".to_string()).with_prompt_timeout(Duration::from_millis(50));
 
         let mut events_rx = session.prompt("hello").await.unwrap();
 
@@ -1544,10 +1486,7 @@ mod tests {
     async fn mock_session_set_cwd_updates_last_cwd() {
         use mock::MockSession;
         let session = MockSession::new("s");
-        session
-            .set_cwd(std::path::Path::new("/new/project"))
-            .await
-            .unwrap();
+        session.set_cwd(std::path::Path::new("/new/project")).await.unwrap();
         assert_eq!(
             session.last_cwd().as_deref(),
             Some(std::path::Path::new("/new/project"))
@@ -1585,8 +1524,9 @@ mod tests {
     async fn compact_delegates_to_runner_session_compact() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         // `compact()` now makes a single `session/compact` ext call; the runner owns the
         // compaction (provider + session model + compactor_model) and returns the result.
@@ -1609,8 +1549,9 @@ mod tests {
     async fn compact_returns_runner_noop_result() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         nats.queue_request_ok(ext_response(
             r#"{"compacted":false,"tokens_before":0,"tokens_after":0}"#,
@@ -1631,8 +1572,9 @@ mod tests {
     async fn compact_surfaces_runner_error_message() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         // Runner replies with a discriminated error envelope.
         let error_reply = serde_json::json!({
@@ -1691,9 +1633,18 @@ mod tests {
         factory.push_session(Arc::new(MockSession::new("first")));
         factory.push_session(Arc::new(MockSession::new("second")));
 
-        let s1 = factory.create_session("acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
-        let s2 = factory.create_session("acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
-        let s3 = factory.create_session("acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let s1 = factory
+            .create_session("acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
+        let s2 = factory
+            .create_session("acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
+        let s3 = factory
+            .create_session("acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
         assert_eq!(s1.session_id(), "first");
         assert_eq!(s2.session_id(), "second");
         assert_eq!(s3.session_id(), "fallback");

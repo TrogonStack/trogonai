@@ -71,14 +71,22 @@ pub struct TodoItem {
 const BUCKET: &str = "ACP_SESSIONS";
 
 /// Persisted state for a single ACP session.
+///
+/// The NATS KV value is encoded as `trogonai.session.v1.SessionRecord` protobuf
+/// (ADR 0009) — see [`crate::session_proto`]. `Serialize`/`Deserialize` are kept
+/// for in-process use (tests, portable export), not for the KV wire format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub messages: Vec<Message>,
     /// Per-session model override. `None` means use the agent's default model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Per-session context-compaction model override (same provider). `None`
-    /// means compact with the session model. Set via `set_session_config_option`.
+    /// Per-session context-compaction provider override. `None` means use the
+    /// session provider. Set via `set_session_config_option` (provider-qualified).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compactor_provider: Option<String>,
+    /// Per-session context-compaction model override. `None` means compact with
+    /// the session model. Set via `set_session_config_option`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compactor_model: Option<String>,
     /// Permission mode (e.g. "default", "acceptEdits", "bypassPermissions").
@@ -191,6 +199,7 @@ impl Default for SessionState {
         Self {
             messages: Vec::new(),
             model: None,
+            compactor_provider: None,
             compactor_model: None,
             mode: String::new(),
             cwd: String::new(),
@@ -320,7 +329,9 @@ impl SessionStore for NatsSessionStore {
     #[cfg_attr(coverage, coverage(off))]
     async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
         match self.kv.get(session_id).await? {
-            Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            // M3/ADR 0009: KV value is a versioned `SessionRecord` protobuf.
+            // Pre-protobuf serde records require C4 migration (separate).
+            Some(bytes) => crate::session_proto::decode(&bytes),
             None => Ok(SessionState::default()),
         }
     }
@@ -328,7 +339,7 @@ impl SessionStore for NatsSessionStore {
     /// Persist updated session state.
     #[cfg_attr(coverage, coverage(off))]
     async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
-        let bytes = serde_json::to_vec(state)?;
+        let bytes = crate::session_proto::encode(state);
         self.kv.put(session_id, bytes.into()).await?;
         Ok(())
     }
@@ -730,10 +741,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(
-            !json.contains("\"model\""),
-            "None model must be omitted: {json}"
-        );
+        assert!(!json.contains("\"model\""), "None model must be omitted: {json}");
     }
 
     #[test]
@@ -743,10 +751,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(
-            json.contains("claude-opus-4-6"),
-            "model must be serialized: {json}"
-        );
+        assert!(json.contains("claude-opus-4-6"), "model must be serialized: {json}");
     }
 
     // ── branching fields ──────────────────────────────────────────────────────

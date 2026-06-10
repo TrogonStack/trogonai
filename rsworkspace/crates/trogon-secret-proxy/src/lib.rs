@@ -21,6 +21,7 @@ pub mod config;
 pub mod impls;
 pub mod messages;
 pub mod provider;
+pub mod providers;
 pub mod proxy;
 pub mod stream;
 pub mod subjects;
@@ -31,6 +32,4 @@ pub mod worker;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod mocks;
 
-pub use traits::{
-    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
-};
+pub use traits::{HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient};

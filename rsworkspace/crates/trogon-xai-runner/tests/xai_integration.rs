@@ -17,16 +17,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use agent_client_protocol::{
-    Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
-    EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, InitializeRequest,
-    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
-    ResourceLink, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModelRequest,
-    StopReason, TextContent, TextResourceContents,
+    Agent, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock, EmbeddedResource,
+    EmbeddedResourceResource, ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, ProtocolVersion, ResourceLink, ResumeSessionRequest,
+    SetSessionConfigOptionRequest, SetSessionModelRequest, StopReason, TextContent, TextResourceContents,
 };
 use agent_client_protocol::{McpServer, McpServerHttp};
-use trogon_xai_runner::{
-    FinishReason, InputItem, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent,
-};
+use trogon_xai_runner::{FinishReason, InputItem, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent};
 
 // ── env-var lock ──────────────────────────────────────────────────────────────
 
@@ -97,10 +94,7 @@ async fn make_agent_with_timeout(mock: Arc<MockXaiHttpClient>, timeout_secs: u64
 }
 
 /// Like `make_agent` but also sets `XAI_SYSTEM_PROMPT`. Caller must hold `env_lock()`.
-async fn make_agent_with_system_prompt(
-    mock: Arc<MockXaiHttpClient>,
-    system_prompt: &str,
-) -> TestAgent {
+async fn make_agent_with_system_prompt(mock: Arc<MockXaiHttpClient>, system_prompt: &str) -> TestAgent {
     unsafe {
         std::env::remove_var("XAI_MODELS");
         std::env::remove_var("XAI_PROMPT_TIMEOUT_SECS");
@@ -132,9 +126,7 @@ async fn make_agent_with_max_history(mock: Arc<MockXaiHttpClient>, max: usize) -
 fn text_response_with_id(text: &str, id: &str) -> Vec<XaiEvent> {
     vec![
         XaiEvent::ResponseId { id: id.to_string() },
-        XaiEvent::TextDelta {
-            text: text.to_string(),
-        },
+        XaiEvent::TextDelta { text: text.to_string() },
         XaiEvent::Done,
     ]
 }
@@ -143,9 +135,7 @@ fn text_response_with_id(text: &str, id: &str) -> Vec<XaiEvent> {
 fn text_response(chunks: &[&str]) -> Vec<XaiEvent> {
     let mut v: Vec<XaiEvent> = chunks
         .iter()
-        .map(|t| XaiEvent::TextDelta {
-            text: t.to_string(),
-        })
+        .map(|t| XaiEvent::TextDelta { text: t.to_string() })
         .collect();
     v.push(XaiEvent::Done);
     v
@@ -175,9 +165,7 @@ fn client_error_response() -> Vec<XaiEvent> {
 /// A response with token usage and text.
 fn text_with_usage(text: &str) -> Vec<XaiEvent> {
     vec![
-        XaiEvent::TextDelta {
-            text: text.to_string(),
-        },
+        XaiEvent::TextDelta { text: text.to_string() },
         XaiEvent::Usage {
             prompt_tokens: 10,
             completion_tokens: 5,
@@ -229,9 +217,7 @@ fn server_failed_response(msg: &str) -> Vec<XaiEvent> {
 /// Incomplete response due to max_output_tokens with a text chunk.
 fn incomplete_max_output_tokens(text: &str, id: &str) -> Vec<XaiEvent> {
     vec![
-        XaiEvent::TextDelta {
-            text: text.to_string(),
-        },
+        XaiEvent::TextDelta { text: text.to_string() },
         XaiEvent::ResponseId { id: id.to_string() },
         XaiEvent::Finished {
             reason: FinishReason::Incomplete,
@@ -256,9 +242,7 @@ fn incomplete_max_turns(id: &str) -> Vec<XaiEvent> {
 /// Continuation response (after incomplete): text + completion.
 fn continuation_response(text: &str, id: &str) -> Vec<XaiEvent> {
     vec![
-        XaiEvent::TextDelta {
-            text: text.to_string(),
-        },
+        XaiEvent::TextDelta { text: text.to_string() },
         XaiEvent::ResponseId { id: id.to_string() },
         XaiEvent::Finished {
             reason: FinishReason::Completed,
@@ -282,19 +266,13 @@ async fn new_session_creates_session_with_correct_model_state() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let resp = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
     assert!(!resp.session_id.to_string().is_empty());
     let models = resp.models.expect("models should be present");
     assert_eq!(models.current_model_id.to_string(), "grok-3");
 
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert_eq!(list.sessions.len(), 1);
 }
 
@@ -304,10 +282,7 @@ async fn new_session_creates_session_with_correct_model_state() {
 async fn list_sessions_is_empty_before_any_session() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert!(list.sessions.is_empty());
 }
 
@@ -315,30 +290,14 @@ async fn list_sessions_is_empty_before_any_session() {
 async fn list_sessions_sorted_by_session_id() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    agent
-        .new_session(NewSessionRequest::new("/a"))
-        .await
-        .unwrap();
-    agent
-        .new_session(NewSessionRequest::new("/b"))
-        .await
-        .unwrap();
-    agent
-        .new_session(NewSessionRequest::new("/c"))
-        .await
-        .unwrap();
+    agent.new_session(NewSessionRequest::new("/a")).await.unwrap();
+    agent.new_session(NewSessionRequest::new("/b")).await.unwrap();
+    agent.new_session(NewSessionRequest::new("/c")).await.unwrap();
 
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert_eq!(list.sessions.len(), 3);
 
-    let ids: Vec<String> = list
-        .sessions
-        .iter()
-        .map(|s| s.session_id.to_string())
-        .collect();
+    let ids: Vec<String> = list.sessions.iter().map(|s| s.session_id.to_string()).collect();
     let mut sorted = ids.clone();
     sorted.sort();
     assert_eq!(ids, sorted, "sessions must be sorted by id");
@@ -357,15 +316,9 @@ async fn list_sessions_returns_correct_cwd_for_each_session() {
         .new_session(NewSessionRequest::new("/project/beta"))
         .await
         .unwrap();
-    agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert_eq!(list.sessions.len(), 3);
 
     let mut cwds: Vec<String> = list
@@ -395,10 +348,7 @@ async fn load_session_returns_error_for_unknown_session() {
 async fn load_session_returns_correct_state_for_existing_session() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let new = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
     let loaded = agent
@@ -415,10 +365,7 @@ async fn load_session_returns_correct_state_for_existing_session() {
 async fn close_session_removes_session() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let new = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
     agent
@@ -426,10 +373,7 @@ async fn close_session_removes_session() {
         .await
         .unwrap();
 
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert!(list.sessions.is_empty());
 }
 
@@ -450,10 +394,7 @@ async fn resume_session_returns_error_for_unknown_session() {
 async fn resume_session_succeeds_for_existing_session() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let new = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
     agent
         .resume_session(ResumeSessionRequest::new(session_id.clone(), "/tmp"))
@@ -467,17 +408,11 @@ async fn resume_session_succeeds_for_existing_session() {
 async fn set_session_model_valid_model_persists() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let new = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
     agent
-        .set_session_model(SetSessionModelRequest::new(
-            session_id.clone(),
-            "grok-3-mini",
-        ))
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap();
 
@@ -493,10 +428,7 @@ async fn set_session_model_valid_model_persists() {
 async fn set_session_model_unknown_model_returns_error() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let new = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let new = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = new.session_id.to_string();
 
     let err = agent
@@ -523,10 +455,7 @@ async fn set_session_model_unknown_session_returns_error() {
 async fn fork_session_creates_independent_session_inheriting_model() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let src = agent
-        .new_session(NewSessionRequest::new("/src"))
-        .await
-        .unwrap();
+    let src = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
     let src_id = src.session_id.to_string();
 
     agent
@@ -544,10 +473,7 @@ async fn fork_session_creates_independent_session_inheriting_model() {
     let models = fork.models.expect("fork should carry model state");
     assert_eq!(models.current_model_id.to_string(), "grok-3-mini");
 
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert_eq!(list.sessions.len(), 2);
 }
 
@@ -569,17 +495,11 @@ async fn fork_session_clones_conversation_history() {
     mock.push_response(text_response(&["Hi"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let src = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("hello"))];
-    agent
-        .prompt(PromptRequest::new(src_id.clone(), content))
-        .await
-        .unwrap();
+    agent.prompt(PromptRequest::new(src_id.clone(), content)).await.unwrap();
 
     let fork = agent
         .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork"))
@@ -588,10 +508,7 @@ async fn fork_session_clones_conversation_history() {
     let fork_id = fork.session_id.to_string();
 
     assert_ne!(fork_id, src_id);
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
     assert_eq!(list.sessions.len(), 2);
 
     let src_history = agent.test_session_history(&src_id).await;
@@ -609,15 +526,7 @@ async fn prompt_unknown_session_id_returns_not_found() {
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
     // None of these IDs have an associated session, so the store lookup fails.
-    for bad_id in &[
-        "foo.bar",
-        "foo*bar",
-        "foo>bar",
-        "foo bar",
-        "séssion",
-        "",
-        "no-such-id",
-    ] {
+    for bad_id in &["foo.bar", "foo*bar", "foo>bar", "foo bar", "séssion", "", "no-such-id"] {
         let err = agent
             .prompt(PromptRequest::new(
                 *bad_id,
@@ -654,10 +563,7 @@ async fn prompt_returns_end_turn_and_updates_history() {
     mock.push_response(text_response(&["Hello", " world"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("ping"))];
@@ -682,17 +588,11 @@ async fn prompt_sends_accumulated_history_on_second_turn() {
     let mock = Arc::new(MockXaiHttpClient::new());
     mock.push_response(text_response(&["First reply"]));
     let agent = make_agent(Arc::clone(&mock)).await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let c1 = vec![ContentBlock::Text(TextContent::new("first turn"))];
-    agent
-        .prompt(PromptRequest::new(session_id.clone(), c1))
-        .await
-        .unwrap();
+    agent.prompt(PromptRequest::new(session_id.clone(), c1)).await.unwrap();
 
     let history = agent.test_session_history(&session_id).await;
     assert_eq!(history.len(), 2);
@@ -707,10 +607,7 @@ async fn prompt_with_api_error_returns_acp_error() {
     mock.push_response(client_error_response());
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("ping"))];
@@ -719,10 +616,7 @@ async fn prompt_with_api_error_returns_acp_error() {
         .await
         .unwrap_err();
 
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into()
-    );
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
 
     // User message is compensated away on error.
     let history = agent.test_session_history(&session_id).await;
@@ -739,10 +633,7 @@ async fn prompt_with_done_only_response_does_not_update_history() {
     mock.push_response(done_only());
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("ping"))];
@@ -764,10 +655,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
     mock.push_response(text_response(&["the reply"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     // Simulate a crash: manually plant the user message in history without a
@@ -789,11 +677,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
     let history = agent.test_session_history(&session_id).await;
-    assert_eq!(
-        history.len(),
-        2,
-        "expected user + assistant, got: {history:?}"
-    );
+    assert_eq!(history.len(), 2, "expected user + assistant, got: {history:?}");
     assert_eq!(history[0].role, "user");
     assert_eq!(history[0].content_str(), "hello");
     assert_eq!(history[1].role, "assistant");
@@ -802,11 +686,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
     // The mock must have been called with exactly one user message (no duplicate).
     let calls = mock.calls.lock().unwrap();
     let user_msgs: Vec<_> = calls[0].input.iter().filter(|i| i.role() == Some("user")).collect();
-    assert_eq!(
-        user_msgs.len(),
-        1,
-        "xAI request must have exactly one user message"
-    );
+    assert_eq!(user_msgs.len(), 1, "xAI request must have exactly one user message");
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -815,10 +695,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
 async fn cancel_unknown_session_is_a_noop() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    agent
-        .cancel(CancelNotification::new("no-such-id"))
-        .await
-        .unwrap();
+    agent.cancel(CancelNotification::new("no-such-id")).await.unwrap();
 }
 
 #[tokio::test]
@@ -830,10 +707,7 @@ async fn cancel_interrupts_in_flight_prompt() {
     });
     let agent = std::sync::Arc::new(make_agent(Arc::clone(&mock)).await);
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let agent_cancel = std::sync::Arc::clone(&agent);
@@ -855,10 +729,7 @@ async fn cancel_interrupts_in_flight_prompt() {
     assert_eq!(resp.stop_reason, StopReason::Cancelled);
 
     let history = agent.test_session_history(&session_id).await;
-    assert!(
-        history.is_empty(),
-        "canceled prompt must not update history"
-    );
+    assert!(history.is_empty(), "canceled prompt must not update history");
 }
 
 #[tokio::test]
@@ -868,10 +739,7 @@ async fn cancel_channels_entry_is_cleaned_up_after_prompt() {
     mock.push_response(text_response(&["hello"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     assert_eq!(agent.test_cancel_channels_len().await, 0);
@@ -896,15 +764,8 @@ async fn cancel_channels_entry_is_cleaned_up_after_prompt() {
 #[tokio::test]
 async fn xai_models_env_var_custom_models_accepted() {
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent_with_models(
-        Arc::new(MockXaiHttpClient::new()),
-        "model-a:Model A,model-b:Model B",
-    )
-    .await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let agent = make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "model-a:Model A,model-b:Model B").await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
@@ -922,10 +783,7 @@ async fn xai_models_env_var_custom_models_accepted() {
         .unwrap();
     // grok-3-mini NOT in the list
     let err = agent
-        .set_session_model(SetSessionModelRequest::new(
-            session_id.clone(),
-            "grok-3-mini",
-        ))
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap_err();
     assert!(err.message.contains("unknown model"));
@@ -939,10 +797,7 @@ async fn xai_models_env_var_malformed_entries_are_skipped() {
         "valid:Valid,malformed,another:Another",
     )
     .await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
@@ -964,10 +819,7 @@ async fn xai_models_env_var_malformed_entries_are_skipped() {
 async fn xai_models_default_when_env_var_not_set() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
@@ -975,10 +827,7 @@ async fn xai_models_default_when_env_var_not_set() {
         .await
         .unwrap();
     agent
-        .set_session_model(SetSessionModelRequest::new(
-            session_id.clone(),
-            "grok-3-mini",
-        ))
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap();
 }
@@ -986,12 +835,8 @@ async fn xai_models_default_when_env_var_not_set() {
 #[tokio::test]
 async fn xai_models_default_model_auto_added_when_absent_from_list() {
     let _guard = env_lock().lock().unwrap();
-    let agent =
-        make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "alpha:Alpha,beta:Beta").await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let agent = make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "alpha:Alpha,beta:Beta").await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let models = sess.models.expect("models should be present");
@@ -1015,10 +860,7 @@ async fn text_is_assembled_from_multiple_deltas() {
     mock.push_response(text_response(&["Hel", "lo"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("hi"))];
@@ -1047,10 +889,7 @@ async fn prompt_times_out_when_server_stops_responding() {
     // 1-second timeout — the mock holds the stream indefinitely after the first event.
     let agent = make_agent_with_timeout(Arc::clone(&mock), 1).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let content = vec![ContentBlock::Text(TextContent::new("hello"))];
@@ -1062,10 +901,7 @@ async fn prompt_times_out_when_server_stops_responding() {
     let elapsed = start.elapsed();
 
     assert_eq!(resp.stop_reason, StopReason::Cancelled);
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "timed out too late: {elapsed:?}"
-    );
+    assert!(elapsed < Duration::from_secs(5), "timed out too late: {elapsed:?}");
     assert!(
         elapsed >= Duration::from_millis(900),
         "timed out too early: {elapsed:?}"
@@ -1087,33 +923,20 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
     mock.push_response(text_response(&["Second reply"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let c1 = vec![ContentBlock::Text(TextContent::new("first question"))];
-    agent
-        .prompt(PromptRequest::new(session_id.clone(), c1))
-        .await
-        .unwrap();
+    agent.prompt(PromptRequest::new(session_id.clone(), c1)).await.unwrap();
 
     let c2 = vec![ContentBlock::Text(TextContent::new("second question"))];
-    agent
-        .prompt(PromptRequest::new(session_id.clone(), c2))
-        .await
-        .unwrap();
+    agent.prompt(PromptRequest::new(session_id.clone(), c2)).await.unwrap();
 
     let calls = mock.calls.lock().unwrap();
     assert_eq!(calls.len(), 2, "expected two recorded requests");
 
     // Turn 1: full history (just the user message — no prior context).
-    assert_eq!(
-        calls[0].input.len(),
-        1,
-        "turn 1 should have exactly one input item"
-    );
+    assert_eq!(calls[0].input.len(), 1, "turn 1 should have exactly one input item");
     assert_eq!(calls[0].input[0].role().unwrap(), "user");
     assert_eq!(calls[0].input[0].content().unwrap(), "first question");
     assert!(
@@ -1122,11 +945,7 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
     );
 
     // Turn 2: stateful via previous_response_id — only the new user message.
-    assert_eq!(
-        calls[1].input.len(),
-        1,
-        "turn 2 should send only the new user message"
-    );
+    assert_eq!(calls[1].input.len(), 1, "turn 2 should send only the new user message");
     assert_eq!(calls[1].input[0].role().unwrap(), "user");
     assert_eq!(calls[1].input[0].content().unwrap(), "second question");
     assert_eq!(
@@ -1146,14 +965,8 @@ async fn concurrent_sessions_do_not_cross_contaminate() {
     mock.push_response(text_response(&["session-reply"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess_a = agent
-        .new_session(NewSessionRequest::new("/tmp/a"))
-        .await
-        .unwrap();
-    let sess_b = agent
-        .new_session(NewSessionRequest::new("/tmp/b"))
-        .await
-        .unwrap();
+    let sess_a = agent.new_session(NewSessionRequest::new("/tmp/a")).await.unwrap();
+    let sess_b = agent.new_session(NewSessionRequest::new("/tmp/b")).await.unwrap();
     let id_a = sess_a.session_id.to_string();
     let id_b = sess_b.session_id.to_string();
 
@@ -1204,9 +1017,7 @@ async fn initialize_always_advertises_xai_api_key_method() {
         .await
         .unwrap();
     assert!(
-        resp.auth_methods
-            .iter()
-            .any(|m| m.id().to_string() == "xai-api-key"),
+        resp.auth_methods.iter().any(|m| m.id().to_string() == "xai-api-key"),
         "expected 'xai-api-key' in auth_methods",
     );
 }
@@ -1220,23 +1031,14 @@ async fn initialize_advertises_agent_method_only_when_server_key_configured() {
         .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await
         .unwrap();
-    assert!(
-        resp.auth_methods
-            .iter()
-            .any(|m| m.id().to_string() == "agent")
-    );
+    assert!(resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"));
 
     let no_key = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
     let resp = no_key
         .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await
         .unwrap();
-    assert!(
-        !resp
-            .auth_methods
-            .iter()
-            .any(|m| m.id().to_string() == "agent")
-    );
+    assert!(!resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"));
 }
 
 #[tokio::test]
@@ -1251,10 +1053,7 @@ async fn authenticate_with_user_key_enables_prompt() {
         .await
         .unwrap();
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let resp = agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1272,15 +1071,9 @@ async fn authenticate_agent_method_uses_server_key() {
     mock.push_response(text_response(&["response"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    agent
-        .authenticate(AuthenticateRequest::new("agent"))
-        .await
-        .unwrap();
+    agent.authenticate(AuthenticateRequest::new("agent")).await.unwrap();
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let resp = agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1300,11 +1093,7 @@ async fn authenticate_missing_key_in_meta_returns_error() {
         .authenticate(AuthenticateRequest::new("xai-api-key"))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("XAI_API_KEY missing"),
-        "got: {}",
-        err.message
-    );
+    assert!(err.message.contains("XAI_API_KEY missing"), "got: {}", err.message);
 
     let mut bad_meta = serde_json::Map::new();
     bad_meta.insert("WRONG_KEY".to_string(), serde_json::json!("value"));
@@ -1312,11 +1101,7 @@ async fn authenticate_missing_key_in_meta_returns_error() {
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(bad_meta))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("XAI_API_KEY missing"),
-        "got: {}",
-        err.message
-    );
+    assert!(err.message.contains("XAI_API_KEY missing"), "got: {}", err.message);
 }
 
 #[tokio::test]
@@ -1330,11 +1115,7 @@ async fn authenticate_empty_key_returns_error() {
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(meta))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("must not be empty"),
-        "got: {}",
-        err.message
-    );
+    assert!(err.message.contains("must not be empty"), "got: {}", err.message);
 }
 
 #[tokio::test]
@@ -1342,10 +1123,7 @@ async fn authenticate_agent_method_without_server_key_returns_error() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
-    let err = agent
-        .authenticate(AuthenticateRequest::new("agent"))
-        .await
-        .unwrap_err();
+    let err = agent.authenticate(AuthenticateRequest::new("agent")).await.unwrap_err();
     assert!(
         err.message.contains("no server API key configured"),
         "got: {}",
@@ -1362,11 +1140,7 @@ async fn authenticate_unknown_method_returns_error() {
         .authenticate(AuthenticateRequest::new("oauth2-mystery"))
         .await
         .unwrap_err();
-    assert!(
-        err.message.contains("unknown method"),
-        "got: {}",
-        err.message
-    );
+    assert!(err.message.contains("unknown method"), "got: {}", err.message);
 }
 
 #[tokio::test]
@@ -1374,10 +1148,7 @@ async fn prompt_fails_with_clear_error_when_session_has_no_api_key() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent_no_key(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let err = agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1401,10 +1172,7 @@ async fn forked_session_inherits_api_key_from_parent() {
         .await
         .unwrap();
 
-    let parent = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let parent = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let parent_id = parent.session_id.to_string();
 
     let fork = agent
@@ -1438,10 +1206,7 @@ async fn authenticate_user_key_is_sent_as_bearer_token_to_xai() {
         .authenticate(AuthenticateRequest::new("xai-api-key").meta(api_key_meta("my-user-key-123")))
         .await
         .unwrap();
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1466,14 +1231,8 @@ async fn pending_api_key_consumed_by_first_new_session() {
         .await
         .unwrap();
 
-    let sess1 = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
-    let sess2 = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess1 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sess2 = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
     // sess2 has no key (pending key was consumed by sess1).
     let err = agent
@@ -1533,10 +1292,7 @@ async fn session_is_usable_after_cancel() {
     mock.push_response(text_response_with_id("second reply", "resp_2"));
     let agent = std::sync::Arc::new(make_agent(Arc::clone(&mock)).await);
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let agent2 = std::sync::Arc::clone(&agent);
@@ -1590,10 +1346,7 @@ async fn re_authentication_replaces_pending_key() {
         .await
         .unwrap();
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1615,10 +1368,7 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let content = vec![
         ContentBlock::Text(TextContent::new("line one")),
         ContentBlock::Text(TextContent::new("line two")),
@@ -1643,17 +1393,11 @@ async fn set_session_model_is_used_in_http_request_to_xai() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
-        .set_session_model(SetSessionModelRequest::new(
-            session_id.clone(),
-            "grok-3-mini",
-        ))
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap();
 
@@ -1676,17 +1420,11 @@ async fn load_session_reflects_model_after_set_session_model() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
-        .set_session_model(SetSessionModelRequest::new(
-            session_id.clone(),
-            "grok-3-mini",
-        ))
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap();
 
@@ -1710,10 +1448,7 @@ async fn fork_histories_are_independent_after_diverging_prompts() {
     }
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let src = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
     agent
         .prompt(PromptRequest::new(
@@ -1752,11 +1487,7 @@ async fn fork_histories_are_independent_after_diverging_prompts() {
     assert_eq!(fork_history[2].content_str(), "fork-only");
 
     assert!(src_history.iter().all(|m| m.content_str() != "fork-only"));
-    assert!(
-        fork_history
-            .iter()
-            .all(|m| m.content_str() != "parent-only")
-    );
+    assert!(fork_history.iter().all(|m| m.content_str() != "parent-only"));
 }
 
 // ── edge-case tests ───────────────────────────────────────────────────────────
@@ -1800,10 +1531,7 @@ async fn authenticate_non_string_key_in_meta_returns_error() {
 async fn set_session_mode_unknown_mode_returns_error() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let err = agent
@@ -1820,16 +1548,11 @@ async fn set_session_mode_unknown_mode_returns_error() {
 async fn set_session_mode_default_succeeds() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
-        .set_session_mode(agent_client_protocol::SetSessionModeRequest::new(
-            session_id, "default",
-        ))
+        .set_session_mode(agent_client_protocol::SetSessionModeRequest::new(session_id, "default"))
         .await
         .expect("set_session_mode('default') should succeed");
 }
@@ -1883,12 +1606,8 @@ async fn xai_prompt_timeout_secs_zero_falls_back_to_default() {
 #[tokio::test]
 async fn xai_models_all_malformed_falls_back_to_defaults() {
     let _guard = env_lock().lock().unwrap();
-    let agent =
-        make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "nocolon,alsomalformed").await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let agent = make_agent_with_models(Arc::new(MockXaiHttpClient::new()), "nocolon,alsomalformed").await;
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     agent
@@ -1896,10 +1615,7 @@ async fn xai_models_all_malformed_falls_back_to_defaults() {
         .await
         .unwrap();
     agent
-        .set_session_model(SetSessionModelRequest::new(
-            session_id.clone(),
-            "grok-3-mini",
-        ))
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
         .await
         .unwrap();
 }
@@ -1911,13 +1627,9 @@ async fn system_prompt_injected_as_first_message_in_request() {
     let _guard = env_lock().lock().unwrap();
     let mock = Arc::new(MockXaiHttpClient::new());
     mock.push_response(text_response(&["ok"]));
-    let agent =
-        make_agent_with_system_prompt(Arc::clone(&mock), "You are a helpful assistant.").await;
+    let agent = make_agent_with_system_prompt(Arc::clone(&mock), "You are a helpful assistant.").await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1943,10 +1655,7 @@ async fn system_prompt_absent_when_env_var_not_set() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -1970,10 +1679,7 @@ async fn system_prompt_present_in_subsequent_turns() {
     mock.push_response(text_response(&["reply2"]));
     let agent = make_agent_with_system_prompt(Arc::clone(&mock), "Be concise.").await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
@@ -2016,10 +1722,7 @@ async fn usage_chunk_is_handled_and_prompt_completes() {
     mock.push_response(text_with_usage("Hello"));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -2049,10 +1752,7 @@ async fn tool_call_response_ends_turn_without_updating_history() {
     mock.push_response(text_response(&["result"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -2078,14 +1778,9 @@ async fn new_session_exposes_all_tool_config_options_as_off() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let resp = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
 
-    let opts = resp
-        .config_options
-        .expect("config_options should be present");
+    let opts = resp.config_options.expect("config_options should be present");
     assert_eq!(opts.len(), 2, "expected 2 tool toggles: {opts:?}");
     let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
     assert!(ids.contains(&"web_search".to_string()));
@@ -2104,10 +1799,7 @@ async fn load_session_exposes_tool_config_options() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -2115,9 +1807,7 @@ async fn load_session_exposes_tool_config_options() {
         .await
         .unwrap();
 
-    let opts = resp
-        .config_options
-        .expect("config_options should be present");
+    let opts = resp.config_options.expect("config_options should be present");
     assert_eq!(opts.len(), 2, "expected 2 tool toggle options");
 }
 
@@ -2126,18 +1816,11 @@ async fn enable_web_search_persists_and_is_reflected_in_response() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
         .unwrap();
 
@@ -2159,18 +1842,11 @@ async fn set_tool_unknown_value_returns_error() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let err = agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "turbo",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "turbo"))
         .await
         .unwrap_err();
 
@@ -2187,18 +1863,11 @@ async fn enabled_tools_are_sent_in_request_tools_array() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
         .unwrap();
 
@@ -2225,10 +1894,7 @@ async fn no_tools_omits_tools_field_from_request() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
@@ -2258,18 +1924,11 @@ async fn fork_session_inherits_enabled_tools() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            src_id.clone(),
-            "web_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(src_id.clone(), "web_search", "on"))
         .await
         .unwrap();
 
@@ -2278,9 +1937,7 @@ async fn fork_session_inherits_enabled_tools() {
         .await
         .unwrap();
 
-    let opts = fork
-        .config_options
-        .expect("config_options should be present in fork");
+    let opts = fork.config_options.expect("config_options should be present in fork");
     let ws = opts
         .iter()
         .find(|o| o.id.to_string() == "web_search")
@@ -2379,10 +2036,7 @@ async fn history_is_truncated_after_exceeding_max() {
     }
     let agent = make_agent_with_max_history(Arc::clone(&mock), 4).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     for i in 1..=3u32 {
@@ -2419,10 +2073,7 @@ async fn history_truncation_drops_oldest_pair_first() {
     }
     let agent = make_agent_with_max_history(Arc::clone(&mock), 2).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     for i in 1..=3u32 {
@@ -2451,18 +2102,11 @@ async fn x_search_tool_enabled_is_included_in_tools_array() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "x_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "x_search", "on"))
         .await
         .unwrap();
 
@@ -2511,10 +2155,7 @@ async fn history_at_exactly_the_limit_is_not_truncated() {
     }
     let agent = make_agent_with_max_history(Arc::clone(&mock), 4).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     for i in 1..=2u32 {
@@ -2542,10 +2183,7 @@ async fn history_truncation_rounds_up_to_even_for_odd_max() {
     }
     let agent = make_agent_with_max_history(Arc::clone(&mock), 3).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     for i in 1..=2u32 {
@@ -2591,10 +2229,7 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
     mock.push_response(text_response(&["done"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -2617,18 +2252,11 @@ async fn set_session_config_option_unknown_id_returns_current_state() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
         .unwrap();
 
@@ -2659,18 +2287,11 @@ async fn load_session_reflects_updated_tool_state() {
     let _guard = env_lock().lock().unwrap();
     let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "x_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "x_search", "on"))
         .await
         .unwrap();
 
@@ -2678,9 +2299,7 @@ async fn load_session_reflects_updated_tool_state() {
         .load_session(LoadSessionRequest::new(sid.clone(), "/tmp"))
         .await
         .unwrap();
-    let opts = loaded
-        .config_options
-        .expect("config_options should be present");
+    let opts = loaded.config_options.expect("config_options should be present");
     assert_eq!(opts.len(), 2);
     let xs = opts
         .iter()
@@ -2700,26 +2319,15 @@ async fn disabling_tool_removes_it_from_request() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "on",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"))
         .await
         .unwrap();
     agent
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            sid.clone(),
-            "web_search",
-            "off",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "off"))
         .await
         .unwrap();
 
@@ -2748,10 +2356,7 @@ async fn close_session_cancels_in_flight_prompt() {
     });
     let agent = std::sync::Arc::new(make_agent(Arc::clone(&mock)).await);
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let agent2 = std::sync::Arc::clone(&agent);
@@ -2764,23 +2369,14 @@ async fn close_session_cancels_in_flight_prompt() {
         )),
         async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
-            agent2
-                .close_session(CloseSessionRequest::new(sid))
-                .await
-                .unwrap();
+            agent2.close_session(CloseSessionRequest::new(sid)).await.unwrap();
         }
     );
 
     assert_eq!(prompt_result.unwrap().stop_reason, StopReason::Cancelled);
 
-    let list = agent
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
-    assert!(
-        list.sessions.is_empty(),
-        "session must be deleted by close_session"
-    );
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    assert!(list.sessions.is_empty(), "session must be deleted by close_session");
 }
 
 #[tokio::test]
@@ -2798,15 +2394,10 @@ async fn prompt_timeout_with_no_text_does_not_update_history() {
     let _guard = env_lock().lock().unwrap();
     let mock = Arc::new(MockXaiHttpClient::new());
     // Yield an empty text delta (effectively no visible text), then block.
-    mock.push_slow_response(XaiEvent::TextDelta {
-        text: "".to_string(),
-    });
+    mock.push_slow_response(XaiEvent::TextDelta { text: "".to_string() });
     let agent = make_agent_with_timeout(Arc::clone(&mock), 1).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let resp = agent
@@ -2834,10 +2425,7 @@ async fn fork_session_inherits_system_prompt() {
     mock.push_response(text_response(&["fork reply"]));
     let agent = make_agent_with_system_prompt(Arc::clone(&mock), "Be concise.").await;
 
-    let src = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
     agent
         .prompt(PromptRequest::new(
@@ -2865,7 +2453,8 @@ async fn fork_session_inherits_system_prompt() {
     let calls = mock.calls.lock().unwrap();
     let fork_input = &calls[1].input;
     assert_eq!(
-        fork_input[0].role().unwrap(), "system",
+        fork_input[0].role().unwrap(),
+        "system",
         "first input item of fork must be system: {fork_input:?}"
     );
     assert_eq!(fork_input[0].content().unwrap(), "Be concise.");
@@ -2880,10 +2469,7 @@ async fn resource_link_is_included_as_text_in_request() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -2910,10 +2496,7 @@ async fn embedded_text_resource_is_included_as_text_in_request() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -2939,10 +2522,7 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -2975,10 +2555,7 @@ async fn response_error_event_surfaces_as_acp_error() {
     mock.push_response(server_failed_response("Request blocked by content policy"));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let err = agent
@@ -2989,10 +2566,7 @@ async fn response_error_event_surfaces_as_acp_error() {
         .await
         .unwrap_err();
 
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into()
-    );
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
     let history = agent.test_session_history(&session_id).await;
     assert!(
         history.is_empty(),
@@ -3007,10 +2581,7 @@ async fn xai_server_cancelled_surfaces_as_acp_error() {
     mock.push_response(server_cancelled_response());
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let err = agent
@@ -3021,10 +2592,7 @@ async fn xai_server_cancelled_surfaces_as_acp_error() {
         .await
         .unwrap_err();
 
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into()
-    );
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
     let history = agent.test_session_history(&session_id).await;
     assert!(
         history.is_empty(),
@@ -3042,10 +2610,7 @@ async fn api_401_error_surfaces_as_acp_error_without_retry() {
     mock.push_response(client_error_response());
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let err = agent
@@ -3056,15 +2621,9 @@ async fn api_401_error_surfaces_as_acp_error_without_retry() {
         .await
         .unwrap_err();
 
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into()
-    );
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
     let history = agent.test_session_history(&session_id).await;
-    assert!(
-        history.is_empty(),
-        "history must be empty after 401 error: {history:?}"
-    );
+    assert!(history.is_empty(), "history must be empty after 401 error: {history:?}");
 }
 
 // ── Incomplete continuation ───────────────────────────────────────────────────
@@ -3079,10 +2638,7 @@ async fn incomplete_max_output_tokens_continues_and_assembles_text() {
     mock.push_response(continuation_response("world", "resp_cont"));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -3154,10 +2710,7 @@ async fn tool_call_then_response_failed_compensates_history() {
     ]);
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let session_id = sess.session_id.to_string();
 
     let err = agent
@@ -3168,10 +2721,7 @@ async fn tool_call_then_response_failed_compensates_history() {
         .await
         .unwrap_err();
 
-    assert_eq!(
-        err.code,
-        agent_client_protocol::ErrorCode::InternalError.into()
-    );
+    assert_eq!(err.code, agent_client_protocol::ErrorCode::InternalError.into());
     let history = agent.test_session_history(&session_id).await;
     assert!(
         history.is_empty(),
@@ -3208,18 +2758,13 @@ async fn web_search_call_completed_advances_tool_status_before_done() {
     ]);
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
         .prompt(PromptRequest::new(
             sid.clone(),
-            vec![ContentBlock::Text(TextContent::new(
-                "search for rust async",
-            ))],
+            vec![ContentBlock::Text(TextContent::new("search for rust async"))],
         ))
         .await
         .unwrap();
@@ -3257,18 +2802,13 @@ async fn x_search_call_completed_advances_tool_status_before_done() {
     ]);
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
         .prompt(PromptRequest::new(
             sid.clone(),
-            vec![ContentBlock::Text(TextContent::new(
-                "search x for rust 2024",
-            ))],
+            vec![ContentBlock::Text(TextContent::new("search x for rust 2024"))],
         ))
         .await
         .unwrap();
@@ -3298,10 +2838,7 @@ async fn search_call_completed_without_prior_function_call_is_noop() {
     ]);
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -3332,10 +2869,7 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
     mock.push_response(text_response_with_id("second reply", "resp_turn2"));
 
     let agent = make_agent(Arc::clone(&mock)).await;
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let r1 = agent
@@ -3380,17 +2914,17 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
     assert!(
         calls[2].input.len() >= 2,
         "retry must include full history, got {:?}",
-        calls[2].input.iter().map(|i| i.role().unwrap_or("")).collect::<Vec<_>>()
+        calls[2]
+            .input
+            .iter()
+            .map(|i| i.role().unwrap_or(""))
+            .collect::<Vec<_>>()
     );
 
     drop(calls);
 
     let history = agent.test_session_history(&sid).await;
-    assert_eq!(
-        history.len(),
-        4,
-        "history must have 4 messages after 2 turns"
-    );
+    assert_eq!(history.len(), 4, "history must have 4 messages after 2 turns");
 }
 
 // ── MAX_CONTINUATIONS exhaustion ──────────────────────────────────────────────
@@ -3407,10 +2941,7 @@ async fn max_continuations_exhausted_returns_cancelled_with_partial_text() {
     }
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -3452,10 +2983,7 @@ async fn incomplete_max_turns_continuation_resends_user_input() {
     mock.push_response(text_response(&["final answer"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     let resp = agent
@@ -3573,28 +3101,37 @@ async fn bash_tool_call_round_trips_through_wasm_runtime() {
 
     // Round 1: model requests a bash call
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo hello"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Round 2: model produces the final answer after seeing the tool output
     mock.push_response(vec![
-        XaiEvent::TextDelta { text: "All done!".to_string() },
-        XaiEvent::ResponseId { id: "resp_2".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "All done!".to_string(),
+        },
+        XaiEvent::ResponseId {
+            id: "resp_2".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
 
     // ── Run prompt ────────────────────────────────────────────────────────
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let resp = agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -3670,13 +3207,18 @@ async fn non_bash_function_call_gets_completed_notification() {
     let agent = make_agent(mock.clone()).await;
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_1".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_1".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "unknown_tool".to_string(),
             arguments: "{}".to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Second call needed after client-side tool dispatch.
@@ -3696,8 +3238,7 @@ async fn non_bash_function_call_gets_completed_notification() {
     let notifs = agent.test_notifier().notifications.lock().unwrap();
     let completed = notifs.iter().find(|n| {
         if let SessionUpdate::ToolCallUpdate(u) = &n.update {
-            u.tool_call_id.to_string() == "cid1"
-                && u.fields.status == Some(ToolCallStatus::Completed)
+            u.tool_call_id.to_string() == "cid1" && u.fields.status == Some(ToolCallStatus::Completed)
         } else {
             false
         }
@@ -3722,7 +3263,9 @@ async fn pending_tool_calls_cleared_when_incomplete_response_contains_function_c
     let agent = make_agent(mock.clone()).await;
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_part".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_part".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid_discard".to_string(),
             name: "bash".to_string(),
@@ -3768,8 +3311,7 @@ async fn pending_tool_calls_cleared_when_incomplete_response_contains_function_c
 #[tokio::test]
 async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output() {
     use agent_client_protocol::{
-        CreateTerminalResponse, SessionUpdate, TerminalId, TerminalOutputResponse, ToolCallStatus,
-        ToolKind,
+        CreateTerminalResponse, SessionUpdate, TerminalId, TerminalOutputResponse, ToolCallStatus, ToolKind,
     };
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
@@ -3803,7 +3345,10 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -3832,13 +3377,18 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
         .with_execution_backend(nats.clone(), registry);
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo hello"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response_with_id("All done!", "resp_2"));
@@ -3864,7 +3414,10 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
             false
         }
     });
-    assert!(pending.is_some(), "expected ToolCall(Pending, Execute) for cid1; got: {notifs:?}");
+    assert!(
+        pending.is_some(),
+        "expected ToolCall(Pending, Execute) for cid1; got: {notifs:?}"
+    );
 
     // 2. InProgress: emitted just before NATS execution
     let in_progress = notifs.iter().find(|n| {
@@ -3943,7 +3496,10 @@ async fn max_tool_rounds_cap_returns_max_turn_requests() {
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -3970,13 +3526,18 @@ async fn max_tool_rounds_cap_returns_max_turn_requests() {
     // 11 bash responses: rounds 1-10 execute successfully, round 11 hits the cap.
     for _ in 0..11 {
         mock.push_response(vec![
-            XaiEvent::ResponseId { id: "resp_bash".to_string() },
+            XaiEvent::ResponseId {
+                id: "resp_bash".to_string(),
+            },
             XaiEvent::FunctionCall {
                 call_id: "cid".to_string(),
                 name: "bash".to_string(),
                 arguments: r#"{"command":"echo ok"}"#.to_string(),
             },
-            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Finished {
+                reason: FinishReason::ToolCalls,
+                incomplete_reason: None,
+            },
             XaiEvent::Done,
         ]);
     }
@@ -4054,13 +3615,18 @@ async fn bash_nats_error_forwarded_as_tool_result_to_model() {
         .with_execution_backend(nats.clone(), registry);
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo hi"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response_with_id("noted", "resp_2"));
@@ -4130,7 +3696,10 @@ async fn last_response_id_cleared_when_bash_ran_but_final_round_has_no_response_
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -4163,18 +3732,25 @@ async fn last_response_id_cleared_when_bash_ran_but_final_round_has_no_response_
 
     // Round 1: bash call with a response ID.
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo ok"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Round 2: final text reply — no ResponseId event.
     mock.push_response(vec![
-        XaiEvent::TextDelta { text: "done".to_string() },
+        XaiEvent::TextDelta {
+            text: "done".to_string(),
+        },
         XaiEvent::Done,
     ]);
 
@@ -4217,13 +3793,16 @@ async fn bash_missing_command_field_returns_error_string_to_model() {
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
     // No terminal responder — execute_bash_via_nats must return before touching NATS.
 
     let mock = Arc::new(MockXaiHttpClient::new());
@@ -4233,13 +3812,18 @@ async fn bash_missing_command_field_returns_error_string_to_model() {
         .with_execution_backend(nats.clone(), registry);
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"arg": "not_command"}"#.to_string(), // missing "command"
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response_with_id("noted", "resp_2"));
@@ -4256,7 +3840,11 @@ async fn bash_missing_command_field_returns_error_string_to_model() {
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
     let calls = mock.calls.lock().unwrap();
-    assert_eq!(calls.len(), 2, "missing-command error must still yield a second HTTP call");
+    assert_eq!(
+        calls.len(),
+        2,
+        "missing-command error must still yield a second HTTP call"
+    );
 
     let fco = calls[1]
         .input
@@ -4292,13 +3880,16 @@ async fn bash_skipped_when_stream_has_no_response_id() {
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
@@ -4313,7 +3904,10 @@ async fn bash_skipped_when_stream_has_no_response_id() {
             name: "bash".to_string(),
             arguments: r#"{"command":"echo hi"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
 
@@ -4358,13 +3952,16 @@ async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
 
     // Terminal responder: stateful growing buffer; both calls in one round use the same terminal.
     let output_buf = Arc::new(Mutex::new(String::new()));
@@ -4373,7 +3970,10 @@ async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -4399,7 +3999,9 @@ async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs
 
     // Round 1: two bash calls in the same response.
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
@@ -4410,7 +4012,10 @@ async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs
             name: "bash".to_string(),
             arguments: r#"{"command":"echo second"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response_with_id("all done", "resp_2"));
@@ -4434,7 +4039,12 @@ async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs
         .iter()
         .filter(|i| matches!(i, InputItem::FunctionCallOutput { .. }))
         .collect();
-    assert_eq!(fcos.len(), 2, "both bash calls must produce function_call_output items; got: {:?}", fcos);
+    assert_eq!(
+        fcos.len(),
+        2,
+        "both bash calls must produce function_call_output items; got: {:?}",
+        fcos
+    );
 
     let ids: Vec<&str> = fcos
         .iter()
@@ -4470,13 +4080,16 @@ async fn execution_backend_registered_adds_bash_to_tools_array() {
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
@@ -4528,13 +4141,16 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
 
     let output_buf = Arc::new(Mutex::new(String::new()));
     let ob = output_buf.clone();
@@ -4542,7 +4158,10 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -4552,7 +4171,9 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
             } else if subject.ends_with(".output") {
                 let out = ob.lock().unwrap().clone();
                 serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
-            } else { vec![] };
+            } else {
+                vec![]
+            };
             let _ = nats_srv.publish(reply, payload.into()).await;
         }
     });
@@ -4566,13 +4187,18 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
 
     // Round 1: bash call — sets continuation_in_progress = true.
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo ok"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Round 2: 5xx error — retry guard must be blocked by continuation_in_progress.
@@ -4619,13 +4245,16 @@ async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id(
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
 
     let output_buf = Arc::new(Mutex::new(String::new()));
     let ob = output_buf.clone();
@@ -4633,7 +4262,10 @@ async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id(
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -4643,7 +4275,9 @@ async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id(
             } else if subject.ends_with(".output") {
                 let out = ob.lock().unwrap().clone();
                 serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
-            } else { vec![] };
+            } else {
+                vec![]
+            };
             let _ = nats_srv.publish(reply, payload.into()).await;
         }
     });
@@ -4657,13 +4291,18 @@ async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id(
 
     // Round 1: bash call.
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo ok"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Round 2: final response WITH a ResponseId — must be persisted.
@@ -4758,13 +4397,16 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
     // Register without acp_prefix — forces the fallback path.
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "acp.wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({}), // no acp_prefix field
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "acp.wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({}), // no acp_prefix field
+        })
+        .await
+        .unwrap();
 
     // Terminal responder on the fallback prefix "acp.wasm".
     let output_buf = Arc::new(Mutex::new(String::new()));
@@ -4773,7 +4415,10 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("acp.wasm.session.>").await.unwrap();
         while let Some(msg) = sub.next().await {
-            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
@@ -4783,7 +4428,9 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
             } else if subject.ends_with(".output") {
                 let out = ob.lock().unwrap().clone();
                 serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
-            } else { vec![] };
+            } else {
+                vec![]
+            };
             let _ = nats_srv.publish(reply, payload.into()).await;
         }
     });
@@ -4796,13 +4443,18 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
         .with_execution_backend(nats.clone(), registry);
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp_bash".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid1".to_string(),
             name: "bash".to_string(),
             arguments: r#"{"command":"echo fallback"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response_with_id("ok", "resp_2"));
@@ -4821,10 +4473,14 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
     // The bash output from the fallback prefix responder must reach the model.
     let calls = mock.calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
-    let fco = calls[1].input.iter().find(
-        |i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"),
+    let fco = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"));
+    assert!(
+        fco.is_some(),
+        "function_call_output must be present — fallback prefix must have been used"
     );
-    assert!(fco.is_some(), "function_call_output must be present — fallback prefix must have been used");
     if let Some(InputItem::FunctionCallOutput { output, .. }) = fco {
         assert!(
             output.contains("fallback"),
@@ -4844,15 +4500,23 @@ async fn ext_method_list_children_returns_forked_sessions() {
     let parent = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
     let parent_id = parent.session_id.to_string();
 
-    let fork1 = agent.fork_session(ForkSessionRequest::new(parent_id.clone(), "/f1")).await.unwrap();
-    let fork2 = agent.fork_session(ForkSessionRequest::new(parent_id.clone(), "/f2")).await.unwrap();
+    let fork1 = agent
+        .fork_session(ForkSessionRequest::new(parent_id.clone(), "/f1"))
+        .await
+        .unwrap();
+    let fork2 = agent
+        .fork_session(ForkSessionRequest::new(parent_id.clone(), "/f2"))
+        .await
+        .unwrap();
     let fork1_id = fork1.session_id.to_string();
     let fork2_id = fork2.session_id.to_string();
 
-    let raw = serde_json::value::RawValue::from_string(
-        serde_json::json!({"sessionId": parent_id}).to_string(),
-    ).unwrap();
-    let resp = agent.ext_method(ExtRequest::new("session/list_children", std::sync::Arc::from(raw))).await.unwrap();
+    let raw =
+        serde_json::value::RawValue::from_string(serde_json::json!({"sessionId": parent_id}).to_string()).unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new("session/list_children", std::sync::Arc::from(raw)))
+        .await
+        .unwrap();
 
     let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
     let mut children: Vec<String> = serde_json::from_value(result["children"].clone()).unwrap();
@@ -4902,7 +4566,10 @@ async fn set_session_model_clears_last_response_id() {
         ))
         .await
         .unwrap();
-    assert_eq!(agent.test_last_response_id(&session_id).await, Some("resp_abc".to_string()));
+    assert_eq!(
+        agent.test_last_response_id(&session_id).await,
+        Some("resp_abc".to_string())
+    );
 
     agent
         .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
@@ -4929,8 +4596,20 @@ async fn fork_session_with_branch_at_index_truncates_history() {
     let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let src_id = src.session_id.to_string();
 
-    agent.prompt(PromptRequest::new(src_id.clone(), vec![ContentBlock::Text(TextContent::new("a"))])).await.unwrap();
-    agent.prompt(PromptRequest::new(src_id.clone(), vec![ContentBlock::Text(TextContent::new("b"))])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("a"))],
+        ))
+        .await
+        .unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("b"))],
+        ))
+        .await
+        .unwrap();
 
     let src_history = agent.test_session_history(&src_id).await;
     assert_eq!(src_history.len(), 4, "source: 4 messages");
@@ -4944,7 +4623,11 @@ async fn fork_session_with_branch_at_index_truncates_history() {
     let fork_id = fork.session_id.to_string();
 
     let fork_history = agent.test_session_history(&fork_id).await;
-    assert_eq!(fork_history.len(), 2, "fork at index 2 must have only first 2 messages; got: {fork_history:?}");
+    assert_eq!(
+        fork_history.len(),
+        2,
+        "fork at index 2 must have only first 2 messages; got: {fork_history:?}"
+    );
     assert_eq!(fork_history[0].content_str(), "a");
     assert_eq!(fork_history[1].content_str(), "r1");
 }
@@ -5034,7 +4717,10 @@ async fn usage_update_notification_sent_when_xai_reports_token_usage() {
     let has_usage = notifs
         .iter()
         .any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
-    assert!(has_usage, "a UsageUpdate notification must be sent when xAI reports token usage; got: {notifs:?}");
+    assert!(
+        has_usage,
+        "a UsageUpdate notification must be sent when xAI reports token usage; got: {notifs:?}"
+    );
 }
 
 // ── FinishReason::Other ───────────────────────────────────────────────────────
@@ -5044,7 +4730,9 @@ async fn finish_reason_other_treated_as_end_turn_no_error() {
     let _guard = env_lock().lock().unwrap();
     let mock = Arc::new(MockXaiHttpClient::new());
     mock.push_response(vec![
-        XaiEvent::TextDelta { text: "hello".to_string() },
+        XaiEvent::TextDelta {
+            text: "hello".to_string(),
+        },
         XaiEvent::Finished {
             reason: FinishReason::Other("some_future_status".to_string()),
             incomplete_reason: None,
@@ -5086,8 +4774,7 @@ async fn binary_blob_resource_in_prompt_is_included_as_text() {
             sess.session_id.to_string(),
             vec![ContentBlock::Resource(EmbeddedResource::new(
                 EmbeddedResourceResource::BlobResourceContents(
-                    BlobResourceContents::new("aGVsbG8=", "file:///data.bin")
-                        .mime_type("application/octet-stream"),
+                    BlobResourceContents::new("aGVsbG8=", "file:///data.bin").mime_type("application/octet-stream"),
                 ),
             ))],
         ))
@@ -5097,8 +4784,7 @@ async fn binary_blob_resource_in_prompt_is_included_as_text() {
     let calls = mock.calls.lock().unwrap();
     let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert_eq!(
-        content,
-        "[Binary resource: file:///data.bin (application/octet-stream)]",
+        content, "[Binary resource: file:///data.bin (application/octet-stream)]",
         "binary blob must be forwarded as a text placeholder"
     );
 }
@@ -5172,13 +4858,16 @@ async fn bash_tool_spec_has_correct_parameters_schema() {
     let js = jetstream::new(nats.clone());
     let reg_store = trogon_registry::provision(&js).await.unwrap();
     let registry = trogon_registry::Registry::new(reg_store);
-    registry.register(&trogon_registry::AgentCapability {
-        agent_type: "wasm-runtime".to_string(),
-        capabilities: vec!["execution".to_string()],
-        nats_subject: "wasm.agent.>".to_string(),
-        current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
-    }).await.unwrap();
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
@@ -5205,10 +4894,7 @@ async fn bash_tool_spec_has_correct_parameters_schema() {
         .expect("bash must be in tools");
 
     if let ToolSpec::Function { parameters, .. } = bash {
-        assert_eq!(
-            parameters["type"], "object",
-            "bash parameters root must be type:object"
-        );
+        assert_eq!(parameters["type"], "object", "bash parameters root must be type:object");
         assert_eq!(
             parameters["properties"]["command"]["type"], "string",
             "command property must be type:string"
@@ -5241,10 +4927,7 @@ async fn ext_method_export_returns_session_history_as_portable_messages() {
         )
         .await;
 
-    let raw = serde_json::value::RawValue::from_string(
-        r#"{"sessionId":"export-1"}"#.to_string(),
-    )
-    .unwrap();
+    let raw = serde_json::value::RawValue::from_string(r#"{"sessionId":"export-1"}"#.to_string()).unwrap();
     let resp = agent
         .ext_method(ExtRequest::new("session/export", std::sync::Arc::from(raw)))
         .await
@@ -5273,22 +4956,13 @@ async fn ext_method_import_replaces_history_and_export_verifies() {
     )
     .unwrap();
     agent
-        .ext_method(ExtRequest::new(
-            "session/import",
-            std::sync::Arc::from(import_raw),
-        ))
+        .ext_method(ExtRequest::new("session/import", std::sync::Arc::from(import_raw)))
         .await
         .unwrap();
 
-    let export_raw = serde_json::value::RawValue::from_string(
-        r#"{"sessionId":"dst-1"}"#.to_string(),
-    )
-    .unwrap();
+    let export_raw = serde_json::value::RawValue::from_string(r#"{"sessionId":"dst-1"}"#.to_string()).unwrap();
     let resp = agent
-        .ext_method(ExtRequest::new(
-            "session/export",
-            std::sync::Arc::from(export_raw),
-        ))
+        .ext_method(ExtRequest::new("session/export", std::sync::Arc::from(export_raw)))
         .await
         .unwrap();
 
@@ -5318,15 +4992,9 @@ async fn ext_method_export_import_round_trip() {
     agent.test_insert_session("dst-rt", "/tmp", None).await;
 
     // Export from "src-rt"
-    let export_src_raw = serde_json::value::RawValue::from_string(
-        r#"{"sessionId":"src-rt"}"#.to_string(),
-    )
-    .unwrap();
+    let export_src_raw = serde_json::value::RawValue::from_string(r#"{"sessionId":"src-rt"}"#.to_string()).unwrap();
     let resp = agent
-        .ext_method(ExtRequest::new(
-            "session/export",
-            std::sync::Arc::from(export_src_raw),
-        ))
+        .ext_method(ExtRequest::new("session/export", std::sync::Arc::from(export_src_raw)))
         .await
         .unwrap();
 
@@ -5335,23 +5003,14 @@ async fn ext_method_export_import_round_trip() {
     let import_params_str = format!(r#"{{"sessionId":"dst-rt","messages":{exported_json}}}"#);
     let import_raw = serde_json::value::RawValue::from_string(import_params_str).unwrap();
     agent
-        .ext_method(ExtRequest::new(
-            "session/import",
-            std::sync::Arc::from(import_raw),
-        ))
+        .ext_method(ExtRequest::new("session/import", std::sync::Arc::from(import_raw)))
         .await
         .unwrap();
 
     // Export from "dst-rt"
-    let export_dst_raw = serde_json::value::RawValue::from_string(
-        r#"{"sessionId":"dst-rt"}"#.to_string(),
-    )
-    .unwrap();
+    let export_dst_raw = serde_json::value::RawValue::from_string(r#"{"sessionId":"dst-rt"}"#.to_string()).unwrap();
     let dst_resp = agent
-        .ext_method(ExtRequest::new(
-            "session/export",
-            std::sync::Arc::from(export_dst_raw),
-        ))
+        .ext_method(ExtRequest::new("session/export", std::sync::Arc::from(export_dst_raw)))
         .await
         .unwrap();
 
@@ -5386,10 +5045,7 @@ async fn ext_method_import_clears_last_response_id() {
 
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     // Turn 1: establishes last_response_id = "resp_turn1".
@@ -5407,10 +5063,7 @@ async fn ext_method_import_clears_last_response_id() {
     ))
     .unwrap();
     agent
-        .ext_method(ExtRequest::new(
-            "session/import",
-            std::sync::Arc::from(import_raw),
-        ))
+        .ext_method(ExtRequest::new("session/import", std::sync::Arc::from(import_raw)))
         .await
         .unwrap();
 
@@ -5514,10 +5167,7 @@ async fn trogon_md_injected_into_system_prompt_in_wire_request() {
     mock.push_response(text_response(&["ok"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
-    let sess = agent
-        .new_session(NewSessionRequest::new(dir.path()))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
 
     agent
         .prompt(PromptRequest::new(
@@ -5553,7 +5203,10 @@ async fn meta_system_prompt_and_trogon_md_both_merged_into_system_message() {
     let agent = make_agent(Arc::clone(&mock)).await;
 
     let mut meta = serde_json::Map::new();
-    meta.insert("systemPrompt".to_string(), serde_json::json!("meta-rules: respond in JSON"));
+    meta.insert(
+        "systemPrompt".to_string(),
+        serde_json::json!("meta-rules: respond in JSON"),
+    );
     let sess = agent
         .new_session(NewSessionRequest::new(dir.path()).meta(meta))
         .await
@@ -5636,13 +5289,18 @@ async fn fetch_url_egress_block_recorded_in_follow_up_call() {
     let mock = Arc::new(MockXaiHttpClient::new());
     // First response: API calls fetch_url with a link-local address
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp-egress".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp-egress".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid-fetch".to_string(),
             name: "fetch_url".to_string(),
             arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Second response: API acknowledges the egress-block result
@@ -5660,13 +5318,14 @@ async fn fetch_url_egress_block_recorded_in_follow_up_call() {
 
     let calls = mock.calls.lock().unwrap();
     assert_eq!(
-        calls.len(), 2,
+        calls.len(),
+        2,
         "agent must make a follow-up API call after egress-blocked fetch_url"
     );
     let follow_up = &calls[1].input;
-    let egress_item = follow_up.iter().find(|item| {
-        matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-fetch")
-    });
+    let egress_item = follow_up
+        .iter()
+        .find(|item| matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-fetch"));
     let egress_item = egress_item.expect("follow-up must contain FunctionCallOutput for cid-fetch");
     if let InputItem::FunctionCallOutput { output, .. } = egress_item {
         assert!(
@@ -5696,21 +5355,23 @@ async fn xai_glob_tool_dispatched_via_wire_format() {
     std::fs::write(dir.path().join("ignore.txt"), "ignored").unwrap();
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp-glob".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp-glob".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid-glob".to_string(),
             name: "glob".to_string(),
             arguments: r#"{"pattern":"**/*.rs"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response(&["done"]));
 
-    let sess = agent
-        .new_session(NewSessionRequest::new(dir.path()))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -5743,7 +5404,9 @@ async fn xai_glob_tool_dispatched_via_wire_format() {
 
 fn push_function_call(mock: &MockXaiHttpClient, call_id: &str, name: &str, args: &str) {
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: format!("resp-{call_id}") },
+        XaiEvent::ResponseId {
+            id: format!("resp-{call_id}"),
+        },
         XaiEvent::FunctionCall {
             call_id: call_id.to_string(),
             name: name.to_string(),
@@ -5820,9 +5483,7 @@ async fn mcp_tool_call_dispatched_and_result_fed_back() {
     );
     let follow_up = &calls[1].input;
     let mcp_output = follow_up.iter().find_map(|item| match item {
-        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_mcp" => {
-            Some(output.clone())
-        }
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_mcp" => Some(output.clone()),
         _ => None,
     });
     assert_eq!(
@@ -5851,8 +5512,7 @@ async fn ask_user_round_trips_through_elicitation_channel() {
     mock.push_response(text_response(&["thanks"]));
 
     // Inject an elicitation channel and a responder that answers "blue".
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
     let responder = tokio::spawn(async move {
         if let Some(req) = elic_rx.recv().await {
             // Capture the question text the runner forwarded.
@@ -5862,11 +5522,10 @@ async fn ask_user_round_trips_through_elicitation_channel() {
                 "answer".to_string(),
                 agent_client_protocol::ElicitationContentValue::String("blue".to_string()),
             );
-            let resp = agent_client_protocol::ElicitationResponse::new(
-                agent_client_protocol::ElicitationAction::Accept(
+            let resp =
+                agent_client_protocol::ElicitationResponse::new(agent_client_protocol::ElicitationAction::Accept(
                     agent_client_protocol::ElicitationAcceptAction::new().content(content),
-                ),
-            );
+                ));
             let _ = req.response_tx.send(Ok(resp));
             q
         } else {
@@ -5876,10 +5535,7 @@ async fn ask_user_round_trips_through_elicitation_channel() {
 
     let agent = make_agent(Arc::clone(&mock)).await.with_elicitation(elic_tx);
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
@@ -5903,9 +5559,7 @@ async fn ask_user_round_trips_through_elicitation_channel() {
         "agent must make a follow-up call after ask_user is answered"
     );
     let answer = calls[1].input.iter().find_map(|item| match item {
-        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => {
-            Some(output.clone())
-        }
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => Some(output.clone()),
         _ => None,
     });
     assert_eq!(
@@ -5922,19 +5576,12 @@ async fn ask_user_unavailable_without_elicitation_channel() {
     let _guard = env_lock().lock().unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
-    mock.push_response(tool_call_round(
-        "call_ask",
-        "ask_user",
-        r#"{"question":"anything?"}"#,
-    ));
+    mock.push_response(tool_call_round("call_ask", "ask_user", r#"{"question":"anything?"}"#));
     mock.push_response(text_response(&["ok"]));
 
     let agent = make_agent(Arc::clone(&mock)).await; // no with_elicitation
 
-    let sess = agent
-        .new_session(NewSessionRequest::new("/tmp"))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let sid = sess.session_id.to_string();
 
     agent
@@ -5947,25 +5594,15 @@ async fn ask_user_unavailable_without_elicitation_channel() {
 
     let calls = mock.calls.lock().unwrap();
     let output = calls[1].input.iter().find_map(|item| match item {
-        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => {
-            Some(output.clone())
-        }
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => Some(output.clone()),
         _ => None,
     });
-    assert_eq!(
-        output.as_deref(),
-        Some("ask_user is not available in this session."),
-    );
+    assert_eq!(output.as_deref(), Some("ask_user is not available in this session."),);
 }
 
 // ── helper: assert FunctionCallOutput in second API call ─────────────────────
 
-fn assert_fco_content(
-    mock: &MockXaiHttpClient,
-    call_id: &str,
-    check: impl Fn(&str) -> bool,
-    msg: &str,
-) {
+fn assert_fco_content(mock: &MockXaiHttpClient, call_id: &str, check: impl Fn(&str) -> bool, msg: &str) {
     use trogon_xai_runner::InputItem;
     let calls = mock.calls.lock().unwrap();
     assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
@@ -5993,21 +5630,23 @@ async fn xai_read_file_tool_dispatched_via_wire_format() {
     std::fs::write(dir.path().join("data.txt"), "xai-read-sentinel-abc123").unwrap();
 
     mock.push_response(vec![
-        XaiEvent::ResponseId { id: "resp-rf".to_string() },
+        XaiEvent::ResponseId {
+            id: "resp-rf".to_string(),
+        },
         XaiEvent::FunctionCall {
             call_id: "cid-rf".to_string(),
             name: "read_file".to_string(),
             arguments: r#"{"path":"data.txt"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(text_response(&["done"]));
 
-    let sess = agent
-        .new_session(NewSessionRequest::new(dir.path()))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
         .prompt(PromptRequest::new(
             sess.session_id.to_string(),
@@ -6052,14 +5691,25 @@ async fn xai_write_file_tool_dispatched_via_wire_format() {
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("write"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("write"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
     let written = std::fs::read_to_string(dir.path().join("out.txt")).expect("write_file must create the file");
-    assert!(written.contains("xai-write-sentinel-789"), "file must contain written content; got: {written}");
-    assert_fco_content(&mock, "cid-wf", |o| !o.contains("Unknown tool"), "write_file must be dispatched");
+    assert!(
+        written.contains("xai-write-sentinel-789"),
+        "file must contain written content; got: {written}"
+    );
+    assert_fco_content(
+        &mock,
+        "cid-wf",
+        |o| !o.contains("Unknown tool"),
+        "write_file must be dispatched",
+    );
 }
 
 /// `list_dir` dispatched via xAI wire format — result contains filenames from
@@ -6076,11 +5726,19 @@ async fn xai_list_dir_tool_dispatched_via_wire_format() {
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("list"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("list"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    assert_fco_content(&mock, "cid-ld", |o| o.contains("alpha.rs"), "list_dir must include 'alpha.rs'");
+    assert_fco_content(
+        &mock,
+        "cid-ld",
+        |o| o.contains("alpha.rs"),
+        "list_dir must include 'alpha.rs'",
+    );
 }
 
 /// `str_replace` dispatched via xAI wire format — modifies the file and the
@@ -6102,14 +5760,25 @@ async fn xai_str_replace_tool_dispatched_via_wire_format() {
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("replace"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("replace"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
 
     let content = std::fs::read_to_string(dir.path().join("edit.rs")).unwrap();
-    assert!(content.contains("new_name"), "str_replace must have renamed the function; got: {content}");
-    assert_fco_content(&mock, "cid-sr", |o| !o.contains("Unknown tool"), "str_replace must be dispatched");
+    assert!(
+        content.contains("new_name"),
+        "str_replace must have renamed the function; got: {content}"
+    );
+    assert_fco_content(
+        &mock,
+        "cid-sr",
+        |o| !o.contains("Unknown tool"),
+        "str_replace must be dispatched",
+    );
 }
 
 /// `git_status` dispatched via xAI wire format — result is non-empty git output.
@@ -6120,18 +5789,38 @@ async fn xai_git_status_tool_dispatched_via_wire_format() {
     let agent = make_agent(mock.clone()).await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["config","user.email","t@t.com"]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["config","user.name","T"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.email", "t@t.com"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.name", "T"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     push_function_call(&mock, "cid-gs", "git_status", r#"{}"#);
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("git status"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("git status"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    assert_fco_content(&mock, "cid-gs", |o| !o.contains("Unknown tool"), "git_status must be dispatched");
+    assert_fco_content(
+        &mock,
+        "cid-gs",
+        |o| !o.contains("Unknown tool"),
+        "git_status must be dispatched",
+    );
 }
 
 /// `git_diff` dispatched via xAI wire format — result contains diff or "nothing".
@@ -6142,22 +5831,50 @@ async fn xai_git_diff_tool_dispatched_via_wire_format() {
     let agent = make_agent(mock.clone()).await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["config","user.email","t@t.com"]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["config","user.name","T"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.email", "t@t.com"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.name", "T"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     std::fs::write(dir.path().join("f.rs"), "fn a(){}").unwrap();
-    std::process::Command::new("git").args(["add","."]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["commit","-m","init"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     std::fs::write(dir.path().join("f.rs"), "fn b(){}").unwrap();
     push_function_call(&mock, "cid-gd", "git_diff", r#"{}"#);
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("git diff"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("git diff"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
-    assert_fco_content(&mock, "cid-gd", |o| !o.contains("Unknown tool"), "git_diff must be dispatched");
+    assert_fco_content(
+        &mock,
+        "cid-gd",
+        |o| !o.contains("Unknown tool"),
+        "git_diff must be dispatched",
+    );
 }
 
 /// `git_log` dispatched via xAI wire format — result contains at least one commit.
@@ -6168,17 +5885,40 @@ async fn xai_git_log_tool_dispatched_via_wire_format() {
     let agent = make_agent(mock.clone()).await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["config","user.email","t@t.com"]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["config","user.name","T"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.email", "t@t.com"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.name", "T"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     std::fs::write(dir.path().join("r.txt"), "init").unwrap();
-    std::process::Command::new("git").args(["add","."]).current_dir(dir.path()).output().unwrap();
-    std::process::Command::new("git").args(["commit","-m","initial commit"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "initial commit"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     push_function_call(&mock, "cid-gl", "git_log", r#"{}"#);
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("git log"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("git log"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
@@ -6214,7 +5954,10 @@ async fn xai_notebook_edit_tool_dispatched_via_wire_format() {
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("edit nb"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("edit nb"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
@@ -6229,8 +5972,16 @@ async fn xai_notebook_edit_tool_dispatched_via_wire_format() {
     } else {
         String::new()
     };
-    assert!(src_text.contains("new"), "notebook_edit must update cell source; got: {src_text}");
-    assert_fco_content(&mock, "cid-ne", |o| !o.contains("Unknown tool"), "notebook_edit must be dispatched");
+    assert!(
+        src_text.contains("new"),
+        "notebook_edit must update cell source; got: {src_text}"
+    );
+    assert_fco_content(
+        &mock,
+        "cid-ne",
+        |o| !o.contains("Unknown tool"),
+        "notebook_edit must be dispatched",
+    );
 }
 
 /// `fetch_url` dispatched via xAI wire format — link-local addresses are blocked
@@ -6251,7 +6002,10 @@ async fn xai_fetch_url_egress_block_recorded_in_follow_up_call() {
 
     let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
     let resp = agent
-        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("fetch"))]))
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("fetch"))],
+        ))
         .await
         .unwrap();
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
@@ -6272,11 +6026,7 @@ async fn xai_search_files_tool_dispatched_via_wire_format() {
     let agent = make_agent(mock.clone()).await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("main.rs"),
-        "fn xai_search_needle_sentinel() {}\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("main.rs"), "fn xai_search_needle_sentinel() {}\n").unwrap();
 
     push_function_call(
         &mock,
@@ -6319,10 +6069,7 @@ async fn no_crash_when_trogon_md_absent_from_session_directory() {
     let dir = tempfile::TempDir::new().unwrap();
     // Intentionally NOT writing TROGON.md in dir
 
-    let sess = agent
-        .new_session(NewSessionRequest::new(dir.path()))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
 
     let resp = agent
         .prompt(PromptRequest::new(
@@ -6362,17 +6109,15 @@ async fn xai_request_has_required_responses_api_fields() {
 
     let _lock = env_lock().lock().unwrap();
     let mock = Arc::new(MockXaiHttpClient::new());
-    mock.push_response(vec![
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
-    ]);
+    mock.push_response(vec![XaiEvent::Finished {
+        reason: FinishReason::Completed,
+        incomplete_reason: None,
+    }]);
 
     let agent = make_agent(Arc::clone(&mock)).await;
     let dir = tempfile::TempDir::new().unwrap();
 
-    let sess = agent
-        .new_session(NewSessionRequest::new(dir.path()))
-        .await
-        .unwrap();
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
 
     agent
         .prompt(PromptRequest::new(
@@ -6436,10 +6181,7 @@ fn spawn_stateful_terminal_responder_xai(
                 *guard += 1;
                 let n = *guard;
                 drop(guard);
-                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new(
-                    format!("tid-{n}"),
-                )))
-                .unwrap()
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new(format!("tid-{n}")))).unwrap()
             } else if subject.contains("write_stdin") {
                 so.lock()
                     .unwrap()
@@ -6500,7 +6242,9 @@ async fn bash_stateful_terminal_reused_on_second_call_same_session() {
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
 
     // Prompt 1: model calls bash, then gives final answer
     mock.push_response(vec![
@@ -6510,13 +6254,21 @@ async fn bash_stateful_terminal_reused_on_second_call_same_session() {
             name: "bash".to_string(),
             arguments: r#"{"command":"echo a"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "r2".to_string() },
-        XaiEvent::TextDelta { text: "done 1".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "done 1".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Prompt 2 (same session): model calls bash again
@@ -6527,13 +6279,21 @@ async fn bash_stateful_terminal_reused_on_second_call_same_session() {
             name: "bash".to_string(),
             arguments: r#"{"command":"echo b"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "r4".to_string() },
-        XaiEvent::TextDelta { text: "done 2".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "done 2".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
 
@@ -6623,7 +6383,9 @@ async fn bash_stateful_terminal_released_on_close_session() {
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
 
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "r1".to_string() },
@@ -6632,13 +6394,21 @@ async fn bash_stateful_terminal_released_on_close_session() {
             name: "bash".to_string(),
             arguments: r#"{"command":"echo hi"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "r2".to_string() },
-        XaiEvent::TextDelta { text: "done".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "done".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
 
@@ -6653,12 +6423,12 @@ async fn bash_stateful_terminal_released_on_close_session() {
         .await
         .unwrap();
 
-    assert!(!*released.lock().unwrap(), "release must not be sent before close_session");
+    assert!(
+        !*released.lock().unwrap(),
+        "release must not be sent before close_session"
+    );
 
-    agent
-        .close_session(CloseSessionRequest::new(sid))
-        .await
-        .unwrap();
+    agent.close_session(CloseSessionRequest::new(sid)).await.unwrap();
 
     assert!(
         *released.lock().unwrap(),
@@ -6734,10 +6504,7 @@ async fn live_e2e_mcp_and_ask_user() {
         After you receive the tool result, reply with one short sentence.";
     let r1 = tokio::time::timeout(
         Duration::from_secs(180),
-        agent.prompt(PromptRequest::new(
-            sid,
-            vec![ContentBlock::Text(TextContent::new(p1))],
-        )),
+        agent.prompt(PromptRequest::new(sid, vec![ContentBlock::Text(TextContent::new(p1))])),
     )
     .await
     .expect("MCP prompt timed out")
@@ -6747,8 +6514,7 @@ async fn live_e2e_mcp_and_ask_user() {
     assert!(hits >= 1, "real grok did not call the MCP tool web__search (hits=0)");
 
     // ---- Part 2: elicitation — real grok must call ask_user, answer round-trips ----
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
     let captured_q = Arc::new(Mutex::new(None::<String>));
     let cq = Arc::clone(&captured_q);
     let responder = tokio::spawn(async move {
@@ -6759,11 +6525,10 @@ async fn live_e2e_mcp_and_ask_user() {
                 "answer".to_string(),
                 agent_client_protocol::ElicitationContentValue::String("teal".to_string()),
             );
-            let resp = agent_client_protocol::ElicitationResponse::new(
-                agent_client_protocol::ElicitationAction::Accept(
+            let resp =
+                agent_client_protocol::ElicitationResponse::new(agent_client_protocol::ElicitationAction::Accept(
                     agent_client_protocol::ElicitationAcceptAction::new().content(content),
-                ),
-            );
+                ));
             let _ = req.response_tx.send(Ok(resp));
         }
     });
@@ -6787,17 +6552,17 @@ async fn live_e2e_mcp_and_ask_user() {
         reply telling me which color I chose.";
     let r2 = tokio::time::timeout(
         Duration::from_secs(180),
-        agent2.prompt(PromptRequest::new(
-            sid2,
-            vec![ContentBlock::Text(TextContent::new(p2))],
-        )),
+        agent2.prompt(PromptRequest::new(sid2, vec![ContentBlock::Text(TextContent::new(p2))])),
     )
     .await
     .expect("ask_user prompt timed out")
     .expect("ask_user prompt failed");
     let _ = responder.await;
     let q = captured_q.lock().unwrap().clone();
-    eprintln!("LIVE/ask_user: stop_reason={:?}, forwarded question={q:?}", r2.stop_reason);
+    eprintln!(
+        "LIVE/ask_user: stop_reason={:?}, forwarded question={q:?}",
+        r2.stop_reason
+    );
     assert!(
         q.is_some(),
         "real grok did not call ask_user (no question forwarded through the channel)"
@@ -6848,8 +6613,7 @@ async fn live_e2e_permission_round_trip() {
 
     // Permission channel + auto-approver: capture the requested tool name, signal
     // `started`, then allow. Loops so every request in the turn is approved.
-    let (perm_tx, mut perm_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+    let (perm_tx, mut perm_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
     let requested = Arc::new(Mutex::new(Vec::<String>::new()));
     let rq = Arc::clone(&requested);
     let approver = tokio::spawn(async move {
@@ -6880,10 +6644,7 @@ async fn live_e2e_permission_round_trip() {
         You MUST call the web__search tool. After the result, reply with one short sentence.";
     let r = tokio::time::timeout(
         Duration::from_secs(180),
-        agent.prompt(PromptRequest::new(
-            sid,
-            vec![ContentBlock::Text(TextContent::new(p))],
-        )),
+        agent.prompt(PromptRequest::new(sid, vec![ContentBlock::Text(TextContent::new(p))])),
     )
     .await
     .expect("permission prompt timed out")
@@ -6940,13 +6701,20 @@ async fn bash_stateful_no_release_when_no_bash_called() {
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
 
     // Model answers with plain text — no bash call
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "r1".to_string() },
-        XaiEvent::TextDelta { text: "hello".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "hello".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
 
@@ -6961,10 +6729,7 @@ async fn bash_stateful_no_release_when_no_bash_called() {
         .await
         .unwrap();
 
-    agent
-        .close_session(CloseSessionRequest::new(sid))
-        .await
-        .unwrap();
+    agent.close_session(CloseSessionRequest::new(sid)).await.unwrap();
 
     assert!(
         !*released.lock().unwrap(),
@@ -6993,7 +6758,9 @@ async fn bash_stateful_fork_creates_independent_terminal() {
 
     let mock = Arc::new(MockXaiHttpClient::new());
     let _guard = env_lock().lock().unwrap();
-    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
 
     // Parent session: bash call
     mock.push_response(vec![
@@ -7003,13 +6770,21 @@ async fn bash_stateful_fork_creates_independent_terminal() {
             name: "bash".to_string(),
             arguments: r#"{"command":"echo parent"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "rA2".to_string() },
-        XaiEvent::TextDelta { text: "parent done".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "parent done".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     // Forked session: bash call (must create a new independent terminal)
@@ -7020,13 +6795,21 @@ async fn bash_stateful_fork_creates_independent_terminal() {
             name: "bash".to_string(),
             arguments: r#"{"command":"echo fork"}"#.to_string(),
         },
-        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
     mock.push_response(vec![
         XaiEvent::ResponseId { id: "rB2".to_string() },
-        XaiEvent::TextDelta { text: "fork done".to_string() },
-        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::TextDelta {
+            text: "fork done".to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Completed,
+            incomplete_reason: None,
+        },
         XaiEvent::Done,
     ]);
 
@@ -7041,7 +6824,11 @@ async fn bash_stateful_fork_creates_independent_terminal() {
         .await
         .unwrap();
     assert_eq!(r_a.stop_reason, StopReason::EndTurn);
-    assert_eq!(*create_count.lock().unwrap(), 1, "parent session must create exactly one terminal");
+    assert_eq!(
+        *create_count.lock().unwrap(),
+        1,
+        "parent session must create exactly one terminal"
+    );
 
     // Fork — the fork starts with terminal_id: None (correct by design)
     let fork = agent

@@ -115,10 +115,7 @@ impl TurnRenderer {
                 let code_suffix = exit_code.map(|c| format!(" (exit {c})")).unwrap_or_default();
                 let badge = if failed { " ✗" } else { "" };
                 self.flush_pill();
-                eprintln!(
-                    "\x1b[2m  {} {}{code_suffix}{badge}\x1b[0m",
-                    self.tools_done, name
-                );
+                eprintln!("\x1b[2m  {} {}{code_suffix}{badge}\x1b[0m", self.tools_done, name);
                 if !output.is_empty() {
                     print_tool_output(&output);
                     cwd_sync = Some(CwdSync {

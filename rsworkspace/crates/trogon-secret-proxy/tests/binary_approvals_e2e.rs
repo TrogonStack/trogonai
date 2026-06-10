@@ -34,10 +34,7 @@ fn spawn_approvals(nats_port: u16) -> Child {
     spawn_approvals_with_env(nats_port, std::iter::empty::<(&str, String)>())
 }
 
-fn spawn_approvals_with_env<'a>(
-    nats_port:  u16,
-    extra_env:  impl IntoIterator<Item = (&'a str, String)>,
-) -> Child {
+fn spawn_approvals_with_env<'a>(nats_port: u16, extra_env: impl IntoIterator<Item = (&'a str, String)>) -> Child {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_approvals"));
     cmd.env("NATS_URL", format!("localhost:{nats_port}"))
         .env("RUST_LOG", "warn")
@@ -52,14 +49,10 @@ fn spawn_approvals_with_env<'a>(
 /// Poll the status request-reply until the binary responds, confirming it is
 /// alive and listening.  Even a "not_found" reply is sufficient evidence.
 async fn wait_for_approvals_ready(nats: &async_nats::Client, vault_name: &str, timeout: Duration) {
-    let subject  = format!("vault.proposals.{vault_name}.status.readiness_ping");
+    let subject = format!("vault.proposals.{vault_name}.status.readiness_ping");
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let got = tokio::time::timeout(
-            Duration::from_millis(250),
-            nats.request(subject.clone(), Bytes::new()),
-        )
-        .await;
+        let got = tokio::time::timeout(Duration::from_millis(250), nats.request(subject.clone(), Bytes::new())).await;
         // Ok(Ok(_)) = service responded; anything else = not ready yet.
         // async-nats returns Ok(Err(NoResponders)) immediately when no subscriber
         // exists, so we must check the inner Result too, not just the outer one.
@@ -84,7 +77,7 @@ async fn nats_connect(port: u16) -> async_nats::Client {
 
 async fn publish_create(nats: &async_nats::Client, vault: &str, id: &str, token: &str) {
     let subject = format!("vault.proposals.{vault}.create");
-    let body    = serde_json::json!({
+    let body = serde_json::json!({
         "id":             id,
         "credential_key": token,
         "service":        "api.example.com",
@@ -96,15 +89,9 @@ async fn publish_create(nats: &async_nats::Client, vault: &str, id: &str, token:
     nats.flush().await.unwrap();
 }
 
-async fn publish_approve(
-    nats:      &async_nats::Client,
-    vault:     &str,
-    id:        &str,
-    by:        &str,
-    plaintext: &str,
-) {
+async fn publish_approve(nats: &async_nats::Client, vault: &str, id: &str, by: &str, plaintext: &str) {
     let subject = format!("vault.proposals.{vault}.approve");
-    let body    = serde_json::json!({
+    let body = serde_json::json!({
         "proposal_id": id,
         "approved_by": by,
         "plaintext":   plaintext,
@@ -115,15 +102,9 @@ async fn publish_approve(
     nats.flush().await.unwrap();
 }
 
-async fn publish_reject(
-    nats:   &async_nats::Client,
-    vault:  &str,
-    id:     &str,
-    by:     &str,
-    reason: &str,
-) {
+async fn publish_reject(nats: &async_nats::Client, vault: &str, id: &str, by: &str, reason: &str) {
     let subject = format!("vault.proposals.{vault}.reject");
-    let body    = serde_json::json!({
+    let body = serde_json::json!({
         "proposal_id": id,
         "rejected_by": by,
         "reason":      reason,
@@ -134,18 +115,11 @@ async fn publish_reject(
     nats.flush().await.unwrap();
 }
 
-async fn query_status(
-    nats:  &async_nats::Client,
-    vault: &str,
-    id:    &str,
-) -> serde_json::Value {
+async fn query_status(nats: &async_nats::Client, vault: &str, id: &str) -> serde_json::Value {
     let subject = format!("vault.proposals.{vault}.status.{id}");
-    let result = tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request(subject, Bytes::new()),
-    )
-    .await
-    .expect("status query timed out");
+    let result = tokio::time::timeout(Duration::from_secs(5), nats.request(subject, Bytes::new()))
+        .await
+        .expect("status query timed out");
 
     match result {
         Ok(msg) => serde_json::from_slice(&msg.payload).expect("status response is not valid JSON"),
@@ -157,11 +131,11 @@ async fn query_status(
 /// Retries [`query_status`] until `expected_status` is returned or the
 /// deadline is reached.  Returns the full status JSON on success.
 async fn poll_until_status(
-    nats:            &async_nats::Client,
-    vault:           &str,
-    id:              &str,
+    nats: &async_nats::Client,
+    vault: &str,
+    id: &str,
     expected_status: &str,
-    timeout:         Duration,
+    timeout: Duration,
 ) -> serde_json::Value {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
@@ -186,8 +160,8 @@ async fn poll_until_status(
 #[tokio::test]
 async fn binary_approvals_create_then_approve_status_shows_approved() {
     let (_nats, nats_port) = start_nats().await;
-    let _proc              = spawn_approvals(nats_port);
-    let nats               = nats_connect(nats_port).await;
+    let _proc = spawn_approvals(nats_port);
+    let nats = nats_connect(nats_port).await;
 
     wait_for_approvals_ready(&nats, "default", Duration::from_secs(10)).await;
 
@@ -195,15 +169,29 @@ async fn binary_approvals_create_then_approve_status_shows_approved() {
     publish_create(&nats, "default", "prop_bin_approve_001", "tok_stripe_prod_abc1").await;
 
     // Wait for the JetStream pull consumer to deliver and process the create.
-    let pending = poll_until_status(&nats, "default", "prop_bin_approve_001", "pending", Duration::from_secs(5)).await;
+    let pending = poll_until_status(
+        &nats,
+        "default",
+        "prop_bin_approve_001",
+        "pending",
+        Duration::from_secs(5),
+    )
+    .await;
     assert_eq!(pending["status"], "pending");
 
     // Approve the proposal via core NATS (intentionally not JetStream).
     publish_approve(&nats, "default", "prop_bin_approve_001", "mario", "sk_live_binary").await;
 
     // Service must transition to approved and update the in-memory store.
-    let approved = poll_until_status(&nats, "default", "prop_bin_approve_001", "approved", Duration::from_secs(5)).await;
-    assert_eq!(approved["status"],      "approved");
+    let approved = poll_until_status(
+        &nats,
+        "default",
+        "prop_bin_approve_001",
+        "approved",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(approved["status"], "approved");
     assert_eq!(approved["approved_by"], "mario");
 }
 
@@ -211,20 +199,34 @@ async fn binary_approvals_create_then_approve_status_shows_approved() {
 #[tokio::test]
 async fn binary_approvals_create_then_reject_status_shows_rejected() {
     let (_nats, nats_port) = start_nats().await;
-    let _proc              = spawn_approvals(nats_port);
-    let nats               = nats_connect(nats_port).await;
+    let _proc = spawn_approvals(nats_port);
+    let nats = nats_connect(nats_port).await;
 
     wait_for_approvals_ready(&nats, "default", Duration::from_secs(10)).await;
 
     publish_create(&nats, "default", "prop_bin_reject_001", "tok_openai_staging_abc1").await;
-    poll_until_status(&nats, "default", "prop_bin_reject_001", "pending", Duration::from_secs(5)).await;
+    poll_until_status(
+        &nats,
+        "default",
+        "prop_bin_reject_001",
+        "pending",
+        Duration::from_secs(5),
+    )
+    .await;
 
     publish_reject(&nats, "default", "prop_bin_reject_001", "luigi", "not authorised").await;
 
-    let rejected = poll_until_status(&nats, "default", "prop_bin_reject_001", "rejected", Duration::from_secs(5)).await;
-    assert_eq!(rejected["status"],      "rejected");
+    let rejected = poll_until_status(
+        &nats,
+        "default",
+        "prop_bin_reject_001",
+        "rejected",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(rejected["status"], "rejected");
     assert_eq!(rejected["rejected_by"], "luigi");
-    assert_eq!(rejected["reason"],      "not authorised");
+    assert_eq!(rejected["reason"], "not authorised");
 }
 
 /// Querying an unknown proposal ID returns `not_found` — the binary does not
@@ -232,13 +234,13 @@ async fn binary_approvals_create_then_reject_status_shows_rejected() {
 #[tokio::test]
 async fn binary_approvals_unknown_proposal_status_returns_not_found() {
     let (_nats, nats_port) = start_nats().await;
-    let _proc              = spawn_approvals(nats_port);
-    let nats               = nats_connect(nats_port).await;
+    let _proc = spawn_approvals(nats_port);
+    let nats = nats_connect(nats_port).await;
 
     wait_for_approvals_ready(&nats, "default", Duration::from_secs(10)).await;
 
     let resp = query_status(&nats, "default", "prop_does_not_exist").await;
-    assert_eq!(resp["status"],      "not_found");
+    assert_eq!(resp["status"], "not_found");
     assert_eq!(resp["proposal_id"], "prop_does_not_exist");
 }
 
@@ -247,10 +249,7 @@ async fn binary_approvals_unknown_proposal_status_returns_not_found() {
 #[tokio::test]
 async fn binary_approvals_custom_vault_name_routes_correctly() {
     let (_nats, nats_port) = start_nats().await;
-    let _proc = spawn_approvals_with_env(
-        nats_port,
-        [("APPROVAL_VAULT_NAME", "staging".to_string())],
-    );
+    let _proc = spawn_approvals_with_env(nats_port, [("APPROVAL_VAULT_NAME", "staging".to_string())]);
     let nats = nats_connect(nats_port).await;
 
     // Readiness check on the custom vault name.
@@ -262,8 +261,10 @@ async fn binary_approvals_custom_vault_name_routes_correctly() {
 
     // That proposal must NOT appear on the default vault — different namespace.
     let resp = query_status(&nats, "default", "prop_staging_001").await;
-    assert_eq!(resp["status"], "not_found",
-        "proposal on 'staging' must be invisible to 'default' vault");
+    assert_eq!(
+        resp["status"], "not_found",
+        "proposal on 'staging' must be invisible to 'default' vault"
+    );
 }
 
 /// With `INFISICAL_URL` set (and `VAULT_NATS_BUCKET` absent), the binary selects
@@ -299,9 +300,9 @@ async fn binary_approvals_infisical_mode_approve_posts_to_infisical() {
     let _proc = spawn_approvals_with_env(
         nats_port,
         [
-            ("APPROVAL_VAULT_NAME",     "infisical_e2e".to_string()),
-            ("INFISICAL_URL",           mock_server.base_url()),
-            ("INFISICAL_PROJECT_ID",    "proj_test_binary".to_string()),
+            ("APPROVAL_VAULT_NAME", "infisical_e2e".to_string()),
+            ("INFISICAL_URL", mock_server.base_url()),
+            ("INFISICAL_PROJECT_ID", "proj_test_binary".to_string()),
             ("INFISICAL_SERVICE_TOKEN", "svc.binary.test".to_string()),
         ],
     );
@@ -310,7 +311,14 @@ async fn binary_approvals_infisical_mode_approve_posts_to_infisical() {
     wait_for_approvals_ready(&nats, "infisical_e2e", Duration::from_secs(10)).await;
 
     publish_create(&nats, "infisical_e2e", "prop_infisical_bin_001", "tok_stripe_prod_abc1").await;
-    poll_until_status(&nats, "infisical_e2e", "prop_infisical_bin_001", "pending", Duration::from_secs(5)).await;
+    poll_until_status(
+        &nats,
+        "infisical_e2e",
+        "prop_infisical_bin_001",
+        "pending",
+        Duration::from_secs(5),
+    )
+    .await;
 
     publish_approve(
         &nats,

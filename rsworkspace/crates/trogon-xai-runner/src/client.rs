@@ -142,7 +142,11 @@ impl Serialize for ToolSpec {
                 map.serialize_entry("type", name)?;
                 map.end()
             }
-            Self::Function { name, description, parameters } => {
+            Self::Function {
+                name,
+                description,
+                parameters,
+            } => {
                 // xAI Responses API expects a flat tool object:
                 //   { "type": "function", "name": ..., "description": ..., "parameters": ... }
                 // (not the OpenAI Chat Completions shape where name/description/parameters
@@ -193,19 +197,31 @@ impl Serialize for InputItem {
 
 impl InputItem {
     pub fn user(content: impl Into<String>) -> Self {
-        Self::Message { role: "user".to_string(), content: content.into() }
+        Self::Message {
+            role: "user".to_string(),
+            content: content.into(),
+        }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
-        Self::Message { role: "system".to_string(), content: content.into() }
+        Self::Message {
+            role: "system".to_string(),
+            content: content.into(),
+        }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self::Message { role: "assistant".to_string(), content: content.into() }
+        Self::Message {
+            role: "assistant".to_string(),
+            content: content.into(),
+        }
     }
 
     pub fn function_call_output(call_id: impl Into<String>, output: impl Into<String>) -> Self {
-        Self::FunctionCallOutput { call_id: call_id.into(), output: output.into() }
+        Self::FunctionCallOutput {
+            call_id: call_id.into(),
+            output: output.into(),
+        }
     }
 
     /// Returns the `role` field for `Message` items, `None` for `FunctionCallOutput`.
@@ -329,8 +345,7 @@ impl Default for XaiClient {
 
 impl XaiClient {
     pub fn new() -> Self {
-        let base_url =
-            std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+        let base_url = std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
         let request_timeout = std::env::var("XAI_PROMPT_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -376,14 +391,7 @@ impl XaiClient {
         );
 
         let result = self
-            .start_request(
-                model,
-                input,
-                api_key,
-                tools,
-                previous_response_id,
-                max_turns,
-            )
+            .start_request(model, input, api_key, tools, previous_response_id, max_turns)
             .await;
         match result {
             Ok(response) => parse_sse(response.bytes_stream()).boxed_local(),
@@ -470,15 +478,8 @@ impl XaiHttpClient for XaiClient {
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
-        self.do_chat_stream(
-            model,
-            input,
-            api_key,
-            tools,
-            previous_response_id,
-            max_turns,
-        )
-        .await
+        self.do_chat_stream(model, input, api_key, tools, previous_response_id, max_turns)
+            .await
     }
 }
 
@@ -500,9 +501,7 @@ struct SseState {
 }
 
 /// Parse a raw SSE byte stream from the Responses API into `XaiEvent`s.
-fn parse_sse(
-    bytes: impl Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
-) -> impl Stream<Item = XaiEvent> {
+fn parse_sse(bytes: impl Stream<Item = Result<Bytes, reqwest::Error>> + 'static) -> impl Stream<Item = XaiEvent> {
     stream::unfold(
         SseState {
             stream: bytes.boxed_local(),
@@ -534,9 +533,7 @@ fn parse_sse(
                         state.buf.push_str(&String::from_utf8_lossy(&chunk));
                     }
                     Some(Err(e)) => {
-                        state.pending.push_back(XaiEvent::Error {
-                            message: e.to_string(),
-                        });
+                        state.pending.push_back(XaiEvent::Error { message: e.to_string() });
                         return state.pending.pop_front().map(|ev| (ev, state));
                     }
                     None => {
@@ -636,14 +633,10 @@ fn process_sse_line(
         // "reasoning_content" field in the same delta object; it is logged and
         // discarded since the ACP protocol has no dedicated reasoning block type.
         "message.delta" | "response.output_text.delta" => {
-            if let Some(text) = val["delta"]["text"]
-                .as_str()
-                .or_else(|| val["delta"].as_str())
+            if let Some(text) = val["delta"]["text"].as_str().or_else(|| val["delta"].as_str())
                 && !text.is_empty()
             {
-                pending.push_back(XaiEvent::TextDelta {
-                    text: text.to_string(),
-                });
+                pending.push_back(XaiEvent::TextDelta { text: text.to_string() });
             }
             if let Some(rc) = val["delta"]["reasoning_content"].as_str()
                 && !rc.is_empty()
@@ -746,14 +739,11 @@ fn process_sse_line(
             if val["item"]["type"].as_str() == Some("message") {
                 if let Some(content) = val["item"]["content"].as_array() {
                     for block in content {
-                        if block["type"].as_str() == Some("output_text") {
-                            if let Some(text) = block["text"].as_str() {
-                                if !text.is_empty() {
-                                    pending.push_back(XaiEvent::TextComplete {
-                                        text: text.to_string(),
-                                    });
-                                }
-                            }
+                        if block["type"].as_str() == Some("output_text")
+                            && let Some(text) = block["text"].as_str()
+                            && !text.is_empty()
+                        {
+                            pending.push_back(XaiEvent::TextComplete { text: text.to_string() });
                         }
                     }
                 }
@@ -770,7 +760,11 @@ fn process_sse_line(
                     let name = val["item"]["name"].as_str().unwrap_or("").to_string();
                     let arguments = val["item"]["arguments"].as_str().unwrap_or("").to_string();
                     if !call_id.is_empty() || !name.is_empty() {
-                        pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
+                        pending.push_back(XaiEvent::FunctionCall {
+                            call_id,
+                            name,
+                            arguments,
+                        });
                     }
                 }
             }
@@ -927,9 +921,7 @@ fn process_sse_line(
             // When status is "incomplete", also extract incomplete_details.reason
             // (e.g. "max_output_tokens" or "max_turns") so the agent can choose
             // the right continuation strategy.
-            let status = val["response"]["status"]
-                .as_str()
-                .or_else(|| val["status"].as_str());
+            let status = val["response"]["status"].as_str().or_else(|| val["status"].as_str());
             if let Some(s) = status {
                 let incomplete_reason = if s == "incomplete" {
                     val["response"]["incomplete_details"]["reason"]
@@ -1003,8 +995,7 @@ mod tests {
 
     #[test]
     fn text_delta_responses_api() {
-        let line =
-            r#"data: {"type":"message.delta","delta":{"type":"output_text","text":"hello"}}"#;
+        let line = r#"data: {"type":"message.delta","delta":{"type":"output_text","text":"hello"}}"#;
         let event = parse_line(line).unwrap();
         assert!(matches!(event, XaiEvent::TextDelta { text } if text == "hello"));
     }
@@ -1046,9 +1037,7 @@ mod tests {
         process_sse_line(line, &mut emitted, &mut pending, &mut pending_fc);
         let events2: Vec<_> = pending.into_iter().collect();
         assert!(
-            !events2
-                .iter()
-                .any(|e| matches!(e, XaiEvent::ResponseId { .. })),
+            !events2.iter().any(|e| matches!(e, XaiEvent::ResponseId { .. })),
             "ResponseId must not be emitted twice: {events2:?}"
         );
     }
@@ -1112,7 +1101,9 @@ mod tests {
         let line = r#"data: {"type":"response.completed","response":{"status":"completed"},"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
             "expected Finished(Completed) in {events:?}"
         );
     }
@@ -1122,7 +1113,9 @@ mod tests {
         let line = r#"data: {"type":"response.completed","response":{"status":"incomplete"}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Incomplete)),
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Incomplete)),
             "expected Finished(Incomplete) in {events:?}"
         );
     }
@@ -1190,7 +1183,11 @@ mod tests {
         let events = parse_lines(&[added, done]);
         assert_eq!(events.len(), 1, "expected exactly one FunctionCall: {events:?}");
         match &events[0] {
-            XaiEvent::FunctionCall { call_id, name, arguments } => {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(call_id, "call_abc");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"rust"}"#);
@@ -1206,13 +1203,18 @@ mod tests {
         let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"web_search"}}"#;
         let delta1 = r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"q\":"}"#;
         let delta2 = r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"test\"}"}"#;
-        let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"q\":\"test\"}"}"#;
+        let done =
+            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"q\":\"test\"}"}"#;
 
         let events = parse_lines(&[added, delta1, delta2, done]);
         // Only the done event emits a FunctionCall (added/delta are stateful, no events).
         assert_eq!(events.len(), 1, "expected exactly one FunctionCall: {events:?}");
         match &events[0] {
-            XaiEvent::FunctionCall { call_id, name, arguments } => {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"test"}"#);
@@ -1235,8 +1237,7 @@ mod tests {
     #[test]
     fn output_item_added_non_function_call_emits_nothing() {
         // output_item.added for text items must not emit any event.
-        let line =
-            r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
+        let line = r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
         assert!(parse_line(line).is_none());
     }
 
@@ -1313,10 +1314,7 @@ mod tests {
         let event = parse_line(line).unwrap();
         match event {
             XaiEvent::Error { message } => {
-                assert!(
-                    message.contains("content policy"),
-                    "unexpected message: {message}"
-                );
+                assert!(message.contains("content policy"), "unexpected message: {message}");
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1327,10 +1325,7 @@ mod tests {
         // Fallback when error object is absent or oddly shaped.
         let line = r#"data: {"type":"response.error","message":"unexpected failure"}"#;
         let event = parse_line(line).unwrap();
-        assert!(
-            matches!(event, XaiEvent::Error { .. }),
-            "expected Error, got {event:?}"
-        );
+        assert!(matches!(event, XaiEvent::Error { .. }), "expected Error, got {event:?}");
     }
 
     #[test]
@@ -1450,8 +1445,7 @@ mod tests {
     fn reasoning_content_delta_emits_nothing() {
         // Reasoning models (e.g. grok-3-mini) emit delta.reasoning_content.
         // This must NOT produce a TextDelta — reasoning is not forwarded to the ACP client.
-        let line =
-            r#"data: {"type":"message.delta","delta":{"reasoning_content":"Let me think..."}}"#;
+        let line = r#"data: {"type":"message.delta","delta":{"reasoning_content":"Let me think..."}}"#;
         assert!(
             parse_line(line).is_none(),
             "reasoning_content-only delta must not produce any event"
@@ -1461,8 +1455,7 @@ mod tests {
     #[test]
     fn reasoning_summary_text_delta_emits_nothing() {
         // OpenAI Responses API reasoning summary events are logged and discarded.
-        let line =
-            r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Summary so far."}"#;
+        let line = r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Summary so far."}"#;
         assert!(
             parse_line(line).is_none(),
             "response.reasoning_summary_text.delta must produce no event"
@@ -1477,7 +1470,9 @@ mod tests {
         let line = r#"data: {"type":"response.done","response":{"status":"completed"},"usage":{"prompt_tokens":5,"completion_tokens":3}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Completed)),
             "response.done must emit Finished(Completed) just like response.completed: {events:?}"
         );
     }
@@ -1513,7 +1508,9 @@ mod tests {
         let line = r#"data: {"type":"response.completed","response":{"status":"failed"}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Failed)),
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Failed)),
             "response.completed with status=failed must emit Finished(Failed): {events:?}"
         );
     }
@@ -1523,7 +1520,9 @@ mod tests {
         let line = r#"data: {"type":"response.completed","response":{"status":"cancelled"}}"#;
         let events = parse_line_all(line);
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
             "response.completed with status=cancelled must emit Finished(Cancelled): {events:?}"
         );
     }
@@ -1571,8 +1570,7 @@ mod tests {
     #[test]
     fn response_error_emits_xai_error_with_nested_message() {
         // Primary path: message lives under error.message (OpenAI Responses API spec).
-        let line =
-            r#"data: {"type":"response.error","error":{"message":"content policy violation"}}"#;
+        let line = r#"data: {"type":"response.error","error":{"message":"content policy violation"}}"#;
         let event = parse_line(line).expect("response.error must emit an event");
         assert!(
             matches!(&event, XaiEvent::Error { message } if message == "content policy violation"),
@@ -1596,8 +1594,7 @@ mod tests {
     fn response_error_uses_default_message_when_no_field_present() {
         // Both fallback paths absent — `.unwrap_or("xAI stream error")` fires.
         let line = r#"data: {"type":"response.error"}"#;
-        let event =
-            parse_line(line).expect("response.error must emit an event even without a message");
+        let event = parse_line(line).expect("response.error must emit an event even without a message");
         assert!(
             matches!(&event, XaiEvent::Error { message } if message == "xAI stream error"),
             "must use the default message when no message field present: {event:?}"
@@ -1678,8 +1675,7 @@ mod tests {
         // produce no event. Without the guard a stale entry would be left in
         // `pending_fc` and the next delta for an unrelated call_id could be
         // mis-attributed.
-        let line =
-            r#"data: {"type":"response.output_item.added","item":{"type":"text","id":"item_abc"}}"#;
+        let line = r#"data: {"type":"response.output_item.added","item":{"type":"text","id":"item_abc"}}"#;
         assert!(
             parse_line(line).is_none(),
             "output_item.added with type=text must produce no event"
@@ -1689,8 +1685,7 @@ mod tests {
     #[test]
     fn output_item_added_with_message_type_produces_no_event() {
         // Same guard, different non-function-call item type.
-        let line =
-            r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
+        let line = r#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}"#;
         assert!(
             parse_line(line).is_none(),
             "output_item.added with type=message must produce no event"
@@ -1722,10 +1717,7 @@ mod tests {
         // newline delimiter, then process the complete line.
         let chunk1 = Bytes::from("data: {\"type\":\"message.delta\",\"delta\":{\"text\":\"hel");
         let chunk2 = Bytes::from("lo\"}}\n");
-        let s = stream::iter(vec![
-            Ok::<_, reqwest::Error>(chunk1),
-            Ok::<_, reqwest::Error>(chunk2),
-        ]);
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(chunk1), Ok::<_, reqwest::Error>(chunk2)]);
         let events: Vec<_> = parse_sse(s).collect().await;
         assert!(
             events
@@ -1804,10 +1796,7 @@ mod tests {
             "second event must be call_2/lookup with correct arguments: {:?}",
             events[1]
         );
-        assert!(
-            pending_fc.is_empty(),
-            "pending_fc must be empty after all done events"
-        );
+        assert!(pending_fc.is_empty(), "pending_fc must be empty after all done events");
     }
 
     // ── response.completed: top-level incomplete_details fallback ─────────────
@@ -1882,9 +1871,17 @@ mod tests {
         let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"my_tool"}}"#;
         let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1"}"#;
         let events = parse_lines(&[added, done]);
-        assert_eq!(events.len(), 1, "done without arguments must emit exactly one FunctionCall: {events:?}");
+        assert_eq!(
+            events.len(),
+            1,
+            "done without arguments must emit exactly one FunctionCall: {events:?}"
+        );
         match &events[0] {
-            XaiEvent::FunctionCall { call_id, name, arguments } => {
+            XaiEvent::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(name, "my_tool");
                 assert_eq!(arguments, "", "absent arguments field must produce empty string");
@@ -1923,10 +1920,7 @@ mod tests {
         // The buffer accumulation logic must reassemble before parsing.
         let part1 = Bytes::from("data: {\"type\":\"message.delta\",\"delta\":{\"type\":\"output");
         let part2 = Bytes::from("_text\",\"text\":\"hello\"}}\n");
-        let s = stream::iter(vec![
-            Ok::<_, reqwest::Error>(part1),
-            Ok::<_, reqwest::Error>(part2),
-        ]);
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(part1), Ok::<_, reqwest::Error>(part2)]);
         let events: Vec<_> = parse_sse(s).collect().await;
         assert!(
             events
@@ -1989,16 +1983,9 @@ mod tests {
         use futures_util::stream::{self, StreamExt as _};
 
         // Two chunks both carry an `id` field. ResponseId must be emitted only once.
-        let line1 = Bytes::from(
-            "data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"a\"}}\n",
-        );
-        let line2 = Bytes::from(
-            "data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"b\"}}\n",
-        );
-        let s = stream::iter(vec![
-            Ok::<_, reqwest::Error>(line1),
-            Ok::<_, reqwest::Error>(line2),
-        ]);
+        let line1 = Bytes::from("data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"a\"}}\n");
+        let line2 = Bytes::from("data: {\"id\":\"resp_x\",\"type\":\"message.delta\",\"delta\":{\"text\":\"b\"}}\n");
+        let s = stream::iter(vec![Ok::<_, reqwest::Error>(line1), Ok::<_, reqwest::Error>(line2)]);
         let events: Vec<_> = parse_sse(s).collect().await;
         let id_count = events
             .iter()
@@ -2048,13 +2035,13 @@ mod tests {
         let line = r#"data: {"type":"response.cancelled","response":{"id":"resp-cancelled","status":"cancelled"}}"#;
         let events = parse_line_all(line);
         assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, XaiEvent::ResponseId { .. })),
+            !events.iter().any(|e| matches!(e, XaiEvent::ResponseId { .. })),
             "response.cancelled must not emit ResponseId: {events:?}"
         );
         assert!(
-            events.iter().any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::Cancelled)),
             "response.cancelled must emit Finished(Cancelled): {events:?}"
         );
     }
@@ -2162,9 +2149,7 @@ mod tests {
     /// Bind a random local port and return (url, axum server future).
     /// The caller must spawn / drive the server future.
     #[cfg(test)]
-    async fn make_test_server(
-        app: axum::Router,
-    ) -> (String, impl std::future::Future<Output = ()>) {
+    async fn make_test_server(app: axum::Router) -> (String, impl std::future::Future<Output = ()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind test server");
@@ -2190,8 +2175,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let input = [InputItem::user("hi")];
-        let mut stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let mut stream = XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
         let event = stream.next().await.expect("stream must emit one event");
 
         server_task.abort();
@@ -2221,8 +2205,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let input = [InputItem::user("hi")];
-        let mut stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let mut stream = XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
         let event = stream.next().await.expect("stream must emit one event");
 
         server_task.abort();
@@ -2253,8 +2236,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let input = [InputItem::user("hi")];
-        let mut stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
+        let mut stream = XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None).await;
         let event = stream
             .next()
             .await
@@ -2299,11 +2281,10 @@ mod tests {
 
         let client = XaiClient::with_base_url(format!("http://{addr}"));
         let input = [InputItem::user("hi")];
-        let events: Vec<XaiEvent> =
-            XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None)
-                .await
-                .collect()
-                .await;
+        let events: Vec<XaiEvent> = XaiHttpClient::chat_stream(&client, "grok-3", &input, "key", &[], None, None)
+            .await
+            .collect()
+            .await;
 
         assert!(
             events.iter().any(|e| matches!(e, XaiEvent::Error { .. })),
@@ -2319,8 +2300,7 @@ mod tests {
     fn finish_reason_tool_calls_from_response_completed_status() {
         // xAI emits "tool_calls" as the response status when the model stops
         // to wait for client-side function results.
-        let line =
-            r#"data: {"type":"response.completed","response":{"status":"tool_calls"}}"#;
+        let line = r#"data: {"type":"response.completed","response":{"status":"tool_calls"}}"#;
         let events = parse_line_all(line);
         assert!(
             events
@@ -2351,7 +2331,10 @@ mod tests {
         let spec = ToolSpec::ServerSide("web_search".to_string());
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["type"], "web_search");
-        assert!(json.get("function").is_none(), "ServerSide must not have a 'function' key");
+        assert!(
+            json.get("function").is_none(),
+            "ServerSide must not have a 'function' key"
+        );
     }
 
     #[test]
@@ -2392,7 +2375,10 @@ mod tests {
         assert_eq!(json["type"], "function_call_output");
         assert_eq!(json["call_id"], "cid_1");
         assert_eq!(json["output"], "output text");
-        assert!(json.get("role").is_none(), "FunctionCallOutput must not carry a 'role' field");
+        assert!(
+            json.get("role").is_none(),
+            "FunctionCallOutput must not carry a 'role' field"
+        );
     }
 
     // ── start_request: HTTP body and header verification ─────────────────────
@@ -2404,8 +2390,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_omits_tools_field_when_tools_empty() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2424,8 +2410,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None)
-                .await;
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2437,8 +2422,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_omits_max_turns_when_tools_empty() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2458,8 +2443,7 @@ mod tests {
         let client = XaiClient::with_base_url(url);
         // max_turns = Some(5) but tools = [] — max_turns must still be omitted
         let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, Some(5))
-                .await;
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, Some(5)).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2471,8 +2455,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_includes_previous_response_id_when_set() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2512,8 +2496,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_omits_previous_response_id_when_none() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2532,8 +2516,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None)
-                .await;
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2545,8 +2528,13 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_sends_authorization_bearer_header() {
+        use axum::{
+            Router,
+            body::Bytes,
+            http::{HeaderMap, StatusCode},
+            routing::post,
+        };
         use std::sync::{Arc, Mutex};
-        use axum::{Router, body::Bytes, http::{HeaderMap, StatusCode}, routing::post};
 
         let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2583,16 +2571,15 @@ mod tests {
 
         let auth = captured.lock().unwrap().take().expect("handler did not run");
         assert_eq!(
-            auth,
-            "Bearer my-secret-key",
+            auth, "Bearer my-secret-key",
             "Authorization header must be 'Bearer <api_key>'; got: {auth:?}"
         );
     }
 
     #[tokio::test]
     async fn start_request_includes_tools_field_when_non_empty() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2612,8 +2599,7 @@ mod tests {
         let client = XaiClient::with_base_url(url);
         let tools = [ToolSpec::ServerSide("web_search".to_string())];
         let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &tools, None, None)
-                .await;
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &tools, None, None).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2631,8 +2617,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_includes_max_turns_when_tools_non_empty() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2652,8 +2638,7 @@ mod tests {
         let client = XaiClient::with_base_url(url);
         let tools = [ToolSpec::ServerSide("web_search".to_string())];
         let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &tools, None, Some(8))
-                .await;
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &tools, None, Some(8)).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2666,8 +2651,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_always_includes_model_and_input_in_body() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2686,8 +2671,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let input = [InputItem::user("test-prompt")];
-        let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3-mini", &input, "k", &[], None, None).await;
+        let _stream = XaiHttpClient::chat_stream(&client, "grok-3-mini", &input, "k", &[], None, None).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2704,8 +2688,8 @@ mod tests {
 
     #[tokio::test]
     async fn start_request_always_sends_stream_true() {
-        use std::sync::{Arc, Mutex};
         use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+        use std::sync::{Arc, Mutex};
 
         let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let state = Arc::clone(&captured);
@@ -2724,8 +2708,7 @@ mod tests {
 
         let client = XaiClient::with_base_url(url);
         let _stream =
-            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None)
-                .await;
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None).await;
         task.abort();
 
         let body = captured.lock().unwrap().take().expect("handler did not run");
@@ -2778,13 +2761,24 @@ mod tests {
             "exactly one FunctionCall event must be emitted from the grok-4 new format; got: {events:?}"
         );
 
-        if let XaiEvent::FunctionCall { call_id, name, arguments } = &fc_events[0] {
-            assert_eq!(call_id, "call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0",
-                "call_id must match the value from response.output_item.done");
-            assert_eq!(name, "write_file",
-                "name must match the value from response.output_item.done");
-            assert!(arguments.contains("hello.txt"),
-                "arguments must contain the path; got: {arguments}");
+        if let XaiEvent::FunctionCall {
+            call_id,
+            name,
+            arguments,
+        } = &fc_events[0]
+        {
+            assert_eq!(
+                call_id, "call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0",
+                "call_id must match the value from response.output_item.done"
+            );
+            assert_eq!(
+                name, "write_file",
+                "name must match the value from response.output_item.done"
+            );
+            assert!(
+                arguments.contains("hello.txt"),
+                "arguments must contain the path; got: {arguments}"
+            );
         }
     }
 }

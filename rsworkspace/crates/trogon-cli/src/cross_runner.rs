@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsJetStreamClient};
 use agent_client_protocol::{Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification};
+use tokio::sync::mpsc;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
-use tokio::sync::mpsc;
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
 
@@ -41,7 +41,12 @@ pub struct CrossRunnerSwitcher<S: RegistryStore> {
 
 impl<S: RegistryStore> CrossRunnerSwitcher<S> {
     pub fn new(nats: async_nats::Client, base_config: Config, registry: Registry<S>) -> Self {
-        Self { nats, base_config, registry, bridges: HashMap::new() }
+        Self {
+            nats,
+            base_config,
+            registry,
+            bridges: HashMap::new(),
+        }
     }
 
     /// Switch the active session to whichever runner owns `model_id`.
@@ -57,8 +62,10 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         cwd: &str,
     ) -> Result<(String, String), String> {
         // 1. Resolve target runner from registry
-        let cap = self.registry
-            .find_by_model(model_id).await
+        let cap = self
+            .registry
+            .find_by_model(model_id)
+            .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("no runner found for model: {model_id}"))?;
         let target_prefix = cap.metadata["acp_prefix"]
@@ -175,13 +182,19 @@ pub mod mock {
 
     impl MockRunnerSwitcher {
         pub fn same_runner(prefix: &str, session_id: &str) -> Self {
-            Self { result: Ok((prefix.to_string(), session_id.to_string())) }
+            Self {
+                result: Ok((prefix.to_string(), session_id.to_string())),
+            }
         }
         pub fn cross_runner(new_prefix: &str, new_session_id: &str) -> Self {
-            Self { result: Ok((new_prefix.to_string(), new_session_id.to_string())) }
+            Self {
+                result: Ok((new_prefix.to_string(), new_session_id.to_string())),
+            }
         }
         pub fn error(msg: &str) -> Self {
-            Self { result: Err(msg.to_string()) }
+            Self {
+                result: Err(msg.to_string()),
+            }
         }
     }
 
@@ -244,7 +257,9 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.test")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.test", "session-abc", "gpt-4", "/workspace").await;
+        let result = switcher
+            .switch_model("acp.test", "session-abc", "gpt-4", "/workspace")
+            .await;
         assert_eq!(result, Ok(("acp.test".to_string(), "session-abc".to_string())));
     }
 
@@ -254,7 +269,9 @@ mod tests {
         let registry = Registry::new(MockRegistryStore::new());
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.current", "session-1", "unknown-model", "/ws").await;
+        let result = switcher
+            .switch_model("acp.current", "session-1", "unknown-model", "/ws")
+            .await;
         assert_eq!(result, Err("no runner found for model: unknown-model".to_string()));
     }
 
@@ -361,7 +378,9 @@ mod tests {
             if let Some(msg) = sub.next().await {
                 let payload = msg.payload.to_vec();
                 if let Some(reply) = msg.reply {
-                    nats.publish(reply, axum::body::Bytes::from_static(response_bytes)).await.ok();
+                    nats.publish(reply, axum::body::Bytes::from_static(response_bytes))
+                        .await
+                        .ok();
                 }
                 tx.send(payload).ok();
             }
@@ -395,7 +414,10 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         let result = switcher.switch_model("acp.src", "session-1", "gpt-4", "/ws").await;
-        assert!(result.is_err(), "expected new_session failure to propagate; got: {result:?}");
+        assert!(
+            result.is_err(),
+            "expected new_session failure to propagate; got: {result:?}"
+        );
     }
 
     #[tokio::test]
@@ -480,7 +502,9 @@ mod tests {
             .await
             .unwrap();
 
-        let new_session_body = new_session_rx.await.expect("new_session request must have been captured");
+        let new_session_body = new_session_rx
+            .await
+            .expect("new_session request must have been captured");
         let json: serde_json::Value = serde_json::from_slice(&new_session_body).unwrap();
         assert_eq!(
             json["cwd"].as_str(),
@@ -501,10 +525,14 @@ mod tests {
             br#"[{"role":"user","content":"hello"}]"#,
         )
         .await;
-        mock_responder(nats_bg.clone(), "acp.tgt.agent.session.new", br#"{"sessionId":"new-sess"}"#).await;
+        mock_responder(
+            nats_bg.clone(),
+            "acp.tgt.agent.session.new",
+            br#"{"sessionId":"new-sess"}"#,
+        )
+        .await;
         // Capture the import request so we can inspect its body
-        let import_rx =
-            capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
+        let import_rx = capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -512,12 +540,18 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        switcher.switch_model("acp.src", "src-session", "gpt-4", "/ws").await.unwrap();
+        switcher
+            .switch_model("acp.src", "src-session", "gpt-4", "/ws")
+            .await
+            .unwrap();
 
         let import_body = import_rx.await.expect("import responder captured payload");
         let json: serde_json::Value = serde_json::from_slice(&import_body).unwrap();
         assert_eq!(json["sessionId"], "new-sess");
-        assert_eq!(json["messages"], serde_json::json!([{"role": "user", "content": "hello"}]));
+        assert_eq!(
+            json["messages"],
+            serde_json::json!([{"role": "user", "content": "hello"}])
+        );
     }
 
     #[tokio::test]
@@ -525,11 +559,16 @@ mod tests {
         let (_container, port) = start_nats().await;
         let nats_bg = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
 
-        let v2_export = br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","text":"hi"}]}]}"#;
+        let v2_export =
+            br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","text":"hi"}]}]}"#;
         mock_responder(nats_bg.clone(), "acp.src.agent.ext.session/export", v2_export).await;
-        mock_responder(nats_bg.clone(), "acp.tgt.agent.session.new", br#"{"sessionId":"v2-sess"}"#).await;
-        let import_rx =
-            capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
+        mock_responder(
+            nats_bg.clone(),
+            "acp.tgt.agent.session.new",
+            br#"{"sessionId":"v2-sess"}"#,
+        )
+        .await;
+        let import_rx = capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -537,7 +576,10 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        switcher.switch_model("acp.src", "src-session", "gpt-4", "/ws").await.unwrap();
+        switcher
+            .switch_model("acp.src", "src-session", "gpt-4", "/ws")
+            .await
+            .unwrap();
 
         let import_body = import_rx.await.expect("import responder captured payload");
         let json: serde_json::Value = serde_json::from_slice(&import_body).unwrap();

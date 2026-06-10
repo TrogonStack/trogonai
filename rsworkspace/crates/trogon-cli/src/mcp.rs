@@ -46,7 +46,11 @@ impl McpManager {
             Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).unwrap_or_default(),
             _ => McpConfig::default(),
         };
-        Self { config, active: HashMap::new(), pending: Vec::new() }
+        Self {
+            config,
+            active: HashMap::new(),
+            pending: Vec::new(),
+        }
     }
 
     pub fn save<F: Fs>(&self, fs: &F) -> std::io::Result<()> {
@@ -81,7 +85,8 @@ impl McpManager {
         if self.pending.is_empty() {
             return;
         }
-        self.active.insert(session_id.to_string(), std::mem::take(&mut self.pending));
+        self.active
+            .insert(session_id.to_string(), std::mem::take(&mut self.pending));
     }
 
     async fn spawn_bridges(&self) -> (Vec<McpServer>, Vec<ActiveBridge>) {

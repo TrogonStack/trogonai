@@ -16,15 +16,13 @@ use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
     AuthMethod, AuthenticateRequest, AuthenticateResponse, BlobResourceContents, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, EmbeddedResource,
-    EmbeddedResourceResource, ForkSessionRequest, ImageContent, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ProtocolVersion, ResourceLink, ResumeSessionRequest, ResumeSessionResponse, SessionConfigKind,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse, TextResourceContents,
-    ToolCallStatus, ToolKind,
+    CloseSessionRequest, CloseSessionResponse, ContentBlock, EmbeddedResource, EmbeddedResourceResource,
+    ForkSessionRequest, ImageContent, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    ProtocolVersion, ResourceLink, ResumeSessionRequest, ResumeSessionResponse, SessionConfigKind, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, TextResourceContents, ToolCallStatus,
+    ToolKind,
 };
 use async_nats::Message;
 use async_trait::async_trait;
@@ -33,9 +31,8 @@ use futures_util::StreamExt as _;
 use futures_util::stream::{self, LocalBoxStream};
 use trogon_nats::mocks::MockNatsClient;
 use trogon_openrouter_runner::{
-    AgentConfig, AgentLoading, AssembledToolCall, FinishReason, Message as OaMessage,
-    OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, SessionNotifier, SessionStoring,
-    SkillLoading, ToolDef,
+    AgentConfig, AgentLoading, AssembledToolCall, FinishReason, Message as OaMessage, OpenRouterAgent, OpenRouterEvent,
+    OpenRouterHttpClient, SessionNotifier, SessionStoring, SkillLoading, ToolDef,
 };
 
 // ── Inline HTTP client stub ───────────────────────────────────────────────────
@@ -70,21 +67,20 @@ impl TestHttpClient {
     }
 
     fn push(&self, events: Vec<OpenRouterEvent>) {
-        self.queue
-            .lock()
-            .unwrap()
-            .push_back(TestResponse::Events(events));
+        self.queue.lock().unwrap().push_back(TestResponse::Events(events));
     }
 
     fn push_slow(&self, first: OpenRouterEvent) {
-        self.queue
-            .lock()
-            .unwrap()
-            .push_back(TestResponse::Slow(first));
+        self.queue.lock().unwrap().push_back(TestResponse::Slow(first));
     }
 
     fn last_tool_names(&self) -> Vec<String> {
-        self.recorded_tool_names.lock().unwrap().last().cloned().unwrap_or_default()
+        self.recorded_tool_names
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn last_model(&self) -> String {
@@ -92,11 +88,21 @@ impl TestHttpClient {
     }
 
     fn last_api_key(&self) -> String {
-        self.recorded_api_keys.lock().unwrap().last().cloned().unwrap_or_default()
+        self.recorded_api_keys
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn last_messages(&self) -> Vec<OaMessage> {
-        self.recorded_messages.lock().unwrap().last().cloned().unwrap_or_default()
+        self.recorded_messages
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -162,9 +168,17 @@ struct RecordingStore {
 }
 
 impl RecordingStore {
-    fn new() -> (Self, Arc<Mutex<Vec<trogon_openrouter_runner::session_store::SessionSnapshot>>>) {
+    fn new() -> (
+        Self,
+        Arc<Mutex<Vec<trogon_openrouter_runner::session_store::SessionSnapshot>>>,
+    ) {
         let saves = Arc::new(Mutex::new(Vec::new()));
-        (Self { saves: Arc::clone(&saves) }, saves)
+        (
+            Self {
+                saves: Arc::clone(&saves),
+            },
+            saves,
+        )
     }
 }
 
@@ -175,7 +189,9 @@ impl SessionStoring for RecordingStore {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         let snap = snapshot.clone();
         let saves = Arc::clone(&self.saves);
-        Box::pin(async move { saves.lock().unwrap().push(snap); })
+        Box::pin(async move {
+            saves.lock().unwrap().push(snap);
+        })
     }
 
     fn remove<'a>(
@@ -190,7 +206,13 @@ impl SessionStoring for RecordingStore {
         &'a self,
         _tenant_id: &'a str,
         _session_id: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<trogon_openrouter_runner::session_store::SessionSnapshot>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Option<trogon_openrouter_runner::session_store::SessionSnapshot>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move { None })
     }
 }
@@ -216,10 +238,7 @@ impl Harness {
 
     /// Build a harness whose agent has the `ask_user` elicitation bridge wired.
     /// `elic_tx` is handed to the agent; the test owns the receiver and answers.
-    fn with_elicitation(
-        key: &str,
-        elic_tx: trogon_runner_tools::ElicitationTx,
-    ) -> Self {
+    fn with_elicitation(key: &str, elic_tx: trogon_runner_tools::ElicitationTx) -> Self {
         Self::build(key, Some(elic_tx))
     }
 
@@ -374,21 +393,14 @@ fn inject_req(
 
 async fn create_session(h: &Harness) -> String {
     let before = h.nats.published_payloads().len();
-    h.global(
-        "acp.agent.session.new",
-        NewSessionRequest::new("/tmp"),
-        "r.new",
-    );
+    h.global("acp.agent.session.new", NewSessionRequest::new("/tmp"), "r.new");
     let payloads = h.expect_n_publishes(before + 1).await;
     let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
     val["sessionId"].as_str().unwrap().to_string()
 }
 
 /// Create a session whose `new_session` request carries the given HTTP MCP servers.
-async fn create_session_with_mcp(
-    h: &Harness,
-    servers: Vec<agent_client_protocol::McpServer>,
-) -> String {
+async fn create_session_with_mcp(h: &Harness, servers: Vec<agent_client_protocol::McpServer>) -> String {
     let before = h.nats.published_payloads().len();
     h.global(
         "acp.agent.session.new",
@@ -451,9 +463,9 @@ async fn prompt_via_nats_returns_prompt_response() {
             let h = Harness::new();
             let sid = create_session(&h).await;
 
-            h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "hello".to_string() },
-            ]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "hello".to_string(),
+            }]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -474,8 +486,12 @@ async fn prompt_via_nats_sends_text_notifications() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "chunk1".to_string() },
-                OpenRouterEvent::TextDelta { text: "chunk2".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "chunk1".to_string(),
+                },
+                OpenRouterEvent::TextDelta {
+                    text: "chunk2".to_string(),
+                },
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -498,8 +514,15 @@ async fn prompt_via_nats_sends_usage_notification() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "answer".to_string() },
-                OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
+                OpenRouterEvent::TextDelta {
+                    text: "answer".to_string(),
+                },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -598,11 +621,7 @@ async fn authenticate_agent_method_succeeds_with_global_key() {
         .run_until(async {
             // Agent has a global key, so "agent" method is available.
             let h = Harness::with_api_key("global-key");
-            h.global(
-                "acp.agent.authenticate",
-                AuthenticateRequest::new("agent"),
-                "r.auth",
-            );
+            h.global("acp.agent.authenticate", AuthenticateRequest::new("agent"), "r.auth");
             let payloads = h.expect_n_publishes(1).await;
             let _: AuthenticateResponse = serde_json::from_slice(&payloads[0]).unwrap();
         })
@@ -619,11 +638,7 @@ async fn close_session_via_nats_returns_ok() {
             let sid = create_session(&h).await;
 
             let close_subj = format!("acp.session.{sid}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
             let payloads = h.expect_n_publishes(2).await;
             let _: CloseSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
         })
@@ -640,11 +655,7 @@ async fn resume_session_via_nats_returns_ok() {
             let sid = create_session(&h).await;
 
             let resume_subj = format!("acp.session.{sid}.agent.resume");
-            h.session_req(
-                &resume_subj,
-                ResumeSessionRequest::new(sid.clone(), "/tmp"),
-                "r.resume",
-            );
+            h.session_req(&resume_subj, ResumeSessionRequest::new(sid.clone(), "/tmp"), "r.resume");
             let payloads = h.expect_n_publishes(2).await;
             let _: ResumeSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
         })
@@ -678,11 +689,7 @@ async fn load_session_via_nats_returns_state() {
             let sid = create_session(&h).await;
 
             let load_subj = format!("acp.session.{sid}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(sid.clone(), "/tmp"),
-                "r.load",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
             let payloads = h.expect_n_publishes(2).await;
             let resp: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
             assert!(resp.modes.is_some(), "load must return mode state");
@@ -718,11 +725,7 @@ async fn fork_session_via_nats_creates_new_session() {
             let sid = create_session(&h).await;
 
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(2).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
             let fork_id = val["sessionId"].as_str().unwrap_or_default();
@@ -740,7 +743,9 @@ async fn fork_session_and_prompt_independently() {
             let sid = create_session(&h).await;
 
             // Prompt source session.
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "from src".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "from src".to_string(),
+            }]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -751,17 +756,17 @@ async fn fork_session_and_prompt_independently() {
 
             // Fork.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()
-                ["sessionId"].as_str().unwrap().to_string();
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
 
             // Prompt the fork independently.
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "from fork".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "from fork".to_string(),
+            }]);
             let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
             h.session_req(
                 &fork_prompt_subj,
@@ -806,11 +811,7 @@ async fn close_session_then_list_sessions_removes_it() {
 
             // Close the session.
             let close_subj = format!("acp.session.{sid}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
             h.expect_n_publishes(2).await;
 
             // List sessions — closed one must not appear.
@@ -877,11 +878,7 @@ async fn set_session_model_via_nats_updates_model() {
 
             // Verify via load_session that the change persisted.
             let load_subj = format!("acp.session.{sid}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(sid.clone(), "/tmp"),
-                "r.load",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
             let payloads = h.expect_n_publishes(3).await;
             let resp: LoadSessionResponse = serde_json::from_slice(&payloads[2]).unwrap();
             let current = resp.models.unwrap().current_model_id.to_string();
@@ -960,7 +957,9 @@ async fn cancel_via_nats_interrupts_prompt() {
             let h = Harness::new();
             let sid = create_session(&h).await;
 
-            h.http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+            h.http.push_slow(OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -988,10 +987,7 @@ async fn cancel_noop_for_unknown_session_via_nats() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-            h.session_notify(
-                "acp.session.ghost.agent.cancel",
-                CancelNotification::new("ghost"),
-            );
+            h.session_notify("acp.session.ghost.agent.cancel", CancelNotification::new("ghost"));
             h.expect_no_new_publishes(0).await;
         })
         .await;
@@ -1040,10 +1036,7 @@ async fn request_without_reply_subject_does_not_publish() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-            h.global_notify(
-                "acp.agent.initialize",
-                InitializeRequest::new(ProtocolVersion::LATEST),
-            );
+            h.global_notify("acp.agent.initialize", InitializeRequest::new(ProtocolVersion::LATEST));
             h.expect_no_new_publishes(0).await;
         })
         .await;
@@ -1064,7 +1057,10 @@ async fn new_session_via_nats_returns_config_options() {
             let payloads = h.expect_n_publishes(1).await;
             let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
             let config_options = resp.config_options.unwrap_or_default();
-            assert!(!config_options.is_empty(), "new_session response must include config_options");
+            assert!(
+                !config_options.is_empty(),
+                "new_session response must include config_options"
+            );
             assert!(
                 config_options.iter().any(|o| o.id.to_string() == "read_file"),
                 "config_options must include read_file tool"
@@ -1085,7 +1081,10 @@ async fn load_session_via_nats_returns_config_options() {
             let payloads = h.expect_n_publishes(2).await;
             let resp: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
             let config_options = resp.config_options.unwrap_or_default();
-            assert!(!config_options.is_empty(), "load_session response must include config_options");
+            assert!(
+                !config_options.is_empty(),
+                "load_session response must include config_options"
+            );
         })
         .await;
 }
@@ -1125,8 +1124,7 @@ async fn set_session_config_option_via_nats_disables_tool() {
                 "reply.set_cfg",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let resp: SetSessionConfigOptionResponse =
-                serde_json::from_slice(&payloads[1]).unwrap();
+            let resp: SetSessionConfigOptionResponse = serde_json::from_slice(&payloads[1]).unwrap();
             let read_file_opt = resp
                 .config_options
                 .iter()
@@ -1136,7 +1134,10 @@ async fn set_session_config_option_via_nats_disables_tool() {
                 agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
                 _ => String::new(),
             };
-            assert_eq!(current, "disabled", "read_file must show disabled after set_config_option");
+            assert_eq!(
+                current, "disabled",
+                "read_file must show disabled after set_config_option"
+            );
         })
         .await;
 }
@@ -1164,8 +1165,7 @@ async fn set_session_config_option_via_nats_enables_then_disables() {
                 "r.enable",
             );
             let payloads = h.expect_n_publishes(3).await;
-            let resp: SetSessionConfigOptionResponse =
-                serde_json::from_slice(&payloads[2]).unwrap();
+            let resp: SetSessionConfigOptionResponse = serde_json::from_slice(&payloads[2]).unwrap();
             let opt = resp
                 .config_options
                 .iter()
@@ -1248,9 +1248,7 @@ async fn tool_call_notifications_via_nats() {
             h.expect_n_publishes(2).await;
 
             let notes = h.notifier.notifications.lock().unwrap();
-            let has_tool_call = notes
-                .iter()
-                .any(|n| matches!(&n.update, SessionUpdate::ToolCall(_)));
+            let has_tool_call = notes.iter().any(|n| matches!(&n.update, SessionUpdate::ToolCall(_)));
             let has_tool_call_update = notes
                 .iter()
                 .any(|n| matches!(&n.update, SessionUpdate::ToolCallUpdate(_)));
@@ -1353,7 +1351,8 @@ async fn fork_session_inherits_disabled_tools_via_nats() {
             );
             let payloads = h.expect_n_publishes(3).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
-            let config_options = val["configOptions"].as_array()
+            let config_options = val["configOptions"]
+                .as_array()
                 .expect("fork response must have configOptions");
             let read_file = config_options
                 .iter()
@@ -1427,8 +1426,7 @@ async fn list_sessions_via_nats_includes_fork_metadata() {
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()
-                ["sessionId"]
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -1475,7 +1473,9 @@ async fn close_session_during_active_prompt_cancels_and_removes_session() {
             let sid = create_session(&h).await;
 
             // Slow HTTP response: yields one event then hangs forever.
-            h.http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+            h.http.push_slow(OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -1490,11 +1490,7 @@ async fn close_session_during_active_prompt_cancels_and_removes_session() {
 
             // Close the session while the prompt is still running.
             let close_subj = format!("acp.session.{sid}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
 
             // Expect new_session + close_session + prompt (3 total).
             let payloads = h.expect_n_publishes(3).await;
@@ -1525,8 +1521,12 @@ async fn finish_reason_stop_maps_to_end_turn() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "answer".to_string() },
-                OpenRouterEvent::Finished { reason: FinishReason::Stop },
+                OpenRouterEvent::TextDelta {
+                    text: "answer".to_string(),
+                },
+                OpenRouterEvent::Finished {
+                    reason: FinishReason::Stop,
+                },
             ]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -1555,8 +1555,12 @@ async fn finish_reason_length_maps_to_end_turn() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "truncated".to_string() },
-                OpenRouterEvent::Finished { reason: FinishReason::Length },
+                OpenRouterEvent::TextDelta {
+                    text: "truncated".to_string(),
+                },
+                OpenRouterEvent::Finished {
+                    reason: FinishReason::Length,
+                },
             ]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -1634,8 +1638,7 @@ async fn list_sessions_via_nats_returns_cwd() {
                 "r.new",
             );
             let payloads = h.expect_n_publishes(1).await;
-            let sid = serde_json::from_slice::<serde_json::Value>(&payloads[0]).unwrap()
-                ["sessionId"]
+            let sid = serde_json::from_slice::<serde_json::Value>(&payloads[0]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -1756,11 +1759,7 @@ async fn load_session_has_modes_and_models_resume_does_not() {
             let sid = create_session(&h).await;
 
             let load_subj = format!("acp.session.{sid}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(sid.clone(), "/"),
-                "r.load.struct",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/"), "r.load.struct");
             let payloads = h.expect_n_publishes(2).await;
             let load_resp: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
             assert!(load_resp.modes.is_some(), "load_session must include modes");
@@ -1791,7 +1790,9 @@ async fn two_sessions_have_independent_histories() {
             let sid2 = create_session(&h).await;
 
             // Prompt session 1
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "reply-s1".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "reply-s1".to_string(),
+            }]);
             let prompt1_subj = format!("acp.session.{sid1}.agent.prompt");
             h.session_req(
                 &prompt1_subj,
@@ -1801,7 +1802,9 @@ async fn two_sessions_have_independent_histories() {
             h.expect_n_publishes(3).await;
 
             // Prompt session 2
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "reply-s2".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "reply-s2".to_string(),
+            }]);
             let prompt2_subj = format!("acp.session.{sid2}.agent.prompt");
             h.session_req(
                 &prompt2_subj,
@@ -1894,14 +1897,9 @@ async fn fork_inherits_api_key_and_uses_it_for_prompt() {
 
             // Fork the source — must inherit the key.
             let fork_subj = format!("acp.session.{src_id}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(src_id.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(src_id.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()
-                ["sessionId"]
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -2056,14 +2054,9 @@ async fn fork_session_cwd_appears_in_list_sessions() {
             let h = Harness::new();
 
             // Create source session with a specific cwd.
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/source-dir"),
-                "r.new",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/source-dir"), "r.new");
             let payloads = h.expect_n_publishes(1).await;
-            let src_id = serde_json::from_slice::<serde_json::Value>(&payloads[0]).unwrap()
-                ["sessionId"]
+            let src_id = serde_json::from_slice::<serde_json::Value>(&payloads[0]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -2076,8 +2069,7 @@ async fn fork_session_cwd_appears_in_list_sessions() {
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()
-                ["sessionId"]
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -2185,7 +2177,9 @@ async fn tool_dispatch_with_malformed_json_does_not_crash_via_nats() {
                     arguments: "NOT_VALID_JSON".to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -2202,7 +2196,10 @@ async fn tool_dispatch_with_malformed_json_does_not_crash_via_nats() {
                 resp.stop_reason
             );
             let call_count = h.http.recorded_models.lock().unwrap().len();
-            assert_eq!(call_count, 2, "tool round-trip must still complete despite malformed args");
+            assert_eq!(
+                call_count, 2,
+                "tool round-trip must still complete despite malformed args"
+            );
         })
         .await;
 }
@@ -2223,7 +2220,9 @@ async fn fetch_url_egress_blocked_completes_without_crash() {
                     arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -2240,7 +2239,10 @@ async fn fetch_url_egress_blocked_completes_without_crash() {
                 resp.stop_reason
             );
             let call_count = h.http.recorded_models.lock().unwrap().len();
-            assert_eq!(call_count, 2, "blocked egress must still produce a tool result and a follow-up call");
+            assert_eq!(
+                call_count, 2,
+                "blocked egress must still produce a tool result and a follow-up call"
+            );
         })
         .await;
 }
@@ -2269,8 +2271,7 @@ async fn set_session_config_option_response_has_updated_config_options() {
                 "r.setcfg",
             );
             let payloads = h.expect_n_publishes(before + 1).await;
-            let resp: SetSessionConfigOptionResponse =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let resp: SetSessionConfigOptionResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
 
             let read_file_opt = resp
                 .config_options
@@ -2281,7 +2282,10 @@ async fn set_session_config_option_response_has_updated_config_options() {
                 SessionConfigKind::Select(s) => s.current_value.to_string(),
                 _ => String::new(),
             };
-            assert_eq!(current, "disabled", "response must reflect the updated value immediately");
+            assert_eq!(
+                current, "disabled",
+                "response must reflect the updated value immediately"
+            );
         })
         .await;
 }
@@ -2293,11 +2297,7 @@ async fn new_session_all_config_options_enabled_by_default() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/"),
-                "r.cfg_default",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/"), "r.cfg_default");
             let payloads = h.expect_n_publishes(1).await;
             let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
             let config_options = resp.config_options.unwrap_or_default();
@@ -2312,7 +2312,10 @@ async fn new_session_all_config_options_enabled_by_default() {
                     SessionConfigKind::Select(s) => s.current_value.to_string(),
                     _ => String::new(),
                 };
-                assert_eq!(current, "enabled", "all tools must be enabled by default in new_session");
+                assert_eq!(
+                    current, "enabled",
+                    "all tools must be enabled by default in new_session"
+                );
             }
         })
         .await;
@@ -2332,30 +2335,40 @@ async fn response_exceeding_size_limit_stops_early_via_nats() {
 
             // Two deltas: "hello" (5 bytes) + " world!!!!" (10 bytes) → total 15 > limit 10.
             http.push(vec![
-                OpenRouterEvent::TextDelta { text: "hello".to_string() },
-                OpenRouterEvent::TextDelta { text: " world!!!!".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
+                OpenRouterEvent::TextDelta {
+                    text: " world!!!!".to_string(),
+                },
             ]);
 
             let prefix = AcpPrefix::new("acp").unwrap();
             let agent =
-                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
-                    .with_max_response_bytes(10);
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http).with_max_response_bytes(10);
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -2368,7 +2381,9 @@ async fn response_exceeding_size_limit_stops_early_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt response");
                 tokio::task::yield_now().await;
             }
@@ -2397,18 +2412,16 @@ async fn available_models_from_env_appear_in_new_session() {
                 );
             }
             let h = Harness::new();
-            unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+            unsafe {
+                std::env::remove_var("OPENROUTER_MODELS");
+            }
             drop(_env_guard);
 
             h.global("acp.agent.session.new", NewSessionRequest::new("/"), "r.models");
             let payloads = h.expect_n_publishes(1).await;
             let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
             let models = resp.models.expect("new_session must return model state");
-            let ids: Vec<&str> = models
-                .available_models
-                .iter()
-                .map(|m| m.model_id.0.as_ref())
-                .collect();
+            let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             assert!(
                 ids.contains(&"custom/model-a"),
                 "custom/model-a must appear in available_models: {ids:?}"
@@ -2436,26 +2449,32 @@ async fn fork_inherits_system_prompt_sent_to_http_client() {
             http.push(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
 
             let prefix = AcpPrefix::new("acp").unwrap();
-            let agent =
-                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http.clone())
-                    .with_system_prompt("Be helpful.");
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http.clone())
+                .with_system_prompt("Be helpful.");
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
             // Create source session
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/src"), "r.src");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/src"),
+                "r.src",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: source session.new");
                 tokio::task::yield_now().await;
             }
             let src_id = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -2469,13 +2488,14 @@ async fn fork_inherits_system_prompt_sent_to_http_client() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: fork response");
                 tokio::task::yield_now().await;
             }
             let fork_id = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[1]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[1]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -2489,7 +2509,9 @@ async fn fork_inherits_system_prompt_sent_to_http_client() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 3 { break; }
+                if nats.published_payloads().len() >= 3 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: fork prompt response");
                 tokio::task::yield_now().await;
             }
@@ -2498,11 +2520,13 @@ async fn fork_inherits_system_prompt_sent_to_http_client() {
             assert!(!msgs.is_empty(), "at least one message must be sent to chat_stream");
             assert_eq!(
                 msgs[0].role, "system",
-                "first wire message must be system role; got: {:?}", msgs[0].role
+                "first wire message must be system role; got: {:?}",
+                msgs[0].role
             );
             assert!(
                 msgs[0].content.contains("Be helpful."),
-                "system message must carry the inherited prompt; got: {:?}", msgs[0].content
+                "system message must carry the inherited prompt; got: {:?}",
+                msgs[0].content
             );
         })
         .await;
@@ -2557,12 +2581,19 @@ async fn initialize_with_global_key_has_two_auth_methods() {
                 "with a global key both env-var and agent methods must be offered: {:?}",
                 resp.auth_methods
             );
-            let ids: Vec<String> = resp.auth_methods.iter().map(|m| match m {
-                AuthMethod::EnvVar(e) => e.id.0.as_ref().to_string(),
-                AuthMethod::Agent(a) => a.id.0.as_ref().to_string(),
-                _ => "other".to_string(),
-            }).collect();
-            assert!(ids.contains(&"openrouter-api-key".to_string()), "env-var method missing: {ids:?}");
+            let ids: Vec<String> = resp
+                .auth_methods
+                .iter()
+                .map(|m| match m {
+                    AuthMethod::EnvVar(e) => e.id.0.as_ref().to_string(),
+                    AuthMethod::Agent(a) => a.id.0.as_ref().to_string(),
+                    _ => "other".to_string(),
+                })
+                .collect();
+            assert!(
+                ids.contains(&"openrouter-api-key".to_string()),
+                "env-var method missing: {ids:?}"
+            );
             assert!(ids.contains(&"agent".to_string()), "agent method missing: {ids:?}");
         })
         .await;
@@ -2606,10 +2637,10 @@ async fn initialize_session_capabilities_are_complete() {
             let payloads = h.expect_n_publishes(1).await;
             let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
             let caps = &resp.agent_capabilities.session_capabilities;
-            assert!(caps.fork.is_some(),   "fork capability must be declared");
-            assert!(caps.list.is_some(),   "list capability must be declared");
+            assert!(caps.fork.is_some(), "fork capability must be declared");
+            assert!(caps.list.is_some(), "list capability must be declared");
             assert!(caps.resume.is_some(), "resume capability must be declared");
-            assert!(caps.close.is_some(),  "close capability must be declared");
+            assert!(caps.close.is_some(), "close capability must be declared");
         })
         .await;
 }
@@ -2639,7 +2670,9 @@ async fn prompt_two_text_blocks_joined_with_newline_via_nats() {
             h.expect_n_publishes(2).await;
 
             let msgs = h.http.last_messages();
-            let user_msg = msgs.iter().find(|m| m.role == "user")
+            let user_msg = msgs
+                .iter()
+                .find(|m| m.role == "user")
                 .expect("user message must be present");
             assert_eq!(
                 user_msg.content, "first\nsecond",
@@ -2674,11 +2707,12 @@ async fn prompt_resource_link_formatted_via_nats() {
             h.expect_n_publishes(2).await;
 
             let msgs = h.http.last_messages();
-            let user_msg = msgs.iter().find(|m| m.role == "user")
+            let user_msg = msgs
+                .iter()
+                .find(|m| m.role == "user")
                 .expect("user message must be present");
             assert_eq!(
-                user_msg.content,
-                "[Resource: my-file.txt | file:///workspace/my-file.txt]",
+                user_msg.content, "[Resource: my-file.txt | file:///workspace/my-file.txt]",
                 "ResourceLink must be formatted with name and URI"
             );
         })
@@ -2701,9 +2735,10 @@ async fn prompt_embedded_text_resource_verbatim_via_nats() {
                 PromptRequest::new(
                     sid.clone(),
                     vec![ContentBlock::Resource(EmbeddedResource::new(
-                        EmbeddedResourceResource::TextResourceContents(
-                            TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
-                        ),
+                        EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                            "fn main() {}",
+                            "file:///src/main.rs",
+                        )),
                     ))],
                 ),
                 "r.embedded_text",
@@ -2711,7 +2746,9 @@ async fn prompt_embedded_text_resource_verbatim_via_nats() {
             h.expect_n_publishes(2).await;
 
             let msgs = h.http.last_messages();
-            let user_msg = msgs.iter().find(|m| m.role == "user")
+            let user_msg = msgs
+                .iter()
+                .find(|m| m.role == "user")
                 .expect("user message must be present");
             assert_eq!(
                 user_msg.content, "fn main() {}",
@@ -2734,28 +2771,36 @@ async fn prompt_stream_timeout_returns_end_turn_via_nats() {
             let session_tx = nats.inject_messages();
 
             // Stream emits one delta then hangs forever — timeout must fire.
-            http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+            http.push_slow(OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prefix = AcpPrefix::new("acp").unwrap();
-            let agent =
-                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
-                    .with_prompt_timeout(Duration::from_millis(100));
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
+                .with_prompt_timeout(Duration::from_millis(100));
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -2769,7 +2814,9 @@ async fn prompt_stream_timeout_returns_end_turn_via_nats() {
             // Wait up to 3s for prompt to complete despite the hanging stream.
             let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for prompt response after stream timeout"
@@ -2824,8 +2871,8 @@ async fn pending_key_consumed_second_session_uses_global_key() {
             h.expect_n_publishes(5).await;
             let key2 = h.http.last_api_key();
 
-            assert_eq!(key1, "user-key",  "first session must use the user-provided key");
-            assert_eq!(key2, "test-key",  "second session must fall back to the global key");
+            assert_eq!(key1, "user-key", "first session must use the user-provided key");
+            assert_eq!(key2, "test-key", "second session must fall back to the global key");
         })
         .await;
 }
@@ -2840,7 +2887,9 @@ async fn fork_branch_at_index_zero_clears_history_via_nats() {
             let src_id = create_session(&h).await;
 
             // Prompt source to build up history (user + assistant messages).
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "src answer".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "src answer".to_string(),
+            }]);
             let prompt_subj = format!("acp.session.{src_id}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -2853,18 +2902,23 @@ async fn fork_branch_at_index_zero_clears_history_via_nats() {
             let fork_subj = format!("acp.session.{src_id}.agent.fork");
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
                 serde_json::json!({"branchAtIndex": 0}),
-            ).unwrap();
+            )
+            .unwrap();
             h.session_req(
                 &fork_subj,
                 ForkSessionRequest::new(src_id.clone(), "/fork").meta(meta),
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(3).await;
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()
-                ["sessionId"].as_str().unwrap().to_string();
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
 
             // Prompt the fork — wire messages must contain only the new user turn.
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "fork answer".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "fork answer".to_string(),
+            }]);
             let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
             h.session_req(
                 &fork_prompt_subj,
@@ -2912,7 +2966,9 @@ async fn prompt_blob_resource_with_mime_type_formatted_via_nats() {
             h.expect_n_publishes(2).await;
 
             let msgs = h.http.last_messages();
-            let user_msg = msgs.iter().find(|m| m.role == "user")
+            let user_msg = msgs
+                .iter()
+                .find(|m| m.role == "user")
                 .expect("user message must be present");
             assert!(
                 user_msg.content.contains("img.png") && user_msg.content.contains("image/png"),
@@ -2946,7 +3002,9 @@ async fn prompt_blob_resource_without_mime_type_uses_binary_fallback_via_nats() 
             h.expect_n_publishes(2).await;
 
             let msgs = h.http.last_messages();
-            let user_msg = msgs.iter().find(|m| m.role == "user")
+            let user_msg = msgs
+                .iter()
+                .find(|m| m.role == "user")
                 .expect("user message must be present");
             assert!(
                 user_msg.content.contains("data.bin") && user_msg.content.contains("binary"),
@@ -2967,7 +3025,9 @@ async fn prompt_different_message_not_treated_as_resume_via_nats() {
             let sid = create_session(&h).await;
 
             // First prompt: "ping"
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "pong".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "pong".to_string(),
+            }]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -2977,7 +3037,9 @@ async fn prompt_different_message_not_treated_as_resume_via_nats() {
             h.expect_n_publishes(2).await;
 
             // Second prompt: "ping world" (different — must NOT be treated as resume of "ping")
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "pong2".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "pong2".to_string(),
+            }]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("ping world")]),
@@ -3012,11 +3074,7 @@ async fn prompt_empty_content_list_returns_end_turn_via_nats() {
 
             // No events queued — empty response
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
-            h.session_req(
-                &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![]),
-                "r.empty_content",
-            );
+            h.session_req(&prompt_subj, PromptRequest::new(sid.clone(), vec![]), "r.empty_content");
             let payloads = h.expect_n_publishes(2).await;
             let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
             assert!(
@@ -3072,7 +3130,13 @@ impl AgentLoading for FixedAgentLoader {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>> {
         let sp = self.sp.clone();
         let model = self.model.clone();
-        Box::pin(async move { AgentConfig { skill_ids: vec![], system_prompt: sp, model_id: model } })
+        Box::pin(async move {
+            AgentConfig {
+                skill_ids: vec![],
+                system_prompt: sp,
+                model_id: model,
+            }
+        })
     }
 }
 
@@ -3100,8 +3164,12 @@ async fn prompt_finished_event_silently_ignored_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "the answer".to_string() },
-                OpenRouterEvent::Finished { reason: FinishReason::Stop },
+                OpenRouterEvent::TextDelta {
+                    text: "the answer".to_string(),
+                },
+                OpenRouterEvent::Finished {
+                    reason: FinishReason::Stop,
+                },
                 OpenRouterEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -3118,8 +3186,11 @@ async fn prompt_finished_event_silently_ignored_via_nats() {
                 resp.stop_reason
             );
             // Verify text arrived via notifications (not that it was erased).
-            assert_eq!(h.http.recorded_models.lock().unwrap().len(), 1,
-                "exactly one HTTP call must be made — Finished must not trigger a retry");
+            assert_eq!(
+                h.http.recorded_models.lock().unwrap().len(),
+                1,
+                "exactly one HTTP call must be made — Finished must not trigger a retry"
+            );
         })
         .await;
 }
@@ -3148,9 +3219,14 @@ async fn prompt_empty_string_still_calls_http_client() {
                 resp.stop_reason
             );
             let msgs = h.http.last_messages();
-            let user_msg = msgs.iter().find(|m| m.role == "user")
+            let user_msg = msgs
+                .iter()
+                .find(|m| m.role == "user")
                 .expect("must have a user message even for empty string input");
-            assert_eq!(user_msg.content, "", "empty string block must produce empty content in wire");
+            assert_eq!(
+                user_msg.content, "",
+                "empty string block must produce empty content in wire"
+            );
         })
         .await;
 }
@@ -3165,7 +3241,9 @@ async fn fork_branch_at_index_beyond_length_copies_full_history_via_nats() {
             let src_id = create_session(&h).await;
 
             // Prompt source to build history (1 user + 1 assistant = 2 history messages).
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "src answer".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "src answer".to_string(),
+            }]);
             let src_prompt_subj = format!("acp.session.{src_id}.agent.prompt");
             h.session_req(
                 &src_prompt_subj,
@@ -3178,18 +3256,23 @@ async fn fork_branch_at_index_beyond_length_copies_full_history_via_nats() {
             let fork_subj = format!("acp.session.{src_id}.agent.fork");
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
                 serde_json::json!({"branchAtIndex": 9999}),
-            ).unwrap();
+            )
+            .unwrap();
             h.session_req(
                 &fork_subj,
                 ForkSessionRequest::new(src_id.clone(), "/fork").meta(meta),
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(3).await;
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()
-                ["sessionId"].as_str().unwrap().to_string();
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
 
             // Prompt fork — wire must include the full inherited history + new user turn.
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "fork answer".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "fork answer".to_string(),
+            }]);
             let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
             h.session_req(
                 &fork_prompt_subj,
@@ -3220,7 +3303,12 @@ fn make_loader_harness(
     agent_sp: Option<&str>,
     skills: Option<&str>,
     model_id: Option<&str>,
-) -> (MockNatsClient, TestHttpClient, UnboundedSender<Message>, UnboundedSender<Message>) {
+) -> (
+    MockNatsClient,
+    TestHttpClient,
+    UnboundedSender<Message>,
+    UnboundedSender<Message>,
+) {
     let nats = MockNatsClient::new();
     let http = TestHttpClient::new();
     let notifier = TestNotifier::new();
@@ -3228,29 +3316,39 @@ fn make_loader_harness(
     let session_tx = nats.inject_messages();
 
     let prefix = AcpPrefix::new("acp").unwrap();
-    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http.clone())
-        .with_loaders(
-            "agent-id",
-            Arc::new(FixedAgentLoader {
-                sp: agent_sp.map(str::to_string),
-                model: model_id.map(str::to_string),
-            }),
-            Arc::new(FixedSkillLoader { text: skills.map(str::to_string) }),
-        );
+    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http.clone()).with_loaders(
+        "agent-id",
+        Arc::new(FixedAgentLoader {
+            sp: agent_sp.map(str::to_string),
+            model: model_id.map(str::to_string),
+        }),
+        Arc::new(FixedSkillLoader {
+            text: skills.map(str::to_string),
+        }),
+    );
     let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
         tokio::task::spawn_local(fut);
     });
-    tokio::task::spawn_local(async move { let _ = io_task.await; });
+    tokio::task::spawn_local(async move {
+        let _ = io_task.await;
+    });
 
     (nats, http, global_tx, session_tx)
 }
 
 async fn loader_create_session(nats: &MockNatsClient, global_tx: &UnboundedSender<Message>) -> String {
     let before = nats.published_payloads().len();
-    inject_req(global_tx, "acp.agent.session.new", NewSessionRequest::new("/tmp"), "r.new");
+    inject_req(
+        global_tx,
+        "acp.agent.session.new",
+        NewSessionRequest::new("/tmp"),
+        "r.new",
+    );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
-        if nats.published_payloads().len() > before { break; }
+        if nats.published_payloads().len() > before {
+            break;
+        }
         assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
         tokio::task::yield_now().await;
     }
@@ -3270,7 +3368,9 @@ async fn loader_send_prompt(nats: &MockNatsClient, session_tx: &UnboundedSender<
     );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
-        if nats.published_payloads().len() > before { break; }
+        if nats.published_payloads().len() > before {
+            break;
+        }
         assert!(tokio::time::Instant::now() < deadline, "timeout: prompt");
         tokio::task::yield_now().await;
     }
@@ -3288,11 +3388,12 @@ async fn loader_combined_system_prompt_sent_to_http_client() {
             loader_send_prompt(&nats, &session_tx, &sid).await;
 
             let msgs = http.last_messages();
-            let sys = msgs.iter().find(|m| m.role == "system")
+            let sys = msgs
+                .iter()
+                .find(|m| m.role == "system")
                 .expect("must have a system message when both loader sp and skills are set");
             assert_eq!(
-                sys.content,
-                "Agent prompt.\n\nSkills text.",
+                sys.content, "Agent prompt.\n\nSkills text.",
                 "combined system prompt must be agent_sp + newlines + skills: {:?}",
                 sys.content
             );
@@ -3304,19 +3405,19 @@ async fn loader_combined_system_prompt_sent_to_http_client() {
 async fn loader_skills_only_system_prompt_sent_to_http_client() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (nats, http, global_tx, session_tx) =
-                make_loader_harness(None, Some("Skills only."), None);
+            let (nats, http, global_tx, session_tx) = make_loader_harness(None, Some("Skills only."), None);
 
             http.push(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
             let sid = loader_create_session(&nats, &global_tx).await;
             loader_send_prompt(&nats, &session_tx, &sid).await;
 
             let msgs = http.last_messages();
-            let sys = msgs.iter().find(|m| m.role == "system")
+            let sys = msgs
+                .iter()
+                .find(|m| m.role == "system")
                 .expect("must have system message when only skills are set");
             assert_eq!(
-                sys.content,
-                "Skills only.",
+                sys.content, "Skills only.",
                 "system prompt must be the skills text when no agent_sp: {:?}",
                 sys.content
             );
@@ -3328,19 +3429,19 @@ async fn loader_skills_only_system_prompt_sent_to_http_client() {
 async fn loader_agent_prompt_only_sent_to_http_client() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (nats, http, global_tx, session_tx) =
-                make_loader_harness(Some("Agent only."), None, None);
+            let (nats, http, global_tx, session_tx) = make_loader_harness(Some("Agent only."), None, None);
 
             http.push(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
             let sid = loader_create_session(&nats, &global_tx).await;
             loader_send_prompt(&nats, &session_tx, &sid).await;
 
             let msgs = http.last_messages();
-            let sys = msgs.iter().find(|m| m.role == "system")
+            let sys = msgs
+                .iter()
+                .find(|m| m.role == "system")
                 .expect("must have system message when only agent_sp is set");
             assert_eq!(
-                sys.content,
-                "Agent only.",
+                sys.content, "Agent only.",
                 "system prompt must be the agent_sp text when no skills: {:?}",
                 sys.content
             );
@@ -3352,8 +3453,7 @@ async fn loader_agent_prompt_only_sent_to_http_client() {
 async fn loader_neither_produces_no_system_message() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (nats, http, global_tx, session_tx) =
-                make_loader_harness(None, None, None);
+            let (nats, http, global_tx, session_tx) = make_loader_harness(None, None, None);
 
             http.push(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
             let sid = loader_create_session(&nats, &global_tx).await;
@@ -3372,8 +3472,7 @@ async fn loader_neither_produces_no_system_message() {
 async fn loader_model_id_used_in_wire_request() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (nats, http, global_tx, session_tx) =
-                make_loader_harness(None, None, Some("loader-model"));
+            let (nats, http, global_tx, session_tx) = make_loader_harness(None, None, Some("loader-model"));
 
             http.push(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
             let sid = loader_create_session(&nats, &global_tx).await;
@@ -3596,11 +3695,7 @@ async fn set_session_config_option_boolean_value_is_ignored_via_nats() {
             // Send a boolean value — must be silently ignored, not re-enable read_file.
             let mut req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "enabled");
             req.value = agent_client_protocol::SessionConfigOptionValue::Boolean { value: true };
-            h.session_req(
-                &format!("acp.session.{sid}.agent.set_config_option"),
-                req,
-                "r.bool",
-            );
+            h.session_req(&format!("acp.session.{sid}.agent.set_config_option"), req, "r.bool");
             h.expect_n_publishes(3).await;
 
             // read_file must still be disabled.
@@ -3639,18 +3734,26 @@ async fn prompt_fails_without_api_key_via_nats() {
             let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
                 tokio::task::spawn_local(fut);
             });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -3662,12 +3765,13 @@ async fn prompt_fails_without_api_key_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt");
                 tokio::task::yield_now().await;
             }
-            let val: serde_json::Value =
-                serde_json::from_slice(&nats.published_payloads()[1]).unwrap();
+            let val: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[1]).unwrap();
             assert!(
                 val.get("code").is_some(),
                 "prompt without API key must return an ACP error: {val}"
@@ -3731,27 +3835,37 @@ async fn response_exactly_at_size_limit_does_not_stop_via_nats() {
             let session_tx = nats.inject_messages();
 
             // "hello" is exactly 5 bytes — at the limit, the guard uses `>`, not `>=`.
-            http.push(vec![OpenRouterEvent::TextDelta { text: "hello".to_string() }]);
+            http.push(vec![OpenRouterEvent::TextDelta {
+                text: "hello".to_string(),
+            }]);
 
             let prefix = AcpPrefix::new("acp").unwrap();
             let http_clone = http.clone();
-            let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http_clone)
-                .with_max_response_bytes(5);
+            let agent =
+                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http_clone).with_max_response_bytes(5);
             let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
                 tokio::task::spawn_local(fut);
             });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -3763,12 +3877,13 @@ async fn response_exactly_at_size_limit_does_not_stop_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt");
                 tokio::task::yield_now().await;
             }
-            let resp: PromptResponse =
-                serde_json::from_slice(&nats.published_payloads()[1]).unwrap();
+            let resp: PromptResponse = serde_json::from_slice(&nats.published_payloads()[1]).unwrap();
             assert!(
                 matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn),
                 "response exactly at limit must complete with EndTurn (guard is >, not >=): {:?}",
@@ -3796,27 +3911,37 @@ async fn size_limit_guard_saves_partial_to_history_via_nats() {
             let session_tx = nats.inject_messages();
 
             // "abcd" is 4 bytes > limit of 3 — triggers early stop.
-            http.push(vec![OpenRouterEvent::TextDelta { text: "abcd".to_string() }]);
+            http.push(vec![OpenRouterEvent::TextDelta {
+                text: "abcd".to_string(),
+            }]);
 
             let prefix = AcpPrefix::new("acp").unwrap();
             let http_clone = http.clone();
-            let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http_clone)
-                .with_max_response_bytes(3);
+            let agent =
+                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http_clone).with_max_response_bytes(3);
             let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
                 tokio::task::spawn_local(fut);
             });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -3828,7 +3953,9 @@ async fn size_limit_guard_saves_partial_to_history_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt");
                 tokio::task::yield_now().await;
             }
@@ -3843,7 +3970,9 @@ async fn size_limit_guard_saves_partial_to_history_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 3 { break; }
+                if nats.published_payloads().len() >= 3 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt2");
                 tokio::task::yield_now().await;
             }
@@ -3857,8 +3986,7 @@ async fn size_limit_guard_saves_partial_to_history_via_nats() {
             );
             assert_eq!(msgs[1].role, "assistant");
             assert_eq!(
-                msgs[1].content,
-                "abcd",
+                msgs[1].content, "abcd",
                 "partial assistant text must be preserved in history"
             );
         })
@@ -3890,18 +4018,26 @@ async fn loader_falls_back_to_with_system_prompt_via_nats() {
             let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
                 tokio::task::spawn_local(fut);
             });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -3914,17 +4050,20 @@ async fn loader_falls_back_to_with_system_prompt_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt");
                 tokio::task::yield_now().await;
             }
 
             let msgs = http.last_messages();
-            let sys = msgs.iter().find(|m| m.role == "system")
+            let sys = msgs
+                .iter()
+                .find(|m| m.role == "system")
                 .expect("must have system message when loader has no prompt but with_system_prompt is set");
             assert_eq!(
-                sys.content,
-                "Base prompt.",
+                sys.content, "Base prompt.",
                 "with_system_prompt must be used as fallback when loader returns no prompt: {:?}",
                 sys.content
             );
@@ -3946,19 +4085,15 @@ async fn available_models_malformed_entry_skipped_via_nats() {
                 );
             }
             let h = Harness::new();
-            unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+            unsafe {
+                std::env::remove_var("OPENROUTER_MODELS");
+            }
 
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/"),
-                "r.new",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let payloads = h.expect_n_publishes(1).await;
             let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
             let models = resp.models.expect("must have model state");
-            let ids: Vec<&str> = models.available_models.iter()
-                .map(|m| m.model_id.0.as_ref())
-                .collect();
+            let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             assert!(ids.contains(&"good/model-a"), "valid entry must appear: {ids:?}");
             assert!(ids.contains(&"good/model-b"), "valid entry must appear: {ids:?}");
             assert!(
@@ -3978,13 +4113,11 @@ async fn available_models_all_malformed_falls_back_to_defaults_via_nats() {
                 std::env::set_var("OPENROUTER_MODELS", "no-colon,also-no-colon");
             }
             let h = Harness::new();
-            unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+            unsafe {
+                std::env::remove_var("OPENROUTER_MODELS");
+            }
 
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/"),
-                "r.new",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let payloads = h.expect_n_publishes(1).await;
             let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
             let models = resp.models.expect("must have model state");
@@ -3994,7 +4127,10 @@ async fn available_models_all_malformed_falls_back_to_defaults_via_nats() {
                 models.available_models
             );
             assert!(
-                models.available_models.iter().any(|m| m.model_id.0.as_ref().contains("claude")),
+                models
+                    .available_models
+                    .iter()
+                    .any(|m| m.model_id.0.as_ref().contains("claude")),
                 "hardcoded defaults must include a Claude model: {:?}",
                 models.available_models
             );
@@ -4018,7 +4154,9 @@ async fn tool_round_second_http_call_contains_tool_messages_via_nats() {
                     arguments: r#"{"path":"."}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4031,7 +4169,9 @@ async fn tool_round_second_http_call_contains_tool_messages_via_nats() {
             let msgs = h.http.last_messages();
 
             // Second call must include an assistant message with tool_calls
-            let asst_tc = msgs.iter().find(|m| m.role == "assistant" && m.tool_calls.is_some())
+            let asst_tc = msgs
+                .iter()
+                .find(|m| m.role == "assistant" && m.tool_calls.is_some())
                 .expect("second HTTP call must include assistant message with tool_calls");
             let tc = asst_tc.tool_calls.as_ref().unwrap();
             assert_eq!(tc.len(), 1, "must have exactly one tool call");
@@ -4039,7 +4179,9 @@ async fn tool_round_second_http_call_contains_tool_messages_via_nats() {
             assert_eq!(tc[0].name, "list_directory");
 
             // Second call must include a tool-result message
-            let tool_result = msgs.iter().find(|m| m.tool_call_id.is_some())
+            let tool_result = msgs
+                .iter()
+                .find(|m| m.tool_call_id.is_some())
                 .expect("second HTTP call must include a tool result message");
             assert_eq!(
                 tool_result.tool_call_id.as_deref(),
@@ -4073,7 +4215,9 @@ async fn multiple_tool_calls_in_one_round_all_dispatched_via_nats() {
                     },
                 ],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4125,7 +4269,9 @@ async fn two_consecutive_tool_rounds_complete_with_end_turn_via_nats() {
                 }],
             }]);
             // Final: model produces text after both tool rounds
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "all done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "all done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4145,40 +4291,53 @@ async fn two_consecutive_tool_rounds_complete_with_end_turn_via_nats() {
 
             // Exactly 3 HTTP calls must have been made
             let call_count = h.http.recorded_models.lock().unwrap().len();
-            assert_eq!(call_count, 3, "must make 3 HTTP calls for two tool rounds + final answer");
+            assert_eq!(
+                call_count, 3,
+                "must make 3 HTTP calls for two tool rounds + final answer"
+            );
 
             // Third HTTP call must carry both tool rounds in its wire messages
             let third_call_msgs = h.http.recorded_messages.lock().unwrap()[2].clone();
-            let tool_calls_msgs: Vec<_> = third_call_msgs.iter()
-                .filter(|m| m.tool_calls.is_some())
-                .collect();
+            let tool_calls_msgs: Vec<_> = third_call_msgs.iter().filter(|m| m.tool_calls.is_some()).collect();
             assert_eq!(
-                tool_calls_msgs.len(), 2,
+                tool_calls_msgs.len(),
+                2,
                 "third HTTP call must include 2 assistant tool_calls messages (one per round): {third_call_msgs:?}"
             );
-            let tool_result_msgs: Vec<_> = third_call_msgs.iter()
-                .filter(|m| m.tool_call_id.is_some())
-                .collect();
+            let tool_result_msgs: Vec<_> = third_call_msgs.iter().filter(|m| m.tool_call_id.is_some()).collect();
             assert_eq!(
-                tool_result_msgs.len(), 2,
+                tool_result_msgs.len(),
+                2,
                 "third HTTP call must include 2 tool result messages (one per round): {third_call_msgs:?}"
             );
-            let result_ids: Vec<Option<&str>> = tool_result_msgs.iter()
-                .map(|m| m.tool_call_id.as_deref())
-                .collect();
-            assert!(result_ids.contains(&Some("call_r1")), "round-1 tool result must be present");
-            assert!(result_ids.contains(&Some("call_r2")), "round-2 tool result must be present");
+            let result_ids: Vec<Option<&str>> = tool_result_msgs.iter().map(|m| m.tool_call_id.as_deref()).collect();
+            assert!(
+                result_ids.contains(&Some("call_r1")),
+                "round-1 tool result must be present"
+            );
+            assert!(
+                result_ids.contains(&Some("call_r2")),
+                "round-2 tool result must be present"
+            );
 
             // Four tool notifications: InProgress+Completed for each round
             let notes = h.notifier.notifications.lock().unwrap();
-            let tool_call_count = notes.iter()
+            let tool_call_count = notes
+                .iter()
                 .filter(|n| matches!(&n.update, SessionUpdate::ToolCall(_)))
                 .count();
-            let tool_call_update_count = notes.iter()
+            let tool_call_update_count = notes
+                .iter()
                 .filter(|n| matches!(&n.update, SessionUpdate::ToolCallUpdate(_)))
                 .count();
-            assert_eq!(tool_call_count, 2, "must emit 2 ToolCall (InProgress) notifications for 2 rounds");
-            assert_eq!(tool_call_update_count, 2, "must emit 2 ToolCallUpdate (Completed) notifications for 2 rounds");
+            assert_eq!(
+                tool_call_count, 2,
+                "must emit 2 ToolCall (InProgress) notifications for 2 rounds"
+            );
+            assert_eq!(
+                tool_call_update_count, 2,
+                "must emit 2 ToolCallUpdate (Completed) notifications for 2 rounds"
+            );
         })
         .await;
 }
@@ -4199,7 +4358,9 @@ async fn fetch_url_egress_blocked_error_message_in_tool_result_via_nats() {
                     arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4210,7 +4371,9 @@ async fn fetch_url_egress_blocked_error_message_in_tool_result_via_nats() {
             h.expect_n_publishes(2).await;
 
             let msgs = h.http.last_messages();
-            let tool_result = msgs.iter().find(|m| m.tool_call_id.is_some())
+            let tool_result = msgs
+                .iter()
+                .find(|m| m.tool_call_id.is_some())
                 .expect("egress-blocked call must still produce a tool result message");
             assert!(
                 tool_result.content.contains("blocked by egress policy"),
@@ -4280,7 +4443,9 @@ async fn text_notification_sent_after_tool_round_via_nats() {
                     arguments: r#"{"path":"."}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "final answer".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "final answer".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4306,7 +4471,6 @@ async fn text_notification_sent_after_tool_round_via_nats() {
         .await;
 }
 
-
 // ── tool-round history preserved into next prompt's wire messages ─────────────
 
 #[tokio::test]
@@ -4324,7 +4488,9 @@ async fn tool_round_history_preserved_for_next_prompt_via_nats() {
                     arguments: r#"{"path":"."}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4356,7 +4522,9 @@ async fn tool_round_history_preserved_for_next_prompt_via_nats() {
                 msgs.iter().any(|m| m.tool_call_id.as_deref() == Some("call_hist")),
                 "wire messages for second prompt must include tool result from history: {msgs:?}"
             );
-            let last_user = msgs.iter().rfind(|m| m.role == "user")
+            let last_user = msgs
+                .iter()
+                .rfind(|m| m.role == "user")
                 .expect("must have a user message");
             assert_eq!(
                 last_user.content, "p2",
@@ -4385,8 +4553,15 @@ async fn usage_update_notification_fires_after_tool_round_via_nats() {
             }]);
             // Call 2: final answer with usage event
             h.http.push(vec![
-                OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
-                OpenRouterEvent::TextDelta { text: "done".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 20,
+                    completion_tokens: 10,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+                OpenRouterEvent::TextDelta {
+                    text: "done".to_string(),
+                },
             ]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -4398,9 +4573,7 @@ async fn usage_update_notification_fires_after_tool_round_via_nats() {
             h.expect_n_publishes(2).await;
 
             let notes = h.notifier.notifications.lock().unwrap();
-            let has_usage = notes
-                .iter()
-                .any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
+            let has_usage = notes.iter().any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
             assert!(
                 has_usage,
                 "UsageUpdate notification must be emitted even when usage arrives in the second HTTP call: {notes:?}"
@@ -4430,27 +4603,36 @@ async fn stream_timeout_in_second_http_call_of_tool_round_via_nats() {
                 }],
             }]);
             // Call 2: emits one delta then hangs — timeout must fire
-            http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+            http.push_slow(OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prefix = AcpPrefix::new("acp").unwrap();
             let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
                 .with_prompt_timeout(Duration::from_millis(100));
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -4464,7 +4646,9 @@ async fn stream_timeout_in_second_http_call_of_tool_round_via_nats() {
             // Wait up to 3s for the second-call timeout to fire and produce a response.
             let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for prompt response after second-call stream timeout"
@@ -4495,7 +4679,9 @@ async fn partial_text_before_tool_calls_not_in_next_wire_messages_via_nats() {
             // as an assistant message in history because assistant_text.clear() runs
             // at the top of each outer loop iteration.
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "pre-tool-text".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "pre-tool-text".to_string(),
+                },
                 OpenRouterEvent::ToolCallsReady {
                     calls: vec![AssembledToolCall {
                         id: "call_pt".to_string(),
@@ -4505,7 +4691,9 @@ async fn partial_text_before_tool_calls_not_in_next_wire_messages_via_nats() {
                 },
             ]);
             // Call 2: final answer
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "final".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "final".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4518,11 +4706,9 @@ async fn partial_text_before_tool_calls_not_in_next_wire_messages_via_nats() {
             // The messages sent in call 2 are the wire batch. The partial text
             // "pre-tool-text" must not appear there as a standalone assistant message.
             let msgs = h.http.last_messages();
-            let partial_as_assistant = msgs.iter().any(|m| {
-                m.role == "assistant"
-                    && m.tool_calls.is_none()
-                    && m.content.contains("pre-tool-text")
-            });
+            let partial_as_assistant = msgs
+                .iter()
+                .any(|m| m.role == "assistant" && m.tool_calls.is_none() && m.content.contains("pre-tool-text"));
             assert!(
                 !partial_as_assistant,
                 "partial text accumulated before ToolCallsReady must not be stored as an assistant message: {msgs:?}"
@@ -4555,29 +4741,40 @@ async fn max_response_bytes_guard_applies_after_tool_round_via_nats() {
             // assistant_text resets to "" at the start of each outer loop iteration,
             // so the guard measures only call-2 text, not any text from call 1.
             http.push(vec![
-                OpenRouterEvent::TextDelta { text: "hello".to_string() },
-                OpenRouterEvent::TextDelta { text: " world!!!!".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
+                OpenRouterEvent::TextDelta {
+                    text: " world!!!!".to_string(),
+                },
             ]);
 
             let prefix = AcpPrefix::new("acp").unwrap();
-            let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
-                .with_max_response_bytes(10);
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let agent =
+                OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http).with_max_response_bytes(10);
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if !nats.published_payloads().is_empty() { break; }
+                if !nats.published_payloads().is_empty() {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
             let sid = {
-                let v: serde_json::Value =
-                    serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+                let v: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
 
@@ -4590,7 +4787,9 @@ async fn max_response_bytes_guard_applies_after_tool_round_via_nats() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: prompt response");
                 tokio::task::yield_now().await;
             }
@@ -4623,7 +4822,9 @@ async fn cancel_during_second_http_call_of_tool_round_via_nats() {
                 }],
             }]);
             // Call 2: hangs — cancel must interrupt it
-            h.http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+            h.http.push_slow(OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4667,7 +4868,9 @@ async fn tool_call_inprogress_notification_has_kind_other_for_trogon_tools_via_n
                     arguments: r#"{"path":"."}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4678,12 +4881,20 @@ async fn tool_call_inprogress_notification_has_kind_other_for_trogon_tools_via_n
             h.expect_n_publishes(2).await;
 
             let notes = h.notifier.notifications.lock().unwrap();
-            let in_progress = notes.iter().find_map(|n| {
-                if let SessionUpdate::ToolCall(tc) = &n.update { Some(tc) } else { None }
-            }).expect("must have a ToolCall (InProgress) notification");
+            let in_progress = notes
+                .iter()
+                .find_map(|n| {
+                    if let SessionUpdate::ToolCall(tc) = &n.update {
+                        Some(tc)
+                    } else {
+                        None
+                    }
+                })
+                .expect("must have a ToolCall (InProgress) notification");
 
             assert_eq!(
-                in_progress.kind, ToolKind::Other,
+                in_progress.kind,
+                ToolKind::Other,
                 "non-bash tool must notify with ToolKind::Other, got {:?}",
                 in_progress.kind
             );
@@ -4712,7 +4923,9 @@ async fn tool_call_completed_notification_has_raw_output_via_nats() {
                     arguments: r#"{"path":"."}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4723,9 +4936,16 @@ async fn tool_call_completed_notification_has_raw_output_via_nats() {
             h.expect_n_publishes(2).await;
 
             let notes = h.notifier.notifications.lock().unwrap();
-            let completed = notes.iter().find_map(|n| {
-                if let SessionUpdate::ToolCallUpdate(tcu) = &n.update { Some(tcu) } else { None }
-            }).expect("must have a ToolCallUpdate (Completed) notification");
+            let completed = notes
+                .iter()
+                .find_map(|n| {
+                    if let SessionUpdate::ToolCallUpdate(tcu) = &n.update {
+                        Some(tcu)
+                    } else {
+                        None
+                    }
+                })
+                .expect("must have a ToolCallUpdate (Completed) notification");
 
             assert_eq!(
                 completed.fields.status,
@@ -4738,10 +4958,7 @@ async fn tool_call_completed_notification_has_raw_output_via_nats() {
             );
             // raw_output must be a non-empty string (the actual tool dispatch result)
             let raw = completed.fields.raw_output.as_ref().unwrap();
-            assert!(
-                raw.is_string(),
-                "raw_output must be a JSON string, got: {raw:?}"
-            );
+            assert!(raw.is_string(), "raw_output must be a JSON string, got: {raw:?}");
             assert!(
                 !raw.as_str().unwrap_or("").is_empty(),
                 "raw_output string must not be empty"
@@ -4853,7 +5070,9 @@ async fn tool_notifications_carry_correct_call_id_and_title_via_nats() {
                     arguments: r#"{"path":"."}"#.to_string(),
                 }],
             }]);
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4866,9 +5085,16 @@ async fn tool_notifications_carry_correct_call_id_and_title_via_nats() {
             let notes = h.notifier.notifications.lock().unwrap();
 
             // ToolCall (InProgress): call_id and title must match the dispatched call
-            let in_progress = notes.iter().find_map(|n| {
-                if let SessionUpdate::ToolCall(tc) = &n.update { Some(tc) } else { None }
-            }).expect("must have ToolCall notification");
+            let in_progress = notes
+                .iter()
+                .find_map(|n| {
+                    if let SessionUpdate::ToolCall(tc) = &n.update {
+                        Some(tc)
+                    } else {
+                        None
+                    }
+                })
+                .expect("must have ToolCall notification");
 
             assert_eq!(
                 in_progress.tool_call_id.0.as_ref(),
@@ -4876,15 +5102,21 @@ async fn tool_notifications_carry_correct_call_id_and_title_via_nats() {
                 "ToolCall notification tool_call_id must match dispatched call id"
             );
             assert_eq!(
-                in_progress.title,
-                "list_directory",
+                in_progress.title, "list_directory",
                 "ToolCall notification title must match dispatched call name"
             );
 
             // ToolCallUpdate (Completed): tool_call_id must match the same call
-            let completed = notes.iter().find_map(|n| {
-                if let SessionUpdate::ToolCallUpdate(tcu) = &n.update { Some(tcu) } else { None }
-            }).expect("must have ToolCallUpdate notification");
+            let completed = notes
+                .iter()
+                .find_map(|n| {
+                    if let SessionUpdate::ToolCallUpdate(tcu) = &n.update {
+                        Some(tcu)
+                    } else {
+                        None
+                    }
+                })
+                .expect("must have ToolCallUpdate notification");
 
             assert_eq!(
                 completed.tool_call_id.0.as_ref(),
@@ -4931,9 +5163,8 @@ async fn mcp_tool_round_trip_via_nats() {
     tokio::task::LocalSet::new()
         .run_until(async move {
             let h = Harness::new();
-            let server = agent_client_protocol::McpServer::Http(
-                agent_client_protocol::McpServerHttp::new("web", mcp_url),
-            );
+            let server =
+                agent_client_protocol::McpServer::Http(agent_client_protocol::McpServerHttp::new("web", mcp_url));
             let sid = create_session_with_mcp(&h, vec![server]).await;
 
             // First response: the model calls the prefixed MCP tool.
@@ -4945,7 +5176,9 @@ async fn mcp_tool_round_trip_via_nats() {
                 }],
             }]);
             // Second response: final answer after the tool result.
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -5010,8 +5243,7 @@ async fn ask_user_elicitation_round_trip() {
 
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (elic_tx, mut elic_rx) =
-                tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+            let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
 
             // Stand in for the ACP client: answer every elicitation with "BLUE".
             tokio::task::spawn_local(async move {
@@ -5040,7 +5272,9 @@ async fn ask_user_elicitation_round_trip() {
                 }],
             }]);
             // Second response: final answer after the elicitation result.
-            h.http.push(vec![OpenRouterEvent::TextDelta { text: "noted".to_string() }]);
+            h.http.push(vec![OpenRouterEvent::TextDelta {
+                text: "noted".to_string(),
+            }]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -5092,30 +5326,35 @@ async fn cancel_saves_token_totals_to_kv() {
             let (store, saves) = RecordingStore::new();
 
             let prefix = AcpPrefix::new("acp").unwrap();
-            let agent =
-                OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
-                    .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let agent = OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
+                .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
             // Create a session via NATS.
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if nats.published_payloads().len() >= 1 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
-            let sid: String = serde_json::from_slice::<serde_json::Value>(
-                &nats.published_payloads()[0],
-            )
-            .unwrap()["sessionId"]
-                .as_str()
-                .unwrap()
-                .to_string();
+            let sid: String =
+                serde_json::from_slice::<serde_json::Value>(&nats.published_payloads()[0]).unwrap()["sessionId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
 
             // First call: Usage + ToolCallsReady → triggers tool dispatch + second call.
             http.push(vec![
@@ -5134,7 +5373,9 @@ async fn cancel_saves_token_totals_to_kv() {
                 },
             ]);
             // Second call: slow — hangs until cancel fires.
-            http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+            http.push_slow(OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             inject_req(
@@ -5150,8 +5391,12 @@ async fn cancel_saves_token_totals_to_kv() {
             loop {
                 let notes = notifier.notifications.lock().unwrap();
                 let has_usage = notes.iter().any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
-                let has_chunk = notes.iter().any(|n| matches!(&n.update, SessionUpdate::AgentMessageChunk(_)));
-                if has_usage && has_chunk { break; }
+                let has_chunk = notes
+                    .iter()
+                    .any(|n| matches!(&n.update, SessionUpdate::AgentMessageChunk(_)));
+                if has_usage && has_chunk {
+                    break;
+                }
                 drop(notes);
                 assert!(
                     tokio::time::Instant::now() < deadline,
@@ -5178,7 +5423,9 @@ async fn cancel_saves_token_totals_to_kv() {
             // Wait for the prompt response (publish 2 = new_session + prompt).
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for cancel prompt response"
@@ -5257,34 +5504,41 @@ async fn completion_saves_token_totals_to_kv() {
             let (store, saves) = RecordingStore::new();
 
             let prefix = AcpPrefix::new("acp").unwrap();
-            let agent =
-                OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
-                    .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let agent = OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
+                .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
             // Create a session via NATS.
-            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            inject_req(
+                &global_tx,
+                "acp.agent.session.new",
+                NewSessionRequest::new("/"),
+                "r.new",
+            );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if nats.published_payloads().len() >= 1 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
-            let sid: String = serde_json::from_slice::<serde_json::Value>(
-                &nats.published_payloads()[0],
-            )
-            .unwrap()["sessionId"]
-                .as_str()
-                .unwrap()
-                .to_string();
+            let sid: String =
+                serde_json::from_slice::<serde_json::Value>(&nats.published_payloads()[0]).unwrap()["sessionId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
 
             // Normal completion: TextDelta + Usage (openrouter ends turn on Usage event).
             http.push(vec![
-                OpenRouterEvent::TextDelta { text: "done".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "done".to_string(),
+                },
                 OpenRouterEvent::Usage {
                     prompt_tokens: 12,
                     completion_tokens: 6,
@@ -5304,7 +5558,9 @@ async fn completion_saves_token_totals_to_kv() {
             // Wait for prompt response (publish 2 = session.new + prompt).
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for prompt response; got {} publishes",
@@ -5399,7 +5655,9 @@ async fn list_sessions_exposes_cache_tokens_in_meta() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "cached".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "cached".to_string(),
+                },
                 OpenRouterEvent::Usage {
                     prompt_tokens: 12,
                     completion_tokens: 6,
@@ -5455,7 +5713,9 @@ async fn multi_turn_tokens_accumulate_via_nats() {
 
             // Turn 1: 10 input + 5 output.
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "first".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "first".to_string(),
+                },
                 OpenRouterEvent::Usage {
                     prompt_tokens: 10,
                     completion_tokens: 5,
@@ -5473,7 +5733,9 @@ async fn multi_turn_tokens_accumulate_via_nats() {
 
             // Turn 2: 6 input + 3 output.
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "second".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "second".to_string(),
+                },
                 OpenRouterEvent::Usage {
                     prompt_tokens: 6,
                     completion_tokens: 3,
@@ -5525,7 +5787,9 @@ async fn fork_session_resets_token_totals_via_nats() {
 
             // Prompt source session so it has non-zero token totals.
             h.http.push(vec![
-                OpenRouterEvent::TextDelta { text: "src".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "src".to_string(),
+                },
                 OpenRouterEvent::Usage {
                     prompt_tokens: 11,
                     completion_tokens: 6,
@@ -5543,11 +5807,7 @@ async fn fork_session_resets_token_totals_via_nats() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();

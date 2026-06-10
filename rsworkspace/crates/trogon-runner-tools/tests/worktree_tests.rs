@@ -74,10 +74,7 @@ async fn git_repo_dir() -> tempfile::TempDir {
 async fn create_worktree_returns_none_for_non_git_dir() {
     let dir = non_git_dir();
     let result = create_worktree(dir.path().to_str().unwrap()).await;
-    assert!(
-        result.is_none(),
-        "expected None for non-git dir, got Some(path)"
-    );
+    assert!(result.is_none(), "expected None for non-git dir, got Some(path)");
 }
 
 /// `create_worktree` returns `Some` for a valid git repository and the path

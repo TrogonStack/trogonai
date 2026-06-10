@@ -16,9 +16,7 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use tokio::sync::RwLock;
 use trogon_acp_runner::{
-    GatewayConfig, TrogonAgent,
-    agent_runner::mock::MockAgentRunner,
-    session_notifier::NatsSessionNotifier,
+    GatewayConfig, TrogonAgent, agent_runner::mock::MockAgentRunner, session_notifier::NatsSessionNotifier,
     session_store::mock::MemorySessionStore,
 };
 
@@ -66,10 +64,7 @@ async fn nats_steer_publish_reaches_runner() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let steer_subject = format!("acp.session.{session_id}.agent.steer");
@@ -84,9 +79,7 @@ async fn nats_steer_publish_reaches_runner() {
                 .await
                 .expect("runner did not start within 5 s");
 
-            nats.publish(steer_subject, "think step by step".into())
-                .await
-                .unwrap();
+            nats.publish(steer_subject, "think step by step".into()).await.unwrap();
             nats.flush().await.unwrap();
 
             let result = tokio::time::timeout(Duration::from_secs(5), prompt_handle)
@@ -131,10 +124,7 @@ async fn nats_multiple_steer_messages_all_arrive() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let steer_subject = format!("acp.session.{session_id}.agent.steer");
@@ -149,12 +139,8 @@ async fn nats_multiple_steer_messages_all_arrive() {
                 .expect("runner did not start within 5 s");
 
             // Publish two messages — the runner awaits the first, then try_recv drains the second.
-            nats.publish(steer_subject.clone(), "first hint".into())
-                .await
-                .unwrap();
-            nats.publish(steer_subject.clone(), "second hint".into())
-                .await
-                .unwrap();
+            nats.publish(steer_subject.clone(), "first hint".into()).await.unwrap();
+            nats.publish(steer_subject.clone(), "second hint".into()).await.unwrap();
             nats.flush().await.unwrap();
 
             // Brief pause so the second message can be delivered before the runner
@@ -208,17 +194,11 @@ async fn nats_steer_is_session_scoped() {
     local
         .run_until(async move {
             // Session A — the one running a prompt
-            let resp_a = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp_a = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_a = resp_a.session_id.to_string();
 
             // Session B — a different session ID
-            let resp_b = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp_b = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_b = resp_b.session_id.to_string();
 
             let steer_a = format!("acp.session.{session_a}.agent.steer");
@@ -286,10 +266,7 @@ async fn nats_steer_invalid_utf8_is_delivered_lossily() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
             let steer_subject = format!("acp.session.{session_id}.agent.steer");
 
@@ -312,7 +289,10 @@ async fn nats_steer_invalid_utf8_is_delivered_lossily() {
                 .await
                 .expect("prompt did not complete within 5 s")
                 .expect("spawn_local did not panic");
-            assert!(result.is_ok(), "prompt must succeed with invalid UTF-8 steer: {result:?}");
+            assert!(
+                result.is_ok(),
+                "prompt must succeed with invalid UTF-8 steer: {result:?}"
+            );
 
             let captured = runner.captured_steer();
             assert_eq!(captured.len(), 1, "runner must receive exactly one steer message");

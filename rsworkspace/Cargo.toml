@@ -35,6 +35,10 @@ trogon-actor = { path = "crates/trogon-actor" }
 trogon-router = { path = "crates/trogon-router" }
 trogon-registry = { path = "crates/trogon-registry" }
 trogon-transcript = { path = "crates/trogon-transcript" }
+trogonai-catalog-proto = { path = "crates/trogonai-catalog-proto" }
+trogonai-compactor-proto = { path = "crates/trogonai-compactor-proto" }
+trogonai-session-proto = { path = "crates/trogonai-session-proto" }
+trogonai-catalog-client = { path = "crates/trogonai-catalog-client" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }

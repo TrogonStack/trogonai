@@ -9,8 +9,8 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -24,13 +24,13 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
 use agent_client_protocol::{
-    Agent as _, AuthenticateRequest, CancelNotification, ContentBlock, ForkSessionRequest,
-    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest, StopReason,
+    Agent as _, AuthenticateRequest, CancelNotification, ContentBlock, ForkSessionRequest, NewSessionRequest,
+    PromptRequest, SessionNotification, SetSessionModelRequest, StopReason,
 };
+use trogon_openrouter_runner::OpenRouterHttpClient as _;
 use trogon_openrouter_runner::{
     FinishReason, Message, OpenRouterAgent, OpenRouterClient, OpenRouterEvent, SessionNotifier,
 };
-use trogon_openrouter_runner::OpenRouterHttpClient as _;
 
 // ── Shared server state ───────────────────────────────────────────────────────
 
@@ -140,13 +140,18 @@ async fn chat_handler(
     let body_json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
     state.captured.lock().unwrap().push(Captured { auth, body: body_json });
 
-    let resp = state.responses.lock().unwrap().pop_front().unwrap_or_else(|| ServerResponse {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        body: Bytes::from("queue empty"),
-        extra_headers: vec![],
-        slow: false,
-        error_body: false,
-    });
+    let resp = state
+        .responses
+        .lock()
+        .unwrap()
+        .pop_front()
+        .unwrap_or_else(|| ServerResponse {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: Bytes::from("queue empty"),
+            extra_headers: vec![],
+            slow: false,
+            error_body: false,
+        });
 
     let mut builder = axum::http::Response::builder().status(resp.status);
     if resp.status == StatusCode::OK {
@@ -236,8 +241,20 @@ async fn happy_path_text_delta_finish_usage_done() {
 
     assert_eq!(events.len(), 4);
     assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hello, world!"));
-    assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-    assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3, .. }));
+    assert!(matches!(
+        &events[1],
+        OpenRouterEvent::Finished {
+            reason: FinishReason::Stop
+        }
+    ));
+    assert!(matches!(
+        &events[2],
+        OpenRouterEvent::Usage {
+            prompt_tokens: 10,
+            completion_tokens: 3,
+            ..
+        }
+    ));
     assert!(matches!(&events[3], OpenRouterEvent::Done));
 }
 
@@ -304,7 +321,6 @@ async fn error_event_on_server_error_response() {
         events
     );
 }
-
 
 #[tokio::test(flavor = "current_thread")]
 async fn bearer_token_is_sent_in_authorization_header() {
@@ -416,9 +432,12 @@ async fn finish_reason_length_is_parsed() {
     let events = srv.run("test-model", "sk-test").await;
 
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, OpenRouterEvent::Finished { reason: FinishReason::Length })),
+        events.iter().any(|e| matches!(
+            e,
+            OpenRouterEvent::Finished {
+                reason: FinishReason::Length
+            }
+        )),
         "expected Finished with reason=Length"
     );
 }
@@ -455,8 +474,20 @@ async fn usage_in_separate_chunk_after_finish() {
     let events = srv.run("test-model", "sk-test").await;
 
     assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hi"));
-    assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-    assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 2, .. }));
+    assert!(matches!(
+        &events[1],
+        OpenRouterEvent::Finished {
+            reason: FinishReason::Stop
+        }
+    ));
+    assert!(matches!(
+        &events[2],
+        OpenRouterEvent::Usage {
+            prompt_tokens: 7,
+            completion_tokens: 2,
+            ..
+        }
+    ));
     assert!(matches!(&events[3], OpenRouterEvent::Done));
 }
 
@@ -472,10 +503,7 @@ async fn keep_alive_comment_lines_are_ignored() {
 
     let events = srv.run("test-model", "sk-test").await;
 
-    let non_meta: Vec<_> = events
-        .iter()
-        .filter(|e| !matches!(e, OpenRouterEvent::Done))
-        .collect();
+    let non_meta: Vec<_> = events.iter().filter(|e| !matches!(e, OpenRouterEvent::Done)).collect();
     assert_eq!(non_meta.len(), 1);
     assert!(matches!(non_meta[0], OpenRouterEvent::TextDelta { .. }));
 }
@@ -524,8 +552,7 @@ async fn request_includes_stream_options_with_usage() {
 
     let body = srv.state.last_body().expect("no request captured");
     assert_eq!(
-        body["stream_options"]["include_usage"],
-        true,
+        body["stream_options"]["include_usage"], true,
         "stream_options.include_usage must be true"
     );
 }
@@ -568,7 +595,8 @@ async fn retries_on_503_and_eventually_succeeds() {
 #[tokio::test(flavor = "current_thread")]
 async fn does_not_retry_on_401() {
     let srv = TestServer::new().await;
-    srv.state.push_error(StatusCode::UNAUTHORIZED, r#"{"error":"invalid key"}"#);
+    srv.state
+        .push_error(StatusCode::UNAUTHORIZED, r#"{"error":"invalid key"}"#);
 
     let events = srv.run("test-model", "bad-key").await;
 
@@ -581,7 +609,8 @@ async fn does_not_retry_on_401() {
 #[tokio::test(flavor = "current_thread")]
 async fn does_not_retry_on_400() {
     let srv = TestServer::new().await;
-    srv.state.push_error(StatusCode::BAD_REQUEST, r#"{"error":"bad request"}"#);
+    srv.state
+        .push_error(StatusCode::BAD_REQUEST, r#"{"error":"bad request"}"#);
 
     let events = srv.run("test-model", "sk-test").await;
 
@@ -606,10 +635,8 @@ async fn does_not_retry_on_402() {
 #[tokio::test(flavor = "current_thread")]
 async fn does_not_retry_on_403() {
     let srv = TestServer::new().await;
-    srv.state.push_error(
-        StatusCode::FORBIDDEN,
-        r#"{"error":{"message":"Forbidden","code":403}}"#,
-    );
+    srv.state
+        .push_error(StatusCode::FORBIDDEN, r#"{"error":{"message":"Forbidden","code":403}}"#);
 
     let events = srv.run("test-model", "sk-test").await;
 
@@ -641,7 +668,9 @@ async fn request_timeout_fires_when_server_never_sends_headers() {
     let port = listener.local_addr().unwrap().port();
     let _server = tokio::spawn(async move {
         loop {
-            let Ok((mut socket, _)) = listener.accept().await else { break };
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
             tokio::spawn(async move {
                 let mut buf = [0u8; 4096];
                 let _ = socket.read(&mut buf).await;
@@ -678,7 +707,11 @@ async fn exhausts_retries_and_returns_error() {
 
     let events = srv.run("test-model", "sk-test").await;
 
-    assert_eq!(srv.state.request_count(), 4, "should have made 4 attempts (1 + 3 retries)");
+    assert_eq!(
+        srv.state.request_count(),
+        4,
+        "should have made 4 attempts (1 + 3 retries)"
+    );
     assert_eq!(events.len(), 1);
     assert!(
         matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("429")),
@@ -795,10 +828,7 @@ async fn cancel_mid_stream_returns_cancelled_stop_reason() {
             let sid = session_id.clone();
             let prompt_handle = tokio::task::spawn_local(async move {
                 agent_prompt
-                    .prompt(PromptRequest::new(
-                        sid,
-                        vec![ContentBlock::from("hello".to_string())],
-                    ))
+                    .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hello".to_string())]))
                     .await
                     .unwrap()
             });
@@ -807,10 +837,7 @@ async fn cancel_mid_stream_returns_cancelled_stop_reason() {
             notifier.wait_for_first().await;
 
             // Cancel the in-flight prompt.
-            agent
-                .cancel(CancelNotification::new(session_id))
-                .await
-                .unwrap();
+            agent.cancel(CancelNotification::new(session_id)).await.unwrap();
 
             // Prompt must complete within 2 seconds.
             let result = tokio::time::timeout(Duration::from_secs(2), prompt_handle)
@@ -856,23 +883,19 @@ async fn cancel_before_first_chunk_returns_cancelled() {
             let sid = session_id.clone();
             let prompt_handle = tokio::task::spawn_local(async move {
                 agent_prompt
-                    .prompt(PromptRequest::new(
-                        sid,
-                        vec![ContentBlock::from("hello".to_string())],
-                    ))
+                    .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hello".to_string())]))
                     .await
                     .unwrap()
             });
 
             // Poll until the cancel sender is registered, then fire cancel.
             loop {
-                if agent.test_cancel_channels_len().await > 0 { break; }
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
-            agent
-                .cancel(CancelNotification::new(session_id))
-                .await
-                .unwrap();
+            agent.cancel(CancelNotification::new(session_id)).await.unwrap();
 
             let result = tokio::time::timeout(Duration::from_secs(2), prompt_handle)
                 .await
@@ -903,8 +926,7 @@ async fn response_size_limit_stops_stream_early() {
     let notifier = TestNotifier::new();
     let client = srv.client();
     let agent = Arc::new(
-        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client)
-            .with_max_response_bytes(50),
+        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client).with_max_response_bytes(50),
     );
 
     tokio::task::LocalSet::new()
@@ -920,10 +942,7 @@ async fn response_size_limit_stops_stream_early() {
             let result = tokio::task::LocalSet::new()
                 .run_until(async move {
                     agent_p
-                        .prompt(PromptRequest::new(
-                            sid,
-                            vec![ContentBlock::from("hello".to_string())],
-                        ))
+                        .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hello".to_string())]))
                         .await
                         .unwrap()
                 })
@@ -963,7 +982,9 @@ async fn sse_truncated_without_trailing_newline_is_flushed() {
     let events = srv.run("test-model", "sk-test").await;
 
     assert!(
-        events.iter().any(|e| matches!(e, OpenRouterEvent::TextDelta { text } if text == "hello")),
+        events
+            .iter()
+            .any(|e| matches!(e, OpenRouterEvent::TextDelta { text } if text == "hello")),
         "SSE parser must flush remaining buffer on stream close: {events:?}"
     );
 }
@@ -975,22 +996,15 @@ async fn single_chunk_exceeding_size_limit_fires_guard() {
     let srv = TestServer::new().await;
     // 100 bytes of content, limit is 50.
     let big_text = "x".repeat(100);
-    let chunk = format!(
-        r#"data: {{"choices":[{{"delta":{{"content":"{big_text}"}},"finish_reason":null}}]}}"#
-    );
+    let chunk = format!(r#"data: {{"choices":[{{"delta":{{"content":"{big_text}"}},"finish_reason":null}}]}}"#);
     // Push chunk followed by [DONE] — guard should fire before [DONE] is seen.
-    srv.state.push_raw(
-        StatusCode::OK,
-        format!("{chunk}\ndata: [DONE]\n"),
-        vec![],
-        false,
-    );
+    srv.state
+        .push_raw(StatusCode::OK, format!("{chunk}\ndata: [DONE]\n"), vec![], false);
 
     let notifier = TestNotifier::new();
     let client = srv.client();
     let agent = Arc::new(
-        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client)
-            .with_max_response_bytes(50),
+        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client).with_max_response_bytes(50),
     );
 
     tokio::task::LocalSet::new()
@@ -1113,10 +1127,7 @@ async fn history_carries_over_between_turns() {
             // The second request must include the full prior turn in the body.
             let body = srv.state.last_body().expect("server must have captured a request");
             let messages = body["messages"].as_array().expect("messages must be array");
-            let roles: Vec<&str> = messages
-                .iter()
-                .filter_map(|m| m["role"].as_str())
-                .collect();
+            let roles: Vec<&str> = messages.iter().filter_map(|m| m["role"].as_str()).collect();
             assert_eq!(
                 roles,
                 ["user", "assistant", "user"],
@@ -1162,19 +1173,13 @@ async fn system_prompt_is_first_wire_message() {
 
             let body = srv.state.last_body().expect("server must have captured request");
             let messages = body["messages"].as_array().expect("messages must be array");
-            assert!(
-                !messages.is_empty(),
-                "request must have at least one message"
-            );
+            assert!(!messages.is_empty(), "request must have at least one message");
             assert_eq!(
                 messages[0]["role"].as_str(),
                 Some("system"),
                 "system prompt must be the first message: {body}"
             );
-            assert_eq!(
-                messages[0]["content"].as_str(),
-                Some("You are a helpful assistant.")
-            );
+            assert_eq!(messages[0]["content"].as_str(), Some("You are a helpful assistant."));
             assert_eq!(
                 messages[1]["role"].as_str(),
                 Some("user"),
@@ -1197,12 +1202,7 @@ async fn user_provided_api_key_used_in_wire_authorization() {
     let notifier = TestNotifier::new();
     let client = srv.client();
     // Agent has NO global key (empty string → None).
-    let agent = Arc::new(OpenRouterAgent::with_deps(
-        notifier.clone(),
-        "test-model",
-        "",
-        client,
-    ));
+    let agent = Arc::new(OpenRouterAgent::with_deps(notifier.clone(), "test-model", "", client));
 
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -1297,12 +1297,12 @@ async fn fork_session_inherits_history_in_next_prompt() {
                 .unwrap();
 
             // The fork's wire body must contain the source history + the fork's own prompt.
-            let body = srv.state.last_body().expect("server must have captured the fork's request");
+            let body = srv
+                .state
+                .last_body()
+                .expect("server must have captured the fork's request");
             let messages = body["messages"].as_array().expect("messages must be array");
-            let roles: Vec<&str> = messages
-                .iter()
-                .filter_map(|m| m["role"].as_str())
-                .collect();
+            let roles: Vec<&str> = messages.iter().filter_map(|m| m["role"].as_str()).collect();
             assert_eq!(
                 roles,
                 ["user", "assistant", "user"],
@@ -1460,14 +1460,18 @@ async fn wire_model_field_reflects_default_and_overridden_model() {
 
     // Build agent with two known models.  `with_deps` auto-adds the default if
     // it's not already present, so we set OPENROUTER_MODELS just for this agent.
-    unsafe { std::env::set_var("OPENROUTER_MODELS", "model-a:Model A,model-b:Model B"); }
+    unsafe {
+        std::env::set_var("OPENROUTER_MODELS", "model-a:Model A,model-b:Model B");
+    }
     let agent = Arc::new(OpenRouterAgent::with_deps(
         notifier.clone(),
         "model-a",
         "test-key",
         client,
     ));
-    unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+    unsafe {
+        std::env::remove_var("OPENROUTER_MODELS");
+    }
 
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -1501,10 +1505,7 @@ async fn wire_model_field_reflects_default_and_overridden_model() {
 
             // Second prompt — uses "model-b".
             agent
-                .prompt(PromptRequest::new(
-                    sid,
-                    vec![ContentBlock::from("q2".to_string())],
-                ))
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("q2".to_string())]))
                 .await
                 .unwrap();
 
@@ -1578,9 +1579,7 @@ async fn fork_with_branch_at_index_sends_truncated_history_on_wire() {
             )
             .unwrap();
             let fork_id = agent
-                .fork_session(
-                    ForkSessionRequest::new(src_id, std::path::PathBuf::from("/")).meta(meta),
-                )
+                .fork_session(ForkSessionRequest::new(src_id, std::path::PathBuf::from("/")).meta(meta))
                 .await
                 .unwrap()
                 .session_id;
@@ -1728,10 +1727,7 @@ async fn resume_path_does_not_duplicate_user_message_on_wire() {
             // The second wire request must contain "ping" only once, not twice.
             let body = srv.state.last_body().expect("must have second request body");
             let messages = body["messages"].as_array().expect("messages must be array");
-            let user_msgs: Vec<_> = messages
-                .iter()
-                .filter(|m| m["role"].as_str() == Some("user"))
-                .collect();
+            let user_msgs: Vec<_> = messages.iter().filter(|m| m["role"].as_str() == Some("user")).collect();
             assert_eq!(
                 user_msgs.len(),
                 1,

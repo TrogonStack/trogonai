@@ -19,8 +19,7 @@ fn test_key() -> String {
 }
 
 fn test_model() -> String {
-    std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string())
+    std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -37,11 +36,7 @@ async fn smoke_prompt_returns_text_and_done() {
     let client = OpenRouterClient::new();
     let messages = vec![Message::user("Reply with exactly one word: hello")];
 
-    let events: Vec<OpenRouterEvent> = client
-        .chat_stream(&model, &messages, &key, &[])
-        .await
-        .collect()
-        .await;
+    let events: Vec<OpenRouterEvent> = client.chat_stream(&model, &messages, &key, &[]).await.collect().await;
 
     let text: String = events
         .iter()
@@ -104,17 +99,13 @@ async fn usage_tokens_are_reported() {
     let client = OpenRouterClient::new();
     let messages = vec![Message::user("Say the word OK")];
 
-    let events: Vec<OpenRouterEvent> = client
-        .chat_stream(&model, &messages, &key, &[])
-        .await
-        .collect()
-        .await;
+    let events: Vec<OpenRouterEvent> = client.chat_stream(&model, &messages, &key, &[]).await.collect().await;
 
     eprintln!("usage events={events:?}");
 
-    let has_usage = events.iter().any(|e| {
-        matches!(e, OpenRouterEvent::Usage { prompt_tokens, .. } if *prompt_tokens > 0)
-    });
+    let has_usage = events
+        .iter()
+        .any(|e| matches!(e, OpenRouterEvent::Usage { prompt_tokens, .. } if *prompt_tokens > 0));
 
     assert!(has_usage, "expected a Usage event with prompt_tokens > 0: {events:?}");
 }

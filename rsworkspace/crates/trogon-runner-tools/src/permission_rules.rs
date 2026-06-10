@@ -260,10 +260,7 @@ fn matches_any_glob(path: &str, patterns: &[String]) -> bool {
             builder.add(g);
         }
     }
-    builder
-        .build()
-        .map(|set| set.is_match(path))
-        .unwrap_or(false)
+    builder.build().map(|set| set.is_match(path)).unwrap_or(false)
 }
 
 /// Match `command` against any of the prefix patterns (case-sensitive).
@@ -274,9 +271,7 @@ fn matches_any_prefix(command: &str, patterns: &[String]) -> bool {
         if p == "*" {
             return true;
         }
-        trimmed == p.as_str()
-            || trimmed.starts_with(&format!("{p} "))
-            || trimmed.starts_with(&format!("{p}\n"))
+        trimmed == p.as_str() || trimmed.starts_with(&format!("{p} ")) || trimmed.starts_with(&format!("{p}\n"))
     })
 }
 
@@ -386,9 +381,7 @@ deny_commands: rm -rf, sudo
 
     #[test]
     fn deny_path_beats_allow_path() {
-        let r = PermissionRules::parse(
-            "## Permissions\nallow_paths: src/**\ndeny_paths: src/.env\n",
-        );
+        let r = PermissionRules::parse("## Permissions\nallow_paths: src/**\ndeny_paths: src/.env\n");
         assert_eq!(
             r.check("write_file", &serde_json::json!({"path": "src/.env"})),
             RuleDecision::Deny
@@ -439,9 +432,7 @@ deny_commands: rm -rf, sudo
 
     #[test]
     fn deny_command_beats_allow_command() {
-        let r = PermissionRules::parse(
-            "## Permissions\nallow_commands: cargo\ndeny_commands: cargo publish\n",
-        );
+        let r = PermissionRules::parse("## Permissions\nallow_commands: cargo\ndeny_commands: cargo publish\n");
         assert_eq!(
             r.check("bash", &serde_json::json!({"command": "cargo publish"})),
             RuleDecision::Deny
@@ -484,10 +475,7 @@ deny_commands: rm -rf, sudo
     #[test]
     fn file_tool_without_path_field_returns_ask() {
         let r = PermissionRules::parse("## Permissions\nallow_paths: src/**\n");
-        assert_eq!(
-            r.check("read_file", &serde_json::json!({})),
-            RuleDecision::Ask
-        );
+        assert_eq!(r.check("read_file", &serde_json::json!({})), RuleDecision::Ask);
     }
 
     #[test]
@@ -572,7 +560,11 @@ allow_commands: *
 ";
         let rules = PermissionRules::parse(md);
         // The fenced example is inert:
-        assert!(rules.allow_paths.is_empty(), "fenced allow_paths leaked: {:?}", rules.allow_paths);
+        assert!(
+            rules.allow_paths.is_empty(),
+            "fenced allow_paths leaked: {:?}",
+            rules.allow_paths
+        );
         assert!(rules.allow_commands.is_empty(), "fenced allow_commands leaked");
         // ...so writes/bash fall through to an interactive prompt (Ask):
         assert_eq!(
@@ -595,8 +587,17 @@ deny_paths: .env, **/.env
 allow_paths: src/**
 ";
         let rules = PermissionRules::parse(md);
-        assert_eq!(rules.check("write_file", &serde_json::json!({"path": "src/main.rs"})), RuleDecision::Allow);
-        assert_eq!(rules.check("write_file", &serde_json::json!({"path": ".env"})), RuleDecision::Deny);
-        assert_eq!(rules.check("write_file", &serde_json::json!({"path": "/tmp/other"})), RuleDecision::Ask);
+        assert_eq!(
+            rules.check("write_file", &serde_json::json!({"path": "src/main.rs"})),
+            RuleDecision::Allow
+        );
+        assert_eq!(
+            rules.check("write_file", &serde_json::json!({"path": ".env"})),
+            RuleDecision::Deny
+        );
+        assert_eq!(
+            rules.check("write_file", &serde_json::json!({"path": "/tmp/other"})),
+            RuleDecision::Ask
+        );
     }
 }

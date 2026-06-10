@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 use agent_client_protocol::{
-    Agent as _, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
-    EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest,
-    PromptRequest, ResourceLink, SessionId, SessionNotification, TextResourceContents,
+    Agent as _, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock, EmbeddedResource,
+    EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest, PromptRequest, ResourceLink, SessionId,
+    SessionNotification, TextResourceContents,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -23,9 +23,8 @@ use testcontainers_modules::{
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_openrouter_runner::{
-    AgentLoader, AssembledToolCall, Message, OpenRouterAgent, OpenRouterEvent,
-    OpenRouterHttpClient, SessionNotifier, SkillLoader, ToolDef,
-    session_store::NatsSessionStore,
+    AgentLoader, AssembledToolCall, Message, OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, SessionNotifier,
+    SkillLoader, ToolDef, session_store::NatsSessionStore,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -77,7 +76,9 @@ struct ToolRoundHttpClient {
 
 impl ToolRoundHttpClient {
     fn new() -> Self {
-        Self { call_count: Arc::new(Mutex::new(0)) }
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+        }
     }
 }
 
@@ -120,11 +121,9 @@ impl OpenRouterHttpClient for ReplyHttpClient {
         _api_key: &str,
         _tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
-        Box::pin(stream::iter(vec![
-            OpenRouterEvent::TextDelta {
-                text: "Hello back!".to_string(),
-            },
-        ]))
+        Box::pin(stream::iter(vec![OpenRouterEvent::TextDelta {
+            text: "Hello back!".to_string(),
+        }]))
     }
 }
 
@@ -141,8 +140,15 @@ impl OpenRouterHttpClient for UsageHttpClient {
         _tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::iter(vec![
-            OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::TextDelta {
+                text: "reply".to_string(),
+            },
+            OpenRouterEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
         ]))
     }
 }
@@ -154,7 +160,9 @@ struct ThinkThenToolHttpClient {
 
 impl ThinkThenToolHttpClient {
     fn new() -> Self {
-        Self { call_count: Arc::new(Mutex::new(0)) }
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+        }
     }
 }
 
@@ -174,7 +182,9 @@ impl OpenRouterHttpClient for ThinkThenToolHttpClient {
 
         if call == 1 {
             Box::pin(stream::iter(vec![
-                OpenRouterEvent::TextDelta { text: "thinking...".to_string() },
+                OpenRouterEvent::TextDelta {
+                    text: "thinking...".to_string(),
+                },
                 OpenRouterEvent::ToolCallsReady {
                     calls: vec![AssembledToolCall {
                         id: "call_t".to_string(),
@@ -184,9 +194,9 @@ impl OpenRouterHttpClient for ThinkThenToolHttpClient {
                 },
             ]))
         } else {
-            Box::pin(stream::iter(vec![
-                OpenRouterEvent::TextDelta { text: "done".to_string() },
-            ]))
+            Box::pin(stream::iter(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]))
         }
     }
 }
@@ -204,15 +214,18 @@ impl OpenRouterHttpClient for PartialThenErrorHttpClient {
         _tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::iter(vec![
-            OpenRouterEvent::TextDelta { text: "partial".to_string() },
-            OpenRouterEvent::Error { message: "upstream boom".to_string() },
+            OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            },
+            OpenRouterEvent::Error {
+                message: "upstream boom".to_string(),
+            },
         ]))
     }
 }
 
 fn make_agent(store: NatsSessionStore) -> OpenRouterAgent<NoOpHttpClient, NoOpNotifier> {
-    OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "", NoOpHttpClient)
-        .with_session_store(Arc::new(store))
+    OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "", NoOpHttpClient).with_session_store(Arc::new(store))
 }
 
 async fn kv_put(js: &jetstream::Context, bucket: &str, key: &str, json: &str) {
@@ -224,9 +237,7 @@ async fn kv_put(js: &jetstream::Context, bucket: &str, key: &str, json: &str) {
         })
         .await
         .expect("open KV bucket");
-    kv.put(key, bytes::Bytes::from(json.to_string()))
-        .await
-        .expect("KV put");
+    kv.put(key, bytes::Bytes::from(json.to_string())).await.expect("KV put");
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -274,11 +285,7 @@ async fn agent_new_session_name_defaults_to_new_conversation() {
             let session_id = resp.session_id.to_string();
 
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .unwrap();
+            let bytes = kv.get(&format!("default.{session_id}")).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
             assert_eq!(v["name"], "New Conversation");
@@ -301,11 +308,7 @@ async fn agent_new_session_model_defaults_to_agent_default() {
             let session_id = resp.session_id.to_string();
 
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .unwrap();
+            let bytes = kv.get(&format!("default.{session_id}")).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
             assert_eq!(v["model"], "test-model");
@@ -328,10 +331,7 @@ async fn agent_fork_session_creates_separate_nats_entry() {
             let source_id = new_resp.session_id.clone();
 
             let fork_resp = agent
-                .fork_session(ForkSessionRequest::new(
-                    source_id.clone(),
-                    PathBuf::from("/tmp"),
-                ))
+                .fork_session(ForkSessionRequest::new(source_id.clone(), PathBuf::from("/tmp")))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -339,17 +339,10 @@ async fn agent_fork_session_creates_separate_nats_entry() {
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
 
             let source_key = format!("default.{}", source_id);
-            assert!(
-                kv.get(&source_key).await.unwrap().is_some(),
-                "source entry must exist"
-            );
+            assert!(kv.get(&source_key).await.unwrap().is_some(), "source entry must exist");
 
             let fork_key = format!("default.{fork_id}");
-            let bytes = kv
-                .get(&fork_key)
-                .await
-                .unwrap()
-                .expect("fork entry must exist");
+            let bytes = kv.get(&fork_key).await.unwrap().expect("fork entry must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(v["id"], fork_id.as_str());
             assert_ne!(fork_id, source_id.to_string(), "fork must have a distinct id");
@@ -474,8 +467,8 @@ async fn tenant_id_env_var_sets_kv_key_prefix() {
     unsafe {
         std::env::set_var("TENANT_ID", "acme-corp");
     }
-    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "", NoOpHttpClient)
-        .with_session_store(Arc::new(store));
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "", NoOpHttpClient).with_session_store(Arc::new(store));
     unsafe {
         std::env::remove_var("TENANT_ID");
     }
@@ -523,10 +516,7 @@ async fn fork_session_persists_parent_session_id_to_nats() {
             let src_id = src_resp.session_id.clone();
 
             let fork_resp = agent
-                .fork_session(ForkSessionRequest::new(
-                    src_id.clone(),
-                    PathBuf::from("/fork"),
-                ))
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -566,9 +556,7 @@ async fn fork_with_branch_at_index_persists_branched_at_index_to_nats() {
             )
             .unwrap();
             let fork_resp = agent
-                .fork_session(
-                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
-                )
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -634,9 +622,8 @@ async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
 async fn prompt_with_tool_calls_persists_only_text_messages_to_nats() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent =
-        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ToolRoundHttpClient::new())
-            .with_session_store(Arc::new(store));
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ToolRoundHttpClient::new())
+        .with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -672,7 +659,8 @@ async fn prompt_with_tool_calls_persists_only_text_messages_to_nats() {
             assert_eq!(messages[1]["role"], "assistant", "second message must be assistant");
             assert!(
                 messages[1].get("tool_calls").is_none() || messages[1]["tool_calls"].is_null(),
-                "assistant snapshot message must not contain tool_calls: {}", messages[1]
+                "assistant snapshot message must not contain tool_calls: {}",
+                messages[1]
             );
             for msg in messages.iter() {
                 assert!(
@@ -701,11 +689,7 @@ async fn session_name_set_from_first_prompt_message() {
 
             // Before prompt the name defaults to "New Conversation".
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .unwrap();
+            let bytes = kv.get(&format!("default.{session_id}")).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(v["name"], "New Conversation", "before prompt: default name expected");
 
@@ -717,15 +701,10 @@ async fn session_name_set_from_first_prompt_message() {
                 .await
                 .unwrap();
 
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .unwrap();
+            let bytes = kv.get(&format!("default.{session_id}")).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
-                v["name"],
-                "What is the capital of France?",
+                v["name"], "What is the capital of France?",
                 "after first prompt: KV name must be derived from user message"
             );
         })
@@ -762,9 +741,7 @@ async fn fork_with_branch_at_index_stores_truncated_messages_to_kv() {
             )
             .unwrap();
             let fork_resp = agent
-                .fork_session(
-                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
-                )
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -842,10 +819,9 @@ async fn resume_detection_skips_duplicate_user_message() {
 async fn system_prompt_not_persisted_to_kv() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent =
-        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
-            .with_system_prompt("You are a helpful assistant.")
-            .with_session_store(Arc::new(store));
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_system_prompt("You are a helpful assistant.")
+        .with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -899,9 +875,10 @@ async fn resource_link_content_block_stored_formatted() {
             agent
                 .prompt(PromptRequest::new(
                     resp.session_id,
-                    vec![ContentBlock::ResourceLink(
-                        ResourceLink::new("readme", "file:///readme.md"),
-                    )],
+                    vec![ContentBlock::ResourceLink(ResourceLink::new(
+                        "readme",
+                        "file:///readme.md",
+                    ))],
                 ))
                 .await
                 .unwrap();
@@ -917,8 +894,7 @@ async fn resource_link_content_block_stored_formatted() {
             assert_eq!(messages.len(), 1, "one user message expected");
             let content = messages[0]["content"][0]["text"].as_str().unwrap_or("");
             assert_eq!(
-                content,
-                "[Resource: readme | file:///readme.md]",
+                content, "[Resource: readme | file:///readme.md]",
                 "ResourceLink must be stored as formatted string in KV"
             );
         })
@@ -967,8 +943,7 @@ async fn fork_inherits_model_from_source_in_kv() {
                 .expect("fork KV entry must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
-                v["model"],
-                "openai/gpt-4o",
+                v["model"], "openai/gpt-4o",
                 "fork must inherit source model in KV snapshot; got: {}",
                 v["model"]
             );
@@ -995,9 +970,10 @@ async fn embedded_text_resource_block_stored_verbatim() {
                 .prompt(PromptRequest::new(
                     resp.session_id,
                     vec![ContentBlock::Resource(EmbeddedResource::new(
-                        EmbeddedResourceResource::TextResourceContents(
-                            TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
-                        ),
+                        EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                            "fn main() {}",
+                            "file:///src/main.rs",
+                        )),
                     ))],
                 ))
                 .await
@@ -1096,7 +1072,9 @@ async fn usage_tokens_stored_in_kv_assistant_message() {
                 .expect("entry must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             let messages = v["messages"].as_array().unwrap();
-            let asst = messages.iter().find(|m| m["role"] == "assistant")
+            let asst = messages
+                .iter()
+                .find(|m| m["role"] == "assistant")
                 .expect("assistant message must exist in KV");
             assert_eq!(
                 asst["usage"]["input_tokens"], 10,
@@ -1146,8 +1124,7 @@ async fn new_session_with_loaders_stores_agent_id_in_kv() {
                 .expect("entry must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
-                v["agent_id"],
-                "agent-x",
+                v["agent_id"], "agent-x",
                 "KV snapshot must include agent_id when agent uses loaders"
             );
         })
@@ -1158,9 +1135,8 @@ async fn new_session_with_loaders_stores_agent_id_in_kv() {
 async fn partial_text_before_error_persisted_to_kv() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent =
-        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", PartialThenErrorHttpClient)
-            .with_session_store(Arc::new(store));
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", PartialThenErrorHttpClient)
+        .with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -1232,9 +1208,7 @@ async fn fork_with_branch_index_beyond_history_copies_full_history_in_kv() {
             )
             .unwrap();
             let fork_resp = agent
-                .fork_session(
-                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
-                )
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -1273,8 +1247,7 @@ async fn blob_resource_content_block_stored_formatted_in_kv() {
                 .unwrap();
             let session_id = resp.session_id.to_string();
 
-            let blob = BlobResourceContents::new("base64data==", "file:///img.png")
-                .mime_type("image/png");
+            let blob = BlobResourceContents::new("base64data==", "file:///img.png").mime_type("image/png");
             agent
                 .prompt(PromptRequest::new(
                     resp.session_id,
@@ -1296,10 +1269,8 @@ async fn blob_resource_content_block_stored_formatted_in_kv() {
             assert_eq!(messages.len(), 1, "one user message expected");
             let content = messages[0]["content"][0]["text"].as_str().unwrap_or("");
             assert_eq!(
-                content,
-                "[Binary resource: file:///img.png (image/png)]",
+                content, "[Binary resource: file:///img.png (image/png)]",
                 "BlobResourceContents must be stored as a binary placeholder in KV"
-
             );
         })
         .await;
@@ -1356,9 +1327,8 @@ async fn empty_assistant_response_not_stored_in_kv() {
 async fn partial_text_before_tool_calls_not_in_kv() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent =
-        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ThinkThenToolHttpClient::new())
-            .with_session_store(Arc::new(store));
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ThinkThenToolHttpClient::new())
+        .with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -1424,31 +1394,29 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
 
     tokio::task::LocalSet::new()
         .run_until(async move {
-        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
-            serde_json::json!({ "systemPrompt": "act like a pirate" }),
-        )
-        .unwrap();
-        let resp = agent
-            .new_session(NewSessionRequest::new(PathBuf::from("/tmp")).meta(meta))
-            .await
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "systemPrompt": "act like a pirate" }),
+            )
             .unwrap();
-        let session_id = resp.session_id.to_string();
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")).meta(meta))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": session_id }).to_string(),
-        )
-        .unwrap();
-        let ext_resp = agent
-            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
-            .await
-            .unwrap();
-        let state: serde_json::Value =
-            serde_json::from_str(ext_resp.0.get()).unwrap();
-        assert_eq!(
-            state["system_prompt"].as_str(),
-            Some("act like a pirate"),
-            "_meta.systemPrompt must be stored in the session state"
-        );
+            let raw_params =
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": session_id }).to_string())
+                    .unwrap();
+            let ext_resp = agent
+                .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+                .await
+                .unwrap();
+            let state: serde_json::Value = serde_json::from_str(ext_resp.0.get()).unwrap();
+            assert_eq!(
+                state["system_prompt"].as_str(),
+                Some("act like a pirate"),
+                "_meta.systemPrompt must be stored in the session state"
+            );
         })
         .await;
 }
@@ -1488,8 +1456,14 @@ async fn token_totals_persisted_to_sessions_kv() {
                 .expect("snapshot must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
-            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
-            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+            assert_eq!(
+                v["total_input_tokens"], 10,
+                "total_input_tokens must be 10 after prompt"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 5,
+                "total_output_tokens must be 5 after prompt"
+            );
         })
         .await;
 }
@@ -1512,10 +1486,7 @@ async fn fork_session_token_totals_absent_in_kv() {
             let src_id = src.session_id.to_string();
 
             agent
-                .prompt(PromptRequest::new(
-                    src.session_id,
-                    vec![ContentBlock::from("prompt")],
-                ))
+                .prompt(PromptRequest::new(src.session_id, vec![ContentBlock::from("prompt")]))
                 .await
                 .unwrap();
 
@@ -1579,9 +1550,8 @@ impl OpenRouterHttpClient for CacheUsageHttpClient {
 async fn cache_tokens_persisted_to_sessions_kv() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent =
-        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", CacheUsageHttpClient)
-            .with_session_store(Arc::new(store));
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", CacheUsageHttpClient)
+        .with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -1745,10 +1715,7 @@ async fn cancel_prompt_token_totals_persisted_to_kv() {
             // `chat_stream` was called → Usage event is in the stream buffer.
             // Cancel fires after Usage has been processed by the streaming loop.
             ready.notified().await;
-            agent
-                .cancel(CancelNotification::new(session_id.clone()))
-                .await
-                .unwrap();
+            agent.cancel(CancelNotification::new(session_id.clone())).await.unwrap();
 
             let result = prompt_handle.await.unwrap();
             assert_eq!(
@@ -1842,7 +1809,9 @@ async fn prompt_compacts_pre_request_and_reuses_own_tail() {
     // gpt-4 → 8192-token window; 85 % ≈ 6963 tokens ≈ 28 KB. Mock LLM returns a
     // reply for the turn (test helpers live on the Mock-typed agent).
     let http = MockOpenRouterHttpClient::new();
-    http.push_response(vec![OpenRouterEvent::TextDelta { text: "Hello back!".to_string() }]);
+    http.push_response(vec![OpenRouterEvent::TextDelta {
+        text: "Hello back!".to_string(),
+    }]);
     let agent = OpenRouterAgent::with_deps(MockSessionNotifier::new(), "gpt-4", "test-key", http)
         .with_session_store(Arc::new(store))
         .with_compactor(nats.clone());
@@ -1987,7 +1956,9 @@ async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
         OrRecordingNotifier { notes: notes.clone() },
         "openai/gpt-4o",
         "dummy-key",
-        AskReadFileThenDone { calls: Arc::new(Mutex::new(0)) },
+        AskReadFileThenDone {
+            calls: Arc::new(Mutex::new(0)),
+        },
     )
     .with_permissions(nats.clone(), AcpPrefix::new("acp").unwrap());
 

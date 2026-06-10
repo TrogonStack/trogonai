@@ -72,11 +72,7 @@ fn truncate(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         s.to_owned()
     } else {
-        format!(
-            "{}…\n[{} more chars truncated]",
-            &s[..max_bytes],
-            s.len() - max_bytes
-        )
+        format!("{}…\n[{} more chars truncated]", &s[..max_bytes], s.len() - max_bytes)
     }
 }
 
@@ -86,10 +82,7 @@ mod tests {
 
     #[test]
     fn serializes_user_and_assistant_turns() {
-        let msgs = vec![
-            Message::user("What is 2+2?"),
-            Message::assistant("It is 4."),
-        ];
+        let msgs = vec![Message::user("What is 2+2?"), Message::assistant("It is 4.")];
         let out = serialize_for_prompt(&msgs);
         assert!(out.contains("[User]: What is 2+2?"));
         assert!(out.contains("[Assistant]: It is 4."));

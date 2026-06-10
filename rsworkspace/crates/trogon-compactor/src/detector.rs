@@ -40,10 +40,7 @@ impl CompactionSettings {
 /// Returns `true` when the conversation is too close to the context window limit.
 pub fn should_compact(messages: &[Message], settings: &CompactionSettings) -> bool {
     let tokens = estimate_total_tokens(messages);
-    tokens
-        > settings
-            .context_window
-            .saturating_sub(settings.reserve_tokens)
+    tokens > settings.context_window.saturating_sub(settings.reserve_tokens)
 }
 
 /// Returns the index of the first message to **keep** verbatim.
@@ -181,10 +178,7 @@ mod tests {
         ];
         let cut = find_cut_point(&msgs, 120);
         if let Some(idx) = cut {
-            assert!(
-                !msgs[idx].is_tool_result_only(),
-                "cut landed on a tool-result message"
-            );
+            assert!(!msgs[idx].is_tool_result_only(), "cut landed on a tool-result message");
         }
     }
 

@@ -29,20 +29,12 @@ pub fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
             McpServer::Http(h) => Some(StoredMcpServer {
                 name: h.name.clone(),
                 url: h.url.clone(),
-                headers: h
-                    .headers
-                    .iter()
-                    .map(|hv| (hv.name.clone(), hv.value.clone()))
-                    .collect(),
+                headers: h.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
             }),
             McpServer::Sse(s) => Some(StoredMcpServer {
                 name: s.name.clone(),
                 url: s.url.clone(),
-                headers: s
-                    .headers
-                    .iter()
-                    .map(|hv| (hv.name.clone(), hv.value.clone()))
-                    .collect(),
+                headers: s.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
             }),
             _ => None,
         })
@@ -58,10 +50,7 @@ pub async fn build_session_mcp(
     http: &reqwest::Client,
     servers: &[StoredMcpServer],
     policy: &EgressPolicy,
-) -> (
-    Vec<ToolDef>,
-    Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
-) {
+) -> (Vec<ToolDef>, Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>) {
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
 
@@ -92,11 +81,7 @@ pub async fn build_session_mcp(
                         input_schema: tool.input_schema,
                         cache_control: None,
                     });
-                    dispatch.push((
-                        prefixed,
-                        tool.name,
-                        client.clone() as Arc<dyn trogon_mcp::McpCallTool>,
-                    ));
+                    dispatch.push((prefixed, tool.name, client.clone() as Arc<dyn trogon_mcp::McpCallTool>));
                 }
                 info!(name = %server.name, tools = tool_defs.len() - before, "MCP server connected");
             }
@@ -143,12 +128,8 @@ mod tests {
         });
 
         let http = reqwest::Client::new();
-        let (defs, dispatch) = build_session_mcp(
-            &http,
-            &[server("web", &mcp.url("/mcp"))],
-            &EgressPolicy::default_safe(),
-        )
-        .await;
+        let (defs, dispatch) =
+            build_session_mcp(&http, &[server("web", &mcp.url("/mcp"))], &EgressPolicy::default_safe()).await;
 
         // AskUserQuestion is filtered out; "search" is prefixed.
         assert_eq!(defs.len(), 1);
@@ -181,12 +162,8 @@ mod tests {
             then.status(500);
         });
         let http = reqwest::Client::new();
-        let (defs, dispatch) = build_session_mcp(
-            &http,
-            &[server("bad", &mcp.url("/mcp"))],
-            &EgressPolicy::default_safe(),
-        )
-        .await;
+        let (defs, dispatch) =
+            build_session_mcp(&http, &[server("bad", &mcp.url("/mcp"))], &EgressPolicy::default_safe()).await;
         assert!(defs.is_empty());
         assert!(dispatch.is_empty());
     }

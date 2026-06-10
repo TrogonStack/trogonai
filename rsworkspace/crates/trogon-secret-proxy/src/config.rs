@@ -142,14 +142,8 @@ mod tests {
     /// The builder takes `mut self`, so each call replaces the previous value.
     #[test]
     fn with_proxy_port_called_twice_last_value_wins() {
-        let cfg = Config::for_test()
-            .with_proxy_port(1000)
-            .with_proxy_port(2000);
-        assert_eq!(
-            cfg.proxy_port(),
-            2000,
-            "Second call must overwrite the first"
-        );
+        let cfg = Config::for_test().with_proxy_port(1000).with_proxy_port(2000);
+        assert_eq!(cfg.proxy_port(), 2000, "Second call must overwrite the first");
     }
 
     // ── Gap: whitespace-only prefix ───────────────────────────────────────────
@@ -165,11 +159,7 @@ mod tests {
             auth: NatsAuth::None,
         };
         let cfg = Config::new(" ", nats);
-        assert_eq!(
-            cfg.prefix(),
-            " ",
-            "Whitespace-only prefix must be stored as-is"
-        );
+        assert_eq!(cfg.prefix(), " ", "Whitespace-only prefix must be stored as-is");
     }
 
     /// Calling `with_worker_timeout` twice must apply the last value.

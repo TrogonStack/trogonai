@@ -36,7 +36,11 @@ pub struct DoctorCheck {
 
 impl DoctorCheck {
     fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, outcome: CheckOutcome::Pass, detail: Some(detail.into()) }
+        Self {
+            name,
+            outcome: CheckOutcome::Pass,
+            detail: Some(detail.into()),
+        }
     }
 
     fn fail(name: &'static str, hint: impl Into<String>) -> Self {
@@ -50,7 +54,9 @@ impl DoctorCheck {
     fn warn(name: &'static str, message: impl Into<String>) -> Self {
         Self {
             name,
-            outcome: CheckOutcome::Warn { message: message.into() },
+            outcome: CheckOutcome::Warn {
+                message: message.into(),
+            },
             detail: None,
         }
     }
@@ -124,8 +130,13 @@ async fn run_checks(nats_url: &str) -> Vec<DoctorCheck> {
     checks.push(check_registry_prefix(&registry, "acp.claude", "ANTHROPIC_TOKEN", "trogon-acp-runner").await);
     checks.push(check_registry_prefix(&registry, "acp.grok", "XAI_API_KEY", "trogon-xai-runner").await);
     checks.push(
-        check_registry_prefix(&registry, "acp.openrouter", "OPENROUTER_API_KEY", "trogon-openrouter-runner")
-            .await,
+        check_registry_prefix(
+            &registry,
+            "acp.openrouter",
+            "OPENROUTER_API_KEY",
+            "trogon-openrouter-runner",
+        )
+        .await,
     );
     checks.push(check_registry_codex(&registry).await);
     checks.push(check_registry_execution(&registry).await);
@@ -213,10 +224,7 @@ async fn check_registry_prefix<S: RegistryStore>(
     }
     match find_by_acp_prefix(registry, acp_prefix).await {
         Ok(Some(_)) => DoctorCheck::pass(leak_name(name), "registered"),
-        Ok(None) => DoctorCheck::fail(
-            leak_name(name),
-            format!("Start `{runner_bin}`"),
-        ),
+        Ok(None) => DoctorCheck::fail(leak_name(name), format!("Start `{runner_bin}`")),
         Err(e) => DoctorCheck::fail(leak_name(name), e),
     }
 }
@@ -237,10 +245,7 @@ async fn check_registry_execution<S: RegistryStore>(registry: &Registry<S>) -> D
         Ok(agents) if agents.iter().any(|a| a.has_capability("execution")) => {
             DoctorCheck::pass("Registry execution", "wasm-runtime registered")
         }
-        Ok(_) => DoctorCheck::fail(
-            "Registry execution",
-            "Start `trogon-wasm-runtime` with `WASM_ONLY=0`",
-        ),
+        Ok(_) => DoctorCheck::fail("Registry execution", "Start `trogon-wasm-runtime` with `WASM_ONLY=0`"),
         Err(e) => DoctorCheck::fail("Registry execution", e.to_string()),
     }
 }
@@ -256,44 +261,41 @@ async fn check_session_smoke(nats: &async_nats::Client) -> DoctorCheck {
     };
 
     match tokio::time::timeout(SESSION_NEW_TIMEOUT, nats.request(subject, payload.into())).await {
-        Ok(Ok(response)) => {
-            match serde_json::from_slice::<serde_json::Value>(&response.payload) {
-                Ok(v) if v.get("sessionId").and_then(|s| s.as_str()).is_some() => {
-                    DoctorCheck::pass("Session smoke", format!("{prefix} session.new OK"))
-                }
-                Ok(v) => DoctorCheck::fail(
-                    "Session smoke",
-                    format!("Runner down or wrong prefix (bad response: {v})"),
-                ),
-                Err(e) => DoctorCheck::fail("Session smoke", format!("Invalid response: {e}")),
+        Ok(Ok(response)) => match serde_json::from_slice::<serde_json::Value>(&response.payload) {
+            Ok(v) if v.get("sessionId").and_then(|s| s.as_str()).is_some() => {
+                DoctorCheck::pass("Session smoke", format!("{prefix} session.new OK"))
             }
-        }
-        Ok(Err(e)) => DoctorCheck::fail(
-            "Session smoke",
-            format!("Runner down or wrong prefix ({e})"),
-        ),
+            Ok(v) => DoctorCheck::fail(
+                "Session smoke",
+                format!("Runner down or wrong prefix (bad response: {v})"),
+            ),
+            Err(e) => DoctorCheck::fail("Session smoke", format!("Invalid response: {e}")),
+        },
+        Ok(Err(e)) => DoctorCheck::fail("Session smoke", format!("Runner down or wrong prefix ({e})")),
         Err(_) => DoctorCheck::fail(
             "Session smoke",
-            format!("Timed out after {}s — is `{prefix}` runner running?", SESSION_NEW_TIMEOUT.as_secs()),
+            format!(
+                "Timed out after {}s — is `{prefix}` runner running?",
+                SESSION_NEW_TIMEOUT.as_secs()
+            ),
         ),
     }
 }
 
 async fn check_compactor(nats: &async_nats::Client) -> DoctorCheck {
     if !env_var_nonempty("ANTHROPIC_TOKEN") {
-        return DoctorCheck::skip(
-            "Compactor",
-            "ANTHROPIC_TOKEN not set (optional for Grok-only dev)",
-        );
+        return DoctorCheck::skip("Compactor", "ANTHROPIC_TOKEN not set (optional for Grok-only dev)");
     }
     let payload = serde_json::to_vec(&json!({ "messages": [] })).unwrap();
-    match tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into())).await
-    {
+    match tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into())).await {
         Ok(Ok(_response)) => DoctorCheck::pass("Compactor", "trogon.compactor.compact OK"),
         Ok(Err(e)) => DoctorCheck::fail("Compactor", format!("Start `trogon-compactor` ({e})")),
         Err(_) => DoctorCheck::fail(
             "Compactor",
-            format!("Start `trogon-compactor` (no response within {}s)", COMPACT_TIMEOUT.as_secs()),
+            format!(
+                "Start `trogon-compactor` (no response within {}s)",
+                COMPACT_TIMEOUT.as_secs()
+            ),
         ),
     }
 }
@@ -305,7 +307,14 @@ fn check_codex_cli() -> DoctorCheck {
     match Command::new("codex").arg("--version").output() {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            DoctorCheck::pass("Codex CLI", if version.is_empty() { "codex --version OK".into() } else { version })
+            DoctorCheck::pass(
+                "Codex CLI",
+                if version.is_empty() {
+                    "codex --version OK".into()
+                } else {
+                    version
+                },
+            )
         }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -339,7 +348,9 @@ pub fn collect_token_warnings() -> Vec<String> {
     if let Some((var, label)) = active
         && !env_var_nonempty(var)
     {
-        warnings.push(format!("{var} is empty for active runner ({label}) — fill `.env.local`"));
+        warnings.push(format!(
+            "{var} is empty for active runner ({label}) — fill `.env.local`"
+        ));
     }
 
     for (var, label) in [
@@ -413,12 +424,19 @@ fn print_summary(checks: &[DoctorCheck]) -> i32 {
     }
 
     eprintln!();
-    let passed = checks.iter().filter(|c| matches!(c.outcome, CheckOutcome::Pass)).count();
-    let warned = checks.iter().filter(|c| matches!(c.outcome, CheckOutcome::Warn { .. })).count();
-    let skipped = checks.iter().filter(|c| matches!(c.outcome, CheckOutcome::Skip { .. })).count();
-    eprintln!(
-        "{BOLD}{passed}{RESET} passed, {BOLD}{failures}{RESET} failed, {warned} warnings, {skipped} skipped"
-    );
+    let passed = checks
+        .iter()
+        .filter(|c| matches!(c.outcome, CheckOutcome::Pass))
+        .count();
+    let warned = checks
+        .iter()
+        .filter(|c| matches!(c.outcome, CheckOutcome::Warn { .. }))
+        .count();
+    let skipped = checks
+        .iter()
+        .filter(|c| matches!(c.outcome, CheckOutcome::Skip { .. }))
+        .count();
+    eprintln!("{BOLD}{passed}{RESET} passed, {BOLD}{failures}{RESET} failed, {warned} warnings, {skipped} skipped");
 
     if failures > 0 { 1 } else { 0 }
 }
@@ -562,10 +580,7 @@ mod tests {
 
     #[test]
     fn print_summary_counts_failures() {
-        let checks = vec![
-            DoctorCheck::pass("A", "ok"),
-            DoctorCheck::fail("B", "hint"),
-        ];
+        let checks = vec![DoctorCheck::pass("A", "ok"), DoctorCheck::fail("B", "hint")];
         assert_eq!(print_summary(&checks), 1);
     }
 
@@ -574,9 +589,6 @@ mod tests {
     async fn doctor_integration_all_checks() {
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
         let checks = run_checks(&url).await;
-        assert!(
-            checks.iter().any(|c| c.name == "NATS TCP"),
-            "expected NATS TCP check"
-        );
+        assert!(checks.iter().any(|c| c.name == "NATS TCP"), "expected NATS TCP check");
     }
 }

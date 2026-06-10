@@ -7,9 +7,7 @@ use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
-use trogon_openrouter_runner::{
-    AgentLoader, NatsSessionNotifier, NatsSessionStore, OpenRouterAgent, SkillLoader,
-};
+use trogon_openrouter_runner::{AgentLoader, NatsSessionNotifier, NatsSessionStore, OpenRouterAgent, SkillLoader};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -82,18 +80,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let spawn_model = cfg.default_model.clone();
     let spawn_prefix = cfg.prefix.clone();
 
-    let nats_config = acp_nats::NatsConfig { servers: vec![cfg.nats_url.clone()], auth: acp_nats::NatsAuth::None };
+    let nats_config = acp_nats::NatsConfig {
+        servers: vec![cfg.nats_url.clone()],
+        auth: acp_nats::NatsAuth::None,
+    };
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let mut agent = OpenRouterAgent::new(
-        notifier,
-        cfg.default_model,
-        cfg.api_key.unwrap_or_default(),
-    );
+    let mut agent = OpenRouterAgent::new(notifier, cfg.default_model, cfg.api_key.unwrap_or_default());
     agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
     agent = agent.with_compactor(nats.clone());
     agent = agent.with_permissions(nats.clone(), acp_prefix.clone());
+    if let Ok(catalog) =
+        trogonai_catalog_client::open(&js_ctx, trogonai_catalog_client::CatalogClientConfig::default()).await
+    {
+        agent = agent.with_catalog(catalog);
+    }
     agent = agent.with_runner_config(runner_config);
 
     {
@@ -124,12 +126,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     {
         use trogon_openrouter_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
-        let base_url = std::env::var("OPENROUTER_BASE_URL")
-            .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
-        let site_url = std::env::var("OPENROUTER_SITE_URL")
-            .unwrap_or_else(|_| "https://trogonai.com".to_string());
-        let site_name = std::env::var("OPENROUTER_SITE_NAME")
-            .unwrap_or_else(|_| "TrogonAI".to_string());
+        let base_url =
+            std::env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+        let site_url = std::env::var("OPENROUTER_SITE_URL").unwrap_or_else(|_| "https://trogonai.com".to_string());
+        let site_name = std::env::var("OPENROUTER_SITE_NAME").unwrap_or_else(|_| "TrogonAI".to_string());
         tokio::spawn(run_spawn_subscriber(
             nats.clone(),
             spawn_prefix,
@@ -149,8 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_for_perm = nats.clone();
     let prefix_for_perm = acp_prefix.clone();
 
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
     agent = agent.with_elicitation(elic_tx);
     let nats_for_elic = nats.clone();
     let prefix_for_elic = acp_prefix.clone();
@@ -180,10 +179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             });
 
-            let (_conn, io_task) =
-                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             // LOW-16: register AFTER the ACP subscription is established so
             // incoming requests are not received before we can handle them.
             if let Err(e) = registry_for_register.register(&cap).await {
@@ -191,7 +189,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     format!("initial registry registration failed: {e}").into(),
                 ));
             }
-            info!(agent_type = agent_type_for_log, prefix = prefix_for_log, "registered in agent registry");
+            info!(
+                agent_type = agent_type_for_log,
+                prefix = prefix_for_log,
+                "registered in agent registry"
+            );
             info!("openrouter-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,

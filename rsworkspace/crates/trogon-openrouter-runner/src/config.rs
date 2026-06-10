@@ -19,24 +19,19 @@ pub struct RunnerConfig {
 
 impl RunnerConfig {
     pub fn from_env() -> Self {
-        let nats_url = std::env::var("NATS_URL")
-            .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
         // MED-34: default to a runner-specific prefix so the spawn subscriber does
         // not share `acp.agent.spawn` with the xai runner (which would round-robin
         // spawn requests to the wrong backend). The dev script still overrides this.
-        let prefix = std::env::var("ACP_PREFIX")
-            .unwrap_or_else(|_| "acp.openrouter".to_string());
+        let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp.openrouter".to_string());
 
-        let default_model = std::env::var("OPENROUTER_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string());
+        let default_model =
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string());
 
-        let api_key = std::env::var("OPENROUTER_API_KEY")
-            .ok()
-            .filter(|s| !s.is_empty());
+        let api_key = std::env::var("OPENROUTER_API_KEY").ok().filter(|s| !s.is_empty());
 
-        let agent_type = std::env::var("AGENT_TYPE")
-            .unwrap_or_else(|_| "openrouter".to_string());
+        let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "openrouter".to_string());
 
         let models_str = std::env::var("OPENROUTER_MODELS").unwrap_or_else(|_| {
             "anthropic/claude-sonnet-4-6:Claude Sonnet 4.6,openai/gpt-4o:GPT-4o,google/gemini-pro-1.5:Gemini Pro 1.5".to_string()
@@ -99,7 +94,9 @@ mod tests {
             "OPENROUTER_PROMPT_TIMEOUT_SECS",
             "OPENROUTER_SYSTEM_PROMPT",
         ] {
-            unsafe { std::env::remove_var(var); }
+            unsafe {
+                std::env::remove_var(var);
+            }
         }
     }
 
@@ -141,7 +138,9 @@ mod tests {
     fn api_key_present_and_non_empty_is_some() {
         let _lock = env_lock();
         clear_runner_env();
-        unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-test-123"); }
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "sk-test-123");
+        }
         let cfg = RunnerConfig::from_env();
         clear_runner_env();
         assert_eq!(cfg.api_key.as_deref(), Some("sk-test-123"));
@@ -151,7 +150,9 @@ mod tests {
     fn empty_api_key_becomes_none() {
         let _lock = env_lock();
         clear_runner_env();
-        unsafe { std::env::set_var("OPENROUTER_API_KEY", ""); }
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "");
+        }
         let cfg = RunnerConfig::from_env();
         clear_runner_env();
         assert!(cfg.api_key.is_none(), "empty API key must be treated as absent");
@@ -162,8 +163,13 @@ mod tests {
         let _lock = env_lock();
         clear_runner_env();
         assert!(!RunnerConfig::from_env().system_prompt_set);
-        unsafe { std::env::set_var("OPENROUTER_SYSTEM_PROMPT", ""); }
-        assert!(RunnerConfig::from_env().system_prompt_set, "flag must be true even for empty value");
+        unsafe {
+            std::env::set_var("OPENROUTER_SYSTEM_PROMPT", "");
+        }
+        assert!(
+            RunnerConfig::from_env().system_prompt_set,
+            "flag must be true even for empty value"
+        );
         clear_runner_env();
     }
 
@@ -219,7 +225,9 @@ mod tests {
     fn models_str_is_read_verbatim() {
         let _lock = env_lock();
         clear_runner_env();
-        unsafe { std::env::set_var("OPENROUTER_MODELS", "x/y:Label"); }
+        unsafe {
+            std::env::set_var("OPENROUTER_MODELS", "x/y:Label");
+        }
         let cfg = RunnerConfig::from_env();
         clear_runner_env();
         assert_eq!(cfg.models_str, "x/y:Label");
@@ -245,7 +253,9 @@ mod tests {
     fn api_key_whitespace_only_is_some() {
         let _lock = env_lock();
         clear_runner_env();
-        unsafe { std::env::set_var("OPENROUTER_API_KEY", "   "); }
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "   ");
+        }
         let cfg = RunnerConfig::from_env();
         clear_runner_env();
         assert_eq!(cfg.api_key.as_deref(), Some("   "));

@@ -39,15 +39,13 @@ impl SpawnHttpClient for ReqwestSpawnClient {
         .await;
 
         match result {
-            Ok(Ok(resp)) if resp.status().is_success() => {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(json) => json["choices"][0]["message"]["content"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
-                    Err(e) => format!("error parsing response: {e}"),
-                }
-            }
+            Ok(Ok(resp)) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                Ok(json) => json["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                Err(e) => format!("error parsing response: {e}"),
+            },
             Ok(Ok(resp)) => format!("error: API returned {}", resp.status()),
             Ok(Err(e)) => format!("error: {e}"),
             Err(_) => format!("error: oneshot_call timed out after {}s", TIMEOUT.as_secs()),
@@ -120,8 +118,7 @@ pub(crate) fn extract_prompt(req: &serde_json::Value) -> Result<String, String> 
 /// One-shot xAI call: no session, no history, no tools.
 /// Returns the assistant text or an error string.
 pub async fn oneshot_call(api_key: &str, model: &str, prompt: &str) -> String {
-    let base_url = std::env::var("XAI_BASE_URL")
-        .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+    let base_url = std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     oneshot_call_with_client(&ReqwestSpawnClient, api_key, model, prompt, &url).await
 }
@@ -153,7 +150,10 @@ mod tests {
         fn responding(response: impl Into<String>) -> (Self, CapturedSpawn) {
             let captured = Arc::new(Mutex::new(None));
             (
-                Self { response: response.into(), captured: Arc::clone(&captured) },
+                Self {
+                    response: response.into(),
+                    captured: Arc::clone(&captured),
+                },
                 captured,
             )
         }
@@ -162,8 +162,12 @@ mod tests {
     #[async_trait]
     impl SpawnHttpClient for MockSpawnClient {
         async fn complete(&self, api_key: &str, model: &str, prompt: &str, url: &str) -> String {
-            *self.captured.lock().unwrap() =
-                Some((api_key.to_string(), model.to_string(), prompt.to_string(), url.to_string()));
+            *self.captured.lock().unwrap() = Some((
+                api_key.to_string(),
+                model.to_string(),
+                prompt.to_string(),
+                url.to_string(),
+            ));
             self.response.clone()
         }
     }

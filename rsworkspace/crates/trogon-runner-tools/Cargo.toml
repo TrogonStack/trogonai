@@ -36,8 +36,13 @@ trogon-mcp   = { path = "../trogon-mcp" }
 trogon-nats  = { workspace = true }
 trogon-std   = { workspace = true }
 trogon-tools = { path = "../trogon-tools" }
+trogonai-catalog-client = { workspace = true }
+trogonai-compactor-proto = { workspace = true }
+trogonai-session-proto = { workspace = true }
+buffa = "=0.7.0"
 
 [dev-dependencies]
+trogonai-catalog-proto = { workspace = true }
 agent-client-protocol  = { workspace = true }
 async-nats             = { workspace = true }
 bytes                  = { workspace = true }

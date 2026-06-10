@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package trogonai.compactor.v1;
+
+message ContentBlock {
+  oneof kind {
+    TextBlock text = 1;
+    ImageBlock image = 2;
+    ThinkingBlock thinking = 3;
+    ToolUseBlock tool_use = 4;
+    ToolResultBlock tool_result = 5;
+  }
+}
+
+message TextBlock {
+  string text = 1;
+}
+
+message ImageBlock {
+  string source_json = 1;
+}
+
+message ThinkingBlock {
+  string thinking = 1;
+}
+
+message ToolUseBlock {
+  string id = 1;
+  string name = 2;
+  string input_json = 3;
+  optional string parent_tool_use_id = 4;
+}
+
+message ToolResultBlock {
+  string tool_use_id = 1;
+  string content = 2;
+}
+
+message Message {
+  string role = 1;
+  repeated ContentBlock content = 2;
+}
+
+message CompactRequest {
+  repeated Message messages = 1;
+  string provider = 2;
+  string model = 3;
+  uint64 context_window = 4;
+  optional string compactor_provider = 5;
+  optional string compactor_model = 6;
+}
+
+message CompactResponse {
+  repeated Message messages = 1;
+  bool compacted = 2;
+  uint64 tokens_before = 3;
+  uint64 tokens_after = 4;
+  uint32 kept_count = 5;
+  optional string fallback_model = 6;
+}
+
+message CompactError {
+  string error = 1;
+}

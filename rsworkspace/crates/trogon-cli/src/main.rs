@@ -2,11 +2,11 @@ use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
-use trogon_cli::{
-    connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession, CrossRunnerSwitcher,
-    NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
-};
 use trogon_cli::Session as _;
+use trogon_cli::{
+    CrossRunnerSwitcher, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
+    connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession,
+};
 
 #[derive(Subcommand)]
 enum Command {
@@ -127,8 +127,14 @@ async fn main() -> anyhow::Result<()> {
             drop(nats_server);
             std::process::exit(1);
         }
-        let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
-        let options = PrintOptions { print_tools: args.print_tools };
+        let format = if args.output_format == "json" {
+            OutputFormat::Json
+        } else {
+            OutputFormat::Text
+        };
+        let options = PrintOptions {
+            print_tools: args.print_tools,
+        };
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
@@ -136,14 +142,12 @@ async fn main() -> anyhow::Result<()> {
         let target_prefix = if let Some(model) = &args.model {
             let model_id = resolve_model_alias(model);
             let js = async_nats::jetstream::new(nats.clone());
-            let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+            let reg_store = trogon_registry::ReprovisioningStore::new(js)
+                .await
                 .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
             let registry = trogon_registry::Registry::new(reg_store);
             match registry.find_by_model(&model_id).await {
-                Ok(Some(cap)) => cap.metadata["acp_prefix"]
-                    .as_str()
-                    .unwrap_or(&args.prefix)
-                    .to_string(),
+                Ok(Some(cap)) => cap.metadata["acp_prefix"].as_str().unwrap_or(&args.prefix).to_string(),
                 _ => args.prefix.clone(),
             }
         } else {
@@ -171,15 +175,15 @@ async fn main() -> anyhow::Result<()> {
         drop(nats_server);
         std::process::exit(code as i32);
     } else {
-        let acp_prefix = AcpPrefix::new(&args.prefix)
-            .map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
+        let acp_prefix = AcpPrefix::new(&args.prefix).map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
         let nats_config = NatsConfig::new(vec![args.nats_url.clone()], NatsAuth::None);
         let acp_config = Config::new(acp_prefix, nats_config);
         let js = async_nats::jetstream::new(nats.clone());
         // MED-36: use a store that re-provisions the (in-memory) AGENT_REGISTRY
         // bucket on failure, so /model and /status keep working after a NATS server
         // restart instead of erroring until the CLI is restarted.
-        let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+        let reg_store = trogon_registry::ReprovisioningStore::new(js)
+            .await
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let registry_for_repl = registry.clone();
@@ -232,4 +236,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

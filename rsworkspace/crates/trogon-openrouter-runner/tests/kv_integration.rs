@@ -11,9 +11,7 @@ use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
-use trogon_openrouter_runner::{
-    AgentLoader, AgentLoading, SkillLoader, SkillLoading,
-};
+use trogon_openrouter_runner::{AgentLoader, AgentLoading, SkillLoader, SkillLoading};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,9 +38,7 @@ async fn kv_put(js: &jetstream::Context, bucket: &str, key: &str, json: &str) {
         })
         .await
         .expect("open KV bucket");
-    kv.put(key, bytes::Bytes::from(json.to_string()))
-        .await
-        .expect("KV put");
+    kv.put(key, bytes::Bytes::from(json.to_string())).await.expect("KV put");
 }
 
 // ── AgentLoader ───────────────────────────────────────────────────────────────
@@ -161,13 +157,7 @@ async fn skill_loader_loads_multiple_skills() {
         r#"{"content":"Do alpha things."}"#,
     )
     .await;
-    kv_put(
-        &js,
-        "CONSOLE_SKILLS",
-        "sk2",
-        r#"{"name":"Beta","latest_version":"v2"}"#,
-    )
-    .await;
+    kv_put(&js, "CONSOLE_SKILLS", "sk2", r#"{"name":"Beta","latest_version":"v2"}"#).await;
     kv_put(
         &js,
         "CONSOLE_SKILL_VERSIONS",
@@ -177,10 +167,7 @@ async fn skill_loader_loads_multiple_skills() {
     .await;
 
     let loader = SkillLoader::open(&js).await.expect("open");
-    let text = loader
-        .load(&["sk1".to_string(), "sk2".to_string()])
-        .await
-        .unwrap();
+    let text = loader.load(&["sk1".to_string(), "sk2".to_string()]).await.unwrap();
     assert!(text.contains("## Skill: Alpha"));
     assert!(text.contains("## Skill: Beta"));
     assert!(text.contains("\n\n---\n\n"));
@@ -207,13 +194,7 @@ async fn skill_loader_skips_skill_with_missing_version_entry() {
 async fn skill_loader_uses_skill_id_as_name_when_name_missing() {
     let (js, _c) = make_js().await;
 
-    kv_put(
-        &js,
-        "CONSOLE_SKILLS",
-        "sk-noname",
-        r#"{"latest_version":"v1"}"#,
-    )
-    .await;
+    kv_put(&js, "CONSOLE_SKILLS", "sk-noname", r#"{"latest_version":"v1"}"#).await;
     kv_put(
         &js,
         "CONSOLE_SKILL_VERSIONS",
@@ -239,6 +220,7 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         tenant_id: tenant_id.to_string(),
         name: "Test session".to_string(),
         model: Some("anthropic/claude-sonnet-4-6".to_string()),
+        compactor_provider: None,
         compactor_model: None,
         tools: vec![],
         memory_path: None,

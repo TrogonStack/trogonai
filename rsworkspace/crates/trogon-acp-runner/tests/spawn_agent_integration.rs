@@ -73,14 +73,10 @@ async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
 
     let nats_clone = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_clone
-            .subscribe(format!("{prefix}.agent.spawn"))
-            .await
-            .unwrap();
+        let mut sub = nats_clone.subscribe(format!("{prefix}.agent.spawn")).await.unwrap();
         if let Some(msg) = sub.next().await {
             // Parse the payload and echo it back so the test can inspect it.
-            let body: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let echo = serde_json::to_string(&body).unwrap();
             if let Some(reply) = msg.reply {
                 nats_clone.publish(reply, echo.into()).await.unwrap();
@@ -113,13 +109,9 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
 
     let nats_clone = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_clone
-            .subscribe(format!("{prefix}.agent.spawn"))
-            .await
-            .unwrap();
+        let mut sub = nats_clone.subscribe(format!("{prefix}.agent.spawn")).await.unwrap();
         if let Some(msg) = sub.next().await {
-            let body: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let echo = serde_json::to_string(&body).unwrap();
             if let Some(reply) = msg.reply {
                 nats_clone.publish(reply, echo.into()).await.unwrap();
@@ -151,7 +143,10 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
 
     // Verify exactly 3 fields — no extras, no missing.
     let field_count = parsed.as_object().map(|o| o.len()).unwrap_or(0);
-    assert_eq!(field_count, 3, "payload must have exactly 3 fields: capability, prompt, session_id");
+    assert_eq!(
+        field_count, 3,
+        "payload must have exactly 3 fields: capability, prompt, session_id"
+    );
 }
 
 #[tokio::test]

@@ -222,7 +222,10 @@ mod tests {
         let root_pos = result.find("root section").unwrap();
         let mid_pos = result.find("mid section").unwrap();
         let leaf_pos = result.find("leaf section").unwrap();
-        assert!(root_pos < mid_pos && mid_pos < leaf_pos, "order must be root→mid→leaf, got: {result}");
+        assert!(
+            root_pos < mid_pos && mid_pos < leaf_pos,
+            "order must be root→mid→leaf, got: {result}"
+        );
     }
 
     // Serialize tests that override HOME to prevent parallel-test interference.

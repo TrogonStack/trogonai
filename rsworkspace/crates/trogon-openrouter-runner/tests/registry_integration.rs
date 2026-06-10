@@ -13,8 +13,7 @@ const AGENT_TYPE: &str = "openrouter";
 // Default model string from config.rs (before colon = model ID, after = label).
 const DEFAULT_MODELS_STR: &str =
     "anthropic/claude-sonnet-4-6:Claude Sonnet 4.6,openai/gpt-4o:GPT-4o,google/gemini-pro-1.5:Gemini Pro 1.5";
-const EXPECTED_MODELS: &[&str] =
-    &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
+const EXPECTED_MODELS: &[&str] = &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
 
 fn parse_model_ids(models_str: &str) -> Vec<String> {
     models_str

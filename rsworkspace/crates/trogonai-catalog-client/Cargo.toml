@@ -1,0 +1,26 @@
+[package]
+name = "trogonai-catalog-client"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-support = []
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv"] }
+buffa = "=0.7.0"
+bytes = { workspace = true }
+confique = { workspace = true }
+futures-util = { workspace = true }
+thiserror = "2"
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+trogonai-catalog-proto = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

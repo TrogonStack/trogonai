@@ -2,17 +2,16 @@
 //!
 //! See `docs/permission-ui-design.md`.
 
-use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
-    PermissionOption, PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionNotification, TerminalOutputRequest,
-    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
-};
-use async_trait::async_trait;
 use crate::app::{permission_from_request, print_permission_prompt};
 use crate::terminal::reset_display;
+use agent_client_protocol::{
+    Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, PermissionOption,
+    PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionNotification, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+};
+use async_trait::async_trait;
 use std::io::{self, BufRead, Write};
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -68,8 +67,7 @@ impl PermissionCoordinator {
     }
 
     pub fn is_cancelled(&self, generation: u64) -> bool {
-        self.cancel.load(Ordering::SeqCst)
-            || self.generation.load(Ordering::SeqCst) != generation
+        self.cancel.load(Ordering::SeqCst) || self.generation.load(Ordering::SeqCst) != generation
     }
 }
 
@@ -197,9 +195,7 @@ fn skip_bracketed_paste_content(fd: i32) {
     loop {
         match read_byte(fd) {
             Ok(Some(0x1b)) => {
-                if poll_readable(fd, ESCAPE_FOLLOW_MS)
-                    && read_byte(fd).ok().flatten() == Some(b'[')
-                {
+                if poll_readable(fd, ESCAPE_FOLLOW_MS) && read_byte(fd).ok().flatten() == Some(b'[') {
                     let seq = read_csi_sequence(fd);
                     if is_bracketed_paste_end(&seq) {
                         break;
@@ -278,9 +274,7 @@ pub(crate) fn is_bracketed_paste_end(seq: &[u8]) -> bool {
 /// each other's keypresses. Respects [`PermissionCoordinator`] cancellation from
 /// the REPL and enforces a wall-clock timeout.
 fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<PermissionKey> {
-    let _guard = permission_prompt_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _guard = permission_prompt_lock().lock().unwrap_or_else(|e| e.into_inner());
 
     let generation = coordinator.begin_prompt();
 
@@ -329,7 +323,11 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
 
     // Guard installed after raw mode is set; Drop restores original termios regardless
     // of whether the function returns Ok or Err (covers all `?`-propagated errors).
-    let mut guard = RawModeGuard { fd, original, drain_stdin_on_drop: true };
+    let mut guard = RawModeGuard {
+        fd,
+        original,
+        drain_stdin_on_drop: true,
+    };
 
     tty_debug("waiting for permission key…");
     let mut last_invalid_msg: Option<Instant> = None;
@@ -374,9 +372,7 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
 }
 
 fn read_line_from_dev_tty(prompt: &str) -> io::Result<String> {
-    let _guard = permission_prompt_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _guard = permission_prompt_lock().lock().unwrap_or_else(|e| e.into_inner());
     let mut tty = open_dev_tty(true, true)?;
     write!(tty, "{prompt}")?;
     tty.flush()?;
@@ -444,15 +440,15 @@ fn cancelled_outcome() -> agent_client_protocol::Result<RequestPermissionRespons
 
 fn permission_key_to_outcome(key: PermissionKey) -> Option<RequestPermissionOutcome> {
     match key {
-        PermissionKey::AllowOnce => Some(RequestPermissionOutcome::Selected(
-            SelectedPermissionOutcome::new("allow"),
-        )),
-        PermissionKey::AllowAlways => Some(RequestPermissionOutcome::Selected(
-            SelectedPermissionOutcome::new("allow_always"),
-        )),
-        PermissionKey::Reject => Some(RequestPermissionOutcome::Selected(
-            SelectedPermissionOutcome::new("reject"),
-        )),
+        PermissionKey::AllowOnce => Some(RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+            "allow",
+        ))),
+        PermissionKey::AllowAlways => Some(RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+            "allow_always",
+        ))),
+        PermissionKey::Reject => Some(RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+            "reject",
+        ))),
         PermissionKey::Cancel => Some(RequestPermissionOutcome::Cancelled),
     }
 }
@@ -567,17 +563,11 @@ impl Client for TuiClient {
         Err(not_implemented("read_text_file"))
     }
 
-    async fn write_text_file(
-        &self,
-        _: WriteTextFileRequest,
-    ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+    async fn write_text_file(&self, _: WriteTextFileRequest) -> agent_client_protocol::Result<WriteTextFileResponse> {
         Err(not_implemented("write_text_file"))
     }
 
-    async fn create_terminal(
-        &self,
-        _: CreateTerminalRequest,
-    ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+    async fn create_terminal(&self, _: CreateTerminalRequest) -> agent_client_protocol::Result<CreateTerminalResponse> {
         Err(not_implemented("create_terminal"))
     }
 
@@ -585,10 +575,7 @@ impl Client for TuiClient {
         Err(not_implemented("kill_terminal"))
     }
 
-    async fn terminal_output(
-        &self,
-        _: TerminalOutputRequest,
-    ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+    async fn terminal_output(&self, _: TerminalOutputRequest) -> agent_client_protocol::Result<TerminalOutputResponse> {
         Err(not_implemented("terminal_output"))
     }
 

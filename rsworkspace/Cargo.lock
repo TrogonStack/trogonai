@@ -903,6 +903,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "borsh"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfd1e3f8955a5d7de9fab72fc8373fade9fb8a703968cb200ae3dc6cf08e185a"
+dependencies = [
+ "bytes",
+ "cfg_aliases 0.2.1",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -937,12 +947,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffa"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6bfcf26f959599a1501e632486d1d5d9db5ecb18905c01b83061019b473e115"
+dependencies = [
+ "bytes",
+ "compact_str",
+ "ecow",
+ "hashbrown 0.15.5",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "buffa-build"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71ba645c06f14a6ecaf8f5d5982212ed9efc2f3272e5a08e35f48700a5e63db3"
+dependencies = [
+ "buffa 0.7.0",
+ "buffa-codegen",
+ "tempfile",
+]
+
+[[package]]
+name = "buffa-codegen"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79a31cf50f911b64c1f107f4feb2052850fc2fc96e34492c2ea426970c43c94a"
+dependencies = [
+ "buffa 0.7.0",
+ "buffa-descriptor",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "buffa-descriptor"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c85ad3861d6affd9844ee02b9a10e6fc1927c719c8f72b03e2ff4adc46979a21"
+dependencies = [
+ "buffa 0.7.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "buffa-types"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc84fac1e7efc335e74934a4ebe0534a30411ec2ea6a5a17ed294201c6b3b23c"
 dependencies = [
- "buffa",
+ "buffa 0.6.0",
  "bytes",
  "serde",
  "serde_json",
@@ -1049,6 +1113,15 @@ dependencies = [
  "once_cell",
  "rustix 1.1.4",
  "winx",
+]
+
+[[package]]
+name = "castaway"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -1183,6 +1256,20 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
+name = "compact_str"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "rustversion",
+ "ryu",
+ "static_assertions",
+]
 
 [[package]]
 name = "concurrent-queue"
@@ -1702,6 +1789,12 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "ecow"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78e4f79b296fbaab6ce2e22d52cb4c7f010fe0ebe7a32e34fa25885fd797bd02"
 
 [[package]]
 name = "ed25519"
@@ -4515,6 +4608,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "smol_str"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9676b89cd56310a87b93dec47b11af744f34d5fc9f367b829474eec0a891350d"
+dependencies = [
+ "borsh",
+ "serde",
+]
+
+[[package]]
 name = "socket2"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4568,6 +4671,12 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "string_cache"
@@ -5323,6 +5432,7 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-catalog-client",
  "uuid",
 ]
 
@@ -5336,6 +5446,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
+ "buffa 0.7.0",
  "bytes",
  "futures",
  "futures-util",
@@ -5357,6 +5468,7 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-compactor-proto",
  "uuid",
 ]
 
@@ -5484,6 +5596,7 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-catalog-client",
  "uuid",
 ]
 
@@ -5516,6 +5629,7 @@ name = "trogon-compactor"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "buffa 0.7.0",
  "futures",
  "httpmock",
  "reqwest",
@@ -5526,6 +5640,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogonai-compactor-proto",
 ]
 
 [[package]]
@@ -5813,6 +5928,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "axum 0.8.9",
+ "buffa 0.7.0",
  "bytes",
  "futures",
  "futures-util",
@@ -5831,6 +5947,8 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-catalog-client",
+ "trogonai-compactor-proto",
  "uuid",
 ]
 
@@ -5956,6 +6074,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
+ "buffa 0.7.0",
  "bytes",
  "futures-util",
  "globset",
@@ -5972,6 +6091,10 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "trogon-tools",
+ "trogonai-catalog-client",
+ "trogonai-catalog-proto",
+ "trogonai-compactor-proto",
+ "trogonai-session-proto",
  "uuid",
 ]
 
@@ -5981,6 +6104,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "axum 0.8.9",
+ "buffa 0.7.0",
  "bytes",
  "futures-util",
  "httpmock",
@@ -5988,6 +6112,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers-modules",
+ "thiserror 2.0.18",
  "tokio",
  "tower",
  "tracing",
@@ -5998,6 +6123,7 @@ dependencies = [
  "trogon-vault",
  "trogon-vault-approvals",
  "trogon-vault-nats",
+ "trogonai-catalog-proto",
  "uuid",
 ]
 
@@ -6209,6 +6335,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "axum 0.8.9",
+ "buffa 0.7.0",
  "bytes",
  "futures",
  "futures-util",
@@ -6228,17 +6355,82 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-catalog-client",
+ "trogonai-compactor-proto",
  "uuid",
+]
+
+[[package]]
+name = "trogonai-catalog"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa 0.7.0",
+ "bytes",
+ "clap",
+ "confique",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-service-config",
+ "trogon-telemetry",
+ "trogonai-catalog-client",
+ "trogonai-catalog-proto",
+]
+
+[[package]]
+name = "trogonai-catalog-client"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa 0.7.0",
+ "bytes",
+ "confique",
+ "futures-util",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "trogonai-catalog-proto",
+]
+
+[[package]]
+name = "trogonai-catalog-proto"
+version = "0.1.0"
+dependencies = [
+ "buffa 0.7.0",
+ "buffa-build",
+]
+
+[[package]]
+name = "trogonai-compactor-proto"
+version = "0.1.0"
+dependencies = [
+ "buffa 0.7.0",
+ "buffa-build",
 ]
 
 [[package]]
 name = "trogonai-proto"
 version = "0.1.0"
 dependencies = [
- "buffa",
+ "buffa 0.6.0",
  "buffa-types",
  "serde",
  "trogon-decider-runtime",
+]
+
+[[package]]
+name = "trogonai-session-proto"
+version = "0.1.0"
+dependencies = [
+ "buffa 0.7.0",
+ "buffa-build",
+ "trogonai-compactor-proto",
 ]
 
 [[package]]

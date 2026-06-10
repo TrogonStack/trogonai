@@ -44,10 +44,7 @@ impl SkillLoader {
             .await
             .map_err(|e| e.to_string())?;
 
-        Ok(Self {
-            skills_kv,
-            versions_kv,
-        })
+        Ok(Self { skills_kv, versions_kv })
     }
 
     async fn load_impl(&self, skill_ids: &[String]) -> Option<String> {
@@ -63,8 +60,7 @@ impl SkillLoader {
                     let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                         continue;
                     };
-                    let Some(version) = meta["latest_version"].as_str().map(|s| s.to_string())
-                    else {
+                    let Some(version) = meta["latest_version"].as_str().map(|s| s.to_string()) else {
                         continue;
                     };
                     let name = meta["name"]
@@ -141,8 +137,7 @@ pub mod mock {
         }
 
         pub fn insert(&mut self, skill_id: &str, content: &str) {
-            self.content
-                .insert(skill_id.to_string(), content.to_string());
+            self.content.insert(skill_id.to_string(), content.to_string());
         }
     }
 
@@ -150,8 +145,7 @@ pub mod mock {
         fn load<'a>(
             &'a self,
             skill_ids: &'a [String],
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>
-        {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
             let sections = skill_ids
                 .iter()
                 .filter_map(|id| self.content.get(id).map(|c| (id.clone(), c.clone())))
@@ -193,8 +187,8 @@ mod tests {
 
     #[test]
     fn mock_loader_returns_none_for_empty_skill_ids() {
-        use mock::MockSkillLoader;
         use super::SkillLoading;
+        use mock::MockSkillLoader;
         let loader = MockSkillLoader::new();
         let result = futures::executor::block_on(loader.load(&[]));
         assert!(result.is_none());
@@ -202,8 +196,8 @@ mod tests {
 
     #[test]
     fn mock_loader_returns_none_for_unknown_ids() {
-        use mock::MockSkillLoader;
         use super::SkillLoading;
+        use mock::MockSkillLoader;
         let loader = MockSkillLoader::new();
         let ids = vec!["unknown".to_string()];
         let result = futures::executor::block_on(loader.load(&ids));
@@ -212,8 +206,8 @@ mod tests {
 
     #[test]
     fn mock_loader_returns_formatted_skills() {
-        use mock::MockSkillLoader;
         use super::SkillLoading;
+        use mock::MockSkillLoader;
         let mut loader = MockSkillLoader::new();
         loader.insert("sk1", "Be concise.");
         loader.insert("sk2", "Use examples.");
@@ -225,8 +219,8 @@ mod tests {
 
     #[test]
     fn mock_loader_preserves_skill_id_order() {
-        use mock::MockSkillLoader;
         use super::SkillLoading;
+        use mock::MockSkillLoader;
         let mut loader = MockSkillLoader::new();
         loader.insert("first", "content-1");
         loader.insert("second", "content-2");

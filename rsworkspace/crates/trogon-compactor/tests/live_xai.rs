@@ -28,16 +28,10 @@ async fn compactor_summarizes_conversation_via_real_xai() {
 
     // A short coding conversation to compact.
     let messages = vec![
-        Message::user(
-            "I'm building a Rust CLI that parses CSV files. Start with clap argument parsing.",
-        ),
-        Message::assistant(
-            "Added clap with `--input <path>` and `--delimiter` (default ','). Parses args in main().",
-        ),
+        Message::user("I'm building a Rust CLI that parses CSV files. Start with clap argument parsing."),
+        Message::assistant("Added clap with `--input <path>` and `--delimiter` (default ','). Parses args in main()."),
         Message::user("Now add a function to count the number of rows using the csv crate."),
-        Message::assistant(
-            "Added `count_rows(path) -> usize` using csv::Reader; wired into main after arg parsing.",
-        ),
+        Message::assistant("Added `count_rows(path) -> usize` using csv::Reader; wired into main after arg parsing."),
         Message::user("Bug: empty files panic. Fix count_rows to return 0 for empty files."),
     ];
 

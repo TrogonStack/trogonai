@@ -80,9 +80,7 @@ async fn multi_runner_ide_drives_xai_runner_live() {
     let init = nats
         .request(
             "acp.agent.initialize",
-            serde_json::to_vec(&json!({ "protocolVersion": 0 }))
-                .unwrap()
-                .into(),
+            serde_json::to_vec(&json!({ "protocolVersion": 0 })).unwrap().into(),
         )
         .await
         .expect("initialize over NATS");

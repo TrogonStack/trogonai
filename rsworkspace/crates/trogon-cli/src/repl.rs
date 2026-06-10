@@ -1,9 +1,9 @@
+use crate::RunnerSwitcher;
 use crate::app::{TurnMetrics, TurnRenderer, TurnStop, print_startup_banner, print_user_line};
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
 use crate::session_store::{SessionIndex, new_session_entry};
-use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -13,6 +13,7 @@ use rustyline::{Context, Editor, Helper};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use crate::client_supervisor::AcpClientSupervisor;
 use crate::stream_input::{StreamInputEvent, StreamInputReader};
@@ -28,11 +29,16 @@ const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
 struct FileAtHelper {
     cwd: PathBuf,
+    /// Catalog-backed `/compact-model` suggestions (provider-qualified ids + `default`).
+    compact_model_suggestions: Arc<RwLock<Vec<String>>>,
 }
 
 impl Default for FileAtHelper {
     fn default() -> Self {
-        Self { cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")) }
+        Self {
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            compact_model_suggestions: Arc::new(RwLock::new(Vec::new())),
+        }
     }
 }
 
@@ -41,13 +47,28 @@ impl Helper for FileAtHelper {}
 impl Completer for FileAtHelper {
     type Candidate = Pair;
 
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        _ctx: &Context<'_>,
-    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+    fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
         let before = &line[..pos];
+        if let Some(compact_start) = compact_model_completion_start(before) {
+            let partial = &before[compact_start..];
+            let suggestions = self
+                .compact_model_suggestions
+                .read()
+                .map(|s| s.clone())
+                .unwrap_or_default();
+            let partial_lower = partial.to_ascii_lowercase();
+            let mut pairs: Vec<Pair> = suggestions
+                .iter()
+                .filter(|s| s.to_ascii_lowercase().starts_with(&partial_lower))
+                .map(|s| Pair {
+                    display: s.clone(),
+                    replacement: s.clone(),
+                })
+                .collect();
+            pairs.sort_by(|a, b| a.display.cmp(&b.display));
+            return Ok((compact_start, pairs));
+        }
+
         let Some(at_pos) = before.rfind('@') else {
             return Ok((pos, vec![]));
         };
@@ -68,13 +89,31 @@ impl Completer for FileAtHelper {
                 if name.starts_with(prefix) {
                     let suffix = if entry.path().is_dir() { "/" } else { "" };
                     let replacement = format!("{dir_prefix}{name}{suffix}");
-                    pairs.push(Pair { display: format!("{name}{suffix}"), replacement });
+                    pairs.push(Pair {
+                        display: format!("{name}{suffix}"),
+                        replacement,
+                    });
                 }
             }
         }
         pairs.sort_by(|a, b| a.display.cmp(&b.display));
         Ok((at_pos + 1, pairs))
     }
+}
+
+/// Start index of the argument fragment for `/compact-model` tab completion.
+fn compact_model_completion_start(before_cursor: &str) -> Option<usize> {
+    let trimmed = before_cursor.trim_start();
+    let leading_ws = before_cursor.len().saturating_sub(trimmed.len());
+    if !trimmed.starts_with("/compact-model") {
+        return None;
+    }
+    let after_cmd = trimmed.strip_prefix("/compact-model")?;
+    if !after_cmd.is_empty() && !after_cmd.starts_with(' ') {
+        return None;
+    }
+    let arg_start = leading_ws + "/compact-model".len() + after_cmd.find(' ')? + 1;
+    Some(arg_start)
 }
 
 impl Hinter for FileAtHelper {
@@ -145,9 +184,7 @@ pub fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
                         }
                         Err(e) => {
                             // LOW-20: distinguish "is a directory" from other read errors.
-                            let msg = if e.kind() == std::io::ErrorKind::IsADirectory
-                                || full_path.is_dir()
-                            {
+                            let msg = if e.kind() == std::io::ErrorKind::IsADirectory || full_path.is_dir() {
                                 "is a directory"
                             } else {
                                 "file not found or not readable"
@@ -203,33 +240,23 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         prefix = entry.prefix.clone();
         match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd).await {
             Ok(s) => {
-                eprintln!(
-                    "resumed session {} on {prefix}",
-                    s.session_id()
-                );
+                eprintln!("resumed session {} on {prefix}", s.session_id());
                 s
             }
             Err(e) => {
-                eprintln!(
-                    "warning: could not resume {}: {e} — starting fresh",
-                    entry.session_id
-                );
+                eprintln!("warning: could not resume {}: {e} — starting fresh", entry.session_id);
                 start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
             }
         }
     } else {
         start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
     };
-    if skip_permissions
-        && let Err(e) = session.set_mode("bypassPermissions").await
-    {
+    if skip_permissions && let Err(e) = session.set_mode("bypassPermissions").await {
         eprintln!("warning: could not set bypassPermissions: {e}");
     }
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
-        if resumed
-            && let Err(e) = sup.rebind(&prefix, session.session_id()).await
-        {
+        if resumed && let Err(e) = sup.rebind(&prefix, session.session_id()).await {
             eprintln!("warning: permission client rebind failed: {e}");
         }
     }
@@ -239,8 +266,20 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         let _ = fs.create_dir_all(dir);
     }
 
+    let compact_model_suggestions: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+    {
+        let suggestions = compact_model_suggestions.clone();
+        let initial_model = session.current_model();
+        tokio::spawn(async move {
+            refresh_compact_model_suggestions(&suggestions, &initial_model).await;
+        });
+    }
+
     let mut rl: Editor<FileAtHelper, _> = Editor::new()?;
-    rl.set_helper(Some(FileAtHelper { cwd: cwd.clone() }));
+    rl.set_helper(Some(FileAtHelper {
+        cwd: cwd.clone(),
+        compact_model_suggestions: compact_model_suggestions.clone(),
+    }));
     let _ = rl.load_history(&history_path);
 
     let mut session_used_tokens: u64 = 0;
@@ -270,17 +309,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
-        let (read, from_queue): (rustyline::Result<String>, bool) =
-            match queued_prompts.pop_front() {
-                Some(q) => (Ok(q), true),
-                None => {
-                    let r = match pending_input.take() {
-                        Some(text) => rl.readline_with_initial("> ", (&text, "")),
-                        None => rl.readline("> "),
-                    };
-                    (r, false)
-                }
-            };
+        let (read, from_queue): (rustyline::Result<String>, bool) = match queued_prompts.pop_front() {
+            Some(q) => (Ok(q), true),
+            None => {
+                let r = match pending_input.take() {
+                    Some(text) => rl.readline_with_initial("> ", (&text, "")),
+                    None => rl.readline("> "),
+                };
+                (r, false)
+            }
+        };
         match read {
             Ok(raw_line) => {
                 let line = join_continuation(&raw_line).trim().to_string();
@@ -348,8 +386,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     }
                                     session_mode = "bypassPermissions".to_string();
                                 } else {
-                                    session_mode = std::env::var("TROGON_MODE")
-                                        .unwrap_or_else(|_| "default".into());
+                                    session_mode = std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
                                 }
                                 // (falls through to persist + print below)
                                 if let Some(ref sup) = client_supervisor {
@@ -364,7 +401,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
-                            Err(e) => eprintln!("error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."),
+                            Err(e) => eprintln!(
+                                "error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."
+                            ),
                         }
                     } else if cmd == "/resume" {
                         if arg.is_empty() {
@@ -400,12 +439,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // remain on the old session, restore its bridges so MCP
                                     // tools keep working instead of silently failing.
                                     eprintln!("error resuming session: {e}");
-                                    if let Err(re) =
-                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
-                                    {
-                                        eprintln!(
-                                            "warning: could not restore MCP bridges for current session: {re}"
-                                        );
+                                    if let Err(re) = respawn_session_mcp(&session, &mut mcp_manager, &cwd).await {
+                                        eprintln!("warning: could not restore MCP bridges for current session: {re}");
                                     }
                                 }
                             }
@@ -417,10 +452,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             }
                             Ok(list) => {
                                 let index = SessionIndex::load(&fs);
-                                println!(
-                                    "{:<36}  {:<20}  cwd",
-                                    "session_id", "updated"
-                                );
+                                println!("{:<36}  {:<20}  cwd", "session_id", "updated");
                                 for s in list {
                                     let updated = s.updated_at.as_deref().unwrap_or("-");
                                     let model = index
@@ -428,27 +460,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         .filter(|e| e.session_id == s.session_id)
                                         .map(|e| e.model.as_str())
                                         .unwrap_or("-");
-                                    let label = s
-                                        .title
-                                        .as_deref()
-                                        .filter(|t| !t.is_empty())
-                                        .unwrap_or(&s.cwd);
-                                    println!(
-                                        "{:<36}  {:<20}  {}  [model: {model}]",
-                                        s.session_id, updated, label
-                                    );
+                                    let label = s.title.as_deref().filter(|t| !t.is_empty()).unwrap_or(&s.cwd);
+                                    println!("{:<36}  {:<20}  {}  [model: {model}]", s.session_id, updated, label);
                                 }
                             }
                             Err(e) => eprintln!("error listing sessions: {e}"),
                         }
                     } else if cmd == "/model" && arg.is_empty() {
-                        match format_model_catalog(
-                            &registry,
-                            &prefix,
-                            &session.current_model(),
-                            session.session_id(),
-                        )
-                        .await
+                        match format_model_catalog(&registry, &prefix, &session.current_model(), session.session_id())
+                            .await
                         {
                             Ok(text) => println!("{text}"),
                             Err(e) => eprintln!("error listing models: {e}"),
@@ -488,14 +508,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             .unwrap_or_else(|_| cwd.clone())
                             .to_string_lossy()
                             .into_owned();
-                        match apply_model_switch(
-                            &mut switcher,
-                            &prefix,
-                            session.session_id(),
-                            &model_id,
-                            &cwd_str,
-                        )
-                        .await
+                        match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, &cwd_str)
+                            .await
                         {
                             Ok(outcome) => {
                                 if outcome.same_runner {
@@ -509,6 +523,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 session.session_id(),
                                                 &model_id,
                                             );
+                                            let suggestions = compact_model_suggestions.clone();
+                                            let model_for_catalog = model_id.clone();
+                                            tokio::spawn(async move {
+                                                refresh_compact_model_suggestions(&suggestions, &model_for_catalog)
+                                                    .await;
+                                            });
                                         }
                                         Err(e) => eprintln!("Error setting model: {e}"),
                                     }
@@ -519,8 +539,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     let old_session_id = session.session_id().to_string();
                                     mcp_manager.shutdown_session(&old_session_id).await;
                                     session.close().await;
-                                    session =
-                                        factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
+                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
                                     prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
@@ -528,9 +547,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // mcp_servers, so MCP tools would be missing. Rebind MCP
                                     // for the new session (shutdown + spawn_pending +
                                     // commit_pending + load_session) so its tools are available.
-                                    if let Err(e) =
-                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
-                                    {
+                                    if let Err(e) = respawn_session_mcp(&session, &mut mcp_manager, &cwd).await {
                                         eprintln!("warning: could not bind MCP for new session: {e}");
                                     }
                                     // MED-5: the new runner starts a session with mode
@@ -542,13 +559,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         }
                                         session_mode = "bypassPermissions".to_string();
                                     } else {
-                                        session_mode = std::env::var("TROGON_MODE")
-                                            .unwrap_or_else(|_| "default".into());
+                                        session_mode =
+                                            std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
                                     }
                                     if let Some(ref sup) = client_supervisor
-                                        && let Err(e) = sup
-                                            .rebind(&outcome.new_prefix, session.session_id())
-                                            .await
+                                        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
                                     {
                                         eprintln!("error rebinding permission client: {e}");
                                     }
@@ -562,6 +577,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 session.session_id(),
                                                 &model_id,
                                             );
+                                            let suggestions = compact_model_suggestions.clone();
+                                            let model_for_catalog = model_id.clone();
+                                            tokio::spawn(async move {
+                                                refresh_compact_model_suggestions(&suggestions, &model_for_catalog)
+                                                    .await;
+                                            });
                                         }
                                         Err(e) => eprintln!("Error setting model on new runner: {e}"),
                                     }
@@ -581,9 +602,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 ("dontAsk", "auto-allow everything (still audited)"),
                                 ("bypassPermissions", "no permission checks at all"),
                             ];
-                            let mut out = format!(
-                                "current mode: {m}{session_mode}{r}\n\nchange with {m}/mode <name>{r}:\n"
-                            );
+                            let mut out =
+                                format!("current mode: {m}{session_mode}{r}\n\nchange with {m}/mode <name>{r}:\n");
                             for (name, desc) in modes {
                                 let marker = if name == session_mode { "▸" } else { " " };
                                 out.push_str(&format!("  {marker} {name:<18}{dim}{desc}{r}\n"));
@@ -601,7 +621,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if cmd == "/compact" {
                         match session.compact().await {
-                            Ok(CompactResult { compacted: true, tokens_before, tokens_after }) => {
+                            Ok(CompactResult {
+                                compacted: true,
+                                tokens_before,
+                                tokens_after,
+                            }) => {
                                 println!(
                                     "compacted: {} → {} tokens",
                                     fmt_tokens(tokens_before as u64),
@@ -612,12 +636,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 // stale pre-compaction count. The context window is unchanged.
                                 session_used_tokens = tokens_after as u64;
                             }
-                            Ok(CompactResult { compacted: false, tokens_before, .. }) => {
+                            Ok(CompactResult {
+                                compacted: false,
+                                tokens_before,
+                                ..
+                            }) => {
                                 if tokens_before > 0 {
-                                    println!(
-                                        "no compaction needed ({} tokens)",
-                                        fmt_tokens(tokens_before as u64),
-                                    );
+                                    println!("no compaction needed ({} tokens)", fmt_tokens(tokens_before as u64),);
                                 } else {
                                     println!("no messages to compact");
                                 }
@@ -630,14 +655,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else if cmd == "/mcp" {
-                        handle_mcp_command(
-                            arg,
-                            &mut mcp_manager,
-                            &fs,
-                            &session,
-                            &cwd,
-                        )
-                        .await;
+                        handle_mcp_command(arg, &mut mcp_manager, &fs, &session, &cwd).await;
                     } else if cmd == "/memory" {
                         handle_memory_command(arg, &cwd, &fs).await;
                     } else if cmd == "/init" {
@@ -686,21 +704,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             if let Some(err) = runner_error {
                                                 eprintln!("error: {err}");
                                             } else {
-                                            let trogon_content = strip_code_fence(&content);
-                                            if trogon_content.is_empty() {
-                                                // Model may have written the file directly via write_file tool.
-                                                // If it has content, keep it; otherwise report failure.
-                                                if fs.read_to_string(&dest).map(|s| !s.is_empty()).unwrap_or(false) {
-                                                    println!("created {}", dest.display());
+                                                let trogon_content = strip_code_fence(&content);
+                                                if trogon_content.is_empty() {
+                                                    // Model may have written the file directly via write_file tool.
+                                                    // If it has content, keep it; otherwise report failure.
+                                                    if fs.read_to_string(&dest).map(|s| !s.is_empty()).unwrap_or(false)
+                                                    {
+                                                        println!("created {}", dest.display());
+                                                    } else {
+                                                        eprintln!("error: model produced no content — try again");
+                                                    }
                                                 } else {
-                                                    eprintln!("error: model produced no content — try again");
+                                                    match fs.write(&dest, trogon_content.as_bytes()) {
+                                                        Ok(()) => println!("created {}", dest.display()),
+                                                        Err(e) => eprintln!("error writing TROGON.md: {e}"),
+                                                    }
                                                 }
-                                            } else {
-                                                match fs.write(&dest, trogon_content.as_bytes()) {
-                                                    Ok(()) => println!("created {}", dest.display()),
-                                                    Err(e) => eprintln!("error writing TROGON.md: {e}"),
-                                                }
-                                            }
                                             } // close runner_error else
                                         }
                                     }
@@ -921,13 +940,7 @@ async fn activate_session<SF: SessionFactory>(
     Ok(session)
 }
 
-async fn handle_mcp_command<F: Fs, S: Session>(
-    arg: &str,
-    mcp: &mut McpManager,
-    fs: &F,
-    session: &S,
-    cwd: &Path,
-) {
+async fn handle_mcp_command<F: Fs, S: Session>(arg: &str, mcp: &mut McpManager, fs: &F, session: &S, cwd: &Path) {
     let mut parts = arg.splitn(2, ' ');
     let sub = parts.next().unwrap_or("list").trim();
     let rest = parts.next().unwrap_or("").trim();
@@ -992,11 +1005,7 @@ async fn handle_mcp_command<F: Fs, S: Session>(
     }
 }
 
-async fn respawn_session_mcp<S: Session>(
-    session: &S,
-    mcp: &mut McpManager,
-    cwd: &Path,
-) -> anyhow::Result<()> {
+async fn respawn_session_mcp<S: Session>(session: &S, mcp: &mut McpManager, cwd: &Path) -> anyhow::Result<()> {
     mcp.shutdown_session(session.session_id()).await;
     let servers = mcp.spawn_pending().await;
     mcp.commit_pending(session.session_id());
@@ -1016,8 +1025,7 @@ async fn sync_repl_cwd_from_session<S: Session>(session: &S, cwd: &mut PathBuf) 
 
 fn sync_cwd_from_tool(name: &str, output: &str, cwd: &mut PathBuf) -> bool {
     let prefix = "Working directory is now ";
-    let is_cd = name == "change_directory"
-        || (name == "bash" && output.starts_with(prefix));
+    let is_cd = name == "change_directory" || (name == "bash" && output.starts_with(prefix));
     if !is_cd {
         return false;
     }
@@ -1065,13 +1073,7 @@ async fn apply_repl_cd<S: Session, F: Fs>(
     }
 }
 
-fn persist_session_index<F: Fs>(
-    fs: &F,
-    project: &Path,
-    prefix: &str,
-    session_id: &str,
-    model: &str,
-) {
+fn persist_session_index<F: Fs>(fs: &F, project: &Path, prefix: &str, session_id: &str, model: &str) {
     let mut index = SessionIndex::load(fs);
     index.record(project, new_session_entry(prefix, session_id, model));
     if let Err(e) = index.save(fs) {
@@ -1095,8 +1097,9 @@ pub fn resolve_model_alias(input: &str) -> String {
         "opus" => "claude-opus-4-7".into(),
         "grok" => "grok-3".into(),
         "grok-mini" => "grok-3-mini".into(),
-        "openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
-            .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        "openrouter" => {
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4".into())
+        }
         // Short aliases for the OpenRouter models. These must match the IDs the
         // openrouter runner registers (OPENROUTER_MODELS); update both together.
         "op-claude" => "anthropic/claude-sonnet-4".into(),
@@ -1116,8 +1119,9 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     model_id: &str,
     cwd: &str,
 ) -> Result<ModelSwitchOutcome, String> {
-    let (new_prefix, new_session_id) =
-        switcher.switch_model(current_prefix, current_session_id, model_id, cwd).await?;
+    let (new_prefix, new_session_id) = switcher
+        .switch_model(current_prefix, current_session_id, model_id, cwd)
+        .await?;
     Ok(ModelSwitchOutcome {
         same_runner: new_prefix == current_prefix,
         new_prefix,
@@ -1201,9 +1205,7 @@ Ctrl+D    quit")
 
         "/status" => "use /status in the REPL for live session status".to_string(),
 
-        "/memory" => {
-            "use /memory in the REPL to list or show TROGON.md hierarchy".to_string()
-        }
+        "/memory" => "use /memory in the REPL to list or show TROGON.md hierarchy".to_string(),
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
@@ -1212,7 +1214,9 @@ Ctrl+D    quit")
 async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
     let arg = arg.trim();
     let layers = trogon_runner_tools::list_trogon_md_hierarchy(
-        &cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()).to_string_lossy(),
+        &cwd.canonicalize()
+            .unwrap_or_else(|_| cwd.to_path_buf())
+            .to_string_lossy(),
     )
     .await;
 
@@ -1250,7 +1254,9 @@ async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
             let mut norm = std::path::PathBuf::new();
             for comp in raw.components() {
                 match comp {
-                    std::path::Component::ParentDir => { norm.pop(); }
+                    std::path::Component::ParentDir => {
+                        norm.pop();
+                    }
                     std::path::Component::CurDir => {}
                     c => norm.push(c),
                 }
@@ -1259,7 +1265,9 @@ async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
             let mut norm2 = std::path::PathBuf::new();
             for comp in resolved.components() {
                 match comp {
-                    std::path::Component::ParentDir => { norm2.pop(); }
+                    std::path::Component::ParentDir => {
+                        norm2.pop();
+                    }
                     std::path::Component::CurDir => {}
                     c => norm2.push(c),
                 }
@@ -1301,8 +1309,7 @@ pub(crate) async fn format_model_catalog<RS: RegistryStore>(
     session_id: &str,
 ) -> Result<String, String> {
     let all = registry.list_all().await.map_err(|e| e.to_string())?;
-    let mut by_prefix: std::collections::BTreeMap<String, Vec<(String, String)>> =
-        std::collections::BTreeMap::new();
+    let mut by_prefix: std::collections::BTreeMap<String, Vec<(String, String)>> = std::collections::BTreeMap::new();
 
     for cap in all {
         let prefix = cap
@@ -1381,7 +1388,10 @@ pub(crate) async fn format_status<RS: RegistryStore>(
         .unwrap_or_else(|_| "unknown".into());
 
     let tokens = if context_size == 0 {
-        format!("{used} tokens used (context size unknown)", used = fmt_tokens(used_tokens))
+        format!(
+            "{used} tokens used (context size unknown)",
+            used = fmt_tokens(used_tokens)
+        )
     } else {
         let pct = used_tokens * 100 / context_size;
         format!(
@@ -1392,39 +1402,122 @@ pub(crate) async fn format_status<RS: RegistryStore>(
         )
     };
 
-    format!(
-        "prefix: {prefix}\nmodel:   {model}\nsession: {session_id}\n{tokens}\nrunners: {runners}"
-    )
+    format!("prefix: {prefix}\nmodel:   {model}\nsession: {session_id}\n{tokens}\nrunners: {runners}")
 }
 
 // ── /compact-model command handler ────────────────────────────────────────────
 
 /// Handle `/compact-model [<model_id>|default]`.
 ///
-/// - No argument   → show current compaction model override (if any)
-/// - `default`     → clear the override; compaction uses the session model
-/// - `<model_id>`  → set the compaction model (must be same provider as current runner)
-pub(crate) async fn do_compact_model<S: Session>(
-    session: &S,
-    arg: &str,
-) -> Result<String, String> {
+/// Catalog-backed listing and provider-qualified selection (M3).
+pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Result<String, String> {
+    let catalog = load_catalog_snapshot().await;
+
     if arg.is_empty() {
-        return Ok(
+        let mut out = String::from(
             "compaction model: default (same as session model)\n\
-             change with: /compact-model <model-id>\n\
-             reset with:  /compact-model default"
-                .to_string(),
+             Estos son los modelos con ventana suficiente para compactar esta sesión.\n",
         );
+        if let Some((snap, providers)) = catalog {
+            let session_window = session_window_for_model(&snap, &session.current_model());
+            let entries = trogonai_catalog_client::compactable_models(trogonai_catalog_client::CompactableFilter {
+                catalog: &snap,
+                callable_providers: &providers,
+                session_window,
+                margin: 1.2,
+            });
+            if entries.is_empty() {
+                out.push_str("(no cross-provider models available — credential snapshot unavailable)\n");
+            } else {
+                for e in &entries {
+                    out.push_str(&format!("  {}::{}  ({})\n", e.provider, e.model_id, e.context_window));
+                }
+            }
+        } else {
+            out.push_str("(catalog unavailable — start trogonai-catalog)\n");
+        }
+        out.push_str("set: /compact-model <provider::model>  |  reset: /compact-model default");
+        return Ok(out);
     }
-    let value = if arg == "default" { "" } else { arg };
+
+    let value = if arg == "default" {
+        String::new()
+    } else if arg.contains("::") {
+        arg.to_string()
+    } else if let Some((snap, _)) = catalog {
+        match trogonai_catalog_client::resolve(&snap, arg) {
+            Ok(q) => trogonai_catalog_client::qualify(&q.provider, &q.model_id),
+            Err(trogonai_catalog_client::CodecError::Ambiguous { id, providers }) => {
+                return Err(format!(
+                    "ambiguous model id '{id}' — qualify as provider::model (candidates: {})",
+                    providers.join(", ")
+                ));
+            }
+            Err(trogonai_catalog_client::CodecError::Unknown { id }) => {
+                return Err(format!("unknown model id '{id}' — use /compact-model to list options"));
+            }
+            Err(trogonai_catalog_client::CodecError::InvalidFormat { value }) => {
+                return Err(format!("invalid qualified value '{value}'"));
+            }
+        }
+    } else {
+        return Err(format!(
+            "unknown model '{arg}' — catalog unavailable; use provider::model format"
+        ));
+    };
+
     session
-        .set_session_config_option("compactor_model", value)
+        .set_session_config_option("compactor_model", &value)
         .await
         .map_err(|e| e.to_string())?;
     if value.is_empty() {
         Ok("compaction model reset to default (same as session model)".to_string())
     } else {
         Ok(format!("compaction model set to: {value}"))
+    }
+}
+
+async fn load_catalog_snapshot() -> Option<(trogonai_catalog_client::CatalogSnapshot, Vec<String>)> {
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let client = async_nats::connect(&nats_url).await.ok()?;
+    let js = async_nats::jetstream::new(client);
+    let catalog_client = trogonai_catalog_client::open(&js, trogonai_catalog_client::CatalogClientConfig::default())
+        .await
+        .ok()?;
+    let snap = catalog_client.catalog_snapshot().await.ok()?;
+    let providers = catalog_client.callable_providers().await.ok()?;
+    Some((snap, providers))
+}
+
+fn session_window_for_model(catalog: &trogonai_catalog_client::CatalogSnapshot, model: &str) -> u64 {
+    catalog
+        .entries
+        .iter()
+        .find(|e| e.model_id == model)
+        .map(|e| e.context_window)
+        .unwrap_or(200_000)
+}
+
+async fn refresh_compact_model_suggestions(suggestions: &Arc<RwLock<Vec<String>>>, session_model: &str) {
+    let Some((snap, providers)) = load_catalog_snapshot().await else {
+        return;
+    };
+    let session_window = session_window_for_model(&snap, session_model);
+    let config = trogonai_catalog_client::CatalogClientConfig::default();
+    let entries = trogonai_catalog_client::compactable_models(trogonai_catalog_client::CompactableFilter {
+        catalog: &snap,
+        callable_providers: &providers,
+        session_window,
+        margin: config.margin,
+    });
+    let mut list = vec!["default".to_string()];
+    list.extend(
+        entries
+            .iter()
+            .map(|e| trogonai_catalog_client::qualify(&e.provider, &e.model_id)),
+    );
+    if let Ok(mut guard) = suggestions.write() {
+        *guard = list;
     }
 }
 
@@ -1445,10 +1538,12 @@ fn read_config<F: Fs>(fs: &F) -> serde_json::Value {
 fn write_config<F: Fs>(config: &serde_json::Value, fs: &F) -> Result<(), String> {
     let path = config_path();
     if let Some(dir) = path.parent() {
-        fs.create_dir_all(dir).map_err(|e| format!("cannot create config dir: {e}"))?;
+        fs.create_dir_all(dir)
+            .map_err(|e| format!("cannot create config dir: {e}"))?;
     }
     let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs.write(&path, content.as_bytes()).map_err(|e| format!("cannot write config: {e}"))
+    fs.write(&path, content.as_bytes())
+        .map_err(|e| format!("cannot write config: {e}"))
 }
 
 fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
@@ -1666,8 +1761,8 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::mock::MockFs;
     use crate::fs::RealFs;
+    use crate::fs::mock::MockFs;
 
     // ── expand_mentions with MockFs ───────────────────────────────────────────
 
@@ -1768,9 +1863,42 @@ mod tests {
 
     // ── FileAtHelper tab-completion (uses real fs directly — no Fs trait) ─────
 
+    fn test_file_at_helper(cwd: PathBuf) -> FileAtHelper {
+        FileAtHelper {
+            cwd,
+            compact_model_suggestions: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    #[test]
+    fn compact_model_completion_start_finds_argument_offset() {
+        assert_eq!(compact_model_completion_start("/compact-model "), Some(15));
+        assert_eq!(compact_model_completion_start("/compact-model xai::"), Some(15));
+        assert!(compact_model_completion_start("/compact-model").is_none());
+        assert!(compact_model_completion_start("/compact").is_none());
+    }
+
+    #[test]
+    fn file_at_helper_complete_compact_model_filters_catalog() {
+        let suggestions = Arc::new(RwLock::new(vec![
+            "default".into(),
+            "anthropic::claude-haiku".into(),
+            "xai::grok-4".into(),
+        ]));
+        let helper = FileAtHelper {
+            cwd: PathBuf::from("/tmp"),
+            compact_model_suggestions: suggestions,
+        };
+        let history = rustyline::history::DefaultHistory::new();
+        let ctx = Context::new(&history);
+        let (_, pairs) = helper.complete("/compact-model xai", 18, &ctx).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].display, "xai::grok-4");
+    }
+
     #[test]
     fn file_at_helper_complete_no_at_returns_empty() {
-        let helper = FileAtHelper { cwd: std::env::temp_dir() };
+        let helper = test_file_at_helper(std::env::temp_dir());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("hello world", 5, &ctx).unwrap();
@@ -1779,7 +1907,7 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_at_with_space_returns_empty() {
-        let helper = FileAtHelper { cwd: std::env::temp_dir() };
+        let helper = test_file_at_helper(std::env::temp_dir());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@ hello", 7, &ctx).unwrap();
@@ -1795,7 +1923,7 @@ mod tests {
         std::fs::write(dir.join("alpha2.txt"), "").unwrap();
         std::fs::write(dir.join("beta.txt"), "").unwrap();
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = test_file_at_helper(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (start, pairs) = helper.complete("@alpha", 6, &ctx).unwrap();
@@ -1815,7 +1943,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&sub).unwrap();
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = test_file_at_helper(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@my", 3, &ctx).unwrap();
@@ -1834,7 +1962,7 @@ mod tests {
             std::fs::write(dir.join(name), "").unwrap();
         }
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = test_file_at_helper(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@", 1, &ctx).unwrap();
@@ -1928,7 +2056,15 @@ mod tests {
     #[test]
     fn slash_cost_shows_percentage_and_estimated_cost() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 50_000, 200_000, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command(
+            "/cost",
+            "",
+            50_000,
+            200_000,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
@@ -1984,7 +2120,10 @@ mod tests {
     fn config_set_and_get_roundtrip() {
         let fs = MockFs::new();
         let set_out = handle_config_cmd("set mykey myvalue", &fs);
-        assert!(set_out.contains("mykey") && set_out.contains("myvalue"), "got: {set_out}");
+        assert!(
+            set_out.contains("mykey") && set_out.contains("myvalue"),
+            "got: {set_out}"
+        );
         let get_out = handle_config_cmd("get mykey", &fs);
         assert!(get_out.contains("myvalue"), "got: {get_out}");
     }
@@ -2028,7 +2167,10 @@ mod tests {
         let out = handle_config_cmd("set model claude-opus-4-7", &fs);
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         let get = handle_config_cmd("get model", &fs);
-        assert!(get.contains("claude-opus-4-7") && !get.contains("claude-sonnet-4-6"), "got: {get}");
+        assert!(
+            get.contains("claude-opus-4-7") && !get.contains("claude-sonnet-4-6"),
+            "got: {get}"
+        );
     }
 
     #[test]
@@ -2082,7 +2224,15 @@ mod tests {
     #[test]
     fn slash_model_with_arg_saves_and_confirms() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command(
+            "/model",
+            "claude-opus-4-7",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         assert!(out.contains("cost estimates updated"), "got: {out}");
     }
@@ -2090,8 +2240,24 @@ mod tests {
     #[test]
     fn slash_model_updates_cost_estimates() {
         let fs = MockFs::new();
-        handle_slash_command("/model", "claude-haiku-4-5", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
-        let cost_out = handle_slash_command("/cost", "", 1_000_000, 2_000_000, "claude-haiku-4-5", Path::new("/tmp"), &fs);
+        handle_slash_command(
+            "/model",
+            "claude-haiku-4-5",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
+        let cost_out = handle_slash_command(
+            "/cost",
+            "",
+            1_000_000,
+            2_000_000,
+            "claude-haiku-4-5",
+            Path::new("/tmp"),
+            &fs,
+        );
         // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
         assert!(cost_out.contains("1.60") || cost_out.contains("1.6"), "got: {cost_out}");
     }
@@ -2099,7 +2265,15 @@ mod tests {
     #[test]
     fn slash_cost_at_full_context_shows_100_percent() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 200_000, 200_000, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command(
+            "/cost",
+            "",
+            200_000,
+            200_000,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+        );
         assert!(out.contains("100%"), "got: {out}");
     }
 
@@ -2257,7 +2431,10 @@ mod tests {
         fs.add_file(readme_path.to_str().unwrap(), "My special readme content.");
 
         let prompt = build_init_prompt(&dir, &fs);
-        assert!(prompt.contains("My special readme content."), "readme not included: {prompt}");
+        assert!(
+            prompt.contains("My special readme content."),
+            "readme not included: {prompt}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -2406,10 +2583,17 @@ mod tests {
         factory.push_session(new_sess.clone());
 
         old.close().await;
-        let created = factory.create_session("acp", PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let created = factory
+            .create_session("acp", PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         assert_eq!(old.close_count(), 1, "old session must be closed once");
-        assert_eq!(created.session_id(), "new-sess", "factory must return the queued session");
+        assert_eq!(
+            created.session_id(),
+            "new-sess",
+            "factory must return the queued session"
+        );
     }
 
     #[tokio::test]
@@ -2430,7 +2614,10 @@ mod tests {
 
         let session = Arc::new(MockSession::new("sess-1"));
         session.queue_turn(vec![
-            StreamEvent::Usage { used_tokens: 75_000, context_size: 150_000 },
+            StreamEvent::Usage {
+                used_tokens: 75_000,
+                context_size: 150_000,
+            },
             StreamEvent::Done("end_turn".into()),
         ]);
 
@@ -2440,7 +2627,10 @@ mod tests {
         loop {
             match rx.recv().await {
                 None => break,
-                Some(StreamEvent::Usage { used_tokens, context_size }) => {
+                Some(StreamEvent::Usage {
+                    used_tokens,
+                    context_size,
+                }) => {
                     used = used_tokens;
                     ctx = context_size;
                 }
@@ -2459,8 +2649,14 @@ mod tests {
 
         let session = Arc::new(MockSession::new("sess-1"));
         session.queue_turn(vec![
-            StreamEvent::Usage { used_tokens: 10_000, context_size: 100_000 },
-            StreamEvent::Usage { used_tokens: 20_000, context_size: 100_000 },
+            StreamEvent::Usage {
+                used_tokens: 10_000,
+                context_size: 100_000,
+            },
+            StreamEvent::Usage {
+                used_tokens: 20_000,
+                context_size: 100_000,
+            },
             StreamEvent::Done("end_turn".into()),
         ]);
 

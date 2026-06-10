@@ -41,6 +41,8 @@ trogon-mcp           = { path = "../trogon-mcp" }
 trogon-nats          = { path = "../trogon-nats" }
 trogon-registry      = { workspace = true }
 trogon-runner-tools  = { path = "../trogon-runner-tools" }
+trogonai-compactor-proto = { workspace = true }
+buffa = "=0.7.0"
 trogon-std           = { path = "../trogon-std" }
 trogon-tools         = { path = "../trogon-tools" }
 

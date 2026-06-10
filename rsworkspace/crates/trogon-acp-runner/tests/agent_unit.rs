@@ -8,21 +8,18 @@
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent, CancelNotification, CloseSessionRequest, ExtRequest, ForkSessionRequest,
-    InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    SetSessionModelRequest, SessionConfigOptionValue, TextContent,
+    Agent, CancelNotification, CloseSessionRequest, ExtRequest, ForkSessionRequest, InitializeRequest,
+    ListSessionsRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, ProtocolVersion, ResumeSessionRequest,
+    SessionConfigOptionValue, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    TextContent,
 };
+use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use trogon_acp_runner::{
-    GatewayConfig, SessionStore, TrogonAgent, TrogonMdLoading,
-    agent_runner::mock::MockAgentRunner,
-    elicitation::ElicitationTx,
-    session_notifier::mock::MockSessionNotifier,
-    session_store::mock::MemorySessionStore,
+    GatewayConfig, SessionStore, TrogonAgent, TrogonMdLoading, agent_runner::mock::MockAgentRunner,
+    elicitation::ElicitationTx, session_notifier::mock::MockSessionNotifier, session_store::mock::MemorySessionStore,
 };
-use async_trait::async_trait;
 
 struct MockTrogonMdLoader(Option<String>);
 
@@ -83,10 +80,7 @@ async fn initialize_returns_capabilities() {
                 .unwrap();
             // list capability must be present
             assert!(
-                resp.agent_capabilities
-                    .session_capabilities
-                    .list
-                    .is_some(),
+                resp.agent_capabilities.session_capabilities.list.is_some(),
                 "list session capability must be set"
             );
         })
@@ -123,10 +117,7 @@ async fn new_session_default_mode_is_default() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let state = store.load(&resp.session_id.to_string()).await.unwrap();
             assert_eq!(state.mode, "default");
         })
@@ -140,10 +131,7 @@ async fn new_session_publishes_session_ready() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let published = notifier.published();
             assert_eq!(published.len(), 1, "one session.ready must be published");
         })
@@ -199,10 +187,7 @@ async fn set_session_mode_updates_stored_mode() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             agent
@@ -225,17 +210,11 @@ async fn set_session_model_updates_stored_model() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             agent
-                .set_session_model(SetSessionModelRequest::new(
-                    session_id.clone(),
-                    "claude-sonnet-4-6",
-                ))
+                .set_session_model(SetSessionModelRequest::new(session_id.clone(), "claude-sonnet-4-6"))
                 .await
                 .unwrap();
 
@@ -254,19 +233,10 @@ async fn list_sessions_returns_all_sessions() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            agent
-                .new_session(NewSessionRequest::new("/a"))
-                .await
-                .unwrap();
-            agent
-                .new_session(NewSessionRequest::new("/b"))
-                .await
-                .unwrap();
+            agent.new_session(NewSessionRequest::new("/a")).await.unwrap();
+            agent.new_session(NewSessionRequest::new("/b")).await.unwrap();
 
-            let resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
             assert_eq!(resp.sessions.len(), 2);
         })
         .await;
@@ -279,10 +249,7 @@ async fn list_sessions_branch_has_parent_meta() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/root"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/root")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let fork_resp = agent
@@ -291,10 +258,7 @@ async fn list_sessions_branch_has_parent_meta() {
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
 
-            let list_resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             let branch_info = list_resp
                 .sessions
@@ -314,10 +278,7 @@ async fn list_sessions_branch_has_parent_meta() {
                 .iter()
                 .find(|s| s.session_id.to_string() == parent_id)
                 .expect("parent session must appear in list");
-            assert!(
-                root_info.meta.is_none(),
-                "root session must not have branch _meta"
-            );
+            assert!(root_info.meta.is_none(), "root session must not have branch _meta");
         })
         .await;
 }
@@ -331,10 +292,7 @@ async fn fork_session_creates_copy_with_new_id() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             let fork_resp = agent
@@ -358,10 +316,7 @@ async fn fork_session_records_parent_id() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             let fork_resp = agent
@@ -388,16 +343,11 @@ async fn fork_session_branches_at_index() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             let mut state = store.load(&source_id).await.unwrap();
-            state.messages = (0..4)
-                .map(|i| Message::user_text(format!("msg-{i}")))
-                .collect();
+            state.messages = (0..4).map(|i| Message::user_text(format!("msg-{i}"))).collect();
             store.save(&source_id, &state).await.unwrap();
 
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
@@ -413,10 +363,7 @@ async fn fork_session_branches_at_index() {
             let fork_state = store.load(&fork_id).await.unwrap();
             assert_eq!(fork_state.messages.len(), 2, "branch must truncate to index 2");
             assert_eq!(fork_state.branched_at_index, Some(2));
-            assert_eq!(
-                fork_state.parent_session_id.as_deref(),
-                Some(source_id.as_str())
-            );
+            assert_eq!(fork_state.parent_session_id.as_deref(), Some(source_id.as_str()));
 
             let src_state = store.load(&source_id).await.unwrap();
             assert_eq!(src_state.messages.len(), 4, "source must remain unchanged");
@@ -431,16 +378,11 @@ async fn fork_session_branch_at_index_out_of_bounds_copies_full_history() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             let mut state = store.load(&source_id).await.unwrap();
-            state.messages = (0..3)
-                .map(|i| Message::user_text(format!("msg-{i}")))
-                .collect();
+            state.messages = (0..3).map(|i| Message::user_text(format!("msg-{i}"))).collect();
             store.save(&source_id, &state).await.unwrap();
 
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
@@ -471,16 +413,11 @@ async fn fork_session_branch_at_index_zero_produces_empty_history() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             let mut state = store.load(&source_id).await.unwrap();
-            state.messages = (0..3)
-                .map(|i| Message::user_text(format!("msg-{i}")))
-                .collect();
+            state.messages = (0..3).map(|i| Message::user_text(format!("msg-{i}"))).collect();
             store.save(&source_id, &state).await.unwrap();
 
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
@@ -516,10 +453,7 @@ async fn close_session_deletes_stored_state() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/tmp"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             let ids_before = store.list_ids().await.unwrap();
@@ -531,10 +465,7 @@ async fn close_session_deletes_stored_state() {
                 .unwrap();
 
             let ids_after = store.list_ids().await.unwrap();
-            assert!(
-                !ids_after.contains(&session_id),
-                "session must be removed after close"
-            );
+            assert!(!ids_after.contains(&session_id), "session must be removed after close");
         })
         .await;
 }
@@ -564,10 +495,7 @@ async fn ext_list_children_returns_direct_children() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/parent"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let fork1 = agent
@@ -581,16 +509,13 @@ async fn ext_list_children_returns_direct_children() {
 
             let params_json = format!(r#"{{"sessionId":"{}"}}"#, parent_id);
             let params: std::sync::Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(params_json)
-                    .unwrap()
-                    .into();
+                serde_json::value::RawValue::from_string(params_json).unwrap().into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/list_children", params))
                 .await
                 .unwrap();
 
-            let body: serde_json::Value =
-                serde_json::from_str(resp.0.get()).unwrap();
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
             let mut children: Vec<String> = body["children"]
                 .as_array()
                 .unwrap()
@@ -599,8 +524,7 @@ async fn ext_list_children_returns_direct_children() {
                 .collect();
             children.sort();
 
-            let mut expected =
-                vec![fork1.session_id.to_string(), fork2.session_id.to_string()];
+            let mut expected = vec![fork1.session_id.to_string(), fork2.session_id.to_string()];
             expected.sort();
             assert_eq!(children, expected);
 
@@ -616,24 +540,18 @@ async fn ext_list_children_returns_empty_for_root_session() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/root"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/root")).await.unwrap();
             let sid = resp.session_id.to_string();
 
             let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
             let params: std::sync::Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(params_json)
-                    .unwrap()
-                    .into();
+                serde_json::value::RawValue::from_string(params_json).unwrap().into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/list_children", params))
                 .await
                 .unwrap();
 
-            let body: serde_json::Value =
-                serde_json::from_str(resp.0.get()).unwrap();
+            let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
             let children = body["children"].as_array().unwrap();
             assert!(children.is_empty(), "root session must have no children");
         })
@@ -670,17 +588,13 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren() {
             let call = |sid: String| {
                 let params_json = format!(r#"{{"sessionId":"{}"}}"#, sid);
                 let params: std::sync::Arc<serde_json::value::RawValue> =
-                    serde_json::value::RawValue::from_string(params_json)
-                        .unwrap()
-                        .into();
+                    serde_json::value::RawValue::from_string(params_json).unwrap().into();
                 ExtRequest::new("session/list_children", params)
             };
 
             let children_a: Vec<String> = {
-                let body: serde_json::Value = serde_json::from_str(
-                    agent.ext_method(call(a.clone())).await.unwrap().0.get(),
-                )
-                .unwrap();
+                let body: serde_json::Value =
+                    serde_json::from_str(agent.ext_method(call(a.clone())).await.unwrap().0.get()).unwrap();
                 body["children"]
                     .as_array()
                     .unwrap()
@@ -691,10 +605,8 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren() {
             assert_eq!(children_a, vec![b.clone()], "A must have only B as child");
 
             let children_b: Vec<String> = {
-                let body: serde_json::Value = serde_json::from_str(
-                    agent.ext_method(call(b.clone())).await.unwrap().0.get(),
-                )
-                .unwrap();
+                let body: serde_json::Value =
+                    serde_json::from_str(agent.ext_method(call(b.clone())).await.unwrap().0.get()).unwrap();
                 body["children"]
                     .as_array()
                     .unwrap()
@@ -705,10 +617,8 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren() {
             assert_eq!(children_b, vec![c.clone()], "B must have only C as child");
 
             let children_c: Vec<String> = {
-                let body: serde_json::Value = serde_json::from_str(
-                    agent.ext_method(call(c.clone())).await.unwrap().0.get(),
-                )
-                .unwrap();
+                let body: serde_json::Value =
+                    serde_json::from_str(agent.ext_method(call(c.clone())).await.unwrap().0.get()).unwrap();
                 body["children"]
                     .as_array()
                     .unwrap()
@@ -750,10 +660,7 @@ async fn fork_session_publishes_session_ready() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             // One notification for new_session; fork must add a second one.
@@ -763,7 +670,11 @@ async fn fork_session_publishes_session_ready() {
                 .unwrap();
 
             let published = notifier.published();
-            assert_eq!(published.len(), 2, "fork_session must publish a session.ready notification");
+            assert_eq!(
+                published.len(),
+                2,
+                "fork_session must publish a session.ready notification"
+            );
         })
         .await;
 }
@@ -775,10 +686,7 @@ async fn fork_session_inherits_parent_mode_and_model() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             // Mutate mode and model directly in the store before forking.
@@ -812,10 +720,7 @@ async fn fork_session_inherits_todos_from_parent() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let mut state = store.load(&parent_id).await.unwrap();
@@ -847,10 +752,7 @@ async fn fork_session_inherits_permission_rules_text_from_parent() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let rules = "## Permissions\ndeny_commands: rm\n";
@@ -915,16 +817,11 @@ async fn fork_session_branch_at_index_wrong_type_falls_back_to_full_copy() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             let mut state = store.load(&source_id).await.unwrap();
-            state.messages = (0..4)
-                .map(|i| Message::user_text(format!("msg-{i}")))
-                .collect();
+            state.messages = (0..4).map(|i| Message::user_text(format!("msg-{i}"))).collect();
             store.save(&source_id, &state).await.unwrap();
 
             // Pass branchAtIndex as a JSON *string* — must be silently ignored.
@@ -945,8 +842,7 @@ async fn fork_session_branch_at_index_wrong_type_falls_back_to_full_copy() {
                 "wrong-type branchAtIndex must be ignored → full history copied"
             );
             assert_eq!(
-                fork_state.branched_at_index,
-                None,
+                fork_state.branched_at_index, None,
                 "branched_at_index must be None when branchAtIndex had a wrong type"
             );
         })
@@ -960,10 +856,7 @@ async fn fork_session_resets_token_totals_to_zero() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/src"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/src")).await.unwrap();
             let source_id = new_resp.session_id.to_string();
 
             // Inject token totals into the parent session.
@@ -981,10 +874,22 @@ async fn fork_session_resets_token_totals_to_zero() {
             let fork_id = fork_resp.session_id.to_string();
 
             let fork_state = store.load(&fork_id).await.unwrap();
-            assert_eq!(fork_state.total_input_tokens, 0, "fork must start with zero input tokens");
-            assert_eq!(fork_state.total_output_tokens, 0, "fork must start with zero output tokens");
-            assert_eq!(fork_state.total_cache_creation_tokens, 0, "fork must start with zero cache-creation tokens");
-            assert_eq!(fork_state.total_cache_read_tokens, 0, "fork must start with zero cache-read tokens");
+            assert_eq!(
+                fork_state.total_input_tokens, 0,
+                "fork must start with zero input tokens"
+            );
+            assert_eq!(
+                fork_state.total_output_tokens, 0,
+                "fork must start with zero output tokens"
+            );
+            assert_eq!(
+                fork_state.total_cache_creation_tokens, 0,
+                "fork must start with zero cache-creation tokens"
+            );
+            assert_eq!(
+                fork_state.total_cache_read_tokens, 0,
+                "fork must start with zero cache-read tokens"
+            );
 
             // Parent totals must be unchanged.
             let parent_state = store.load(&source_id).await.unwrap();
@@ -1041,10 +946,7 @@ async fn ext_list_children_null_session_id_returns_empty() {
                 .unwrap();
             let body: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
             let children = body["children"].as_array().unwrap();
-            assert!(
-                children.is_empty(),
-                "null sessionId must yield an empty children list"
-            );
+            assert!(children.is_empty(), "null sessionId must yield an empty children list");
         })
         .await;
 }
@@ -1058,10 +960,7 @@ async fn list_sessions_includes_branched_at_index_in_meta() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/root"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/root")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
@@ -1074,10 +973,7 @@ async fn list_sessions_includes_branched_at_index_in_meta() {
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
 
-            let list_resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             let fork_info = list_resp
                 .sessions
@@ -1109,10 +1005,7 @@ async fn list_sessions_preserves_parent_session_id_after_parent_deleted() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let parent_resp = agent
-                .new_session(NewSessionRequest::new("/root"))
-                .await
-                .unwrap();
+            let parent_resp = agent.new_session(NewSessionRequest::new("/root")).await.unwrap();
             let parent_id = parent_resp.session_id.to_string();
 
             let fork_resp = agent
@@ -1124,17 +1017,11 @@ async fn list_sessions_preserves_parent_session_id_after_parent_deleted() {
             // Delete the parent directly via the store.
             store.delete(&parent_id).await.unwrap();
 
-            let list_resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             // Parent must no longer appear.
             assert!(
-                list_resp
-                    .sessions
-                    .iter()
-                    .all(|s| s.session_id.to_string() != parent_id),
+                list_resp.sessions.iter().all(|s| s.session_id.to_string() != parent_id),
                 "deleted parent must not appear in list_sessions"
             );
 
@@ -1161,10 +1048,7 @@ async fn list_sessions_includes_token_totals_in_meta() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/work"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/work")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             // Inject token totals directly into the store.
@@ -1175,10 +1059,7 @@ async fn list_sessions_includes_token_totals_in_meta() {
             state.total_cache_read_tokens = 10;
             store.save(&session_id, &state).await.unwrap();
 
-            let list_resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             let info = list_resp
                 .sessions
@@ -1202,16 +1083,10 @@ async fn list_sessions_omits_token_meta_when_zero() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/work"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/work")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
-            let list_resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             let info = list_resp
                 .sessions
@@ -1239,10 +1114,7 @@ async fn cancel_publishes_cancel_subject() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            agent
-                .cancel(CancelNotification::new("sess-xyz"))
-                .await
-                .unwrap();
+            agent.cancel(CancelNotification::new("sess-xyz")).await.unwrap();
 
             let published = notifier.published();
             assert_eq!(published.len(), 1);
@@ -1284,26 +1156,18 @@ async fn prompt_runs_agent_and_saves_messages() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(
                 session_id.clone(),
-                vec![agent_client_protocol::ContentBlock::Text(
-                    TextContent::new("hello"),
-                )],
+                vec![agent_client_protocol::ContentBlock::Text(TextContent::new("hello"))],
             );
             let result = agent.prompt(prompt_req).await;
             assert!(result.is_ok(), "prompt must succeed: {:?}", result);
 
             let state = store.load(&session_id).await.unwrap();
-            assert!(
-                !state.messages.is_empty(),
-                "session must contain messages after prompt"
-            );
+            assert!(!state.messages.is_empty(), "session must contain messages after prompt");
         })
         .await;
 }
@@ -1315,17 +1179,14 @@ async fn prompt_sets_title_from_first_text_block() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(
                 session_id.clone(),
-                vec![agent_client_protocol::ContentBlock::Text(
-                    TextContent::new("What is Rust?"),
-                )],
+                vec![agent_client_protocol::ContentBlock::Text(TextContent::new(
+                    "What is Rust?",
+                ))],
             );
             agent.prompt(prompt_req).await.unwrap();
 
@@ -1355,17 +1216,12 @@ async fn prompt_max_iterations_returns_max_turn_requests() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(
                 session_id,
-                vec![agent_client_protocol::ContentBlock::Text(
-                    TextContent::new("loop"),
-                )],
+                vec![agent_client_protocol::ContentBlock::Text(TextContent::new("loop"))],
             );
             let result = agent.prompt(prompt_req).await.unwrap();
             assert_eq!(result.stop_reason, StopReason::MaxTurnRequests);
@@ -1393,17 +1249,14 @@ async fn prompt_max_tokens_returns_max_tokens_stop_reason() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(
                 session_id,
-                vec![agent_client_protocol::ContentBlock::Text(
-                    TextContent::new("big prompt"),
-                )],
+                vec![agent_client_protocol::ContentBlock::Text(TextContent::new(
+                    "big prompt",
+                ))],
             );
             let result = agent.prompt(prompt_req).await.unwrap();
             assert_eq!(result.stop_reason, StopReason::MaxTokens);
@@ -1431,10 +1284,7 @@ async fn prompt_steer_subject_contains_session_id() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(session_id.clone(), vec![]);
@@ -1476,10 +1326,7 @@ async fn prompt_steer_message_reaches_runner() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(session_id, vec![]);
@@ -1514,10 +1361,7 @@ async fn prompt_multiple_steer_messages_all_reach_runner() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(session_id, vec![]);
@@ -1551,10 +1395,7 @@ async fn prompt_no_steer_runner_receives_empty() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let prompt_req = PromptRequest::new(session_id, vec![]);
@@ -1591,10 +1432,7 @@ async fn prompt_steer_subscribe_failure_prompt_still_succeeds() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
 
             let result = agent.prompt(PromptRequest::new(session_id, vec![])).await;
@@ -1634,10 +1472,7 @@ async fn prompt_text_delta_events_are_forwarded_without_error() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = new_resp.session_id.to_string();
             let prompt_req = PromptRequest::new(session_id, vec![]);
             let result = agent.prompt(prompt_req).await;
@@ -1667,15 +1502,9 @@ async fn no_execution_backend_bash_tool_not_injected() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -1708,15 +1537,9 @@ async fn prompt_injects_elicitation_provider_when_elicitation_tx_is_some() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -1753,7 +1576,10 @@ async fn prompt_injects_trogon_md_content_into_system_prompt() {
             agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
 
             let sp = runner.captured_system_prompt();
-            assert!(sp.is_some(), "system_prompt must be set when TROGON.md loader returns content");
+            assert!(
+                sp.is_some(),
+                "system_prompt must be set when TROGON.md loader returns content"
+            );
             assert!(
                 sp.unwrap().contains("custom workspace instructions"),
                 "system_prompt must contain TROGON.md content"
@@ -1840,7 +1666,9 @@ async fn set_session_config_option_model_persists_to_store() {
                 .set_session_config_option(SetSessionConfigOptionRequest::new(
                     sid.clone(),
                     "model",
-                    SessionConfigOptionValue::ValueId { value: "claude-sonnet-4-6".into() },
+                    SessionConfigOptionValue::ValueId {
+                        value: "claude-sonnet-4-6".into(),
+                    },
                 ))
                 .await
                 .unwrap();
@@ -1866,7 +1694,9 @@ async fn set_session_config_option_unknown_id_is_silently_ignored() {
                 .set_session_config_option(SetSessionConfigOptionRequest::new(
                     sid.clone(),
                     "unknown_config_key_xyz",
-                    SessionConfigOptionValue::ValueId { value: "whatever".into() },
+                    SessionConfigOptionValue::ValueId {
+                        value: "whatever".into(),
+                    },
                 ))
                 .await;
             assert!(
@@ -1919,7 +1749,9 @@ async fn set_session_config_option_permissions_empty_clears_rules() {
                 .set_session_config_option(SetSessionConfigOptionRequest::new(
                     sid.clone(),
                     "permissions",
-                    SessionConfigOptionValue::ValueId { value: "deny_commands: rm".into() },
+                    SessionConfigOptionValue::ValueId {
+                        value: "deny_commands: rm".into(),
+                    },
                 ))
                 .await
                 .unwrap();
@@ -1966,14 +1798,10 @@ async fn prompt_appends_additional_roots_to_system_prompt() {
             let session_id = resp.session_id.to_string();
 
             let mut state = store.load(&session_id).await.unwrap();
-            state.additional_roots =
-                vec!["/extra/path".to_string(), "/another/root".to_string()];
+            state.additional_roots = vec!["/extra/path".to_string(), "/another/root".to_string()];
             store.save(&session_id, &state).await.unwrap();
 
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
 
             let sp = runner.captured_system_prompt().unwrap();
             assert!(
@@ -2011,15 +1839,9 @@ async fn prompt_does_not_inject_elicitation_provider_when_elicitation_tx_is_none
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -2067,10 +1889,7 @@ async fn prompt_egress_deny_policy_does_not_contact_mcp_server() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             let mut state = store.load(&session_id).await.unwrap();
@@ -2085,10 +1904,7 @@ async fn prompt_egress_deny_policy_does_not_contact_mcp_server() {
             });
             store.save(&session_id, &state).await.unwrap();
 
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -2136,10 +1952,7 @@ async fn prompt_egress_allow_policy_contacts_mcp_server() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             let mut state = store.load(&session_id).await.unwrap();
@@ -2154,10 +1967,7 @@ async fn prompt_egress_allow_policy_contacts_mcp_server() {
             });
             store.save(&session_id, &state).await.unwrap();
 
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -2190,15 +2000,9 @@ async fn prompt_sets_permission_checker_when_permission_tx_is_some() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -2229,20 +2033,14 @@ async fn prompt_skips_permission_checker_in_bypass_mode() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             let mut state = store.load(&session_id).await.unwrap();
             state.mode = "bypassPermissions".to_string();
             store.save(&session_id, &state).await.unwrap();
 
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -2275,10 +2073,7 @@ async fn prompt_wires_tool_policies_from_session_state() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             let mut state = store.load(&session_id).await.unwrap();
@@ -2289,10 +2084,7 @@ async fn prompt_wires_tool_policies_from_session_state() {
             }];
             store.save(&session_id, &state).await.unwrap();
 
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -2311,10 +2103,8 @@ async fn prompt_audit_drain_populates_session_audit_log() {
     // Configure the mock to call the checker with "allowed_tool".
     // The session will have "allowed_tool" in allowed_tools so the checker
     // short-circuits immediately (no channel round-trip) and records Allowed.
-    let runner = MockAgentRunner::new("claude-test").with_permission_check(
-        "allowed_tool",
-        serde_json::json!({"path": "/workspace/foo.rs"}),
-    );
+    let runner = MockAgentRunner::new("claude-test")
+        .with_permission_check("allowed_tool", serde_json::json!({"path": "/workspace/foo.rs"}));
     let agent = TrogonAgent::new(
         MockSessionNotifier::new(),
         store.clone(),
@@ -2329,10 +2119,7 @@ async fn prompt_audit_drain_populates_session_audit_log() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             // Pre-allow "allowed_tool" so the checker auto-approves it.

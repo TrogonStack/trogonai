@@ -134,7 +134,11 @@ fn civil_from_days(z: i64) -> (u32, u32, u32) {
     (y, m, d)
 }
 
-pub fn new_session_entry(prefix: impl Into<String>, session_id: impl Into<String>, model: impl Into<String>) -> SessionEntry {
+pub fn new_session_entry(
+    prefix: impl Into<String>,
+    session_id: impl Into<String>,
+    model: impl Into<String>,
+) -> SessionEntry {
     SessionEntry {
         prefix: prefix.into(),
         session_id: session_id.into(),
@@ -155,10 +159,7 @@ mod tests {
         let entry = new_session_entry("acp.claude", "sess-1", "claude-sonnet-4-6");
         index.record(&project, entry.clone());
         assert_eq!(index.get_last(&project), Some(&entry));
-        assert_eq!(
-            index.get_for_prefix(&project, "acp.claude"),
-            Some(&entry)
-        );
+        assert_eq!(index.get_for_prefix(&project, "acp.claude"), Some(&entry));
     }
 
     #[test]

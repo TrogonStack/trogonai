@@ -21,8 +21,14 @@ pub struct SessionSnapshot {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Per-session context-compaction model override. Persisted like `model`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Per-session context-compaction provider override.
+    /// Persisted as a separate `CompactionConfig` protobuf record (ADR 0009),
+    /// NOT in this console-shared JSON blob — hence `#[serde(skip)]`.
+    #[serde(skip)]
+    pub compactor_provider: Option<String>,
+    /// Per-session context-compaction model override.
+    /// Persisted as a separate `CompactionConfig` protobuf record (ADR 0009).
+    #[serde(skip)]
     pub compactor_model: Option<String>,
     #[serde(default)]
     pub tools: Vec<String>,
@@ -101,11 +107,7 @@ impl TextBlock {
 pub trait SessionStoring: Send + Sync + 'static {
     fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()>;
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()>;
-    fn load<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        session_id: &'a str,
-    ) -> BoxFuture<'a, Option<SessionSnapshot>>;
+    fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>>;
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -141,6 +143,16 @@ impl NatsSessionStore {
         if let Err(e) = self.sessions_kv.put(&key, bytes.into()).await {
             warn!(session_id = %snapshot.id, error = %e, "failed to write session to SESSIONS KV");
         }
+        // Compaction override → separate versioned protobuf record (ADR 0009),
+        // keeping the console-shared JSON blob above untouched.
+        let comp_key = format!("{key}.compaction");
+        let comp_bytes = trogon_runner_tools::encode_compaction(
+            snapshot.compactor_provider.as_deref(),
+            snapshot.compactor_model.as_deref(),
+        );
+        if let Err(e) = self.sessions_kv.put(&comp_key, comp_bytes.into()).await {
+            warn!(session_id = %snapshot.id, error = %e, "failed to write compaction override record");
+        }
     }
 
     async fn remove_impl(&self, tenant_id: &str, session_id: &str) {
@@ -148,6 +160,7 @@ impl NatsSessionStore {
         if let Err(e) = self.sessions_kv.delete(&key).await {
             warn!(session_id, error = %e, "failed to delete session from SESSIONS KV");
         }
+        let _ = self.sessions_kv.delete(&format!("{key}.compaction")).await;
     }
 
     async fn load_impl(&self, tenant_id: &str, session_id: &str) -> Option<SessionSnapshot> {
@@ -160,7 +173,15 @@ impl NatsSessionStore {
             }
         };
         match serde_json::from_slice::<SessionSnapshot>(&entry.value) {
-            Ok(snap) => Some(snap),
+            Ok(mut snap) => {
+                // Overlay the compaction override from its separate protobuf record.
+                if let Ok(Some(c)) = self.sessions_kv.entry(&format!("{key}.compaction")).await {
+                    let (provider, model) = trogon_runner_tools::decode_compaction(&c.value);
+                    snap.compactor_provider = provider;
+                    snap.compactor_model = model;
+                }
+                Some(snap)
+            }
             Err(e) => {
                 warn!(session_id, error = %e, "failed to deserialize session snapshot");
                 None
@@ -178,11 +199,7 @@ impl SessionStoring for NatsSessionStore {
         Box::pin(self.remove_impl(tenant_id, session_id))
     }
 
-    fn load<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        session_id: &'a str,
-    ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+    fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>> {
         Box::pin(self.load_impl(tenant_id, session_id))
     }
 }
@@ -191,9 +208,7 @@ impl SessionStoring for NatsSessionStore {
 
 /// Returns the current UTC time as an ISO 8601 string (e.g. `2026-04-20T15:30:00.123Z`).
 pub fn now_iso() -> String {
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = d.as_secs();
     let millis = d.subsec_millis();
     let time_secs = secs % 86400;
@@ -247,10 +262,7 @@ pub mod mock {
 
     impl SessionStoring for MockSessionStore {
         fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()> {
-            self.saves
-                .lock()
-                .expect("saves lock poisoned")
-                .push(snapshot.clone());
+            self.saves.lock().expect("saves lock poisoned").push(snapshot.clone());
             Box::pin(std::future::ready(()))
         }
 
@@ -262,11 +274,7 @@ pub mod mock {
             Box::pin(std::future::ready(()))
         }
 
-        fn load<'a>(
-            &'a self,
-            _tenant_id: &'a str,
-            session_id: &'a str,
-        ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+        fn load<'a>(&'a self, _tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>> {
             let result = self
                 .loads
                 .lock()
@@ -290,6 +298,7 @@ mod tests {
             tenant_id: "acme".into(),
             name: "Hello world".into(),
             model: Some("grok-4".into()),
+            compactor_provider: None,
             compactor_model: None,
             tools: vec![],
             memory_path: None,
@@ -361,6 +370,7 @@ mod tests {
             tenant_id: "t1".into(),
             name: "Test".into(),
             model: None,
+            compactor_provider: None,
             compactor_model: None,
             tools: vec![],
             memory_path: None,

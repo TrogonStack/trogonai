@@ -56,15 +56,13 @@ impl SpawnHttpClient for ReqwestSpawnClient {
         .await;
 
         match result {
-            Ok(Ok(resp)) if resp.status().is_success() => {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(json) => json["choices"][0]["message"]["content"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
-                    Err(e) => format!("error parsing response: {e}"),
-                }
-            }
+            Ok(Ok(resp)) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                Ok(json) => json["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                Err(e) => format!("error parsing response: {e}"),
+            },
             Ok(Ok(resp)) => format!("error: API returned {}", resp.status()),
             Ok(Err(e)) => format!("error: {e}"),
             Err(_) => format!("error: oneshot_call timed out after {}s", TIMEOUT.as_secs()),
@@ -120,9 +118,9 @@ pub async fn run_spawn_subscriber<C: SpawnHttpClient + Send + Sync + 'static>(
         let site_name2 = site_name.clone();
         let client2 = Arc::clone(&client);
         tokio::spawn(async move {
-            let result = oneshot_call_with_client(
-                client2.as_ref(), &key2, &model2, &prompt, &url, &site_url2, &site_name2,
-            ).await;
+            let result =
+                oneshot_call_with_client(client2.as_ref(), &key2, &model2, &prompt, &url, &site_url2, &site_name2)
+                    .await;
             nats2.publish(reply, result.into()).await.ok();
         });
     }
@@ -144,13 +142,10 @@ pub(crate) fn extract_prompt(req: &serde_json::Value) -> Result<String, String> 
 /// One-shot OpenRouter call: no session, no history, no tools.
 /// Returns the assistant text or an error string.
 pub async fn oneshot_call(api_key: &str, model: &str, prompt: &str) -> String {
-    let base_url = std::env::var("OPENROUTER_BASE_URL")
-        .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+    let base_url = std::env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let site_url = std::env::var("OPENROUTER_SITE_URL")
-        .unwrap_or_else(|_| "https://trogonai.com".to_string());
-    let site_name = std::env::var("OPENROUTER_SITE_NAME")
-        .unwrap_or_else(|_| "TrogonAI".to_string());
+    let site_url = std::env::var("OPENROUTER_SITE_URL").unwrap_or_else(|_| "https://trogonai.com".to_string());
+    let site_name = std::env::var("OPENROUTER_SITE_NAME").unwrap_or_else(|_| "TrogonAI".to_string());
     oneshot_call_with_client(&ReqwestSpawnClient, api_key, model, prompt, &url, &site_url, &site_name).await
 }
 
@@ -180,10 +175,16 @@ mod tests {
     impl MockSpawnClient {
         fn responding(
             response: impl Into<String>,
-        ) -> (Self, Arc<Mutex<Option<(String, String, String, String, String, String)>>>) {
+        ) -> (
+            Self,
+            Arc<Mutex<Option<(String, String, String, String, String, String)>>>,
+        ) {
             let captured = Arc::new(Mutex::new(None));
             (
-                Self { response: response.into(), captured: Arc::clone(&captured) },
+                Self {
+                    response: response.into(),
+                    captured: Arc::clone(&captured),
+                },
                 captured,
             )
         }
@@ -212,12 +213,15 @@ mod tests {
         }
     }
 
-    fn call<'a>(
-        mock: &'a MockSpawnClient,
-    ) -> impl std::future::Future<Output = String> + 'a {
+    fn call<'a>(mock: &'a MockSpawnClient) -> impl std::future::Future<Output = String> + 'a {
         oneshot_call_with_client(
-            mock, "key", "claude-sonnet-4-6", "hi",
-            "http://x/chat/completions", "https://trogonai.com", "TrogonAI",
+            mock,
+            "key",
+            "claude-sonnet-4-6",
+            "hi",
+            "http://x/chat/completions",
+            "https://trogonai.com",
+            "TrogonAI",
         )
     }
 
@@ -255,9 +259,15 @@ mod tests {
     async fn sends_correct_model_and_prompt() {
         let (mock, captured) = MockSpawnClient::responding("ok");
         oneshot_call_with_client(
-            &mock, "key", "claude-sonnet-4-6", "explain recursion",
-            "http://x/chat/completions", "https://trogonai.com", "TrogonAI",
-        ).await;
+            &mock,
+            "key",
+            "claude-sonnet-4-6",
+            "explain recursion",
+            "http://x/chat/completions",
+            "https://trogonai.com",
+            "TrogonAI",
+        )
+        .await;
         let cap = captured.lock().unwrap().take().unwrap();
         assert_eq!(cap.1, "claude-sonnet-4-6");
         assert_eq!(cap.2, "explain recursion");
@@ -267,9 +277,15 @@ mod tests {
     async fn sends_bearer_auth_header() {
         let (mock, captured) = MockSpawnClient::responding("ok");
         oneshot_call_with_client(
-            &mock, "my-secret-key", "claude-sonnet-4-6", "hi",
-            "http://x/chat/completions", "https://trogonai.com", "TrogonAI",
-        ).await;
+            &mock,
+            "my-secret-key",
+            "claude-sonnet-4-6",
+            "hi",
+            "http://x/chat/completions",
+            "https://trogonai.com",
+            "TrogonAI",
+        )
+        .await;
         let cap = captured.lock().unwrap().take().unwrap();
         assert_eq!(cap.0, "my-secret-key");
     }
@@ -278,9 +294,15 @@ mod tests {
     async fn sends_site_headers() {
         let (mock, captured) = MockSpawnClient::responding("ok");
         oneshot_call_with_client(
-            &mock, "key", "claude-sonnet-4-6", "hi",
-            "http://x/chat/completions", "https://mysite.com", "MySite",
-        ).await;
+            &mock,
+            "key",
+            "claude-sonnet-4-6",
+            "hi",
+            "http://x/chat/completions",
+            "https://mysite.com",
+            "MySite",
+        )
+        .await;
         let cap = captured.lock().unwrap().take().unwrap();
         assert_eq!(cap.4, "https://mysite.com");
         assert_eq!(cap.5, "MySite");

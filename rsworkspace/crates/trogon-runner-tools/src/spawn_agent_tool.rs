@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
+use trogon_tools::ToolDef;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -19,11 +19,7 @@ pub struct SpawnAgentTool {
 }
 
 impl SpawnAgentTool {
-    pub fn new(
-        nats: async_nats::Client,
-        prefix: impl Into<String>,
-        session_id: impl Into<String>,
-    ) -> Self {
+    pub fn new(nats: async_nats::Client, prefix: impl Into<String>, session_id: impl Into<String>) -> Self {
         Self {
             nats,
             prefix: prefix.into(),
@@ -57,11 +53,7 @@ impl SpawnAgentTool {
     }
 
     pub fn into_dispatch(self) -> (String, String, Arc<dyn McpCallTool>) {
-        (
-            "spawn_agent".to_string(),
-            "spawn_agent".to_string(),
-            Arc::new(self),
-        )
+        ("spawn_agent".to_string(), "spawn_agent".to_string(), Arc::new(self))
     }
 }
 
@@ -91,13 +83,10 @@ impl McpCallTool for SpawnAgentTool {
 
             let subject = format!("{prefix}.agent.spawn");
 
-            let msg = tokio::time::timeout(
-                SPAWN_TIMEOUT,
-                nats.request(subject, payload.into()),
-            )
-            .await
-            .map_err(|_| format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs()))?
-            .map_err(|e| e.to_string())?;
+            let msg = tokio::time::timeout(SPAWN_TIMEOUT, nats.request(subject, payload.into()))
+                .await
+                .map_err(|_| format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs()))?
+                .map_err(|e| e.to_string())?;
 
             String::from_utf8(msg.payload.to_vec()).map_err(|e| e.to_string())
         })

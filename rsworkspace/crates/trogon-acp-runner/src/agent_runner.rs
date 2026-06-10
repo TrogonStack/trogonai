@@ -24,11 +24,7 @@ pub trait AgentRunner: Clone {
     fn set_cwd(&mut self, cwd: String);
 
     /// Append MCP tool definitions and their dispatch entries.
-    fn add_mcp_tools(
-        &mut self,
-        defs: Vec<ToolDef>,
-        dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
-    );
+    fn add_mcp_tools(&mut self, defs: Vec<ToolDef>, dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>);
 
     /// Install a permission checker that gates every tool execution.
     fn set_permission_checker(&mut self, checker: Arc<dyn PermissionChecker>);
@@ -75,11 +71,7 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
         });
     }
 
-    fn add_mcp_tools(
-        &mut self,
-        defs: Vec<ToolDef>,
-        dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
-    ) {
+    fn add_mcp_tools(&mut self, defs: Vec<ToolDef>, dispatch: Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>) {
         self.mcp_tool_defs.extend(defs);
         self.mcp_dispatch.extend(dispatch);
     }
@@ -120,11 +112,11 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use trogon_tools::ToolContext;
-    use trogon_agent_core::agent_loop::AgentLoop;
-    use crate::agent::GatewayConfig;
     use super::AgentRunner;
+    use crate::agent::GatewayConfig;
+    use std::sync::Arc;
+    use trogon_agent_core::agent_loop::AgentLoop;
+    use trogon_tools::ToolContext;
 
     fn make_agent_loop() -> AgentLoop {
         AgentLoop {
@@ -163,7 +155,10 @@ mod tests {
         runner.apply_gateway(&config);
         assert_eq!(runner.anthropic_base_url, Some("https://proxy.example.com".to_string()));
         assert_eq!(runner.anthropic_token, "gateway-token");
-        assert_eq!(runner.anthropic_extra_headers, vec![("X-Custom".to_string(), "value".to_string())]);
+        assert_eq!(
+            runner.anthropic_extra_headers,
+            vec![("X-Custom".to_string(), "value".to_string())]
+        );
     }
 
     #[test]
@@ -179,9 +174,15 @@ mod tests {
             token: "token-2".to_string(),
             extra_headers: vec![("X-New".to_string(), "v2".to_string())],
         });
-        assert_eq!(runner.anthropic_base_url, Some("https://second.example.com".to_string()));
+        assert_eq!(
+            runner.anthropic_base_url,
+            Some("https://second.example.com".to_string())
+        );
         assert_eq!(runner.anthropic_token, "token-2");
-        assert_eq!(runner.anthropic_extra_headers, vec![("X-New".to_string(), "v2".to_string())]);
+        assert_eq!(
+            runner.anthropic_extra_headers,
+            vec![("X-New".to_string(), "v2".to_string())]
+        );
     }
 
     #[test]
@@ -196,7 +197,11 @@ mod tests {
     fn add_mcp_tools_extends_tool_defs() {
         let mut runner = make_agent_loop();
         assert!(runner.mcp_tool_defs.is_empty());
-        let def = trogon_tools::tool_def("my_tool", "does stuff", serde_json::json!({"type":"object","properties":{}}));
+        let def = trogon_tools::tool_def(
+            "my_tool",
+            "does stuff",
+            serde_json::json!({"type":"object","properties":{}}),
+        );
         runner.add_mcp_tools(vec![def], vec![]);
         assert_eq!(runner.mcp_tool_defs.len(), 1);
         assert_eq!(runner.mcp_tool_defs[0].name, "my_tool");
@@ -432,12 +437,7 @@ pub mod mock {
             if let Some(error) = self.error.lock().unwrap().take() {
                 return Err(error);
             }
-            Ok(self
-                .response
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or(messages))
+            Ok(self.response.lock().unwrap().clone().unwrap_or(messages))
         }
     }
 }

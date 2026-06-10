@@ -5,16 +5,13 @@ use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
-use trogon_xai_runner::{
-    AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent,
-};
+use trogon_xai_runner::{AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     // MED-34: default to a runner-specific prefix so the spawn subscriber does not
     // share `acp.agent.spawn` with the openrouter runner (which would round-robin
     // spawn requests to the wrong backend). The dev script still overrides this.
@@ -76,7 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // ── Registry self-registration ────────────────────────────────────────────
 
     let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "xai".to_string());
-    let reg_store = trogon_registry::provision(&js_ctx).await
+    let reg_store = trogon_registry::provision(&js_ctx)
+        .await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
     let model_ids: Vec<String> = models
@@ -110,15 +108,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let spawn_model = default_model.clone();
     let spawn_prefix = prefix.clone();
 
-    let nats_config = acp_nats::NatsConfig { servers: vec![nats_url.clone()], auth: acp_nats::NatsAuth::None };
+    let nats_config = acp_nats::NatsConfig {
+        servers: vec![nats_url.clone()],
+        auth: acp_nats::NatsAuth::None,
+    };
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
         .with_execution_backend(nats.clone(), registry_for_agent)
         .with_compactor(nats.clone())
-        .with_permissions(nats.clone(), acp_prefix.clone())
-        .with_runner_config(runner_config);
+        .with_permissions(nats.clone(), acp_prefix.clone());
+    if let Ok(catalog) =
+        trogonai_catalog_client::open(&js_ctx, trogonai_catalog_client::CatalogClientConfig::default()).await
+    {
+        agent = agent.with_catalog(catalog);
+    }
+    let mut agent = agent.with_runner_config(runner_config);
 
     // If AGENT_ID is set, attach console skill loaders so skills defined in
     // trogon-console are injected into every new session's system prompt.
@@ -151,8 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     {
         use trogon_xai_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
-        let base_url = std::env::var("XAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+        let base_url = std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
         tokio::spawn(run_spawn_subscriber(
             nats.clone(),
             spawn_prefix,
@@ -170,8 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_for_perm = nats.clone();
     let prefix_for_perm = acp_prefix.clone();
 
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
     agent = agent.with_elicitation(elic_tx);
     let nats_for_elic = nats.clone();
     let prefix_for_elic = acp_prefix.clone();
@@ -201,10 +205,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             });
 
-            let (_conn, io_task) =
-                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             // LOW-16: register AFTER the ACP subscription is established so
             // incoming requests are not received before we can handle them.
             if let Err(e) = registry_for_register.register(&cap).await {
