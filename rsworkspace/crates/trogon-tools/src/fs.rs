@@ -395,6 +395,63 @@ pub async fn glob_files(ctx: &ToolContext, input: &Value) -> String {
     matches.join("\n")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotebookEditMode {
+    Replace,
+    Insert,
+    Delete,
+}
+
+fn parse_notebook_edit_mode(input: &Value) -> Result<NotebookEditMode, String> {
+    if input.get("is_new_cell").and_then(|v| v.as_bool()) == Some(true) {
+        return Ok(NotebookEditMode::Insert);
+    }
+    match input.get("edit_mode").and_then(|v| v.as_str()) {
+        None | Some("replace") => Ok(NotebookEditMode::Replace),
+        Some("insert") => Ok(NotebookEditMode::Insert),
+        Some("delete") => Ok(NotebookEditMode::Delete),
+        Some(other) => Err(format!(
+            "Error: invalid edit_mode '{other}' (expected 'replace', 'insert', or 'delete')"
+        )),
+    }
+}
+
+fn content_to_source_lines(content: &str) -> Vec<String> {
+    let line_count = content.lines().count();
+    content
+        .lines()
+        .enumerate()
+        .map(|(i, line)| {
+            if i == line_count - 1 {
+                line.to_string()
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect()
+}
+
+fn new_notebook_cell(cell_type: &str, content: &str) -> Result<serde_json::Value, String> {
+    let source = content_to_source_lines(content);
+    match cell_type {
+        "code" => Ok(serde_json::json!({
+            "cell_type": "code",
+            "source": source,
+            "metadata": {},
+            "outputs": [],
+            "execution_count": null
+        })),
+        "markdown" => Ok(serde_json::json!({
+            "cell_type": "markdown",
+            "source": source,
+            "metadata": {}
+        })),
+        other => Err(format!(
+            "Error: invalid cell_type '{other}' (expected 'code' or 'markdown')"
+        )),
+    }
+}
+
 pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
     let path = match input.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
@@ -404,11 +461,16 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
         Some(i) => i as usize,
         None => return "Error: missing required parameter 'cell_index'".to_string(),
     };
-    let content = match input.get("content").and_then(|v| v.as_str()) {
-        Some(c) => c,
-        None => return "Error: missing required parameter 'content'".to_string(),
+    let edit_mode = match parse_notebook_edit_mode(input) {
+        Ok(mode) => mode,
+        Err(e) => return e,
     };
+    let content = input.get("content").and_then(|v| v.as_str());
     let cell_type = input.get("cell_type").and_then(|v| v.as_str());
+
+    if edit_mode != NotebookEditMode::Delete && content.is_none() {
+        return "Error: missing required parameter 'content'".to_string();
+    }
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
@@ -430,30 +492,48 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
         None => return "Error: notebook has no 'cells' array".to_string(),
     };
 
-    if cell_index >= cells.len() {
-        return format!(
-            "Error: cell_index {cell_index} out of range (notebook has {} cells)",
-            cells.len()
-        );
-    }
-
-    let cell = &mut cells[cell_index];
-    let line_count = content.lines().count();
-    let source_lines: Vec<String> = content
-        .lines()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == line_count - 1 {
-                line.to_string()
-            } else {
-                format!("{line}\n")
+    match edit_mode {
+        NotebookEditMode::Replace => {
+            if cell_index >= cells.len() {
+                return format!(
+                    "Error: cell_index {cell_index} out of range (notebook has {} cells)",
+                    cells.len()
+                );
             }
-        })
-        .collect();
-    cell["source"] = serde_json::json!(source_lines);
 
-    if let Some(ct) = cell_type {
-        cell["cell_type"] = serde_json::json!(ct);
+            let content = content.expect("content checked above");
+            let cell = &mut cells[cell_index];
+            cell["source"] = serde_json::json!(content_to_source_lines(content));
+
+            if let Some(ct) = cell_type {
+                cell["cell_type"] = serde_json::json!(ct);
+            }
+        }
+        NotebookEditMode::Insert => {
+            if cell_index > cells.len() {
+                return format!(
+                    "Error: cell_index {cell_index} out of range for insert (notebook has {} cells)",
+                    cells.len()
+                );
+            }
+
+            let content = content.expect("content checked above");
+            let ct = cell_type.unwrap_or("code");
+            let new_cell = match new_notebook_cell(ct, content) {
+                Ok(cell) => cell,
+                Err(e) => return e,
+            };
+            cells.insert(cell_index, new_cell);
+        }
+        NotebookEditMode::Delete => {
+            if cell_index >= cells.len() {
+                return format!(
+                    "Error: cell_index {cell_index} out of range (notebook has {} cells)",
+                    cells.len()
+                );
+            }
+            cells.remove(cell_index);
+        }
     }
 
     let updated = match serde_json::to_string_pretty(&notebook) {
@@ -1033,5 +1113,147 @@ mod tests {
         let raw = tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed["cells"][0]["cell_type"], "markdown");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_inserts_code_cell_at_index() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["first"], "metadata": {}, "outputs": [], "execution_count": null},
+                {"cell_type": "code", "source": ["third"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({
+                "path": "nb.ipynb",
+                "cell_index": 1,
+                "content": "second",
+                "cell_type": "code",
+                "edit_mode": "insert"
+            }),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 3);
+        assert_eq!(parsed["cells"][0]["source"][0], "first");
+        assert_eq!(parsed["cells"][1]["source"][0], "second");
+        assert_eq!(parsed["cells"][1]["cell_type"], "code");
+        assert_eq!(parsed["cells"][2]["source"][0], "third");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_inserts_markdown_cell_at_index() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["code"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({
+                "path": "nb.ipynb",
+                "cell_index": 0,
+                "content": "# heading",
+                "cell_type": "markdown",
+                "edit_mode": "insert"
+            }),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["cells"][0]["cell_type"], "markdown");
+        assert_eq!(parsed["cells"][0]["source"][0], "# heading");
+        assert_eq!(parsed["cells"][1]["source"][0], "code");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_insert_via_is_new_cell() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["only"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({
+                "path": "nb.ipynb",
+                "cell_index": 1,
+                "content": "appended",
+                "cell_type": "code",
+                "is_new_cell": true
+            }),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["cells"][0]["source"][0], "only");
+        assert_eq!(parsed["cells"][1]["source"][0], "appended");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_delete_cell() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["keep"], "metadata": {}, "outputs": [], "execution_count": null},
+                {"cell_type": "code", "source": ["remove"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({"path": "nb.ipynb", "cell_index": 1, "edit_mode": "delete"}),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["cells"][0]["source"][0], "keep");
     }
 }
