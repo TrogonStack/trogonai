@@ -65,6 +65,25 @@ fn not_found(msg: impl Into<String>) -> Error {
 /// the Responses API `tools` array; the label is shown in the ACP UI.
 const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_search", "X Search")];
 
+/// Whether `name` is an xAI server-side tool (handled via [`AVAILABLE_TOOLS`]).
+fn is_xai_server_tool(name: &str) -> bool {
+    AVAILABLE_TOOLS.iter().any(|(id, _)| *id == name)
+}
+
+/// Default `enabled_tools` for a fresh or legacy (pre-fix, `tools: []`) xAI
+/// session: every portable trogon tool, **minus** the xAI server-side tools in
+/// [`AVAILABLE_TOOLS`] (`web_search`, `x_search`). Those default off and are
+/// toggled per session via the config UI. Without this filter the portable
+/// `web_search` that `trogon-tools` now ships (acp/openrouter feature) would
+/// silently enable xAI's native web search by default and collide with it.
+fn default_enabled_tools() -> Vec<String> {
+    trogon_tools::all_tool_defs()
+        .into_iter()
+        .map(|d| d.name)
+        .filter(|name| !is_xai_server_tool(name.as_str()))
+        .collect()
+}
+
 /// Maximum number of sessions held in memory simultaneously.
 ///
 /// When a new session would exceed this limit, the oldest session (by
@@ -698,10 +717,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             return false;
         };
         let enabled_tools = if snap.tools.is_empty() {
-            trogon_tools::all_tool_defs()
-                .into_iter()
-                .map(|d| d.name.to_string())
-                .collect()
+            default_enabled_tools()
         } else {
             snap.tools.clone()
         };
@@ -1122,10 +1138,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
-                enabled_tools: trogon_tools::all_tool_defs()
-                    .into_iter()
-                    .map(|d| d.name)
-                    .collect(),
+                enabled_tools: default_enabled_tools(),
                 system_prompt,
                 created_at: Instant::now(),
                 last_used_at: Instant::now(),
@@ -1349,19 +1362,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             store.save(&snapshot).await;
         }
         // Release persistent bash terminal if one was created for this session.
-        if let Some(s) = sessions.get(&session_id) {
-            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+        if let Some(s) = sessions.get(&session_id)
+            && let (Some(tid), Some(wasm_prefix), Some(nats)) = (
                 s.terminal_id.clone(),
                 s.terminal_wasm_prefix.clone(),
                 &self.execution_nats,
-            ) {
-                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-                if let Ok(payload) = serde_json::to_vec(&agent_client_protocol::ReleaseTerminalRequest::new(
-                    session_id.clone(),
-                    tid,
-                )) {
-                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
-                }
+            )
+        {
+            let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+            if let Ok(payload) = serde_json::to_vec(&agent_client_protocol::ReleaseTerminalRequest::new(
+                session_id.clone(),
+                tid,
+            )) {
+                let _ = nats.request(format!("{base}.release"), payload.into()).await;
             }
         }
         sessions.remove(&session_id);
@@ -1790,6 +1803,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         for def in trogon_tools::all_tool_defs() {
+            // Skip xAI server-side tools (web_search/x_search): they're emitted as
+            // ServerSide specs above. trogon-tools now ships a portable `web_search`
+            // for other runners; on xAI it must not also be sent as a Function spec,
+            // or the Responses API receives a duplicate tool name.
+            if is_xai_server_tool(&def.name) {
+                continue;
+            }
             if offered_tools.iter().any(|t| t == &def.name) {
                 call_tools.push(ToolSpec::Function {
                     name: def.name,
@@ -2222,8 +2242,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             rules.merge(PermissionRules::parse(extra));
                         }
                         let allowed_tools = self.permission_store.allowed_tools(&session_id);
-                        let mut extras = trogon_runner_tools::PermissionExtras::default();
-                        extras.classifier = self.classifier.clone();
+                        let extras = trogon_runner_tools::PermissionExtras {
+                            classifier: self.classifier.clone(),
+                            ..Default::default()
+                        };
                         check_tool_permission(
                             &session_mode,
                             &session_id,
@@ -2296,11 +2318,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 // Persist terminal_id back to session if it was just created
                                 if terminal_id.is_some() {
                                     let mut sessions = self.sessions.lock().await;
-                                    if let Some(s) = sessions.get_mut(&session_id) {
-                                        if s.terminal_id.is_none() {
-                                            s.terminal_id = terminal_id.clone();
-                                            s.terminal_wasm_prefix = Some(wasm.to_string());
-                                        }
+                                    if let Some(s) = sessions.get_mut(&session_id)
+                                        && s.terminal_id.is_none()
+                                    {
+                                        s.terminal_id = terminal_id.clone();
+                                        s.terminal_wasm_prefix = Some(wasm.to_string());
                                     }
                                 }
                                 result
@@ -2655,43 +2677,43 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // xAI is stateful: when compaction fires we clear `last_response_id` so
         // the next turn re-sends the full compacted history (otherwise the server
         // keeps the old context and the summary never takes effect).
-        if !canceled {
-            if let Some(nats) = self.compactor_nats.clone() {
-                let snapshot = {
-                    let sessions = self.sessions.lock().await;
-                    sessions.get(&session_id).map(|s| {
-                        (
-                            s.history.clone(),
-                            s.model.clone().unwrap_or_else(|| self.default_model.clone()),
-                            s.compactor_model.clone(),
-                        )
-                    })
-                };
-                if let Some((history, model, compactor_model)) = snapshot {
-                    let context_window = context_window_tokens(&model);
-                    if crate::compaction::should_compact(&history, context_window) {
-                        let (new_history, compacted) = crate::compaction::compact(
-                            &nats,
-                            history,
-                            &model,
-                            compactor_model.as_deref(),
-                            context_window,
-                        )
-                        .await;
-                        if compacted {
-                            let mut sessions = self.sessions.lock().await;
-                            if let Some(s) = sessions.get_mut(&session_id) {
-                                s.history = new_history;
-                                s.last_response_id = None;
-                            }
-                            if let (Some(store), Some(s)) =
-                                (&self.session_store, sessions.get(&session_id))
-                            {
-                                let snap = self.build_snapshot(&session_id, s);
-                                store.save(&snap).await;
-                            }
-                            info!(session_id, "xai: context compacted post-turn");
+        if !canceled
+            && let Some(nats) = self.compactor_nats.clone()
+        {
+            let snapshot = {
+                let sessions = self.sessions.lock().await;
+                sessions.get(&session_id).map(|s| {
+                    (
+                        s.history.clone(),
+                        s.model.clone().unwrap_or_else(|| self.default_model.clone()),
+                        s.compactor_model.clone(),
+                    )
+                })
+            };
+            if let Some((history, model, compactor_model)) = snapshot {
+                let context_window = context_window_tokens(&model);
+                if crate::compaction::should_compact(&history, context_window) {
+                    let (new_history, compacted) = crate::compaction::compact(
+                        &nats,
+                        history,
+                        &model,
+                        compactor_model.as_deref(),
+                        context_window,
+                    )
+                    .await;
+                    if compacted {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            s.history = new_history;
+                            s.last_response_id = None;
                         }
+                        if let (Some(store), Some(s)) =
+                            (&self.session_store, sessions.get(&session_id))
+                        {
+                            let snap = self.build_snapshot(&session_id, s);
+                            store.save(&snap).await;
+                        }
+                        info!(session_id, "xai: context compacted post-turn");
                     }
                 }
             }
@@ -3840,15 +3862,20 @@ mod tests {
             .expect("must succeed");
 
         let tools = agent.test_session_enabled_tools("sess-old").await;
+        // Restoring a pre-fix snapshot enables every portable trogon tool EXCEPT the
+        // xAI server-side tools (web_search/x_search), which default off. `web_search`
+        // is now in `all_tool_defs()` (portable acp/openrouter tool), so it must be
+        // filtered out of the xAI default — hence `default_enabled_tools()`.
         let expected: Vec<String> = trogon_tools::all_tool_defs()
             .into_iter()
             .map(|d| d.name.to_string())
+            .filter(|n| n != "web_search" && n != "x_search")
             .collect();
         assert_eq!(
             tools, expected,
             "pre-fix snapshot (tools:[]) must restore all trogon tools, not xAI tools"
         );
-        // xAI tools must NOT be present — they default to off.
+        // xAI server-side tools must NOT be present — they default to off.
         assert!(
             !tools.iter().any(|t| t == "web_search" || t == "x_search"),
             "web_search and x_search must be off when restoring a pre-fix snapshot"

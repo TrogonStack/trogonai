@@ -1425,21 +1425,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             store.save(&snapshot).await;
         }
         // Release persistent bash terminal if one was created for this session.
-        if let Some(s) = sessions.get(&session_id) {
-            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+        if let Some(s) = sessions.get(&session_id)
+            && let (Some(tid), Some(wasm_prefix), Some(nats)) = (
                 s.terminal_id.clone(),
                 s.terminal_wasm_prefix.clone(),
                 &self.execution_nats,
+            )
+        {
+            let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+            if let Ok(payload) = serde_json::to_vec(
+                &agent_client_protocol::ReleaseTerminalRequest::new(
+                    session_id.clone(),
+                    tid,
+                ),
             ) {
-                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-                if let Ok(payload) = serde_json::to_vec(
-                    &agent_client_protocol::ReleaseTerminalRequest::new(
-                        session_id.clone(),
-                        tid,
-                    ),
-                ) {
-                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
-                }
+                let _ = nats.request(format!("{base}.release"), payload.into()).await;
             }
         }
         sessions.remove(&session_id);
@@ -2099,8 +2099,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         rules.merge(PermissionRules::parse(extra));
                     }
                     let allowed_tools = self.permission_store.allowed_tools(&session_id);
-                    let mut extras = trogon_runner_tools::PermissionExtras::default();
-                    extras.classifier = self.classifier.clone();
+                    let extras = trogon_runner_tools::PermissionExtras {
+                        classifier: self.classifier.clone(),
+                        ..Default::default()
+                    };
                     check_tool_permission(
                         &session_mode,
                         &session_id,
@@ -2167,11 +2169,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         // Persist terminal_id back to session if it was just created
                         if terminal_id.is_some() {
                             let mut sessions = self.sessions.lock().await;
-                            if let Some(s) = sessions.get_mut(&session_id) {
-                                if s.terminal_id.is_none() {
-                                    s.terminal_id = terminal_id.clone();
-                                    s.terminal_wasm_prefix = Some(wasm.to_string());
-                                }
+                            if let Some(s) = sessions.get_mut(&session_id)
+                                && s.terminal_id.is_none()
+                            {
+                                s.terminal_id = terminal_id.clone();
+                                s.terminal_wasm_prefix = Some(wasm.to_string());
                             }
                         }
                         result
