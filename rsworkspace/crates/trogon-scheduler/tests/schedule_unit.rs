@@ -35,11 +35,11 @@ fn expected_schedule(id: &str) -> Schedule {
     }
 }
 
-fn command_base_schedule(id: &str) -> command_domain::Schedule {
-    command_domain::Schedule {
+fn command_base_schedule(id: &str) -> CreateSchedule {
+    CreateSchedule {
         id: command_schedule_id(id),
-        status: command_domain::ScheduleStatus::Enabled,
-        schedule: command_domain::ScheduleSpec::every(30).unwrap(),
+        status: command_domain::ScheduleEventStatus::Scheduled,
+        schedule: command_domain::Schedule::every(std::time::Duration::from_secs(30)).unwrap(),
         delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
         message: command_domain::ScheduleMessage {
             content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
@@ -131,32 +131,16 @@ async fn client_remove_and_list_schedules_use_store_paths() {
 
 #[tokio::test]
 async fn client_rejects_invalid_route() {
-    let error = serde_json::from_value::<command_domain::Schedule>(serde_json::json!({
-        "id": "bad",
-        "schedule": { "type": "every", "every_sec": 30 },
-        "delivery": { "type": "nats_event", "route": "agent.>" },
-        "content": "{\"kind\":\"heartbeat\"}"
-    }))
-    .unwrap_err();
+    let error = command_domain::Delivery::nats_event("agent.>").unwrap_err();
 
     assert!(error.to_string().contains("route"));
 }
 
 #[tokio::test]
 async fn client_rejects_invalid_source_subject() {
-    let error = serde_json::from_value::<command_domain::Schedule>(serde_json::json!({
-        "id": "bad-source",
-        "schedule": { "type": "every", "every_sec": 30 },
-        "delivery": {
-            "type": "nats_event",
-            "route": "agent.run",
-            "source": { "type": "latest_from_subject", "subject": "sensors.>" }
-        },
-        "content": "{\"kind\":\"heartbeat\"}"
-    }))
-    .unwrap_err();
+    let error = command_domain::SamplingSource::latest_from_subject("sensors.>").unwrap_err();
 
-    assert!(error.to_string().contains("sampling source"));
+    assert!(error.to_string().contains("sampling subject"));
 }
 
 #[tokio::test]

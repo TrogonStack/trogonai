@@ -217,17 +217,20 @@ impl MockSchedulerStore {
 
     pub(crate) fn read_command_snapshot<Payload>(
         &self,
-        stream_id: &(impl AsRef<str> + ?Sized),
+        snapshot_id: &(impl AsRef<str> + ?Sized),
     ) -> Result<Option<Snapshot<Payload>>, SchedulerError>
     where
         Payload: SnapshotPayloadDecode + SnapshotType,
-        Payload::Error: std::error::Error + Send + Sync + 'static,
+        <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
+        <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
     {
+        let snapshot_type = Payload::snapshot_type()
+            .map_err(|source| SchedulerError::event_source("failed to resolve command snapshot type", source))?;
         self.command_snapshots
             .lock()
             .unwrap()
-            .get(Payload::SNAPSHOT_STREAM_PREFIX)
-            .and_then(|snapshots| snapshots.get(stream_id.as_ref()).cloned())
+            .get(snapshot_type.as_ref())
+            .and_then(|snapshots| snapshots.get(snapshot_id.as_ref()).cloned())
             .map(|snapshot| {
                 Payload::decode(SnapshotPayloadData::new(snapshot.payload.as_slice()))
                     .map(|payload| Snapshot::new(snapshot.position, payload))
@@ -635,7 +638,8 @@ impl StreamAppend<str> for MockSchedulerStore {
 impl<Payload> SnapshotRead<Payload, str> for MockSchedulerStore
 where
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
-    Payload::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = SchedulerError;
 
@@ -643,7 +647,7 @@ where
         &self,
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        self.read_command_snapshot(request.stream_id)
+        self.read_command_snapshot(request.snapshot_id)
             .map(|snapshot| ReadSnapshotResponse { snapshot })
     }
 }
@@ -651,7 +655,8 @@ where
 impl<Payload> SnapshotWrite<Payload, str> for MockSchedulerStore
 where
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
-    Payload::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = SchedulerError;
 
@@ -666,12 +671,14 @@ where
                     SchedulerError::event_source("failed to encode command snapshot payload", source)
                 })?,
             };
+        let snapshot_type = Payload::snapshot_type()
+            .map_err(|source| SchedulerError::event_source("failed to resolve command snapshot type", source))?;
         self.command_snapshots
             .lock()
             .unwrap()
-            .entry(Payload::SNAPSHOT_STREAM_PREFIX.to_string())
+            .entry(snapshot_type.to_string())
             .or_default()
-            .insert(request.stream_id.to_string(), snapshot);
+            .insert(request.snapshot_id.to_string(), snapshot);
         Ok(WriteSnapshotResponse)
     }
 }
@@ -714,11 +721,11 @@ mod tests {
         }
     }
 
-    fn command_base_schedule(id: &str) -> command_domain::Schedule {
-        command_domain::Schedule {
+    fn command_base_schedule(id: &str) -> CreateSchedule {
+        CreateSchedule {
             id: command_schedule_id(id),
-            status: command_domain::ScheduleStatus::Enabled,
-            schedule: command_domain::ScheduleSpec::every(30).unwrap(),
+            status: command_domain::ScheduleEventStatus::Scheduled,
+            schedule: command_domain::Schedule::every(std::time::Duration::from_secs(30)).unwrap(),
             delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
             message: command_domain::ScheduleMessage {
                 content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
@@ -864,18 +871,8 @@ mod tests {
     #[tokio::test]
     async fn mock_scheduler_store_rejects_invalid_specs_and_state_errors() {
         let store = MockSchedulerStore::new();
-        let invalid_error = serde_json::from_value::<command_domain::Schedule>(serde_json::json!({
-            "id": "bad",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": {
-                "type": "nats_event",
-                "route": "agent.run",
-                "source": { "type": "latest_from_subject", "subject": "sensors.>" }
-            },
-            "content": "{\"kind\":\"heartbeat\"}"
-        }))
-        .unwrap_err();
-        assert!(invalid_error.to_string().contains("sampling source"));
+        let invalid_error = command_domain::SamplingSource::latest_from_subject("sensors.>").unwrap_err();
+        assert!(invalid_error.to_string().contains("sampling subject"));
 
         CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
             .with_snapshot(&store)

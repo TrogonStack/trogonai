@@ -108,14 +108,14 @@ async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, sub
     .expect("timed out waiting for stream subject to be configured");
 }
 
-fn base_schedule(id: &str) -> command_domain::Schedule {
-    command_domain::Schedule {
+fn base_schedule(id: &str) -> CreateSchedule {
+    CreateSchedule {
         id: command_schedule_id(id),
-        status: command_domain::ScheduleStatus::Enabled,
-        schedule: command_domain::ScheduleSpec::every(2).unwrap(),
+        status: command_domain::ScheduleEventStatus::Scheduled,
+        schedule: command_domain::Schedule::every(Duration::from_secs(2)).unwrap(),
         delivery: command_domain::Delivery::NatsEvent {
             route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
-            ttl_sec: Some(command_domain::TtlSeconds::new(30).unwrap()),
+            ttl: Some(command_domain::TtlDuration::from_secs(30).unwrap()),
             source: None,
         },
         message: command_domain::ScheduleMessage {
@@ -170,7 +170,7 @@ async fn controller_reconciles_one_time_job() {
     });
 
     let mut job = base_schedule("one-time");
-    job.schedule = command_domain::ScheduleSpec::At {
+    job.schedule = command_domain::Schedule::At {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
@@ -201,7 +201,7 @@ async fn controller_reconciles_sampling_job() {
     let mut job = base_schedule("sampling");
     job.delivery = command_domain::Delivery::NatsEvent {
         route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
-        ttl_sec: None,
+        ttl: None,
         source: Some(command_domain::SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
@@ -236,7 +236,7 @@ async fn controller_reconciles_schedule_with_timezone() {
     });
 
     let mut job = base_schedule("cron-timezone");
-    job.schedule = command_domain::ScheduleSpec::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
+    job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
     CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
         .with_snapshot(&store.event_store)
@@ -325,7 +325,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     let store = connect_store(nats.clone()).await.unwrap();
     let mut job = base_schedule("eventful");
-    job.schedule = command_domain::ScheduleSpec::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
+    job.schedule = command_domain::Schedule::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
     let expected_schedule = ScheduleEventSchedule::Cron {
         expr: "*/5 * * * * *".to_string(),
         timezone: Some("UTC".to_string()),

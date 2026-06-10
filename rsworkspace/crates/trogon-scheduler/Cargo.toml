@@ -16,7 +16,7 @@ panic = "deny"
 unwrap_used = "deny"
 
 [features]
-test-support = ["trogon-decider-runtime/test-support"]
+test-support = ["trogon-decider-runtime/test-support", "trogon-nats/test-support"]
 
 [dependencies]
 thiserror = { workspace = true }
@@ -56,6 +56,7 @@ testcontainers-modules = { version = "0.15", features = ["nats"] }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 trogon-decider = { workspace = true, features = ["test-support"] }
+trogon-decider-runtime = { workspace = true, features = ["test-support"] }
 trogon-decider-nats = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 
