@@ -77,6 +77,7 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
         mcp_dispatch: vec![(dispatch_name, orig_name, client)],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
     }
 }
 
@@ -520,6 +521,7 @@ async fn bash_sandbox_dir_passed_as_cwd_in_create_terminal_request() {
         mcp_dispatch: vec![(dispatch_name, orig_name, client)],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
     };
 
     let (tx, _rx) = tokio::sync::mpsc::channel(64);

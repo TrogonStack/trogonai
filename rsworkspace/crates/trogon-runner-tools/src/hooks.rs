@@ -27,12 +27,24 @@ pub struct HooksConfig {
     pub pre_tool_use: Vec<HookMatcher>,
     #[serde(default, rename = "PostToolUse", skip_serializing_if = "Vec::is_empty")]
     pub post_tool_use: Vec<HookMatcher>,
+    /// Fires once after all tool calls in a single assistant turn complete.
+    #[serde(default, rename = "PostToolBatch", skip_serializing_if = "Vec::is_empty")]
+    pub post_tool_batch: Vec<HookMatcher>,
     #[serde(default, rename = "Stop", skip_serializing_if = "Vec::is_empty")]
     pub stop: Vec<HookMatcher>,
     #[serde(default, rename = "Notification", skip_serializing_if = "Vec::is_empty")]
     pub notification: Vec<HookMatcher>,
     #[serde(default, rename = "UserPromptSubmit", skip_serializing_if = "Vec::is_empty")]
     pub user_prompt_submit: Vec<HookMatcher>,
+    /// Fires when a new session starts (CLI startup / runner session create).
+    #[serde(default, rename = "SessionStart", skip_serializing_if = "Vec::is_empty")]
+    pub session_start: Vec<HookMatcher>,
+    /// Fires before the context compactor runs.
+    #[serde(default, rename = "PreCompact", skip_serializing_if = "Vec::is_empty")]
+    pub pre_compact: Vec<HookMatcher>,
+    /// Fires when a spawned sub-agent finishes its session.
+    #[serde(default, rename = "SubagentStop", skip_serializing_if = "Vec::is_empty")]
+    pub subagent_stop: Vec<HookMatcher>,
 }
 
 impl HooksConfig {
@@ -40,18 +52,26 @@ impl HooksConfig {
     pub fn merge(&mut self, other: HooksConfig) {
         self.pre_tool_use.extend(other.pre_tool_use);
         self.post_tool_use.extend(other.post_tool_use);
+        self.post_tool_batch.extend(other.post_tool_batch);
         self.stop.extend(other.stop);
         self.notification.extend(other.notification);
         self.user_prompt_submit.extend(other.user_prompt_submit);
+        self.session_start.extend(other.session_start);
+        self.pre_compact.extend(other.pre_compact);
+        self.subagent_stop.extend(other.subagent_stop);
     }
 
     /// True when no hooks are configured for any event.
     pub fn is_empty(&self) -> bool {
         self.pre_tool_use.is_empty()
             && self.post_tool_use.is_empty()
+            && self.post_tool_batch.is_empty()
             && self.stop.is_empty()
             && self.notification.is_empty()
             && self.user_prompt_submit.is_empty()
+            && self.session_start.is_empty()
+            && self.pre_compact.is_empty()
+            && self.subagent_stop.is_empty()
     }
 }
 
@@ -203,6 +223,42 @@ pub async fn run_event_hooks(
     }
 }
 
+/// A [`trogon_tools::PostToolObserver`] backed by `PostToolUse` hook matchers.
+///
+/// After each tool runs, the matching hooks are invoked with the standard
+/// `PostToolUse` payload. A blocking hook's reason is returned so the agent loop
+/// can append it to the tool result the model sees (the tool already ran).
+pub struct HookPostToolObserver {
+    matchers: Vec<HookMatcher>,
+}
+
+impl HookPostToolObserver {
+    pub fn new(matchers: Vec<HookMatcher>) -> Self {
+        Self { matchers }
+    }
+}
+
+impl trogon_tools::PostToolObserver for HookPostToolObserver {
+    fn observe<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_output: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let payload = serde_json::json!({
+                "hook_event_name": "PostToolUse",
+                "tool_name": tool_name,
+                "tool_response": tool_output,
+            });
+            match run_event_hooks(&self.matchers, Some(tool_name), &payload).await {
+                HookOutcome::Block { reason } => Some(reason),
+                HookOutcome::Continue { .. } => None,
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +300,42 @@ mod tests {
         assert_eq!(back, cfg);
     }
 
+    #[test]
+    fn config_serde_round_trips_new_events() {
+        let raw = r#"{
+            "SessionStart":[{"hooks":[{"type":"command","command":"./start.sh"}]}],
+            "PreCompact":[{"hooks":[{"type":"command","command":"./pre.sh"}]}],
+            "SubagentStop":[{"hooks":[{"type":"command","command":"./sub.sh"}]}],
+            "PostToolBatch":[{"hooks":[{"type":"command","command":"./batch.sh"}]}]
+        }"#;
+        let cfg: HooksConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.session_start.len(), 1);
+        assert_eq!(cfg.pre_compact.len(), 1);
+        assert_eq!(cfg.subagent_stop.len(), 1);
+        assert_eq!(cfg.post_tool_batch.len(), 1);
+        assert!(!cfg.is_empty());
+        let back: HooksConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn merge_and_is_empty_cover_new_events() {
+        let mut a = HooksConfig::default();
+        assert!(a.is_empty());
+        let mut b = HooksConfig::default();
+        b.subagent_stop.push(HookMatcher {
+            matcher: String::new(),
+            hooks: vec![HookCommand {
+                r#type: "command".into(),
+                command: "echo hi".into(),
+                timeout: None,
+            }],
+        });
+        a.merge(b);
+        assert!(!a.is_empty());
+        assert_eq!(a.subagent_stop.len(), 1);
+    }
+
     #[tokio::test]
     async fn run_event_hooks_blocks_on_exit_2() {
         let matchers = vec![HookMatcher {
@@ -273,6 +365,22 @@ mod tests {
             HookOutcome::Continue { context: Some(c) } => assert!(c.contains("got:hello")),
             other => panic!("expected context, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn post_tool_observer_returns_block_reason() {
+        use trogon_tools::PostToolObserver;
+        let obs = HookPostToolObserver::new(vec![HookMatcher {
+            matcher: "Bash".into(),
+            hooks: vec![HookCommand {
+                r#type: "command".into(),
+                command: "echo nope >&2; exit 2".into(),
+                timeout: None,
+            }],
+        }]);
+        assert_eq!(obs.observe("id1", "Bash", "output").await, Some("nope".to_string()));
+        // Non-matching tool → no objection.
+        assert_eq!(obs.observe("id2", "Read", "output").await, None);
     }
 
     #[tokio::test]

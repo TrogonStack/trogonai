@@ -571,6 +571,23 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         let text = collected.lock().map(|g| g.clone()).unwrap_or_default();
+
+        // SubagentStop: notify when a spawned sub-agent finishes its session.
+        if !parent_state.tool_hooks.subagent_stop.is_empty() {
+            let payload = serde_json::json!({
+                "hook_event_name": "SubagentStop",
+                "agent_name": agent_name,
+                "sub_session_id": sub_sid,
+                "parent_session_id": parent_session_id,
+            });
+            let _ = trogon_runner_tools::run_event_hooks(
+                &parent_state.tool_hooks.subagent_stop,
+                None,
+                &payload,
+            )
+            .await;
+        }
+
         match run {
             Err(_elapsed) => Err(format!(
                 "spawn_agent error: safety-net timeout after {}s",
@@ -826,6 +843,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         tx: elic_tx.clone(),
                     }));
                 }
+                // PostToolUse hooks run inside the agent loop so a blocking hook's
+                // objection is folded into the tool result the model sees.
+                if !state.tool_hooks.post_tool_use.is_empty() {
+                    a.set_post_tool_observer(Arc::new(
+                        trogon_runner_tools::HookPostToolObserver::new(
+                            state.tool_hooks.post_tool_use.clone(),
+                        ),
+                    ));
+                }
                 if let Some(ref gw) = gateway {
                     a.apply_gateway(gw);
                 }
@@ -973,12 +999,6 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                         state.terminal_cwd = None;
                                     }
 
-                                    // Keep the output for the PostToolUse hook before it moves into the event.
-                                    let post_output = if state.tool_hooks.post_tool_use.is_empty() {
-                                        None
-                                    } else {
-                                        Some(output.clone())
-                                    };
                                     let finished = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
                                     publish_via_converter(prompt_client, &mut converter, finished).await;
                                     if is_enter_plan {
@@ -1019,18 +1039,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                         )
                                         .await;
                                     }
-                                    // PostToolUse hooks: react to the tool result (fire-and-forget).
-                                    if let Some(out) = post_output
-                                        && let Some(ref tn) = tool_name
-                                    {
+                                    continue;
+                                }
+                                AgentEvent::ToolBatchFinished { count } => {
+                                    // PostToolBatch: fires once after a turn's tools complete.
+                                    if !state.tool_hooks.post_tool_batch.is_empty() {
                                         let payload = serde_json::json!({
-                                            "hook_event_name": "PostToolUse",
-                                            "tool_name": tn,
-                                            "tool_response": out,
+                                            "hook_event_name": "PostToolBatch",
+                                            "tool_count": count,
                                         });
                                         let _ = trogon_runner_tools::run_event_hooks(
-                                            &state.tool_hooks.post_tool_use,
-                                            Some(tn),
+                                            &state.tool_hooks.post_tool_batch,
+                                            None,
                                             &payload,
                                         )
                                         .await;

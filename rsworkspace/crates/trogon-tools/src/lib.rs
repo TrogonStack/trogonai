@@ -13,8 +13,8 @@ pub mod types;
 pub mod web;
 
 pub use types::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolOutput,
-    ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
+    ToolOutput, ToolResult,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
