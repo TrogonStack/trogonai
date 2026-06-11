@@ -449,6 +449,28 @@ impl Scope {
     pub fn on_exceed(&self) -> OnExceed {
         self.on_exceed
     }
+
+    /// Resolve the effective scope from all sources, in precedence order:
+    /// session (already a built Scope) > settings.json > TROGON.md > compiled baseline.
+    ///
+    /// The first present source wins; config wires are built via [`Scope::from_wire`].
+    pub fn resolve(
+        session: Option<Scope>,
+        settings: Option<ScopeWire>,
+        trogon_md: Option<ScopeWire>,
+        cwd: &str,
+    ) -> Result<Self, ScopeError> {
+        if let Some(session) = session {
+            return Ok(session);
+        }
+        if let Some(settings) = settings {
+            return Self::from_wire(settings, cwd);
+        }
+        if let Some(trogon_md) = trogon_md {
+            return Self::from_wire(trogon_md, cwd);
+        }
+        Ok(Self::baseline(cwd))
+    }
 }
 
 /// Untrusted wire form of a [`Scope`], deserialized from TROGON.md / settings.json
@@ -530,6 +552,17 @@ impl ScopeWire {
             parse_scope_line(line, &mut wire);
         }
         wire
+    }
+
+    /// Extract scope config from a parsed settings.json value. Reads the top-level
+    /// `"scope"` object (if present) and deserializes it as a [`ScopeWire`]. Absent or
+    /// non-object => [`ScopeWire::default()`].
+    pub fn from_settings_value(settings: &Value) -> Self {
+        settings
+            .get("scope")
+            .filter(|scope| scope.is_object())
+            .and_then(|scope| serde_json::from_value(scope.clone()).ok())
+            .unwrap_or_default()
     }
 }
 
@@ -1210,5 +1243,164 @@ scope.on_exceed: deny
         let json = serde_json::to_string(&scope).unwrap();
         let back: Scope = serde_json::from_str(&json).unwrap();
         assert_eq!(scope, back);
+    }
+
+    // ── SCOPE-12/13 settings.json + precedence ────────────────────────────
+
+    #[test]
+    fn from_settings_value_happy_path() {
+        let settings = json!({
+            "scope": {
+                "write": ["src/**"],
+                "run": ["cargo"],
+                "network": "on",
+                "on_exceed": "deny"
+            }
+        });
+        let wire = ScopeWire::from_settings_value(&settings);
+        assert_eq!(wire.write, vec!["src/**".to_string()]);
+        assert_eq!(wire.run, vec!["cargo".to_string()]);
+        assert_eq!(wire.network, Some("on".to_string()));
+        assert_eq!(wire.on_exceed, Some("deny".to_string()));
+    }
+
+    #[test]
+    fn from_settings_value_missing_scope_returns_default() {
+        let settings = json!({"model": "claude-sonnet"});
+        assert_eq!(ScopeWire::from_settings_value(&settings), ScopeWire::default());
+    }
+
+    #[test]
+    fn from_settings_value_non_object_scope_returns_default() {
+        for settings in [
+            json!({"scope": "off"}),
+            json!({"scope": null}),
+            json!({"scope": ["src/**"]}),
+        ] {
+            assert_eq!(
+                ScopeWire::from_settings_value(&settings),
+                ScopeWire::default(),
+                "expected default for {settings}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_settings_value_partial_fields() {
+        let settings = json!({
+            "scope": {
+                "write": ["src/**"],
+                "network": "off"
+            }
+        });
+        let wire = ScopeWire::from_settings_value(&settings);
+        assert_eq!(wire.write, vec!["src/**".to_string()]);
+        assert_eq!(wire.network, Some("off".to_string()));
+        assert!(wire.run.is_empty());
+        assert!(wire.protected.is_empty());
+        assert!(wire.on_exceed.is_none());
+    }
+
+    fn session_scope() -> Scope {
+        Scope::from_wire(
+            ScopeWire {
+                network: Some("on".to_string()),
+                on_exceed: Some("deny".to_string()),
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .expect("valid session scope")
+    }
+
+    fn settings_wire() -> ScopeWire {
+        ScopeWire {
+            network: Some("allow:api.github.com".to_string()),
+            on_exceed: Some("escalate".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn trogon_wire() -> ScopeWire {
+        ScopeWire {
+            network: Some("off".to_string()),
+            on_exceed: Some("deny".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolve_session_beats_settings_trogon_md_and_baseline() {
+        let session = session_scope();
+        let scope = Scope::resolve(
+            Some(session.clone()),
+            Some(settings_wire()),
+            Some(trogon_wire()),
+            "/repo",
+        )
+        .unwrap();
+        assert_eq!(scope, session);
+        assert_eq!(scope.network(), &NetworkPolicy::Allowed);
+        assert_eq!(scope.on_exceed(), OnExceed::Deny);
+    }
+
+    #[test]
+    fn resolve_settings_beats_trogon_md_and_baseline() {
+        let scope = Scope::resolve(None, Some(settings_wire()), Some(trogon_wire()), "/repo")
+            .unwrap();
+        assert_eq!(
+            scope.network(),
+            &NetworkPolicy::AllowList(vec!["api.github.com".to_string()])
+        );
+        assert_eq!(scope.on_exceed(), OnExceed::Escalate);
+    }
+
+    #[test]
+    fn resolve_trogon_md_beats_baseline() {
+        let scope = Scope::resolve(None, None, Some(trogon_wire()), "/repo").unwrap();
+        assert_eq!(scope.network(), &NetworkPolicy::Denied);
+        assert_eq!(scope.on_exceed(), OnExceed::Deny);
+        assert!(scope.run().is_empty());
+    }
+
+    #[test]
+    fn resolve_falls_back_to_baseline() {
+        let scope = Scope::resolve(None, None, None, "/repo").unwrap();
+        let baseline = Scope::baseline("/repo");
+        assert_eq!(scope, baseline);
+        assert_eq!(scope.network(), &NetworkPolicy::Denied);
+        assert_eq!(scope.on_exceed(), OnExceed::Escalate);
+        assert!(scope.run().matches("cargo test"));
+    }
+
+    #[test]
+    fn resolve_empty_settings_wire_beats_baseline() {
+        let scope = Scope::resolve(None, Some(ScopeWire::default()), None, "/repo").unwrap();
+        assert_ne!(scope, Scope::baseline("/repo"));
+        assert!(scope.write().is_empty());
+        assert!(scope.run().is_empty());
+        assert!(!scope.run().matches("cargo test"));
+        assert_eq!(scope.network(), &NetworkPolicy::Denied);
+        assert_eq!(scope.on_exceed(), OnExceed::Escalate);
+    }
+
+    #[test]
+    fn resolve_propagates_invalid_glob_from_settings() {
+        let wire = ScopeWire {
+            write: vec!["[".to_string()],
+            ..Default::default()
+        };
+        let err = Scope::resolve(None, Some(wire), None, "/repo").unwrap_err();
+        assert!(matches!(err, ScopeError::InvalidGlob { .. }));
+    }
+
+    #[test]
+    fn resolve_propagates_invalid_glob_from_trogon_md() {
+        let wire = ScopeWire {
+            write: vec!["[".to_string()],
+            ..Default::default()
+        };
+        let err = Scope::resolve(None, None, Some(wire), "/repo").unwrap_err();
+        assert!(matches!(err, ScopeError::InvalidGlob { .. }));
     }
 }
