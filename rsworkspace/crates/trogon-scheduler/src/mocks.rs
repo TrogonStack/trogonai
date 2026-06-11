@@ -1,13 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::num::NonZeroU64;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, AtomicU64, Ordering},
-};
+use std::sync::{Arc, Mutex};
 
-use async_nats::jetstream::kv;
 use buffa::MessageField;
-use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use trogon_decider_runtime::snapshot::Snapshot;
 use trogon_decider_runtime::{
@@ -17,12 +12,10 @@ use trogon_decider_runtime::{
     StreamAppend, StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
     WriteSnapshotResponse,
 };
-use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    DeliveryKind, GetSchedule, ListSchedules, ResolvedSchedule, ScheduleEventCase, ScheduleKind, ScheduleStatusKind,
-    SourceKind,
+    DeliveryKind, GetSchedule, ListSchedules, ScheduleEventCase, ScheduleKind, ScheduleStatusKind, SourceKind,
     config::{ScheduleWriteCondition, ScheduleWriteState},
     error::SchedulerError,
     projections::{LoadAndWatchSchedulesResult, ScheduleWatchStream},
@@ -30,117 +23,8 @@ use crate::{
         MessageContent, MessageEnvelope, MessageHeaders, Schedule, ScheduleEventDelivery, ScheduleEventSamplingSource,
         ScheduleEventSchedule, ScheduleEventStatus,
     },
-    traits::SchedulePublisher,
     v1,
 };
-
-#[derive(Clone, Default)]
-pub struct MockSchedulePublisher {
-    upserts: Arc<Mutex<Vec<String>>>,
-    removals: Arc<Mutex<Vec<String>>>,
-    active: Arc<Mutex<HashSet<String>>>,
-}
-
-impl MockSchedulePublisher {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn upserts(&self) -> Vec<String> {
-        self.upserts.lock().unwrap().clone()
-    }
-
-    pub fn removals(&self) -> Vec<String> {
-        self.removals.lock().unwrap().clone()
-    }
-
-    pub fn seed_active_schedule(&self, job_id: &str) {
-        self.active.lock().unwrap().insert(job_id.to_string());
-    }
-}
-
-impl SchedulePublisher for MockSchedulePublisher {
-    type Error = SchedulerError;
-
-    async fn active_schedule_ids(&self) -> Result<HashSet<String>, Self::Error> {
-        Ok(self.active.lock().unwrap().clone())
-    }
-
-    async fn upsert_schedule(&self, job: &ResolvedSchedule) -> Result<(), Self::Error> {
-        self.upserts.lock().unwrap().push(job.schedule_subject().to_string());
-        self.active.lock().unwrap().insert(job.id().to_string());
-        Ok(())
-    }
-
-    async fn remove_schedule(&self, job_id: &str) -> Result<(), Self::Error> {
-        self.removals.lock().unwrap().push(job_id.to_string());
-        self.active.lock().unwrap().remove(job_id);
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct MockLeaderLock {
-    allow_acquire: Arc<AtomicBool>,
-    allow_renew: Arc<AtomicBool>,
-    next_revision: Arc<AtomicU64>,
-}
-
-impl Default for MockLeaderLock {
-    fn default() -> Self {
-        Self {
-            allow_acquire: Arc::new(AtomicBool::new(true)),
-            allow_renew: Arc::new(AtomicBool::new(true)),
-            next_revision: Arc::new(AtomicU64::new(1)),
-        }
-    }
-}
-
-impl MockLeaderLock {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn set_allow_acquire(&self, allowed: bool) {
-        self.allow_acquire.store(allowed, Ordering::SeqCst);
-    }
-
-    pub fn set_allow_renew(&self, allowed: bool) {
-        self.allow_renew.store(allowed, Ordering::SeqCst);
-    }
-}
-
-impl TryAcquireLease for MockLeaderLock {
-    type Error = kv::CreateError;
-
-    async fn try_acquire(&self, _value: Bytes) -> Result<u64, Self::Error> {
-        if self.allow_acquire.load(Ordering::SeqCst) {
-            Ok(self.next_revision.fetch_add(1, Ordering::SeqCst))
-        } else {
-            Err(kv::CreateError::new(kv::CreateErrorKind::AlreadyExists))
-        }
-    }
-}
-
-impl RenewLease for MockLeaderLock {
-    type Error = kv::UpdateError;
-
-    async fn renew(&self, _value: Bytes, revision: u64) -> Result<u64, Self::Error> {
-        if self.allow_renew.load(Ordering::SeqCst) {
-            Ok(revision + 1)
-        } else {
-            Err(kv::UpdateError::new(kv::UpdateErrorKind::Other))
-        }
-    }
-}
-
-impl ReleaseLease for MockLeaderLock {
-    type Error = kv::DeleteError;
-
-    async fn release(&self, _revision: u64) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 
 #[derive(Clone, Default)]
 pub struct MockSchedulerStore {
@@ -736,58 +620,6 @@ mod tests {
 
     fn expected_schedule(id: &str) -> Schedule {
         base_schedule(id)
-    }
-
-    #[tokio::test]
-    async fn mock_schedule_publisher_tracks_active_schedules() {
-        let publisher = MockSchedulePublisher::new();
-        publisher.seed_active_schedule("orphan");
-        let schedule = expected_schedule("alpha");
-        let details = v1::ScheduleCreated {
-            schedule_id: schedule.id.clone(),
-            status: MessageField::some(v1::ScheduleStatus {
-                kind: Some(match schedule.status {
-                    ScheduleEventStatus::Scheduled => v1::schedule_status::Scheduled {}.into(),
-                    ScheduleEventStatus::Paused => v1::schedule_status::Paused {}.into(),
-                }),
-            }),
-            schedule: MessageField::some(super::proto_schedule(&schedule.schedule)),
-            delivery: MessageField::some(super::proto_delivery(&schedule.delivery)),
-            message: MessageField::some(super::proto_message(&schedule.message)),
-        };
-        let resolved = ResolvedSchedule::from_event("alpha", &details).unwrap();
-
-        let active = publisher.active_schedule_ids().await.unwrap();
-        assert!(active.contains("orphan"));
-
-        publisher.upsert_schedule(&resolved).await.unwrap();
-        publisher.remove_schedule("orphan").await.unwrap();
-
-        assert_eq!(publisher.upserts(), vec!["scheduler.schedules.alpha"]);
-        assert_eq!(publisher.removals(), vec!["orphan"]);
-        assert!(publisher.active_schedule_ids().await.unwrap().contains("alpha"));
-    }
-
-    #[tokio::test]
-    async fn mock_leader_lock_covers_success_and_failure_paths() {
-        let lock = MockLeaderLock::new();
-
-        let first = lock.try_acquire(Bytes::new()).await.unwrap();
-        assert_eq!(first, 1);
-        assert_eq!(lock.renew(Bytes::new(), first).await.unwrap(), 2);
-        lock.release(first).await.unwrap();
-
-        lock.allow_acquire.store(false, Ordering::SeqCst);
-        assert_eq!(
-            lock.try_acquire(Bytes::new()).await.unwrap_err().kind(),
-            kv::CreateErrorKind::AlreadyExists
-        );
-
-        lock.allow_renew.store(false, Ordering::SeqCst);
-        assert_eq!(
-            lock.renew(Bytes::new(), 2).await.unwrap_err().kind(),
-            kv::UpdateErrorKind::Other
-        );
     }
 
     #[tokio::test]

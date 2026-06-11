@@ -1,13 +1,10 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use buffa::MessageField;
 use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
     PauseSchedule, RemoveSchedule, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
-    ScheduleId, SchedulePublisher, ScheduleWriteCondition,
-    commands::domain as command_domain,
-    mocks::{MockSchedulePublisher, MockSchedulerStore},
+    ScheduleId, ScheduleWriteCondition, commands::domain as command_domain, mocks::MockSchedulerStore,
 };
 
 fn position(value: u64) -> StreamPosition {
@@ -145,51 +142,4 @@ async fn client_rejects_stale_version() {
         error,
         trogon_scheduler::SchedulerError::OptimisticConcurrencyConflict { .. }
     ));
-}
-
-#[tokio::test]
-async fn mock_schedule_publisher_records_changes() {
-    use buffa_types::google::protobuf::Duration;
-    let publisher = MockSchedulePublisher::new();
-    let job = trogon_scheduler::v1::ScheduleCreated {
-        schedule_id: "alpha".to_string(),
-        status: MessageField::some(trogon_scheduler::v1::ScheduleStatus {
-            kind: Some(trogon_scheduler::v1::schedule_status::Scheduled {}.into()),
-        }),
-        schedule: MessageField::some(trogon_scheduler::v1::Schedule {
-            kind: Some(
-                trogon_scheduler::v1::schedule::Every {
-                    every: MessageField::some(Duration {
-                        seconds: 30,
-                        ..Default::default()
-                    }),
-                }
-                .into(),
-            ),
-        }),
-        delivery: MessageField::some(trogon_scheduler::v1::Delivery {
-            kind: Some(
-                trogon_scheduler::v1::delivery::NatsMessage {
-                    subject: "agent.run".to_string(),
-                    ttl: MessageField::none(),
-                    source: MessageField::none(),
-                }
-                .into(),
-            ),
-        }),
-        message: MessageField::some(trogon_scheduler::v1::Message {
-            content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
-                content_type: "application/json".to_string(),
-                data: r#"{"kind":"heartbeat"}"#.as_bytes().to_vec(),
-            }),
-            headers: Vec::new(),
-        }),
-    };
-    let resolved = trogon_scheduler::ResolvedSchedule::from_event("alpha", &job).unwrap();
-
-    publisher.upsert_schedule(&resolved).await.unwrap();
-    publisher.remove_schedule("alpha").await.unwrap();
-
-    assert_eq!(publisher.upserts(), vec!["scheduler.schedules.alpha"]);
-    assert_eq!(publisher.removals(), vec!["alpha"]);
 }

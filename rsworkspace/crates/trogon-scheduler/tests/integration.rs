@@ -30,18 +30,11 @@ async fn connect() -> async_nats::Client {
 async fn connect_js() -> (async_nats::Client, jetstream::Context) {
     let nats = connect().await;
     let js = jetstream::new(nats.clone());
-    let _ = trogon_scheduler::kv::get_or_create_schedule_stream(&js)
-        .await
-        .expect("failed to create schedule stream");
     (nats, js)
 }
 
 async fn reset_state(js: &jetstream::Context) {
     let _ = js.delete_stream(trogon_scheduler::kv::EVENTS_STREAM).await;
-    if let Ok(stream) = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await {
-        let _ = stream.purge().await;
-    }
-    let _ = js.delete_stream("SENSORS").await;
     if let Ok(kv) = js.get_key_value(trogon_scheduler::kv::SCHEDULES_BUCKET).await {
         let mut keys = kv.keys().await.unwrap();
         while let Some(result) = futures::StreamExt::next(&mut keys).await {
@@ -55,9 +48,6 @@ async fn reset_state(js: &jetstream::Context) {
             let key = result.unwrap();
             let _ = kv.purge(key).await;
         }
-    }
-    if let Ok(kv) = js.get_key_value(trogon_scheduler::kv::LEADER_BUCKET).await {
-        let _ = kv.purge(trogon_scheduler::kv::LEADER_KEY).await;
     }
 }
 
@@ -76,19 +66,6 @@ fn base_schedule(id: &str) -> CreateSchedule {
             headers: command_domain::ScheduleHeaders::default(),
         },
     }
-}
-
-#[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
-async fn schedule_stream_has_required_flags() {
-    let (_nats, js) = connect_js().await;
-    reset_state(&js).await;
-
-    let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
-    let info = stream.cached_info();
-
-    assert!(info.config.allow_message_schedules);
-    assert!(info.config.allow_message_ttl);
 }
 
 #[tokio::test]

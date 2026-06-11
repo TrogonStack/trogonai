@@ -8,18 +8,11 @@ use trogon_nats::jetstream::{
 use crate::error::SchedulerError;
 
 pub const SCHEDULES_BUCKET: &str = "scheduler_schedules";
-pub const LEADER_BUCKET: &str = "scheduler_leader";
-pub const LEADER_KEY: &str = "lock";
 pub const EVENTS_STREAM: &str = "SCHEDULER_EVENTS";
 pub const EVENTS_SUBJECT_PREFIX: &str = "scheduler.schedules.events.";
 pub const EVENTS_SUBJECT_PATTERN: &str = "scheduler.schedules.events.>";
 pub const COMMAND_SNAPSHOT_BUCKET: &str = "scheduler_command_snapshots";
 pub const SCHEDULES_CHECKPOINT_KEY: &str = "_query.schedules.last_event_sequence";
-pub const SCHEDULES_STREAM: &str = "SCHEDULER_SCHEDULES";
-pub const SCHEDULE_SUBJECT_PREFIX: &str = "scheduler.schedules.";
-pub const FIRE_SUBJECT_PREFIX: &str = "scheduler.fire.";
-pub const SCHEDULE_SUBJECT_PATTERN: &str = "scheduler.schedules.>";
-pub const FIRE_SUBJECT_PATTERN: &str = "scheduler.fire.>";
 
 #[cfg(not(coverage))]
 pub async fn get_or_create_schedules_bucket(js: &jetstream::Context) -> Result<kv::Store, SchedulerError> {
@@ -83,41 +76,6 @@ pub async fn get_or_create(_js: &jetstream::Context, _config: kv::Config) -> Res
     Err(SchedulerError::kv_source(
         "coverage stub does not provision key-value buckets",
         std::io::Error::other("coverage"),
-    ))
-}
-
-#[cfg(not(coverage))]
-pub async fn get_or_create_schedule_stream(js: &jetstream::Context) -> Result<stream::Stream, SchedulerError> {
-    let config = stream::Config {
-        name: SCHEDULES_STREAM.to_string(),
-        subjects: vec![SCHEDULE_SUBJECT_PATTERN.to_string(), FIRE_SUBJECT_PATTERN.to_string()],
-        allow_message_ttl: true,
-        allow_message_schedules: true,
-        ..Default::default()
-    };
-
-    match js.create_stream(config).await {
-        Ok(stream) => Ok(stream),
-        Err(source) if is_create_stream_already_exists(&source) => {
-            js.get_stream(SCHEDULES_STREAM).await.map_err(|source| {
-                SchedulerError::schedule_source(
-                    "failed to get existing schedule stream after create reported already exists",
-                    source,
-                )
-            })
-        }
-        Err(source) => Err(SchedulerError::schedule_source(
-            "failed to get or create schedule stream",
-            source,
-        )),
-    }
-}
-
-#[cfg(coverage)]
-pub async fn get_or_create_schedule_stream(_js: &jetstream::Context) -> Result<stream::Stream, SchedulerError> {
-    Err(SchedulerError::schedule_source(
-        "coverage stub does not provision schedule streams",
-        std::io::Error::other(SCHEDULES_STREAM),
     ))
 }
 
