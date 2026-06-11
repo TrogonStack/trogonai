@@ -14,6 +14,7 @@ pub mod repl;
 pub mod runtime;
 pub mod session;
 pub mod session_store;
+pub mod spawn_tracker;
 pub mod settings;
 pub mod stdio_mcp_bridge;
 pub mod stream_input;
