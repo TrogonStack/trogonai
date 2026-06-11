@@ -67,6 +67,8 @@ pub struct SessionSummary {
     pub cwd: String,
     pub title: Option<String>,
     pub updated_at: Option<String>,
+    /// Parent session when this row is a forked or spawned sub-session.
+    pub parent_session_id: Option<String>,
 }
 
 // ── Session trait ─────────────────────────────────────────────────────────────
@@ -760,11 +762,20 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             Ok(resp
                 .sessions
                 .into_iter()
-                .map(|info| SessionSummary {
-                    session_id: info.session_id.to_string(),
-                    cwd: info.cwd.to_string_lossy().into_owned(),
-                    title: info.title,
-                    updated_at: info.updated_at,
+                .map(|info| {
+                    let parent_session_id = info
+                        .meta
+                        .as_ref()
+                        .and_then(|m| m.get("parentSessionId"))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    SessionSummary {
+                        session_id: info.session_id.to_string(),
+                        cwd: info.cwd.to_string_lossy().into_owned(),
+                        title: info.title,
+                        updated_at: info.updated_at,
+                        parent_session_id,
+                    }
                 })
                 .collect())
         }
