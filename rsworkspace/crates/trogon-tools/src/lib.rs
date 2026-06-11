@@ -302,16 +302,18 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             "notebook_edit",
-            "Edit a cell in a Jupyter notebook (.ipynb file) by index.",
+            "Edit, insert, or delete a cell in a Jupyter notebook (.ipynb file) by index.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path":       { "type": "string",  "description": "Path to the .ipynb file, relative to the working directory" },
-                    "cell_index": { "type": "integer", "description": "Zero-based index of the cell to edit" },
-                    "content":    { "type": "string",  "description": "New content for the cell" },
-                    "cell_type":  { "type": "string",  "description": "Cell type: 'code' or 'markdown' (optional, keeps existing type if omitted)" }
+                    "path":        { "type": "string",  "description": "Path to the .ipynb file, relative to the working directory" },
+                    "cell_index":  { "type": "integer", "description": "Zero-based index of the target cell (for insert, the new cell is inserted before this index; use len(cells) to append)" },
+                    "content":     { "type": "string",  "description": "Cell source content (required for replace and insert, omitted for delete)" },
+                    "cell_type":   { "type": "string",  "description": "Cell type: 'code' or 'markdown' (required for insert; optional for replace, keeps existing type if omitted)" },
+                    "edit_mode":   { "type": "string",  "description": "Operation mode: 'replace' (default), 'insert' (add a new cell before cell_index), or 'delete'" },
+                    "is_new_cell": { "type": "boolean", "description": "If true, insert a new cell before cell_index (equivalent to edit_mode: 'insert')" }
                 },
-                "required": ["path", "cell_index", "content"]
+                "required": ["path", "cell_index"]
             }),
         ),
         tool_def(
