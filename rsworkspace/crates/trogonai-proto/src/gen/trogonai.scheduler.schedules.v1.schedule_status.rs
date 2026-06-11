@@ -457,7 +457,11 @@ pub mod schedule_status {
     #[doc(inline)]
     pub use super::__buffa::view::schedule_status::ScheduledView;
     #[doc(inline)]
+    pub use super::__buffa::view::schedule_status::ScheduledOwnedView;
+    #[doc(inline)]
     pub use super::__buffa::view::schedule_status::PausedView;
+    #[doc(inline)]
+    pub use super::__buffa::view::schedule_status::PausedOwnedView;
     #[doc(inline)]
     pub use super::__buffa::view::oneof::schedule_status::Kind as KindView;
 }

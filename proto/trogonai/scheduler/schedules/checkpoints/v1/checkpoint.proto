@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.checkpoints.v1;
+
+import "trogonai/scheduler/schedules/checkpoints/v1/delivery.proto";
+import "trogonai/scheduler/schedules/checkpoints/v1/message.proto";
+import "trogonai/scheduler/schedules/checkpoints/v1/schedule.proto";
+
+// ScheduleCheckpoint is the rebuildable KV snapshot for one schedule.
+message ScheduleCheckpoint {
+  string schedule_id = 1;
+  ScheduleCheckpointStatus status = 2;
+  uint64 last_applied_stream_position = 3;
+  string last_applied_event_id = 4;
+  ReconcileOutcome last_outcome = 5;
+  Schedule schedule = 6;
+  Delivery delivery = 7;
+  Message message = 8;
+}
+
+enum ScheduleCheckpointStatus {
+  SCHEDULE_CHECKPOINT_STATUS_UNSPECIFIED = 0;
+  SCHEDULE_CHECKPOINT_STATUS_SCHEDULED = 1;
+  SCHEDULE_CHECKPOINT_STATUS_PAUSED = 2;
+  SCHEDULE_CHECKPOINT_STATUS_REMOVED = 3;
+  SCHEDULE_CHECKPOINT_STATUS_UNSUPPORTED = 4;
+  SCHEDULE_CHECKPOINT_STATUS_EXPIRED = 5;
+}
+
+enum ReconcileOutcome {
+  RECONCILE_OUTCOME_UNSPECIFIED = 0;
+  RECONCILE_OUTCOME_PUBLISHED = 1;
+  RECONCILE_OUTCOME_PURGED = 2;
+  RECONCILE_OUTCOME_STORED_PAUSED = 3;
+  RECONCILE_OUTCOME_UNSUPPORTED = 4;
+  RECONCILE_OUTCOME_EXPIRED = 5;
+  RECONCILE_OUTCOME_DUPLICATE_STALE = 6;
+}
