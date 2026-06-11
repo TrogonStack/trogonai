@@ -2078,6 +2078,9 @@ async fn prompt_egress_deny_policy_does_not_contact_mcp_server() {
                 name: "blocked-server".to_string(),
                 url: server_url,
                 headers: vec![],
+                command: String::new(),
+                args: vec![],
+                env: vec![],
                 timeout_secs: None,
             }];
             state.egress_policy = Some(EgressPolicy {
@@ -2148,6 +2151,9 @@ async fn prompt_egress_allow_policy_contacts_mcp_server() {
                 name: "allowed-server".to_string(),
                 url: server_url,
                 headers: vec![],
+                command: String::new(),
+                args: vec![],
+                env: vec![],
                 timeout_secs: None,
             }];
             state.egress_policy = Some(EgressPolicy {

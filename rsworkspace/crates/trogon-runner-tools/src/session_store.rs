@@ -7,17 +7,31 @@ use trogon_tools::Message;
 
 use crate::egress::EgressPolicy;
 
-/// A URL-based MCP server configuration stored per session.
-/// Stdio servers are not supported in the NATS model.
+/// An MCP server configuration stored per session.
+///
+/// Two transports: HTTP/SSE (via `url`) and native stdio (via `command`). When
+/// `command` is non-empty the runner spawns the server subprocess and drives it
+/// in-process over stdio (no local HTTP bridge); otherwise `url` is used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredMcpServer {
     /// Human-readable name (used as tool prefix).
     pub name: String,
-    /// HTTP or SSE endpoint URL.
+    /// HTTP or SSE endpoint URL (empty for stdio servers).
+    #[serde(default)]
     pub url: String,
     /// Optional HTTP headers (name, value pairs).
     #[serde(default)]
     pub headers: Vec<(String, String)>,
+    /// For a stdio MCP server: the executable to spawn. When set, `url`/`headers`
+    /// are ignored and the runner drives the server natively over stdio.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub command: String,
+    /// Command-line arguments for the stdio server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Environment variables (name, value) for the stdio server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<(String, String)>,
     /// Optional per-request timeout in seconds. `None` uses the runner's default
     /// HTTP client timeout. Carried from the client via the ACP `_meta` field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -707,6 +721,9 @@ mod tests {
                 ("Authorization".to_string(), "Bearer tok".to_string()),
                 ("X-Tenant".to_string(), "acme".to_string()),
             ],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
             timeout_secs: None,
         };
         let json = serde_json::to_string(&server).unwrap();
@@ -723,11 +740,33 @@ mod tests {
             name: "bare".to_string(),
             url: "http://localhost:8080".to_string(),
             headers: vec![],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
             timeout_secs: None,
         };
         let json = serde_json::to_string(&server).unwrap();
         let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
         assert!(back.headers.is_empty());
+    }
+
+    #[test]
+    fn stored_mcp_server_stdio_roundtrip() {
+        let server = StoredMcpServer {
+            name: "fs".to_string(),
+            url: String::new(),
+            headers: vec![],
+            command: "npx".to_string(),
+            args: vec!["-y".to_string(), "server-filesystem".to_string()],
+            env: vec![("TOKEN".to_string(), "x".to_string())],
+            timeout_secs: Some(10),
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.command, "npx");
+        assert_eq!(back.args.len(), 2);
+        assert_eq!(back.env[0], ("TOKEN".to_string(), "x".to_string()));
+        assert!(back.url.is_empty());
     }
 
     #[test]

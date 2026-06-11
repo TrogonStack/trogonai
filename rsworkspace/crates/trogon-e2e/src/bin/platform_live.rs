@@ -330,6 +330,9 @@ async fn test_egress_deny_skips_mcp() -> bool {
                 name: "blocked_srv".to_string(),
                 url: mcp.base_url(),
                 headers: vec![],
+                command: String::new(),
+                args: vec![],
+                env: vec![],
                 timeout_secs: None,
             }],
             egress_policy: Some(EgressPolicy {
