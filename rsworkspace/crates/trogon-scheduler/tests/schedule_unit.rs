@@ -5,9 +5,9 @@ use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, S
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
     PauseSchedule, RemoveSchedule, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
-    ScheduleId, SchedulePublisher, ScheduleWriteCondition, SchedulerController,
+    ScheduleId, SchedulePublisher, ScheduleWriteCondition,
     commands::domain as command_domain,
-    mocks::{MockLeaderLock, MockSchedulePublisher, MockSchedulerStore},
+    mocks::{MockSchedulePublisher, MockSchedulerStore},
 };
 
 fn position(value: u64) -> StreamPosition {
@@ -192,13 +192,4 @@ async fn mock_schedule_publisher_records_changes() {
 
     assert_eq!(publisher.upserts(), vec!["scheduler.schedules.alpha"]);
     assert_eq!(publisher.removals(), vec!["alpha"]);
-}
-
-#[test]
-fn controller_new_with_mocks_compiles() {
-    let _controller = SchedulerController::new(
-        MockSchedulerStore::new(),
-        MockSchedulePublisher::new(),
-        MockLeaderLock::new(),
-    );
 }

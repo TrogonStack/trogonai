@@ -4,13 +4,12 @@ use std::time::Duration;
 
 use async_nats::Request;
 use async_nats::jetstream;
-use chrono::{Duration as ChronoDuration, Utc};
 use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, PauseSchedule, RemoveSchedule, ResumeSchedule, ScheduleEventCase,
-    ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, SchedulerController, commands::domain as command_domain,
-    connect_store, get_schedule, state_v1, v1,
+    ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, commands::domain as command_domain, connect_store,
+    get_schedule, state_v1, v1,
 };
 
 fn test_url() -> String {
@@ -62,52 +61,6 @@ async fn reset_state(js: &jetstream::Context) {
     }
 }
 
-async fn wait_for_subject(stream: &jetstream::stream::Stream, subject: &str) {
-    tokio::time::timeout(Duration::from_secs(12), async {
-        loop {
-            if stream.get_last_raw_message_by_subject(subject).await.is_ok() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    })
-    .await
-    .expect("timed out waiting for scheduled subject");
-}
-
-async fn wait_for_subject_absence(stream: &jetstream::stream::Stream, subject: &str) {
-    tokio::time::timeout(Duration::from_secs(12), async {
-        loop {
-            if stream.get_last_raw_message_by_subject(subject).await.is_err() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    })
-    .await
-    .expect("timed out waiting for subject to disappear");
-}
-
-async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, subject: &str) {
-    tokio::time::timeout(Duration::from_secs(12), async {
-        loop {
-            let stream = js.get_stream(stream_name).await.unwrap();
-            if stream
-                .cached_info()
-                .config
-                .subjects
-                .iter()
-                .any(|candidate| candidate == subject)
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    })
-    .await
-    .expect("timed out waiting for stream subject to be configured");
-}
-
 fn base_schedule(id: &str) -> CreateSchedule {
     CreateSchedule {
         id: command_schedule_id(id),
@@ -156,140 +109,6 @@ async fn raw_js_info_request_with_explicit_inbox_works() {
 
     let body = String::from_utf8(response.payload.to_vec()).unwrap();
     assert!(body.contains("\"memory\""));
-}
-
-#[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
-async fn controller_reconciles_one_time_job() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
-    let store = connect_store(nats.clone()).await.unwrap();
-
-    let handle = tokio::spawn(async move {
-        SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
-    });
-
-    let mut job = base_schedule("one-time");
-    job.schedule = command_domain::Schedule::At {
-        at: Utc::now() + ChronoDuration::seconds(2),
-    };
-
-    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
-
-    let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
-    wait_for_subject(&stream, "scheduler.fire.agent.run.one-time").await;
-
-    handle.abort();
-}
-
-#[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
-async fn controller_reconciles_sampling_job() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
-    let store = connect_store(nats.clone()).await.unwrap();
-
-    let handle = tokio::spawn(async move {
-        SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
-    });
-
-    let mut job = base_schedule("sampling");
-    job.delivery = command_domain::Delivery::NatsEvent {
-        route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
-        ttl: None,
-        source: Some(command_domain::SamplingSource::latest_from_subject("sensors.latest").unwrap()),
-    };
-
-    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
-    wait_for_stream_subject(&js, trogon_scheduler::kv::SCHEDULES_STREAM, "sensors.latest").await;
-    js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
-        .await
-        .unwrap()
-        .await
-        .unwrap();
-
-    let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
-    wait_for_subject(&stream, "scheduler.fire.agent.run.sampling").await;
-
-    handle.abort();
-}
-
-#[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
-async fn controller_reconciles_schedule_with_timezone() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
-    let store = connect_store(nats.clone()).await.unwrap();
-
-    let handle = tokio::spawn(async move {
-        SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
-    });
-
-    let mut job = base_schedule("cron-timezone");
-    job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
-
-    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
-
-    let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
-    wait_for_subject(&stream, "scheduler.fire.agent.run.cron-timezone").await;
-
-    handle.abort();
-}
-
-#[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
-async fn disabling_job_removes_schedule_subject() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
-    let store = connect_store(nats.clone()).await.unwrap();
-
-    let handle = tokio::spawn(async move {
-        SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
-    });
-
-    let job = base_schedule("disabled");
-    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
-
-    let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
-    wait_for_subject(&stream, "scheduler.schedules.disabled").await;
-
-    CommandExecution::new(&store.event_store, &PauseSchedule::new(command_schedule_id("disabled")))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
-    wait_for_subject_absence(&stream, "scheduler.schedules.disabled").await;
-
-    handle.abort();
-}
-
-#[tokio::test]
-#[ignore = "requires nightly NATS scheduler"]
-async fn removing_job_removes_schedule_subject() {
-    let (nats, js) = connect_js().await;
-    reset_state(&js).await;
-    let store = connect_store(nats.clone()).await.unwrap();
-
-    let handle = tokio::spawn(async move {
-        SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
-    });
-
-    let job = base_schedule("removed");
-    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
-
-    let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
-    wait_for_subject(&stream, "scheduler.schedules.removed").await;
-
-    CommandExecution::new(&store.event_store, &RemoveSchedule::new(command_schedule_id("removed")))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
-    wait_for_subject_absence(&stream, "scheduler.schedules.removed").await;
-
-    handle.abort();
 }
 
 #[tokio::test]

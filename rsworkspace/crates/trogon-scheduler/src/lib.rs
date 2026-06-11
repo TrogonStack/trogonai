@@ -11,7 +11,6 @@ pub mod error;
 pub mod kv;
 pub mod nats;
 pub mod processor;
-mod processors;
 pub mod projections;
 pub mod queries;
 mod read_model;
@@ -30,7 +29,6 @@ pub use commands::{
 pub use config::ScheduleWriteCondition;
 pub use error::{ScheduleSpecError, SchedulerError};
 pub use nats::NatsSchedulePublisher;
-pub use processors::SchedulerController;
 pub use projections::{
     LoadAndWatchSchedulesResult, ProjectionChange, ScheduleChange, ScheduleStreamState, ScheduleTransitionError,
     ScheduleWatchStream, apply, initial_state, load_and_watch_schedules, projection_change,
