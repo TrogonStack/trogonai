@@ -3,7 +3,9 @@
 use crate::fs::Fs;
 use crate::mcp_oauth::{OAuthStore, StoredToken};
 use crate::stdio_mcp_bridge::StdioMcpBridge;
-use agent_client_protocol::{HttpHeader, McpServer, McpServerHttp, McpServerSse};
+use agent_client_protocol::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -191,21 +193,32 @@ impl McpManager {
         for cfg in &configs {
             match cfg.transport {
                 McpTransport::Stdio => {
-                    let env: Vec<(String, String)> = cfg.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                    match StdioMcpBridge::spawn(&cfg.command, &cfg.args, &env).await {
-                        Ok(bridge) => {
-                            let url = bridge.url.clone();
-                            acp_servers.push(McpServer::Http(McpServerHttp::new(cfg.name.clone(), url.clone())));
-                            bridges.push(ActiveBridge {
-                                name: cfg.name.clone(),
-                                url,
-                                bridge: Some(bridge),
-                            });
-                        }
-                        Err(e) => {
-                            eprintln!("warning: MCP server `{}` failed to start: {e}", cfg.name)
-                        }
-                    }
+                    // Native stdio (MCP-3): hand the command to the runner, which
+                    // drives the server subprocess in-process via StdioMcpClient —
+                    // no local stdio→HTTP bridge and no extra localhost hop.
+                    let env: Vec<EnvVariable> = cfg
+                        .env
+                        .iter()
+                        .map(|(k, v)| EnvVariable::new(k.clone(), v.clone()))
+                        .collect();
+                    let timeout_meta = cfg.timeout_secs.map(|secs| {
+                        let mut m = serde_json::Map::new();
+                        m.insert(
+                            trogon_runner_tools::mcp::TIMEOUT_META_KEY.to_string(),
+                            serde_json::json!(secs),
+                        );
+                        m
+                    });
+                    let stdio = McpServerStdio::new(cfg.name.clone(), cfg.command.clone())
+                        .args(cfg.args.clone())
+                        .env(env)
+                        .meta(timeout_meta);
+                    acp_servers.push(McpServer::Stdio(stdio));
+                    bridges.push(ActiveBridge {
+                        name: cfg.name.clone(),
+                        url: format!("stdio:{}", cfg.command),
+                        bridge: None,
+                    });
                 }
                 McpTransport::Http | McpTransport::Sse => {
                     // Direct remote server: no local bridge, pass the URL (and any
@@ -685,6 +698,47 @@ mod tests {
     fn parse_add_args_http_with_timeout() {
         let cfg = McpManager::parse_add_args("--transport http api https://api.example.com/mcp --timeout 30").unwrap();
         assert_eq!(cfg.timeout_secs, Some(30));
+    }
+
+    /// MCP-3: a stdio server config is forwarded to the runner as a native
+    /// `McpServer::Stdio` (driven in-process), not spawned as a local bridge.
+    #[tokio::test]
+    async fn stdio_config_yields_native_server_not_bridge() {
+        use crate::fs::mock::MockFs;
+        let mut env = HashMap::new();
+        env.insert("TOKEN".to_string(), "x".to_string());
+        let mut mgr = McpManager {
+            config: McpConfig {
+                servers: vec![McpServerConfig {
+                    name: "fs".to_string(),
+                    transport: McpTransport::Stdio,
+                    command: "/usr/bin/server".to_string(),
+                    args: vec!["--root".to_string(), ".".to_string()],
+                    env,
+                    url: String::new(),
+                    headers: vec![],
+                    oauth: false,
+                    timeout_secs: Some(5),
+                }],
+            },
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::default(),
+            oauth_http: reqwest::Client::new(),
+        };
+        let servers = mgr.spawn_pending(&MockFs::new()).await;
+        assert_eq!(servers.len(), 1);
+        match &servers[0] {
+            McpServer::Stdio(s) => {
+                assert_eq!(s.command.to_string_lossy(), "/usr/bin/server");
+                assert_eq!(s.args, vec!["--root".to_string(), ".".to_string()]);
+                assert_eq!(s.env.len(), 1);
+                assert_eq!(s.env[0].name, "TOKEN");
+            }
+            other => panic!("expected native Stdio server, got {other:?}"),
+        }
+        // No local bridge subprocess was spawned for the stdio server.
+        assert!(mgr.pending.iter().all(|b| b.bridge.is_none()));
     }
 
     #[test]
