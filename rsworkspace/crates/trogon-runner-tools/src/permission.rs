@@ -835,6 +835,12 @@ pub fn build_mode_permission_checker(
         tool_policies,
         inner,
     };
+    // Resolve the scope before moving `extras.cwd` into the struct below.
+    let scope = if scope_enabled() {
+        extras.cwd.as_deref().map(Scope::baseline)
+    } else {
+        None
+    };
     Some(Arc::new(ModePermissionChecker {
         mode: mode.to_string(),
         inner: rules_checker,
@@ -842,11 +848,7 @@ pub fn build_mode_permission_checker(
         read_dirs: extras.additional_read_dirs,
         classifier: extras.classifier,
         pre_tool_use: extras.pre_tool_use,
-        scope: if scope_enabled() {
-            extras.cwd.as_deref().map(Scope::baseline)
-        } else {
-            None
-        },
+        scope,
     }))
 }
 
