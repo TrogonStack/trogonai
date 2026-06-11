@@ -472,15 +472,18 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = session.set_mode("bypassPermissions").await {
                 eprintln!("warning: could not set bypassPermissions: {e}");
             }
+        } else if let Some(task) = trogon_cli::print::spawn_auto_deny_permissions(
+            nats_for_perm,
+            &target_prefix,
+            session.session_id(),
+        )
+        .await
+        {
+            deny_task = Some(task);
         } else {
-            deny_task = Some(
-                trogon_cli::print::spawn_auto_deny_permissions(
-                    nats_for_perm,
-                    &target_prefix,
-                    session.session_id(),
-                )
-                .await,
-            );
+            mcp_manager.shutdown_session(session.session_id()).await;
+            drop(nats_server);
+            std::process::exit(1);
         }
         if !resumed
             && let Some(model) = &chosen_model
