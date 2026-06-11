@@ -906,81 +906,149 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             .collect();
 
         if self.permission_checker.is_some() {
-            // Serial path: permission checks must not overlap (interactive).
-            // We also maintain a local tool_context so that a change_directory
-            // call updates the cwd for all subsequent tools in the same turn.
+            // Hybrid path: read-only / auto-allowed tools run concurrently; tools
+            // that may block on the interactive permission gate stay serial.
+            // change_directory updates cwd for subsequent tools in this turn.
             let mut current_ctx = Arc::clone(&self.tool_context);
-            let mut results = Vec::new();
-            for (id, name, input, parent_tool_use_id) in tool_uses {
-                debug!(tool = %name, "Executing tool (streaming, serial)");
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolCallStarted {
-                        id: id.clone(),
-                        name: name.clone(),
-                        input: input.clone(),
-                        parent_tool_use_id,
-                    })
-                    .await;
-
-                let output = if name == "ask_user" {
-                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                    match &self.elicitation_provider {
-                        Some(provider) => match provider.elicit(question).await {
-                            Some(answer) => answer,
-                            None => "The user declined or cancelled the request.".to_string(),
-                        },
-                        None => "ask_user tool is not available in this context.".to_string(),
-                    }
-                } else {
-                    let allowed = match &self.permission_checker {
-                        Some(checker) => checker.check(&id, &name, &input).await,
-                        None => true,
-                    };
-                    if !allowed {
-                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
-                    } else if let Some((_, original, client)) =
-                        self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+            let mut results = Vec::with_capacity(tool_uses.len());
+            let mut i = 0;
+            while i < tool_uses.len() {
+                if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
+                    let start = i;
+                    while i < tool_uses.len()
+                        && is_parallel_safe_read_only_tool(&tool_uses[i].1)
                     {
-                        match client.call_tool(original, &input).await {
-                            Ok(out) => out,
-                            Err(e) => format!("Tool error: {e}"),
+                        i += 1;
+                    }
+                    let batch = &tool_uses[start..i];
+                    let futures: Vec<_> = batch
+                        .iter()
+                        .map(|(id, name, input, parent_tool_use_id)| {
+                            let event_tx = event_tx.clone();
+                            let tool_context = Arc::clone(&current_ctx);
+                            let mcp_dispatch = self.mcp_dispatch.clone();
+                            let post_tool_observer = self.post_tool_observer.clone();
+                            let id = id.clone();
+                            let name = name.clone();
+                            let input = input.clone();
+                            let parent_tool_use_id = parent_tool_use_id.clone();
+                            async move {
+                                debug!(tool = %name, "Executing tool (streaming, parallel-safe)");
+
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolCallStarted {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        input: input.clone(),
+                                        parent_tool_use_id,
+                                    })
+                                    .await;
+
+                                let output = if let Some((_, original, client)) =
+                                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                                {
+                                    match client.call_tool(original, &input).await {
+                                        Ok(out) => out,
+                                        Err(e) => format!("Tool error: {e}"),
+                                    }
+                                } else {
+                                    dispatch_tool(&tool_context, &name, &input).await.display_text()
+                                };
+
+                                let output = if let Some(obs) = &post_tool_observer {
+                                    match obs.observe(&id, &name, &output).await {
+                                        Some(reason) => {
+                                            format!("{output}\n\n[PostToolUse hook] {reason}")
+                                        }
+                                        None => output,
+                                    }
+                                } else {
+                                    output
+                                };
+
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolCallFinished {
+                                        id: id.clone(),
+                                        output: output.clone(),
+                                        exit_code: None,
+                                        signal: None,
+                                    })
+                                    .await;
+
+                                ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                            }
+                        })
+                        .collect();
+                    results.extend(futures_util::future::join_all(futures).await);
+                } else {
+                    let (id, name, input, parent_tool_use_id) = tool_uses[i].clone();
+                    i += 1;
+                    debug!(tool = %name, "Executing tool (streaming, serial)");
+
+                    let _ = event_tx
+                        .send(AgentEvent::ToolCallStarted {
+                            id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                            parent_tool_use_id,
+                        })
+                        .await;
+
+                    let output = if name == "ask_user" {
+                        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                        match &self.elicitation_provider {
+                            Some(provider) => match provider.elicit(question).await {
+                                Some(answer) => answer,
+                                None => "The user declined or cancelled the request.".to_string(),
+                            },
+                            None => "ask_user tool is not available in this context.".to_string(),
                         }
                     } else {
-                        dispatch_tool(&current_ctx, &name, &input).await.display_text()
-                    }
-                };
+                        let allowed = match &self.permission_checker {
+                            Some(checker) => checker.check(&id, &name, &input).await,
+                            None => true,
+                        };
+                        if !allowed {
+                            format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
+                        } else if let Some((_, original, client)) =
+                            self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                        {
+                            match client.call_tool(original, &input).await {
+                                Ok(out) => out,
+                                Err(e) => format!("Tool error: {e}"),
+                            }
+                        } else {
+                            dispatch_tool(&current_ctx, &name, &input).await.display_text()
+                        }
+                    };
 
-                // PostToolUse observer: a blocking hook appends its objection to
-                // the result the model sees (the tool already ran).
-                let output = if let Some(obs) = &self.post_tool_observer {
-                    match obs.observe(&id, &name, &output).await {
-                        Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
-                        None => output,
-                    }
-                } else {
-                    output
-                };
+                    let output = if let Some(obs) = &self.post_tool_observer {
+                        match obs.observe(&id, &name, &output).await {
+                            Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                            None => output,
+                        }
+                    } else {
+                        output
+                    };
 
-                // If change_directory succeeded, update the local context so
-                // subsequent tools in this turn see the new working directory.
-                const CD_PREFIX: &str = "Working directory is now ";
-                if name == "change_directory"
-                    && let Some(new_path) = output.strip_prefix(CD_PREFIX)
-                {
-                    current_ctx = Arc::new(current_ctx.with_cwd(new_path));
+                    const CD_PREFIX: &str = "Working directory is now ";
+                    if name == "change_directory"
+                        && let Some(new_path) = output.strip_prefix(CD_PREFIX)
+                    {
+                        current_ctx = Arc::new(current_ctx.with_cwd(new_path));
+                    }
+
+                    let _ = event_tx
+                        .send(AgentEvent::ToolCallFinished {
+                            id: id.clone(),
+                            output: output.clone(),
+                            exit_code: None,
+                            signal: None,
+                        })
+                        .await;
+
+                    results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
                 }
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolCallFinished {
-                        id: id.clone(),
-                        output: output.clone(),
-                        exit_code: None,
-                        signal: None,
-                    })
-                    .await;
-
-                results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
             }
             results
         } else {
@@ -1068,49 +1136,102 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             .collect();
 
         if self.permission_checker.is_some() {
-            // Serial path: permission checks must not overlap (interactive).
-            let mut results = Vec::new();
-            for (id, name, input) in tool_uses {
-                debug!(tool = %name, "Executing tool (serial)");
-
-                let output = if name == "ask_user" {
-                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                    match &self.elicitation_provider {
-                        Some(provider) => match provider.elicit(question).await {
-                            Some(answer) => answer,
-                            None => "The user declined or cancelled the request.".to_string(),
-                        },
-                        None => "ask_user tool is not available in this context.".to_string(),
-                    }
-                } else {
-                    let allowed = match &self.permission_checker {
-                        Some(checker) => checker.check(&id, &name, &input).await,
-                        None => true,
-                    };
-                    if !allowed {
-                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
-                    } else if let Some((_, original, client)) =
-                        self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+            // Hybrid path: read-only / auto-allowed tools run concurrently; tools
+            // that may block on the interactive permission gate stay serial.
+            let mut results = Vec::with_capacity(tool_uses.len());
+            let mut i = 0;
+            while i < tool_uses.len() {
+                if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
+                    let start = i;
+                    while i < tool_uses.len()
+                        && is_parallel_safe_read_only_tool(&tool_uses[i].1)
                     {
-                        match client.call_tool(original, &input).await {
-                            Ok(out) => out,
-                            Err(e) => format!("Tool error: {e}"),
+                        i += 1;
+                    }
+                    let batch = &tool_uses[start..i];
+                    let futures: Vec<_> = batch
+                        .iter()
+                        .map(|(id, name, input)| {
+                            let tool_context = Arc::clone(&self.tool_context);
+                            let mcp_dispatch = self.mcp_dispatch.clone();
+                            let post_tool_observer = self.post_tool_observer.clone();
+                            let id = id.clone();
+                            let name = name.clone();
+                            let input = input.clone();
+                            async move {
+                                debug!(tool = %name, "Executing tool (parallel-safe)");
+
+                                let output = if let Some((_, original, client)) =
+                                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                                {
+                                    match client.call_tool(original, &input).await {
+                                        Ok(out) => out,
+                                        Err(e) => format!("Tool error: {e}"),
+                                    }
+                                } else {
+                                    dispatch_tool(&tool_context, &name, &input).await.display_text()
+                                };
+
+                                let output = if let Some(obs) = &post_tool_observer {
+                                    match obs.observe(&id, &name, &output).await {
+                                        Some(reason) => {
+                                            format!("{output}\n\n[PostToolUse hook] {reason}")
+                                        }
+                                        None => output,
+                                    }
+                                } else {
+                                    output
+                                };
+
+                                ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                            }
+                        })
+                        .collect();
+                    results.extend(futures_util::future::join_all(futures).await);
+                } else {
+                    let (id, name, input) = tool_uses[i].clone();
+                    i += 1;
+                    debug!(tool = %name, "Executing tool (serial)");
+
+                    let output = if name == "ask_user" {
+                        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                        match &self.elicitation_provider {
+                            Some(provider) => match provider.elicit(question).await {
+                                Some(answer) => answer,
+                                None => "The user declined or cancelled the request.".to_string(),
+                            },
+                            None => "ask_user tool is not available in this context.".to_string(),
                         }
                     } else {
-                        dispatch_tool(&self.tool_context, &name, &input).await.display_text()
-                    }
-                };
+                        let allowed = match &self.permission_checker {
+                            Some(checker) => checker.check(&id, &name, &input).await,
+                            None => true,
+                        };
+                        if !allowed {
+                            format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
+                        } else if let Some((_, original, client)) =
+                            self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                        {
+                            match client.call_tool(original, &input).await {
+                                Ok(out) => out,
+                                Err(e) => format!("Tool error: {e}"),
+                            }
+                        } else {
+                            dispatch_tool(&self.tool_context, &name, &input).await.display_text()
+                        }
+                    };
 
-                let output = if let Some(obs) = &self.post_tool_observer {
-                    match obs.observe(&id, &name, &output).await {
-                        Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
-                        None => output,
-                    }
-                } else {
-                    output
-                };
+                    let output = if let Some(obs) = &self.post_tool_observer {
+                        match obs.observe(&id, &name, &output).await {
+                            Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                            None => output,
+                        }
+                    } else {
+                        output
+                    };
 
-                results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
+                    results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
+                }
             }
             results
         } else {
@@ -1164,6 +1285,22 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             futures_util::future::join_all(futures).await
         }
     }
+}
+
+/// Read-only tools that are auto-allowed and safe to run concurrently even when
+/// an interactive permission checker is configured.
+fn is_parallel_safe_read_only_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "read_file"
+            | "list_dir"
+            | "glob"
+            | "search_files"
+            | "git_status"
+            | "git_diff"
+            | "git_log"
+            | "fetch_url"
+    )
 }
 
 // ── SSE streaming helpers ─────────────────────────────────────────────────────
@@ -1835,8 +1972,8 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         agent.permission_checker = Some(Arc::new(DenyAllChecker));
         let content = vec![ContentBlock::ToolUse {
             id: "t1".to_string(),
-            name: "read_file".to_string(),
-            input: serde_json::json!({"path": "foo.txt"}),
+            name: "write_file".to_string(),
+            input: serde_json::json!({"path": "foo.txt", "content": "x"}),
             parent_tool_use_id: None,
         }];
         let results = agent.execute_tools(&content).await;
@@ -2319,6 +2456,64 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                 "ToolCallFinished missing for {id}: {events:?}"
             );
         }
+    }
+
+    /// Read-only tools with a permission checker must not invoke the checker
+    /// (they bypass the serial gate and run concurrently).
+    #[tokio::test]
+    async fn execute_tools_read_only_skips_permission_checker() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CheckCounter(Arc<AtomicUsize>);
+
+        impl PermissionChecker for CheckCounter {
+            fn check<'a>(
+                &'a self,
+                _tool_call_id: &'a str,
+                _tool_name: &'a str,
+                _tool_input: &'a serde_json::Value,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { true })
+            }
+        }
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut agent = make_test_agent();
+        agent.permission_checker =
+            Some(Arc::new(CheckCounter(Arc::clone(&counter))) as Arc<dyn PermissionChecker>);
+
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "r1".to_string(),
+                name: "read_file".to_string(),
+                input: serde_json::json!({"path": "missing-a.txt"}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "r2".to_string(),
+                name: "glob".to_string(),
+                input: serde_json::json!({"pattern": "*.rs"}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "g1".to_string(),
+                name: "some_tool".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "only the non-read-only tool should pass through the permission checker"
+        );
+        assert_eq!(results[0].tool_use_id, "r1");
+        assert_eq!(results[1].tool_use_id, "r2");
+        assert_eq!(results[2].tool_use_id, "g1");
     }
 
     /// Non-ToolUse content blocks are silently skipped by execute_tools.
