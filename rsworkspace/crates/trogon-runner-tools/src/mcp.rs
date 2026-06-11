@@ -9,7 +9,7 @@
 //! connected. The built-in `AskUserQuestion` tool is filtered out so it never
 //! shadows a runner's own elicitation tool.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::McpServer;
 use tracing::{info, warn};
@@ -17,6 +17,71 @@ use trogon_tools::ToolDef;
 
 use crate::egress::EgressPolicy;
 use crate::session_store::StoredMcpServer;
+
+/// Dispatch entry: `(prefixed_name, original_name, client)`.
+pub type McpDispatch = Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>;
+
+/// Per-session cache of MCP tool defs and dispatch table from [`build_session_mcp`].
+///
+/// The first [`get_or_build`](Self::get_or_build) connects and lists tools; later calls
+/// reuse the cached result until [`invalidate`](Self::invalidate) or the server/policy
+/// inputs change (e.g. after MCP respawn updates session servers).
+pub struct SessionMcpCache {
+    inner: Mutex<Option<CachedSessionMcp>>,
+}
+
+struct CachedSessionMcp {
+    servers: Vec<StoredMcpServer>,
+    policy: EgressPolicy,
+    tool_defs: Vec<ToolDef>,
+    dispatch: McpDispatch,
+}
+
+impl SessionMcpCache {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(None),
+        }
+    }
+
+    /// Drop cached tools so the next [`get_or_build`](Self::get_or_build) reconnects and
+    /// re-lists.
+    pub fn invalidate(&self) {
+        *self.inner.lock().expect("SessionMcpCache mutex poisoned") = None;
+    }
+
+    /// Return cached MCP tools, or build and cache them on first use.
+    pub async fn get_or_build(
+        &self,
+        http: &reqwest::Client,
+        servers: &[StoredMcpServer],
+        policy: &EgressPolicy,
+    ) -> (Vec<ToolDef>, McpDispatch) {
+        if let Some(cached) = self.inner.lock().expect("SessionMcpCache mutex poisoned").as_ref()
+            && cached.servers == servers
+            && cached.policy == *policy
+        {
+            return (cached.tool_defs.clone(), cached.dispatch.clone());
+        }
+
+        let (tool_defs, dispatch) = build_session_mcp(http, servers, policy).await;
+
+        *self.inner.lock().expect("SessionMcpCache mutex poisoned") = Some(CachedSessionMcp {
+            servers: servers.to_vec(),
+            policy: policy.clone(),
+            tool_defs: tool_defs.clone(),
+            dispatch: dispatch.clone(),
+        });
+
+        (tool_defs, dispatch)
+    }
+}
+
+impl Default for SessionMcpCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Convert the ACP `mcpServers` field from a `new_session` request into the
 /// persisted, transport-neutral `StoredMcpServer` form. HTTP and SSE entries
@@ -60,7 +125,7 @@ pub async fn build_session_mcp(
     http: &reqwest::Client,
     servers: &[StoredMcpServer],
     policy: &EgressPolicy,
-) -> (Vec<ToolDef>, Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>) {
+) -> (Vec<ToolDef>, McpDispatch) {
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
 
@@ -197,5 +262,68 @@ mod tests {
             build_session_mcp(&http, &[server("bad", &mcp.url("/mcp"))], &EgressPolicy::default_safe()).await;
         assert!(defs.is_empty());
         assert!(dispatch.is_empty());
+    }
+
+    /// First `get_or_build` populates the cache; a second call reuses it (no extra `tools/list`).
+    #[tokio::test]
+    async fn session_mcp_cache_reuses_on_second_call() {
+        let mcp = MockServer::start();
+        mcp.mock(|when, then| {
+            when.method(POST).body_contains("\"initialize\"");
+            then.status(200).json_body(json!({"jsonrpc":"2.0","id":1,"result":{}}));
+        });
+        let list_mock = mcp.mock(|when, then| {
+            when.method(POST).body_contains("tools/list");
+            then.status(200).json_body(json!({
+                "jsonrpc":"2.0","id":2,
+                "result":{"tools":[
+                    {"name":"search","description":"Search","inputSchema":{"type":"object"}}
+                ]}
+            }));
+        });
+
+        let http = reqwest::Client::new();
+        let servers = [server("web", &mcp.url("/mcp"))];
+        let policy = EgressPolicy::default_safe();
+        let cache = SessionMcpCache::new();
+
+        let (defs1, _) = cache.get_or_build(&http, &servers, &policy).await;
+        let (defs2, _) = cache.get_or_build(&http, &servers, &policy).await;
+
+        assert_eq!(defs1.len(), 1);
+        assert_eq!(defs1[0].name, "web__search");
+        assert_eq!(defs2.len(), 1);
+        assert_eq!(defs2[0].name, "web__search");
+        assert_eq!(list_mock.hits(), 1, "tools/list should run once");
+    }
+
+    /// `invalidate` forces a fresh `tools/list` on the next `get_or_build`.
+    #[tokio::test]
+    async fn session_mcp_cache_invalidates() {
+        let mcp = MockServer::start();
+        mcp.mock(|when, then| {
+            when.method(POST).body_contains("\"initialize\"");
+            then.status(200).json_body(json!({"jsonrpc":"2.0","id":1,"result":{}}));
+        });
+        let list_mock = mcp.mock(|when, then| {
+            when.method(POST).body_contains("tools/list");
+            then.status(200).json_body(json!({
+                "jsonrpc":"2.0","id":2,
+                "result":{"tools":[
+                    {"name":"search","description":"Search","inputSchema":{"type":"object"}}
+                ]}
+            }));
+        });
+
+        let http = reqwest::Client::new();
+        let servers = [server("web", &mcp.url("/mcp"))];
+        let policy = EgressPolicy::default_safe();
+        let cache = SessionMcpCache::new();
+
+        cache.get_or_build(&http, &servers, &policy).await;
+        cache.invalidate();
+        cache.get_or_build(&http, &servers, &policy).await;
+
+        assert_eq!(list_mock.hits(), 2, "tools/list should run after invalidate");
     }
 }

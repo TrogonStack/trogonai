@@ -9,7 +9,7 @@ use crate::egress::EgressPolicy;
 
 /// A URL-based MCP server configuration stored per session.
 /// Stdio servers are not supported in the NATS model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredMcpServer {
     /// Human-readable name (used as tool prefix).
     pub name: String,
