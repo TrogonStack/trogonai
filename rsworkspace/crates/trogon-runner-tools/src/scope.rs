@@ -253,8 +253,8 @@ impl Scope {
     /// escalates instead of being silently allowed. `cwd` is escaped so glob
     /// metacharacters in the path are treated literally. Pure; performs no I/O.
     pub fn baseline(cwd: &str) -> Self {
-        let root = format!("{}/**", globset::escape(cwd.trim_end_matches('/')));
-        let write = GlobSet::compile(&[root]).expect("cwd-anchored `**` is a valid glob");
+        let write = GlobSet::compile(&anchor_to_cwd(&["**".to_string()], cwd))
+            .expect("cwd-anchored `**` is a valid glob");
         Self {
             write,
             run: CommandSet::any(),
@@ -262,6 +262,25 @@ impl Scope {
             protected: GlobSet::empty(),
             on_exceed: OnExceed::Escalate,
         }
+    }
+
+    /// Convert untrusted wire config into a validated [`Scope`], anchoring
+    /// relative globs to `cwd`. This is the single wire -> domain boundary; it
+    /// runs exactly once per config source. Returns the first [`ScopeError`]
+    /// encountered (invalid glob, or unrecognized `network` / `on_exceed`).
+    ///
+    /// `run` is taken verbatim — an empty list means "no commands" (bash blocked),
+    /// not "any command"; the run-any default lives only in [`Scope::baseline`].
+    pub fn from_wire(wire: ScopeWire, cwd: &str) -> Result<Self, ScopeError> {
+        let write = GlobSet::compile(&anchor_to_cwd(&wire.write, cwd))?;
+        let protected = GlobSet::compile(&anchor_to_cwd(&wire.protected, cwd))?;
+        Ok(Self {
+            write,
+            run: CommandSet::from_patterns(wire.run),
+            network: parse_network(wire.network)?,
+            protected,
+            on_exceed: parse_on_exceed(wire.on_exceed)?,
+        })
     }
 
     /// Globs the agent may write to silently.
@@ -290,6 +309,81 @@ impl Scope {
     }
 }
 
+/// Untrusted wire form of a [`Scope`], deserialized from TROGON.md / settings.json
+/// / NATS. Converted into a domain [`Scope`] exactly once via [`Scope::from_wire`].
+///
+/// Field grammars:
+/// - `network`: `off` | `on` | `allow:host1,host2,...` (absent => denied)
+/// - `on_exceed`: `escalate` | `deny` (absent => escalate)
+#[derive(Debug, Default, Deserialize)]
+pub struct ScopeWire {
+    #[serde(default)]
+    pub write: Vec<String>,
+    #[serde(default)]
+    pub run: Vec<String>,
+    #[serde(default)]
+    pub network: Option<String>,
+    #[serde(default)]
+    pub protected: Vec<String>,
+    #[serde(default)]
+    pub on_exceed: Option<String>,
+}
+
+/// Anchor relative glob patterns to `cwd` (escaped, so the path is literal) so
+/// they match the absolute paths produced during evaluation. Absolute patterns
+/// (leading `/`) are left untouched.
+fn anchor_to_cwd(patterns: &[String], cwd: &str) -> Vec<String> {
+    let root = globset::escape(cwd.trim_end_matches('/'));
+    patterns
+        .iter()
+        .map(|pattern| {
+            if pattern.starts_with('/') {
+                pattern.clone()
+            } else {
+                format!("{root}/{pattern}")
+            }
+        })
+        .collect()
+}
+
+/// Parse the wire `network` field. Absent => `Denied`.
+fn parse_network(value: Option<String>) -> Result<NetworkPolicy, ScopeError> {
+    let Some(raw) = value else {
+        return Ok(NetworkPolicy::Denied);
+    };
+    match raw.trim() {
+        "off" => Ok(NetworkPolicy::Denied),
+        "on" => Ok(NetworkPolicy::Allowed),
+        other => match other.strip_prefix("allow:") {
+            Some(list) => {
+                let hosts: Vec<String> = list
+                    .split(',')
+                    .map(|h| h.trim().to_string())
+                    .filter(|h| !h.is_empty())
+                    .collect();
+                if hosts.is_empty() {
+                    Err(ScopeError::UnknownNetwork(raw))
+                } else {
+                    Ok(NetworkPolicy::AllowList(hosts))
+                }
+            }
+            None => Err(ScopeError::UnknownNetwork(raw)),
+        },
+    }
+}
+
+/// Parse the wire `on_exceed` field. Absent => `Escalate`.
+fn parse_on_exceed(value: Option<String>) -> Result<OnExceed, ScopeError> {
+    let Some(raw) = value else {
+        return Ok(OnExceed::Escalate);
+    };
+    match raw.trim() {
+        "escalate" => Ok(OnExceed::Escalate),
+        "deny" => Ok(OnExceed::Deny),
+        _ => Err(ScopeError::UnknownOnExceed(raw)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,5 +409,115 @@ mod tests {
         let scope = Scope::baseline("/repo/");
         assert!(scope.write().matches("/repo/src/lib.rs"));
         assert!(!scope.write().matches("/other/file"));
+    }
+
+    #[test]
+    fn from_wire_happy_path() {
+        let wire = ScopeWire {
+            write: vec!["src/**".to_string()],
+            run: vec!["cargo".to_string()],
+            network: Some("allow:api.github.com, example.com".to_string()),
+            protected: vec!["**/.env".to_string()],
+            on_exceed: Some("deny".to_string()),
+        };
+        let scope = Scope::from_wire(wire, "/repo").expect("valid wire");
+        // Relative write glob anchored to cwd.
+        assert!(scope.write().matches("/repo/src/main.rs"));
+        assert!(!scope.write().matches("/repo/tests/x.rs"));
+        // Command prefix matching.
+        assert!(scope.run().matches("cargo build"));
+        assert!(!scope.run().matches("rm -rf /"));
+        // Host allow-list parsed and trimmed.
+        assert_eq!(
+            scope.network(),
+            &NetworkPolicy::AllowList(vec![
+                "api.github.com".to_string(),
+                "example.com".to_string()
+            ])
+        );
+        assert_eq!(scope.on_exceed(), OnExceed::Deny);
+        assert!(scope.protected().matches("/repo/src/.env"));
+    }
+
+    #[test]
+    fn from_wire_defaults_to_denied_and_escalate() {
+        let scope = Scope::from_wire(ScopeWire::default(), "/repo").expect("valid");
+        assert_eq!(scope.network(), &NetworkPolicy::Denied);
+        assert_eq!(scope.on_exceed(), OnExceed::Escalate);
+        assert!(scope.write().is_empty());
+        // Empty `run` means no commands, not "any".
+        assert!(scope.run().is_empty());
+        assert!(!scope.run().matches("cargo build"));
+    }
+
+    #[test]
+    fn from_wire_network_on_off() {
+        let on = Scope::from_wire(
+            ScopeWire {
+                network: Some("on".to_string()),
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .unwrap();
+        assert_eq!(on.network(), &NetworkPolicy::Allowed);
+        let off = Scope::from_wire(
+            ScopeWire {
+                network: Some("off".to_string()),
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .unwrap();
+        assert_eq!(off.network(), &NetworkPolicy::Denied);
+    }
+
+    #[test]
+    fn from_wire_invalid_glob_errors() {
+        let wire = ScopeWire {
+            write: vec!["[".to_string()],
+            ..Default::default()
+        };
+        let err = Scope::from_wire(wire, "/repo").unwrap_err();
+        assert!(matches!(err, ScopeError::InvalidGlob { .. }));
+        // Error implements std::error::Error with a source.
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[test]
+    fn from_wire_unknown_network_errors() {
+        for bad in ["sometimes", "allow:", "yes"] {
+            let wire = ScopeWire {
+                network: Some(bad.to_string()),
+                ..Default::default()
+            };
+            assert!(matches!(
+                Scope::from_wire(wire, "/repo").unwrap_err(),
+                ScopeError::UnknownNetwork(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn from_wire_unknown_on_exceed_errors() {
+        let wire = ScopeWire {
+            on_exceed: Some("maybe".to_string()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            Scope::from_wire(wire, "/repo").unwrap_err(),
+            ScopeError::UnknownOnExceed(_)
+        ));
+    }
+
+    #[test]
+    fn scope_wire_deserializes_from_json_with_missing_fields() {
+        let wire: ScopeWire =
+            serde_json::from_str(r#"{"write":["src/**"],"on_exceed":"deny"}"#).expect("json");
+        assert_eq!(wire.write, vec!["src/**".to_string()]);
+        assert!(wire.run.is_empty());
+        assert!(wire.network.is_none());
+        let scope = Scope::from_wire(wire, "/repo").unwrap();
+        assert_eq!(scope.on_exceed(), OnExceed::Deny);
     }
 }
