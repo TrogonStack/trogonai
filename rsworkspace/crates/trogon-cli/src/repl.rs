@@ -883,55 +883,27 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         Err(e) => eprintln!("Error setting model: {e}"),
                                     }
                                 } else {
-                                    // B5: shut down the OLD session's MCP bridges before
-                                    // switching, otherwise their child processes are leaked
-                                    // across the runner switch (mirrors /clear and /resume).
-                                    let old_session_id = session.session_id().to_string();
-                                    mcp_manager.shutdown_session(&old_session_id).await;
-                                    session.close().await;
-                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
-                                    prefix = outcome.new_prefix.clone();
+                                    let applied = finish_cross_runner_model_switch(
+                                        &factory,
+                                        session,
+                                        &outcome,
+                                        &model_id,
+                                        &mut mcp_manager,
+                                        &cwd,
+                                        &fs,
+                                        &project_dir,
+                                        session_name.as_deref(),
+                                        skip_permissions,
+                                        client_supervisor.as_ref(),
+                                        None,
+                                    )
+                                    .await;
+                                    session = applied.session;
+                                    prefix = applied.prefix;
+                                    session_mode = applied.session_mode;
                                     session_used_tokens = 0;
                                     session_context_size = 0;
                                     compactor_model_sel = None;
-                                    // B5: the cross-runner session was created with NO
-                                    // mcp_servers, so MCP tools would be missing. Rebind MCP
-                                    // for the new session (shutdown + spawn_pending +
-                                    // commit_pending + load_session) so its tools are available.
-                                    if let Err(e) = respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await {
-                                        eprintln!("warning: could not bind MCP for new session: {e}");
-                                    }
-                                    // MED-5: the new runner starts a session with mode
-                                    // initialized from TROGON_MODE; keep the REPL's tracked
-                                    // mode in sync so /status and permission prompts match.
-                                    if skip_permissions {
-                                        if let Err(e) = session.set_mode("bypassPermissions").await {
-                                            eprintln!("warning: could not set bypassPermissions: {e}");
-                                        }
-                                        session_mode = "bypassPermissions".to_string();
-                                    } else {
-                                        session_mode =
-                                            std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
-                                    }
-                                    if let Some(ref sup) = client_supervisor
-                                        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
-                                    {
-                                        eprintln!("error rebinding permission client: {e}");
-                                    }
-                                    match session.set_model(&model_id).await {
-                                        Ok(()) => {
-                                            println!("Switched to {model_id}");
-                                            persist_session_index(
-                                                &fs,
-                                                &project_dir,
-                                                &prefix,
-                                                session.session_id(),
-                                                &model_id,
-                                                session_name.as_deref(),
-                                            );
-                                        }
-                                        Err(e) => eprintln!("Error setting model on new runner: {e}"),
-                                    }
                                     rewind_state.reset();
                                 }
                             }
@@ -1795,6 +1767,126 @@ pub(crate) struct ModelSwitchOutcome {
     pub same_runner: bool,
     pub new_prefix: String,
     pub new_session_id: String,
+}
+
+/// Records cross-runner switch phases for unit tests (ordering assertions).
+#[derive(Debug, Default)]
+pub(crate) struct SwitchJournal {
+    steps: Vec<&'static str>,
+}
+
+impl SwitchJournal {
+    fn record(&mut self, step: &'static str) {
+        self.steps.push(step);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn steps(&self) -> &[&'static str] {
+        &self.steps
+    }
+}
+
+pub(crate) struct CrossRunnerSwitchApplied<S> {
+    pub session: S,
+    pub prefix: String,
+    pub session_mode: String,
+}
+
+/// Complete a cross-runner `/model` switch: tear down the old session's MCP
+/// bridges, attach the migrated session, bind MCP tools, then sync mode and
+/// model. MCP must be ready before this returns so the REPL prompt cannot accept
+/// user input while tools are still missing.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn finish_cross_runner_model_switch<SF, S, F>(
+    factory: &SF,
+    session: S,
+    outcome: &ModelSwitchOutcome,
+    model_id: &str,
+    mcp: &mut McpManager,
+    cwd: &Path,
+    fs: &F,
+    project_dir: &Path,
+    session_name: Option<&str>,
+    skip_permissions: bool,
+    client_supervisor: Option<&Rc<AcpClientSupervisor>>,
+    mut journal: Option<&mut SwitchJournal>,
+) -> CrossRunnerSwitchApplied<S>
+where
+    SF: SessionFactory<Sess = S>,
+    S: Session,
+    F: Fs,
+{
+    let record = |journal: &mut Option<&mut SwitchJournal>, step: &'static str| {
+        if let Some(j) = journal.as_mut() {
+            j.record(step);
+        }
+    };
+
+    // B5: shut down the OLD session's MCP bridges before switching, otherwise
+    // their child processes are leaked across the runner switch.
+    let old_session_id = session.session_id().to_string();
+    mcp.shutdown_session(&old_session_id).await;
+    session.close().await;
+
+    // B5: the cross-runner session was created with NO mcp_servers. Bind MCP for
+    // the new session before any post-switch work or REPL prompt unblock.
+    let session = match activate_session(
+        factory,
+        mcp,
+        &outcome.new_prefix,
+        &outcome.new_session_id,
+        cwd,
+        fs,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: could not bind MCP for new session: {e}");
+            factory.attach_session(&outcome.new_prefix, outcome.new_session_id.clone())
+        }
+    };
+    record(&mut journal, "mcp_bound");
+
+    // MED-5: the new runner starts a session with mode initialized from
+    // TROGON_MODE; keep the REPL's tracked mode in sync.
+    let session_mode = if skip_permissions {
+        if let Err(e) = session.set_mode("bypassPermissions").await {
+            eprintln!("warning: could not set bypassPermissions: {e}");
+        }
+        "bypassPermissions".to_string()
+    } else {
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
+    };
+
+    if let Some(sup) = client_supervisor
+        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
+    {
+        eprintln!("error rebinding permission client: {e}");
+    }
+
+    match session.set_model(model_id).await {
+        Ok(()) => {
+            println!("Switched to {model_id}");
+            persist_session_index(
+                fs,
+                project_dir,
+                &outcome.new_prefix,
+                session.session_id(),
+                model_id,
+                session_name,
+            );
+        }
+        Err(e) => eprintln!("Error setting model on new runner: {e}"),
+    }
+
+    record(&mut journal, "prompt_unblocked");
+
+    CrossRunnerSwitchApplied {
+        session,
+        prefix: outcome.new_prefix.clone(),
+        session_mode,
+    }
 }
 
 pub fn resolve_model_alias(input: &str) -> String {
@@ -3863,6 +3955,55 @@ mod tests {
     }
 
     // ── /model cross-runner: loop wiring ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn cross_runner_switch_binds_mcp_before_prompt_unblocked() {
+        use crate::session::mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+
+        let old = Arc::new(MockSession::new("old-sess"));
+        let factory = MockSessionFactory::new("new-sess");
+        let fs = MockFs::new();
+        let mut mcp = McpManager::load(&fs);
+        let mut journal = SwitchJournal::default();
+        let outcome = ModelSwitchOutcome {
+            same_runner: false,
+            new_prefix: "acp.xai".into(),
+            new_session_id: "new-sess".into(),
+        };
+
+        let applied = finish_cross_runner_model_switch(
+            &factory,
+            old.clone(),
+            &outcome,
+            "grok-3",
+            &mut mcp,
+            Path::new("/ws"),
+            &fs,
+            Path::new("/ws"),
+            None,
+            false,
+            None,
+            Some(&mut journal),
+        )
+        .await;
+
+        assert_eq!(old.close_count(), 1);
+        assert_eq!(applied.session.session_id(), "new-sess");
+        assert_eq!(applied.prefix, "acp.xai");
+        assert_eq!(applied.session.load_session_count(), 1);
+
+        let steps = journal.steps();
+        let mcp_idx = steps.iter().position(|&s| s == "mcp_bound").expect("mcp_bound step");
+        let prompt_idx = steps
+            .iter()
+            .position(|&s| s == "prompt_unblocked")
+            .expect("prompt_unblocked step");
+        assert!(
+            mcp_idx < prompt_idx,
+            "MCP must be bound before the prompt unblocks: {steps:?}"
+        );
+    }
 
     #[tokio::test]
     async fn model_cross_runner_attaches_new_session_and_resets_counters() {
