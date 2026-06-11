@@ -369,6 +369,7 @@ where
                         if let AgentContentBlock::ToolResult {
                             tool_use_id,
                             content,
+                            ..
                         } = block
                         {
                             // Skip result for TodoWrite — Plan was already replayed
@@ -1197,6 +1198,7 @@ where
         let new_state = SessionState {
             tool_allowlist: Vec::new(),
             background_jobs: Vec::new(),
+            env: src_state.env.clone(),
             messages,
             model: src_state.model.clone(),
             compactor_model: src_state.compactor_model.clone(),
@@ -4105,6 +4107,7 @@ mod tests {
                         content: vec![AgentCb::ToolResult {
                             tool_use_id: "tu-1".to_string(),
                             content: "file1.txt\nfile2.txt".to_string(),
+                            blocks: vec![],
                         }],
                     },
                 ],
@@ -4243,6 +4246,7 @@ mod tests {
                         content: vec![AgentCb::ToolResult {
                             tool_use_id: "tu-1".to_string(),
                             content: "file content".to_string(),
+                            blocks: vec![],
                         }],
                     },
                 ],
@@ -4336,6 +4340,7 @@ mod tests {
                         content: vec![AgentCb::ToolResult {
                             tool_use_id: "tw-skip".to_string(), // same id → continue
                             content: "done".to_string(),
+                            blocks: vec![],
                         }],
                     },
                 ],
@@ -4379,6 +4384,7 @@ mod tests {
                         content: vec![AgentCb::ToolResult {
                             tool_use_id: "tu-x".to_string(),
                             content: "output".to_string(),
+                            blocks: vec![],
                         }],
                     },
                 ],
@@ -4413,6 +4419,7 @@ mod tests {
                         content: vec![AgentCb::ToolResult {
                             tool_use_id: "tu-bash".to_string(),
                             content: "hi\n".to_string(),
+                            blocks: vec![],
                         }],
                     },
                 ],
@@ -4470,6 +4477,7 @@ mod tests {
                         content: vec![AgentCb::ToolResult {
                             tool_use_id: "bash-replay-term".to_string(),
                             content: "hello\n".to_string(),
+                            blocks: vec![],
                         }],
                     },
                 ],
