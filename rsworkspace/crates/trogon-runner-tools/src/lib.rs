@@ -29,7 +29,7 @@ pub use elicitation::{
     answer_from_response, elicit_via_channel, handle_elicitation_request_nats, ElicitationReq,
     ElicitationTx,
 };
-pub use mcp::{build_session_mcp, convert_mcp_servers};
+pub use mcp::{build_session_mcp, convert_mcp_servers, McpDispatch, SessionMcpCache};
 pub use permission::{
     build_mode_permission_checker, check_tool_permission, ChannelPermissionChecker,
     ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
