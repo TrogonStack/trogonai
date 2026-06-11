@@ -6,6 +6,7 @@ use crate::app::{
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
+use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -542,6 +543,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // (one per turn) once the current turn finishes.
     let mut queued_prompts: VecDeque<String> = VecDeque::new();
     let custom_commands = crate::commands::load_commands(&project_dir);
+    let mut spawn_tracker = SpawnTracker::default();
 
     loop {
         permission_coordinator.cancel_pending();
@@ -721,6 +723,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     session_name.as_deref(),
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
+                                spawn_tracker = SpawnTracker::default();
                             }
                             Err(e) => eprintln!(
                                 "error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."
@@ -755,6 +758,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         session_name.as_deref(),
                                     );
                                     eprintln!("resumed session {}", session.session_id());
+                                    spawn_tracker = SpawnTracker::default();
                                 }
                                 Err(e) => {
                                     // MED-3: the old session's MCP bridges were shut down
@@ -1065,10 +1069,25 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/agents" {
                         handle_agents_command(arg, &cwd);
                     } else if cmd == "/tasks" {
-                        // Subagents spawned via the spawn_agent tool run synchronously
-                        // (inline, in an isolated worktree) and return their result as
-                        // the tool output — there is no background task queue to list.
-                        println!("no background tasks — spawned subagents run inline and return immediately");
+                        match session.list_sessions().await {
+                            Ok(list) => {
+                                let text = spawn_tracker.format_tasks(
+                                    &prefix,
+                                    session.session_id(),
+                                    &list,
+                                );
+                                println!("{text}");
+                            }
+                            Err(e) => {
+                                eprintln!("error listing spawns: {e}");
+                                let text = spawn_tracker.format_tasks(
+                                    &prefix,
+                                    session.session_id(),
+                                    &[],
+                                );
+                                println!("{text}");
+                            }
+                        }
                     } else if cmd == "/init" {
                         let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -1269,6 +1288,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     match event {
                                         None => break,
                                         Some(ev) => {
+                                            match &ev {
+                                                StreamEvent::ToolCall(name) => {
+                                                    spawn_tracker.on_tool_call(name);
+                                                }
+                                                StreamEvent::ToolFinished { name, .. } => {
+                                                    spawn_tracker.on_tool_finished(name);
+                                                }
+                                                _ => {}
+                                            }
                                             if let Some(sync) = renderer.handle(ev, &mut metrics)
                                                 && sync_cwd_from_tool(
                                                     &sync.tool_name,
@@ -2003,8 +2031,9 @@ Ctrl+D    quit");
         }
 
         "/tasks" => {
-            "The CLI does not track background tasks — prompts run inline (Ctrl+C to interrupt). \
-             Sub-agents the model spawns run on the runner in isolated worktrees; see /agents."
+            "Lists live sub-agent spawns for the current session: child NATS sub-sessions \
+             (via the runner's session list) plus any in-flight spawn_agent tool calls. \
+             Read-only — use /agents to inspect subagent definitions."
                 .to_string()
         }
 
