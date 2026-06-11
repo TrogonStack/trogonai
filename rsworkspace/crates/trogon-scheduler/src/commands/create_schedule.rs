@@ -1,5 +1,5 @@
 use buffa::MessageField;
-use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
+use trogon_decider_runtime::{Decider, Decision, WritePrecondition};
 use trogonai_proto::convert::DurationConversionError;
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
@@ -15,12 +15,6 @@ pub struct CreateSchedule {
     pub schedule: Schedule,
     pub delivery: Delivery,
     pub message: ScheduleMessage,
-}
-
-impl CreateSchedule {
-    pub fn new(command: Self) -> Self {
-        command
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -103,11 +97,6 @@ impl Decider for CreateSchedule {
             }
         }
     }
-}
-
-impl CommandSnapshotPolicy for CreateSchedule {
-    type SnapshotPolicy = FrequencySnapshot;
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
 #[cfg(test)]

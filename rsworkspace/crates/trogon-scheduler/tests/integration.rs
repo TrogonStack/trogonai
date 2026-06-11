@@ -174,12 +174,7 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
 
     let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "scheduler.fire.agent.run.one-time").await;
@@ -205,12 +200,7 @@ async fn controller_reconciles_sampling_job() {
         source: Some(command_domain::SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
     wait_for_stream_subject(&js, trogon_scheduler::kv::SCHEDULES_STREAM, "sensors.latest").await;
     js.publish("sensors.latest", br#"{"value":42}"#.as_slice().into())
         .await
@@ -238,12 +228,7 @@ async fn controller_reconciles_schedule_with_timezone() {
     let mut job = base_schedule("cron-timezone");
     job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
-    CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
 
     let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "scheduler.fire.agent.run.cron-timezone").await;
@@ -263,12 +248,7 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_schedule("disabled");
-    CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
 
     let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "scheduler.schedules.disabled").await;
@@ -296,12 +276,7 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_schedule("removed");
-    CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
 
     let stream = js.get_stream(trogon_scheduler::kv::SCHEDULES_STREAM).await.unwrap();
     wait_for_subject(&stream, "scheduler.schedules.removed").await;
@@ -331,12 +306,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         timezone: Some("UTC".to_string()),
     };
 
-    CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
     CommandExecution::new(&store.event_store, &PauseSchedule::new(command_schedule_id("eventful")))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -367,12 +337,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let job = base_schedule("lifecycle");
     let command_id = command_schedule_id("lifecycle");
 
-    let added = CommandExecution::new(&store.event_store, &CreateSchedule::new(job))
-        .with_snapshot(&store.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    let added = CommandExecution::new(&store.event_store, &job).execute().await.unwrap();
     let added_position = added.stream_position;
     assert_eq!(
         added.state.state.as_ref().and_then(|value| value.as_known()),

@@ -53,12 +53,7 @@ async fn client_register_then_get() {
     let store = MockSchedulerStore::new();
 
     let job = command_base_schedule("backup");
-    CommandExecution::new(&store, &CreateSchedule::new(job))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(&store, &job).execute().await.unwrap();
 
     let got = store
         .get_schedule(GetScheduleCommand::new(ScheduleId::parse("backup").unwrap()))
@@ -71,9 +66,7 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("toggle")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    CommandExecution::new(&store, &command_base_schedule("toggle"))
         .execute()
         .await
         .unwrap();
@@ -96,15 +89,11 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_schedules_use_store_paths() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    CommandExecution::new(&store, &command_base_schedule("alpha"))
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("beta")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    CommandExecution::new(&store, &command_base_schedule("beta"))
         .execute()
         .await
         .unwrap();

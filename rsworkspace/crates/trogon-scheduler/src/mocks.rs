@@ -802,9 +802,7 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_schedule("seeded"));
 
-        CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
-            .with_snapshot(&store)
-            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        CommandExecution::new(&store, &command_base_schedule("alpha"))
             .execute()
             .await
             .unwrap();
@@ -856,9 +854,7 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
-            .with_snapshot(&store)
-            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        let deleted_error = CommandExecution::new(&store, &command_base_schedule("alpha"))
             .execute()
             .await
             .unwrap_err();
@@ -878,9 +874,7 @@ mod tests {
         let invalid_error = command_domain::SamplingSource::latest_from_subject("sensors.>").unwrap_err();
         assert!(invalid_error.to_string().contains("sampling subject"));
 
-        CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
-            .with_snapshot(&store)
-            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        CommandExecution::new(&store, &command_base_schedule("alpha"))
             .execute()
             .await
             .unwrap();
