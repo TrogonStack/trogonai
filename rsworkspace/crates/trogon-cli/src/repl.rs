@@ -2087,6 +2087,7 @@ Commands:
   {m}/doctor{r}             run health checks (same as `trogon doctor`)
   {m}/status{r}             prefix, model, tokens, registered runners
   {m}/cost{r}               show token usage for this session
+  {m}/context{r}            show context-window usage for this session
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
@@ -2140,6 +2141,8 @@ Ctrl+D    quit");
                 )
             }
         }
+
+        "/context" => render_context_usage(used_tokens, context_size),
 
         "/config" => handle_config_cmd(arg, fs),
 
@@ -2745,6 +2748,22 @@ fn estimate_cost(tokens: u64, model: &str) -> String {
 
 // ── token formatting ──────────────────────────────────────────────────────────
 
+fn render_context_usage(used_tokens: u64, context_size: u64) -> String {
+    if context_size == 0 {
+        "no context usage yet — send a message first".to_string()
+    } else {
+        let pct = (used_tokens * 100).checked_div(context_size).unwrap_or(0);
+        let remaining = context_size.saturating_sub(used_tokens);
+        format!(
+            "context: {} / {} tokens ({}%) · {} remaining",
+            fmt_tokens(used_tokens),
+            fmt_tokens(context_size),
+            pct,
+            fmt_tokens(remaining),
+        )
+    }
+}
+
 fn fmt_tokens(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
@@ -3131,6 +3150,7 @@ mod tests {
         let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
+        assert!(out.contains("/context"));
         assert!(out.contains("/clear"));
         assert!(out.contains("/sessions"));
         assert!(out.contains("/resume"));
@@ -3207,6 +3227,33 @@ mod tests {
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
         assert!(out.contains("~$"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_context_no_data_yet() {
+        let out = render_context_usage(0, 0);
+        assert!(out.contains("no context usage yet"), "got: {out}");
+        assert!(out.contains("send a message first"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_context_shows_usage_percentage_and_remaining() {
+        let out = render_context_usage(12_345, 200_000);
+        assert_eq!(
+            out,
+            "context: 12,345 / 200,000 tokens (6%) · 187,655 remaining"
+        );
+        let via_cmd = handle_slash_command(
+            "/context",
+            "",
+            12_345,
+            200_000,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &MockFs::new(),
+            None,
+        );
+        assert_eq!(via_cmd, out);
     }
 
     // ── blended_rate / estimate_cost ──────────────────────────────────────────
