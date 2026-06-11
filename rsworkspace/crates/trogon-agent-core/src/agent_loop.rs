@@ -19,7 +19,8 @@ use tracing::{debug, info, warn};
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
 pub use trogon_tools::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
+    ToolResult,
 };
 
 /// A single block in the Anthropic `system` array.
@@ -230,6 +231,9 @@ pub enum AgentEvent {
         exit_code: Option<i32>,
         signal: Option<String>,
     },
+    /// All tool calls in one assistant turn finished — emitted once after a
+    /// batch of `ToolCallFinished` events (drives the PostToolBatch hook).
+    ToolBatchFinished { count: usize },
     /// A system-level status message (forward compatibility with Anthropic API system events).
     SystemStatus { message: String },
     /// Token usage summary emitted at the end of a turn.
@@ -400,6 +404,9 @@ pub struct AgentLoop<H = reqwest::Client> {
     pub permission_checker: Option<Arc<dyn PermissionChecker>>,
     /// Optional provider for the built-in `ask_user` tool; `None` means the tool is not offered.
     pub elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
+    /// Optional observer called after each tool finishes — may return a block
+    /// reason that is appended to the tool result the model sees (PostToolUse).
+    pub post_tool_observer: Option<Arc<dyn PostToolObserver>>,
 }
 
 #[allow(private_bounds)]
@@ -854,6 +861,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     let results = self
                         .execute_tools_streaming(&response_content, &event_tx)
                         .await;
+                    if !results.is_empty() {
+                        let _ = event_tx
+                            .send(AgentEvent::ToolBatchFinished { count: results.len() })
+                            .await;
+                    }
                     messages.push(Message::assistant(response_content));
                     let mut tool_results_msg = Message::tool_results(results);
                     if let Some(ref mut rx) = steer_rx {
@@ -939,6 +951,17 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     }
                 };
 
+                // PostToolUse observer: a blocking hook appends its objection to
+                // the result the model sees (the tool already ran).
+                let output = if let Some(obs) = &self.post_tool_observer {
+                    match obs.observe(&id, &name, &output).await {
+                        Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                        None => output,
+                    }
+                } else {
+                    output
+                };
+
                 // If change_directory succeeded, update the local context so
                 // subsequent tools in this turn see the new working directory.
                 const CD_PREFIX: &str = "Working directory is now ";
@@ -969,6 +992,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     let tool_context = Arc::clone(&self.tool_context);
                     let mcp_dispatch = self.mcp_dispatch.clone();
                     let elicitation_provider = self.elicitation_provider.clone();
+                    let post_tool_observer = self.post_tool_observer.clone();
                     async move {
                         debug!(tool = %name, "Executing tool (streaming, parallel)");
 
@@ -1002,6 +1026,15 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             }
                         } else {
                             dispatch_tool(&tool_context, &name, &input).await.display_text()
+                        };
+
+                        let output = if let Some(obs) = &post_tool_observer {
+                            match obs.observe(&id, &name, &output).await {
+                                Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                                None => output,
+                            }
+                        } else {
+                            output
                         };
 
                         let _ = event_tx
@@ -1068,6 +1101,15 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     }
                 };
 
+                let output = if let Some(obs) = &self.post_tool_observer {
+                    match obs.observe(&id, &name, &output).await {
+                        Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                        None => output,
+                    }
+                } else {
+                    output
+                };
+
                 results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
             }
             results
@@ -1079,6 +1121,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     let tool_context = Arc::clone(&self.tool_context);
                     let mcp_dispatch = self.mcp_dispatch.clone();
                     let elicitation_provider = self.elicitation_provider.clone();
+                    let post_tool_observer = self.post_tool_observer.clone();
                     async move {
                         debug!(tool = %name, "Executing tool (parallel)");
 
@@ -1103,6 +1146,15 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             }
                         } else {
                             dispatch_tool(&tool_context, &name, &input).await.display_text()
+                        };
+
+                        let output = if let Some(obs) = &post_tool_observer {
+                            match obs.observe(&id, &name, &output).await {
+                                Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                                None => output,
+                            }
+                        } else {
+                            output
                         };
 
                         ToolResult { tool_use_id: id, content: output, blocks: vec![] }
@@ -1293,12 +1345,13 @@ mod tests {
         let results = vec![ToolResult {
             tool_use_id: "id1".to_string(),
             content: "output".to_string(),
+            blocks: vec![],
         }];
         let msg = Message::tool_results(results);
         assert_eq!(msg.role, "user");
         assert!(matches!(
             &msg.content[0],
-            ContentBlock::ToolResult { tool_use_id, content }
+            ContentBlock::ToolResult { tool_use_id, content, .. }
             if tool_use_id == "id1" && content == "output"
         ));
     }
@@ -1432,6 +1485,8 @@ mod tests {
             http_client: http_client.clone(),
             proxy_url: "http://unused:9999".to_string(),
             cwd: ".".to_string(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         });
         AgentLoop {
             http_client,
@@ -1451,6 +1506,7 @@ mod tests {
             mcp_dispatch: vec![],
             permission_checker: None,
             elicitation_provider: None,
+            post_tool_observer: None,
         }
     }
 

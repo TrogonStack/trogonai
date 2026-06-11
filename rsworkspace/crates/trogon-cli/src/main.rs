@@ -214,16 +214,21 @@ fn build_session_init(
             ),
         }
     }
-    // Tool-event hooks (PreToolUse/PostToolUse) forwarded to the runner; CLI-side
-    // events (Stop/UserPromptSubmit/Notification) run in the REPL, not here.
+    // Runner-side hooks (PreToolUse/PostToolUse/PostToolBatch/SubagentStop) fire
+    // inside the agent loop; CLI-side events (SessionStart/PreCompact/Stop/
+    // UserPromptSubmit/Notification) run in the REPL, not here.
     let tool_hooks = if settings.hooks.pre_tool_use.is_empty()
         && settings.hooks.post_tool_use.is_empty()
+        && settings.hooks.post_tool_batch.is_empty()
+        && settings.hooks.subagent_stop.is_empty()
     {
         None
     } else {
         Some(trogon_runner_tools::HooksConfig {
             pre_tool_use: settings.hooks.pre_tool_use.clone(),
             post_tool_use: settings.hooks.post_tool_use.clone(),
+            post_tool_batch: settings.hooks.post_tool_batch.clone(),
+            subagent_stop: settings.hooks.subagent_stop.clone(),
             ..Default::default()
         })
     };

@@ -13,6 +13,21 @@ pub trait PermissionChecker: Send + Sync {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>;
 }
 
+// ── PostToolObserver ──────────────────────────────────────────────────────────
+
+/// Called after each tool finishes executing. Returns `Some(reason)` to raise a
+/// blocking objection — the reason is appended to the tool result the model
+/// sees, so a "blocked" PostToolUse hook feeds its complaint back to the model
+/// (the tool already ran; this cannot undo it). Returns `None` to proceed.
+pub trait PostToolObserver: Send + Sync {
+    fn observe<'a>(
+        &'a self,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_output: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
+}
+
 // ── ElicitationProvider ───────────────────────────────────────────────────────
 
 /// Called when the model uses the built-in `ask_user` tool.

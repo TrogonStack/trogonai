@@ -163,6 +163,7 @@ async fn agent_loop_run_chat_streaming_through_proxy_emits_text_delta() {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);

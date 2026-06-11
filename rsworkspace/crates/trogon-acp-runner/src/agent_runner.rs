@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
-use trogon_agent_core::agent_loop::{AgentError, AgentEvent, ElicitationProvider, Message, PermissionChecker};
+use trogon_agent_core::agent_loop::{
+    AgentError, AgentEvent, ElicitationProvider, Message, PermissionChecker, PostToolObserver,
+};
 use trogon_agent_core::tools::ToolDef;
 
 use crate::agent::GatewayConfig;
@@ -35,6 +37,10 @@ pub trait AgentRunner: Clone {
 
     /// Install an elicitation provider for the built-in `ask_user` tool.
     fn set_elicitation_provider(&mut self, provider: Arc<dyn ElicitationProvider>);
+
+    /// Install a post-tool observer (PostToolUse hooks) that may append a
+    /// blocking objection to a tool result the model sees.
+    fn set_post_tool_observer(&mut self, observer: Arc<dyn PostToolObserver>);
 
     /// Override proxy / token / extra-headers from a `GatewayConfig`.
     fn apply_gateway(&mut self, config: &GatewayConfig);
@@ -86,6 +92,10 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
 
     fn set_elicitation_provider(&mut self, provider: Arc<dyn ElicitationProvider>) {
         self.elicitation_provider = Some(provider);
+    }
+
+    fn set_post_tool_observer(&mut self, observer: Arc<dyn PostToolObserver>) {
+        self.post_tool_observer = Some(observer);
     }
 
     fn apply_gateway(&mut self, config: &GatewayConfig) {
@@ -141,6 +151,7 @@ mod tests {
             mcp_dispatch: vec![],
             permission_checker: None,
             elicitation_provider: None,
+            post_tool_observer: None,
         }
     }
 
@@ -382,6 +393,8 @@ pub mod mock {
         fn set_elicitation_provider(&mut self, _provider: Arc<dyn ElicitationProvider>) {
             *self.elicitation_provider_set.lock().unwrap() = true;
         }
+
+        fn set_post_tool_observer(&mut self, _observer: Arc<dyn PostToolObserver>) {}
 
         fn apply_gateway(&mut self, _config: &GatewayConfig) {}
 

@@ -164,6 +164,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
         thinking_budget,
     };
 

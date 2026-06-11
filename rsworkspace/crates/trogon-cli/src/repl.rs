@@ -478,6 +478,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         eprintln!("warning: could not apply default model {m}: {e}");
     }
 
+    // SessionStart hooks run once; any context they emit is injected into the
+    // first user prompt (mirroring Claude Code's SessionStart semantics).
+    let mut pending_start_context: Option<String> = None;
+    if !hooks_config.session_start.is_empty() {
+        let payload = serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": session.session_id(),
+            "cwd": cwd.to_string_lossy(),
+        });
+        if let trogon_runner_tools::HookOutcome::Continue { context: Some(ctx) } =
+            trogon_runner_tools::run_event_hooks(&hooks_config.session_start, None, &payload).await
+        {
+            pending_start_context = Some(ctx);
+        }
+    }
+
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
         let _ = fs.create_dir_all(dir);
@@ -977,6 +993,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/pr-comments" {
                         queued_prompts.push_back(pr_comments_prompt(arg));
                     } else if cmd == "/compact" {
+                        if !hooks_config.pre_compact.is_empty() {
+                            let payload = serde_json::json!({
+                                "hook_event_name": "PreCompact",
+                                "trigger": "manual",
+                                "session_id": session.session_id(),
+                            });
+                            let _ = trogon_runner_tools::run_event_hooks(
+                                &hooks_config.pre_compact,
+                                None,
+                                &payload,
+                            )
+                            .await;
+                        }
                         match session.compact().await {
                             Ok(CompactResult {
                                 compacted: true,
@@ -1201,6 +1230,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                         trogon_runner_tools::HookOutcome::Continue { context: None } => {}
                     }
+                }
+                // Inject any SessionStart context into the first prompt, once.
+                if let Some(ctx) = pending_start_context.take() {
+                    expanded.push_str("\n\n");
+                    expanded.push_str(&ctx);
                 }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
                 let prompt_result = match session.prompt(&expanded).await {

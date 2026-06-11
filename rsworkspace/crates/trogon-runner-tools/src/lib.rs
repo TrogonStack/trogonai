@@ -35,7 +35,9 @@ pub use permission::{
     ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
     RulesPermissionChecker, SafetyClassifier,
 };
-pub use hooks::{run_event_hooks, HookMatcher, HookOutcome, HooksConfig};
+pub use hooks::{
+    run_event_hooks, HookMatcher, HookOutcome, HookPostToolObserver, HooksConfig,
+};
 pub use safety_classifier::{build_auto_safety_classifier, LlmSafetyClassifier};
 pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
