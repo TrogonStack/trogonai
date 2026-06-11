@@ -1177,6 +1177,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         content: partial_results.get(id).cloned().unwrap_or_else(|| {
                             "Tool call interrupted by the user before it completed.".to_string()
                         }),
+                        blocks: vec![],
                     }),
                     _ => None,
                 })
