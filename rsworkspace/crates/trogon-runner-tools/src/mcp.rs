@@ -95,12 +95,29 @@ pub fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
                 name: h.name.clone(),
                 url: h.url.clone(),
                 headers: h.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
+                command: String::new(),
+                args: Vec::new(),
+                env: Vec::new(),
                 timeout_secs: timeout_from_meta(h.meta.as_ref()),
             }),
             McpServer::Sse(s) => Some(StoredMcpServer {
                 name: s.name.clone(),
                 url: s.url.clone(),
                 headers: s.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
+                command: String::new(),
+                args: Vec::new(),
+                env: Vec::new(),
+                timeout_secs: timeout_from_meta(s.meta.as_ref()),
+            }),
+            // Native stdio: the runner spawns the server subprocess and drives it
+            // in-process (no local HTTP bridge).
+            McpServer::Stdio(s) => Some(StoredMcpServer {
+                name: s.name.clone(),
+                url: String::new(),
+                headers: Vec::new(),
+                command: s.command.to_string_lossy().into_owned(),
+                args: s.args.clone(),
+                env: s.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect(),
                 timeout_secs: timeout_from_meta(s.meta.as_ref()),
             }),
             _ => None,
@@ -130,43 +147,77 @@ pub async fn build_session_mcp(
     let mut dispatch = Vec::new();
 
     for server in servers {
-        if !policy.is_allowed(&server.url) {
-            warn!(name = %server.name, url = %server.url, "MCP server URL denied by egress policy — skipping");
-            continue;
-        }
-
-        let client = Arc::new(
-            trogon_mcp::McpClient::with_headers(http.clone(), &server.url, server.headers.clone())
-                .with_timeout(server.timeout_secs.map(std::time::Duration::from_secs)),
-        );
-
-        if let Err(e) = client.initialize().await {
-            warn!(name = %server.name, url = %server.url, error = %e, "MCP server init failed — skipping");
-            continue;
-        }
-
-        match client.list_tools().await {
-            Ok(tools) => {
-                let before = tool_defs.len();
-                for tool in tools {
-                    if tool.name == "AskUserQuestion" {
+        // Native stdio transport: spawn the server subprocess and drive it
+        // directly over stdio — no local HTTP bridge / egress URL involved.
+        let (client, tools): (Arc<dyn trogon_mcp::McpCallTool>, Vec<trogon_mcp::McpTool>) =
+            if !server.command.is_empty() {
+                let stdio = match trogon_mcp::StdioMcpClient::spawn(
+                    &server.command,
+                    &server.args,
+                    &server.env,
+                    None,
+                )
+                .await
+                {
+                    Ok(c) => match server.timeout_secs {
+                        Some(t) => c.with_timeout(std::time::Duration::from_secs(t)),
+                        None => c,
+                    },
+                    Err(e) => {
+                        warn!(name = %server.name, command = %server.command, error = %e, "MCP stdio spawn failed — skipping");
                         continue;
                     }
-                    let prefixed = format!("{}__{}", server.name, tool.name);
-                    tool_defs.push(ToolDef {
-                        name: prefixed.clone(),
-                        description: tool.description,
-                        input_schema: tool.input_schema,
-                        cache_control: None,
-                    });
-                    dispatch.push((prefixed, tool.name, client.clone() as Arc<dyn trogon_mcp::McpCallTool>));
+                };
+                if let Err(e) = stdio.initialize().await {
+                    warn!(name = %server.name, command = %server.command, error = %e, "MCP stdio init failed — skipping");
+                    continue;
                 }
-                info!(name = %server.name, tools = tool_defs.len() - before, "MCP server connected");
+                let tools = match stdio.list_tools().await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(name = %server.name, error = %e, "Failed to list MCP stdio tools — skipping");
+                        continue;
+                    }
+                };
+                (Arc::new(stdio), tools)
+            } else {
+                if !policy.is_allowed(&server.url) {
+                    warn!(name = %server.name, url = %server.url, "MCP server URL denied by egress policy — skipping");
+                    continue;
+                }
+                let http_client = Arc::new(
+                    trogon_mcp::McpClient::with_headers(http.clone(), &server.url, server.headers.clone())
+                        .with_timeout(server.timeout_secs.map(std::time::Duration::from_secs)),
+                );
+                if let Err(e) = http_client.initialize().await {
+                    warn!(name = %server.name, url = %server.url, error = %e, "MCP server init failed — skipping");
+                    continue;
+                }
+                let tools = match http_client.list_tools().await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(name = %server.name, error = %e, "Failed to list MCP tools — skipping");
+                        continue;
+                    }
+                };
+                (http_client, tools)
+            };
+
+        let before = tool_defs.len();
+        for tool in tools {
+            if tool.name == "AskUserQuestion" {
+                continue;
             }
-            Err(e) => {
-                warn!(name = %server.name, error = %e, "Failed to list MCP tools — skipping");
-            }
+            let prefixed = format!("{}__{}", server.name, tool.name);
+            tool_defs.push(ToolDef {
+                name: prefixed.clone(),
+                description: tool.description,
+                input_schema: tool.input_schema,
+                cache_control: None,
+            });
+            dispatch.push((prefixed, tool.name, client.clone()));
         }
+        info!(name = %server.name, tools = tool_defs.len() - before, "MCP server connected");
     }
 
     (tool_defs, dispatch)
@@ -183,6 +234,9 @@ mod tests {
             name: name.to_string(),
             url: url.to_string(),
             headers: vec![],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
             timeout_secs: None,
         }
     }
@@ -247,6 +301,24 @@ mod tests {
         assert_eq!(stored[0].timeout_secs, Some(45));
         assert_eq!(stored[1].timeout_secs, Some(45));
         assert_eq!(stored[2].timeout_secs, None);
+    }
+
+    /// A `McpServer::Stdio` is captured as a command-based `StoredMcpServer` so
+    /// the runner can drive it natively (no HTTP bridge).
+    #[test]
+    fn convert_captures_stdio_as_command() {
+        use agent_client_protocol::{EnvVariable, McpServerStdio};
+        let stdio = McpServer::Stdio(
+            McpServerStdio::new("fs", "/usr/bin/server")
+                .args(vec!["--root".to_string(), ".".to_string()])
+                .env(vec![EnvVariable::new("TOKEN", "x")]),
+        );
+        let stored = convert_mcp_servers(&[stdio]);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].command, "/usr/bin/server");
+        assert_eq!(stored[0].args, vec!["--root".to_string(), ".".to_string()]);
+        assert_eq!(stored[0].env[0], ("TOKEN".to_string(), "x".to_string()));
+        assert!(stored[0].url.is_empty());
     }
 
     /// A server that fails the initialize handshake is skipped, not fatal.

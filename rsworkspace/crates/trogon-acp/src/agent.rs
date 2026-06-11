@@ -531,6 +531,9 @@ where
                         .iter()
                         .map(|hv| (hv.name.clone(), hv.value.clone()))
                         .collect(),
+                    command: String::new(),
+                    args: vec![],
+                    env: vec![],
                     timeout_secs: trogon_runner_tools::mcp::timeout_from_meta(h.meta.as_ref()),
                 }),
                 McpServer::Sse(s) => Some(StoredMcpServer {
@@ -541,6 +544,9 @@ where
                         .iter()
                         .map(|hv| (hv.name.clone(), hv.value.clone()))
                         .collect(),
+                    command: String::new(),
+                    args: vec![],
+                    env: vec![],
                     timeout_secs: trogon_runner_tools::mcp::timeout_from_meta(s.meta.as_ref()),
                 }),
                 _ => None, // Stdio not supported in NATS model
@@ -578,6 +584,9 @@ where
                             name: stdio.name.clone(),
                             url: bridge.url.clone(),
                             headers: vec![],
+                            command: String::new(),
+                            args: vec![],
+                            env: vec![],
                             timeout_secs: None,
                         });
                         bridges.push(bridge);
