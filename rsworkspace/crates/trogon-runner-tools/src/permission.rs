@@ -14,6 +14,7 @@ use trogon_tools::PermissionChecker;
 use crate::permission_rules::{
     extract_path_from_input, is_always_allowed, normalize_tool_name, PermissionRules, RuleDecision,
 };
+use crate::scope::Scope;
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
 /// A single permission check request sent from the Runner to the ACP connection handler.
@@ -487,6 +488,11 @@ pub struct ModePermissionChecker {
     pub classifier: Option<Arc<dyn SafetyClassifier>>,
     /// PreToolUse hook matchers; a blocking hook denies the tool.
     pub pre_tool_use: Vec<crate::hooks::HookMatcher>,
+    /// Optional Scope envelope for the low-friction permission model (Phase 2).
+    /// When `Some`, it governs the decision before the mode match; `None` uses
+    /// the legacy mode logic. Resolved in the builder (SCOPE-7), consulted in
+    /// `check` (SCOPE-8).
+    pub scope: Option<Scope>,
 }
 
 impl ModePermissionChecker {
@@ -807,6 +813,7 @@ pub fn build_mode_permission_checker(
         read_dirs: extras.additional_read_dirs,
         classifier: extras.classifier,
         pre_tool_use: extras.pre_tool_use,
+        scope: None, // resolved in SCOPE-7
     }))
 }
 
@@ -1029,6 +1036,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1048,6 +1056,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1070,6 +1079,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -1094,6 +1104,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1113,6 +1124,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -1140,6 +1152,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1159,6 +1172,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1177,6 +1191,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1195,6 +1210,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1217,6 +1233,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1236,6 +1253,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1255,6 +1273,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1275,6 +1294,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1296,6 +1316,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -2078,6 +2099,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         let got_request = tokio::spawn(async move {
             match rx.recv().await {
