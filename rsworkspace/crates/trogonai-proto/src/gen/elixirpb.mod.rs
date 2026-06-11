@@ -34,6 +34,8 @@ pub mod __buffa {
 #[doc(inline)]
 pub use self::__buffa::view::FileOptionsView;
 #[doc(inline)]
+pub use self::__buffa::view::FileOptionsOwnedView;
+#[doc(inline)]
 pub use self::__buffa::ext::FILE;
 #[doc(inline)]
 pub use self::__buffa::register_types;

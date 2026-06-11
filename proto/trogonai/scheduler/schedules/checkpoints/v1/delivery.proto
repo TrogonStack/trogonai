@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.checkpoints.v1;
+
+import "google/protobuf/duration.proto";
+
+// Delivery describes where a checkpointed schedule publishes when it fires.
+message Delivery {
+  oneof kind {
+    NatsMessage nats_message = 1;
+  }
+
+  message NatsMessage {
+    string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    google.protobuf.Duration ttl = 2;
+    Source source = 3;
+
+    message Source {
+      oneof kind {
+        LatestFromSubject latest_from_subject = 1;
+      }
+    }
+
+    message LatestFromSubject {
+      string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    }
+  }
+}

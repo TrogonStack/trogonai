@@ -1,6 +1,8 @@
 use std::{convert::Infallible, fmt};
 
 use async_nats::jetstream::{self, kv};
+#[cfg(any(test, not(coverage)))]
+use trogon_decider_runtime::ReadFrom;
 #[cfg(not(coverage))]
 use trogon_decider_runtime::snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
@@ -11,7 +13,7 @@ use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotWrite,
     StreamAppend, StreamRead,
 };
-use trogon_decider_runtime::{ReadFrom, StreamPosition, StreamWritePrecondition};
+use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 
 use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
 use crate::stream_store::StreamStoreError;
@@ -198,6 +200,7 @@ where
     }
 }
 
+#[cfg(any(test, not(coverage)))]
 fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
     match from {
         ReadFrom::Beginning => 1,
@@ -303,6 +306,7 @@ where
     }
 }
 
+#[cfg(any(test, not(coverage)))]
 fn resolve_expected_last_subject_sequence<StreamId, Error>(
     stream_id: &StreamId,
     expected_state: StreamWritePrecondition,

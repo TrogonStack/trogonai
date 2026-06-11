@@ -28,4 +28,6 @@ pub mod __buffa {
 #[doc(inline)]
 pub use self::__buffa::view::StateView;
 #[doc(inline)]
+pub use self::__buffa::view::StateOwnedView;
+#[doc(inline)]
 pub use self::__buffa::register_types;
