@@ -832,4 +832,173 @@ mod tests {
             ScopeDecision::OutOfScope
         );
     }
+
+    // ── SCOPE-5 comprehensive coverage (every classification row) ──────────
+
+    #[test]
+    fn evaluate_all_read_only_tools_are_in_scope() {
+        let s = Scope::baseline("/repo");
+        for tool in [
+            "read_file",
+            "glob",
+            "list_dir",
+            "grep",
+            "todo_read",
+            "git_status",
+            "git_diff",
+            "git_log",
+        ] {
+            assert_eq!(
+                s.evaluate(tool, &json!({"path": "src/x"}), "/repo"),
+                ScopeDecision::InScope,
+                "{tool} should be read-only in scope"
+            );
+        }
+    }
+
+    #[test]
+    fn evaluate_all_edit_tools_gated_by_write_root() {
+        let s = Scope::baseline("/repo");
+        // In-cwd writes across every edit-tool variant + path key.
+        assert_eq!(
+            s.evaluate("str_replace", &json!({"path": "src/a.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("multi_edit", &json!({"file_path": "src/b.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("notebook_edit", &json!({"notebook_path": "nb.ipynb"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        // Out-of-cwd variants escalate.
+        assert_eq!(
+            s.evaluate("multi_edit", &json!({"file_path": "/tmp/b.rs"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+        assert_eq!(
+            s.evaluate("notebook_edit", &json!({"notebook_path": "/etc/nb.ipynb"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+    }
+
+    #[test]
+    fn evaluate_all_network_tools_follow_policy() {
+        let denied = Scope::baseline("/repo");
+        for tool in ["fetch_url", "web_search", "git_push", "gh"] {
+            assert_eq!(
+                denied.evaluate(tool, &json!({}), "/repo"),
+                ScopeDecision::OutOfScope,
+                "{tool} should be out of scope when network denied"
+            );
+        }
+        let allowed = Scope::from_wire(
+            ScopeWire {
+                network: Some("on".to_string()),
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .unwrap();
+        for tool in ["fetch_url", "web_search", "git_push", "gh"] {
+            assert_eq!(
+                allowed.evaluate(tool, &json!({}), "/repo"),
+                ScopeDecision::InScope,
+                "{tool} should be in scope when network on"
+            );
+        }
+    }
+
+    #[test]
+    fn evaluate_allowlist_network_is_permitted_at_gate() {
+        let s = Scope::from_wire(
+            ScopeWire {
+                network: Some("allow:api.github.com".to_string()),
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .unwrap();
+        assert!(matches!(s.network(), NetworkPolicy::AllowList(_)));
+        // AllowList is not Denied → permitted at the scope gate; per-host
+        // enforcement is EgressPolicy's job downstream.
+        assert_eq!(
+            s.evaluate("fetch_url", &json!({"url": "https://api.github.com/x"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("gh", &json!({}), "/repo"),
+            ScopeDecision::InScope
+        );
+    }
+
+    #[test]
+    fn evaluate_git_create_branch_follows_repo_writability() {
+        let base = Scope::baseline("/repo");
+        assert_eq!(
+            base.evaluate("git_create_branch", &json!({}), "/repo"),
+            ScopeDecision::InScope
+        );
+        let src_only = Scope::from_wire(
+            ScopeWire {
+                write: vec!["src/**".to_string()],
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .unwrap();
+        assert_eq!(
+            src_only.evaluate("git_create_branch", &json!({}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+    }
+
+    #[test]
+    fn evaluate_absolute_write_glob_matches_absolute_path() {
+        let s = Scope::from_wire(
+            ScopeWire {
+                write: vec!["/data/**".to_string()],
+                ..Default::default()
+            },
+            "/repo",
+        )
+        .unwrap();
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "/data/out.txt"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        // A cwd-relative write is not under the absolute /data/** root.
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "src/x.rs"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+    }
+
+    #[test]
+    fn evaluate_empty_run_blocks_write_bash_but_not_reads() {
+        let s = Scope::from_wire(ScopeWire::default(), "/repo").unwrap();
+        // Empty run set → every write-bash command escalates.
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "cargo test"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+        // Read-only bash is decided before the run check, so it stays in scope.
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "ls"}), "/repo"),
+            ScopeDecision::InScope
+        );
+    }
+
+    #[test]
+    fn evaluate_unclassified_side_effect_tools_fail_closed() {
+        let s = Scope::baseline("/repo");
+        for tool in ["todo_write", "change_directory", "some_mcp_tool"] {
+            assert_eq!(
+                s.evaluate(tool, &json!({}), "/repo"),
+                ScopeDecision::OutOfScope,
+                "{tool} should fail closed"
+            );
+        }
+    }
 }
