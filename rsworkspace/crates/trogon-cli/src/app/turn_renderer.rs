@@ -40,6 +40,8 @@ pub struct TurnRenderer {
     /// and markdown-rendered when the turn (or a tool call) interrupts the text.
     stream: bool,
     response_buf: String,
+    /// Full assistant text for this turn (used by optional REPL transcript capture).
+    assistant_text: String,
     /// True once the bold `Trogon` prefix has been printed for the current text run.
     text_started: bool,
     tools_done: u32,
@@ -54,6 +56,7 @@ impl TurnRenderer {
         Self {
             stream,
             response_buf: String::new(),
+            assistant_text: String::new(),
             text_started: false,
             tools_done: 0,
             running_tool: None,
@@ -70,6 +73,11 @@ impl TurnRenderer {
         self.stop.is_some()
     }
 
+    /// Accumulated assistant text for the current turn.
+    pub fn assistant_text(&self) -> &str {
+        &self.assistant_text
+    }
+
     pub fn on_ctrl_c(&mut self) {
         self.flush_pill();
         eprintln!("\n[cancelled]");
@@ -79,6 +87,7 @@ impl TurnRenderer {
         let mut cwd_sync = None;
         match event {
             StreamEvent::Text(text) => {
+                self.assistant_text.push_str(&text);
                 self.flush_pill();
                 if self.stream {
                     self.start_text();
