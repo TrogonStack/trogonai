@@ -812,6 +812,7 @@ fn openrouter_history_to_wire(history: &[Message]) -> Vec<WireMessage> {
                     content: vec![WireContentBlock::ToolResult {
                         tool_use_id: m.tool_call_id.clone().unwrap_or_default(),
                         content: m.content.clone(),
+                        blocks: vec![],
                     }],
                 }
             } else if let Some(calls) = &m.tool_calls {
@@ -865,6 +866,7 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
                 WireContentBlock::ToolResult {
                     tool_use_id,
                     content,
+                    ..
                 } => Some(Message::tool_result(tool_use_id, content)),
                 _ => None,
             })
@@ -887,6 +889,7 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
             WireContentBlock::ToolResult {
                 tool_use_id,
                 content,
+                ..
             } => {
                 // MED-19: don't early-return here — that discarded any text and
                 // tool_calls accumulated before this block in a mixed-content
@@ -2185,7 +2188,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                         format!("fetch_url: URL blocked by egress policy: {url}")
                     } else {
-                        trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
+                        trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await.display_text()
                     }
                 } else if call.name == "spawn_agent" {
                     let task = tool_input["prompt"].as_str().unwrap_or("").to_string();
@@ -2338,7 +2341,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         Err(e) => format!("MCP tool error: {e}"),
                     }
                 } else {
-                    trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
+                    trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await.display_text()
                 };
 
                 let update_status = if allowed { ToolCallStatus::Completed } else { ToolCallStatus::Failed };

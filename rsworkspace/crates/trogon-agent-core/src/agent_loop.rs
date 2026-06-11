@@ -935,7 +935,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             Err(e) => format!("Tool error: {e}"),
                         }
                     } else {
-                        dispatch_tool(&current_ctx, &name, &input).await
+                        dispatch_tool(&current_ctx, &name, &input).await.display_text()
                     }
                 };
 
@@ -957,7 +957,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     })
                     .await;
 
-                results.push(ToolResult { tool_use_id: id, content: output });
+                results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
             }
             results
         } else {
@@ -1001,7 +1001,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 Err(e) => format!("Tool error: {e}"),
                             }
                         } else {
-                            dispatch_tool(&tool_context, &name, &input).await
+                            dispatch_tool(&tool_context, &name, &input).await.display_text()
                         };
 
                         let _ = event_tx
@@ -1013,7 +1013,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             })
                             .await;
 
-                        ToolResult { tool_use_id: id, content: output }
+                        ToolResult { tool_use_id: id, content: output, blocks: vec![] }
                     }
                 })
                 .collect();
@@ -1064,11 +1064,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             Err(e) => format!("Tool error: {e}"),
                         }
                     } else {
-                        dispatch_tool(&self.tool_context, &name, &input).await
+                        dispatch_tool(&self.tool_context, &name, &input).await.display_text()
                     }
                 };
 
-                results.push(ToolResult { tool_use_id: id, content: output });
+                results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
             }
             results
         } else {
@@ -1102,10 +1102,10 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 Err(e) => format!("Tool error: {e}"),
                             }
                         } else {
-                            dispatch_tool(&tool_context, &name, &input).await
+                            dispatch_tool(&tool_context, &name, &input).await.display_text()
                         };
 
-                        ToolResult { tool_use_id: id, content: output }
+                        ToolResult { tool_use_id: id, content: output, blocks: vec![] }
                     }
                 })
                 .collect();

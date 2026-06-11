@@ -2513,7 +2513,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                         cwd.clone(),
                                         self.tool_http_client.clone(),
                                     );
-                                    trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
+                                    trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await.display_text()
                                 }
                             } else {
                                 let ctx = trogon_tools::ToolContext::new(
@@ -2521,7 +2521,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                     cwd.clone(),
                                     self.tool_http_client.clone(),
                                 );
-                                trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
+                                trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await.display_text()
                             }
                         }
                     }
