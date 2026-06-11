@@ -18,7 +18,6 @@ use crate::{
     DeliveryKind, GetSchedule, ListSchedules, ScheduleEventCase, ScheduleKind, ScheduleStatusKind, SourceKind,
     config::{ScheduleWriteCondition, ScheduleWriteState},
     error::SchedulerError,
-    projections::{LoadAndWatchSchedulesResult, ScheduleWatchStream},
     read_model::{
         MessageContent, MessageEnvelope, MessageHeaders, Schedule, ScheduleEventDelivery, ScheduleEventSamplingSource,
         ScheduleEventSchedule, ScheduleEventStatus,
@@ -129,11 +128,6 @@ impl MockSchedulerStore {
 
     pub async fn list_schedules(&self, _command: ListSchedules) -> Result<Vec<Schedule>, SchedulerError> {
         Ok(self.schedules.lock().unwrap().values().cloned().collect())
-    }
-
-    pub async fn load_and_watch_schedules(&self) -> LoadAndWatchSchedulesResult {
-        let jobs = self.schedules.lock().unwrap().values().cloned().collect();
-        Ok((jobs, Box::pin(futures::stream::pending()) as ScheduleWatchStream))
     }
 }
 
@@ -582,8 +576,6 @@ mod tests {
     fn position(value: u64) -> StreamPosition {
         StreamPosition::try_new(value).expect("test stream position must be non-zero")
     }
-    use futures::StreamExt;
-
     fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
         command_domain::ScheduleId::parse(id).unwrap()
     }
@@ -623,7 +615,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_scheduler_store_covers_crud_and_read_model_watch() {
+    async fn mock_scheduler_store_covers_crud_and_read_model() {
         let store = MockSchedulerStore::new();
         store.seed_schedule(base_schedule("seeded"));
 
@@ -663,14 +655,6 @@ mod tests {
 
         let listed = store.list_schedules(ListSchedules).await.unwrap();
         assert_eq!(listed.len(), 2);
-
-        let (watch_jobs, mut watcher) = store.load_and_watch_schedules().await.unwrap();
-        assert_eq!(watch_jobs.len(), 2);
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(5), watcher.next())
-                .await
-                .is_err()
-        );
 
         CommandExecution::new(&store, &RemoveSchedule::new(command_schedule_id("alpha")))
             .with_snapshot(&store)

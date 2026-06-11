@@ -1,13 +1,11 @@
 use std::collections::BTreeMap;
-use std::pin::Pin;
-use std::time::Duration;
 
 use async_nats::jetstream::{
     self,
-    consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull},
+    consumer::{DeliverPolicy, ReplayPolicy, pull},
     kv,
 };
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use trogon_decider_nats::record_stream_message;
 use trogon_decider_runtime::{Event, EventData, EventDecode, StreamEvent, StreamPosition};
 use trogon_nats::SubjectTokenViolation;
@@ -26,40 +24,23 @@ use crate::{
     v1,
 };
 
-pub type ScheduleWatchStream = Pin<Box<dyn Stream<Item = ScheduleChange> + Send + 'static>>;
-pub type LoadAndWatchSchedulesResult = Result<(Vec<Schedule>, ScheduleWatchStream), SchedulerError>;
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
-pub enum ScheduleChange {
-    Put(Schedule),
-    Delete(String),
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProjectionChange {
+enum ProjectionChange {
     Upsert(Schedule),
     Delete(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct WatchedProjectionChange {
-    stream_id: String,
-    next_state: ScheduleStreamState,
-    change: Option<ProjectionChange>,
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
-pub enum ScheduleStreamState {
+enum ScheduleStreamState {
     Initial,
     Present(Schedule),
     Deleted(String),
 }
 
 #[derive(Debug)]
-pub enum ScheduleTransitionError {
+enum ScheduleTransitionError {
     InvalidEventId { id: String, source: SubjectTokenViolation },
     MismatchedEventScheduleId { stream_id: String, schedule_id: String },
     MalformedEvent { context: &'static str },
@@ -70,11 +51,11 @@ pub enum ScheduleTransitionError {
     DeletedScheduleForRemoval { id: String },
 }
 
-pub const fn initial_state() -> ScheduleStreamState {
+const fn initial_state() -> ScheduleStreamState {
     ScheduleStreamState::Initial
 }
 
-pub fn apply(
+fn apply(
     stream_id: &str,
     state: ScheduleStreamState,
     event: &v1::ScheduleEvent,
@@ -288,7 +269,7 @@ fn project_message(message: &v1::Message) -> MessageEnvelope {
     }
 }
 
-pub fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) -> Option<ProjectionChange> {
+fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) -> Option<ProjectionChange> {
     match (before, after) {
         (ScheduleStreamState::Initial, ScheduleStreamState::Initial) => None,
         (_, ScheduleStreamState::Present(spec)) => Some(ProjectionChange::Upsert(spec.clone())),
@@ -298,16 +279,6 @@ pub fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamSta
         (ScheduleStreamState::Initial, ScheduleStreamState::Deleted(_))
         | (ScheduleStreamState::Deleted(_), ScheduleStreamState::Initial)
         | (ScheduleStreamState::Deleted(_), ScheduleStreamState::Deleted(_)) => None,
-    }
-}
-
-impl ScheduleStreamState {
-    pub fn into_job(self) -> Option<Schedule> {
-        match self {
-            Self::Initial => None,
-            Self::Deleted(_) => None,
-            Self::Present(job) => Some(job),
-        }
     }
 }
 
@@ -360,76 +331,6 @@ impl std::error::Error for ScheduleTransitionError {
     }
 }
 
-pub async fn load_and_watch_schedules<J>(js: &J) -> LoadAndWatchSchedulesResult
-where
-    J: JetStreamGetKeyValue<Store = kv::Store> + JetStreamGetStream<Stream = jetstream::stream::Stream>,
-{
-    let stream: jetstream::stream::Stream = open_events_stream(js).await?;
-    let info = stream
-        .get_info()
-        .await
-        .map_err(|source| SchedulerError::event_source("failed to query events stream info", source))?;
-    let last_sequence = info.state.last_sequence;
-    let initial_jobs = rebuild_jobs_from_stream(&stream, info.state.first_sequence, last_sequence).await?;
-    rewrite_schedules_projection(js, &initial_jobs).await?;
-    let consumer = stream
-        .create_consumer(event_watch_consumer_config(next_watch_start_sequence(last_sequence)))
-        .await
-        .map_err(|source| SchedulerError::event_source("failed to create schedule event watch consumer", source))?;
-    let subscriber = consumer
-        .messages()
-        .await
-        .map_err(|source| SchedulerError::event_source("failed to open schedule event watch stream", source))?;
-
-    let kv: kv::Store = open_schedules_bucket(js).await?;
-    let state = initial_jobs
-        .iter()
-        .cloned()
-        .map(|job| (job.id.to_string(), ScheduleStreamState::Present(job)))
-        .collect::<BTreeMap<_, _>>();
-    let watcher: ScheduleWatchStream = Box::pin(futures::stream::unfold(
-        (state, subscriber, kv),
-        |(mut state, mut subscriber, kv)| async move {
-            loop {
-                let result = subscriber.next().await?;
-                let message = match result {
-                    Ok(message) => message,
-                    Err(error) => {
-                        tracing::error!(error = %error, "Failed to read schedule event from watch consumer");
-                        continue;
-                    }
-                };
-                let Some(projection_change) = prepare_watched_projection_change(&state, &message) else {
-                    ack_watch_message(&message).await;
-                    continue;
-                };
-
-                let WatchedProjectionChange {
-                    stream_id,
-                    next_state,
-                    change,
-                } = projection_change;
-
-                if let Some(change) = change.as_ref()
-                    && let Err(error) = apply_projection_change(&kv, change).await
-                {
-                    tracing::error!(error = %error, "Failed to update projected schedules state from event");
-                    nak_watch_message(&message).await;
-                    continue;
-                }
-
-                commit_watched_projection_state(&mut state, stream_id, next_state);
-                ack_watch_message(&message).await;
-                if let Some(change) = change {
-                    return Some((change_from_projection_change(change), (state, subscriber, kv)));
-                }
-            }
-        },
-    ));
-
-    Ok((initial_jobs, watcher))
-}
-
 pub(crate) async fn catch_up_schedules_read_model<J>(js: &J) -> Result<(), SchedulerError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store> + JetStreamGetStream<Stream = jetstream::stream::Stream>,
@@ -476,7 +377,7 @@ where
             break;
         }
         let reached_tail = sequence >= info.state.last_sequence;
-        let event = decode_recorded_watch_message(&message)?;
+        let event = decode_recorded_delivery_message(&message)?;
         let data = event.decode::<v1::ScheduleEvent>().map_err(|source| {
             SchedulerError::event_source(
                 "failed to decode schedule event during schedules read-model catch-up",
@@ -538,92 +439,6 @@ pub(crate) async fn project_appended_events(
     maybe_advance_read_model_checkpoint(bucket, final_position.as_u64()).await
 }
 
-async fn rewrite_schedules_projection<J>(js: &J, jobs: &[Schedule]) -> Result<(), SchedulerError>
-where
-    J: JetStreamGetKeyValue<Store = kv::Store>,
-{
-    let kv: kv::Store = open_schedules_bucket(js).await?;
-    let desired_ids = jobs
-        .iter()
-        .map(|job| job.id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut keys = kv
-        .keys()
-        .await
-        .map_err(|source| SchedulerError::kv_source("failed to list projection keys", source))?;
-
-    while let Some(result) = keys.next().await {
-        let key = result.map_err(|source| SchedulerError::kv_source("failed to read projection key", source))?;
-        if is_read_model_metadata_key(&key) {
-            continue;
-        }
-        if desired_ids.contains(key.as_str()) {
-            continue;
-        }
-        kv.delete(key)
-            .await
-            .map_err(|source| SchedulerError::kv_source("failed to delete stale projected job state", source))?;
-    }
-
-    for job in jobs {
-        let value = serde_json::to_vec(job)?;
-        kv.put(job.id.to_string(), value.into())
-            .await
-            .map_err(|source| SchedulerError::kv_source("failed to write projected job state", source))?;
-    }
-
-    Ok(())
-}
-
-async fn rebuild_jobs_from_stream(
-    stream: &jetstream::stream::Stream,
-    first_sequence: u64,
-    last_sequence: u64,
-) -> Result<Vec<Schedule>, SchedulerError> {
-    let mut states = BTreeMap::new();
-    if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
-        return Ok(Vec::new());
-    }
-
-    let consumer = stream
-        .create_consumer(event_replay_consumer_config(first_sequence))
-        .await
-        .map_err(|source| {
-            SchedulerError::event_source("failed to create schedule projection replay consumer", source)
-        })?;
-    let mut messages = consumer
-        .messages()
-        .await
-        .map_err(|source| SchedulerError::event_source("failed to open schedule projection replay stream", source))?;
-
-    while let Some(message) = messages.next().await {
-        let message = message
-            .map_err(|source| SchedulerError::event_source("failed to read schedule event from stream", source))?;
-        let sequence = event_message_sequence(&message, "failed to read schedule event metadata")?;
-        if sequence > last_sequence {
-            break;
-        }
-        let reached_tail = sequence >= last_sequence;
-        let event = decode_recorded_watch_message(&message)?;
-        let data = event.decode::<v1::ScheduleEvent>().map_err(|source| {
-            SchedulerError::event_source("failed to decode recorded schedule event payload", source)
-        })?;
-        let Some(data) = data.into_decoded() else {
-            if reached_tail {
-                break;
-            }
-            continue;
-        };
-        let stream_id = schedule_id_from_event_subject(event.stream_id())?;
-        apply_event_to_read_model_state(&mut states, &stream_id, &data)?;
-        if reached_tail {
-            break;
-        }
-    }
-
-    Ok(states.into_values().filter_map(ScheduleStreamState::into_job).collect())
-}
-
 fn decode_recorded_job_event(
     message: async_nats::jetstream::message::StreamMessage,
 ) -> Result<StreamEvent, SchedulerError> {
@@ -632,27 +447,13 @@ fn decode_recorded_job_event(
         .map_err(|source| SchedulerError::event_source("failed to decode stored schedule event", source))
 }
 
-fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<StreamEvent, SchedulerError> {
+fn decode_recorded_delivery_message(message: &async_nats::jetstream::Message) -> Result<StreamEvent, SchedulerError> {
     let stream_message =
         async_nats::jetstream::message::StreamMessage::try_from(message.message.clone()).map_err(|source| {
-            SchedulerError::event_source("failed to reconstruct stream message from watch delivery", source)
+            SchedulerError::event_source("failed to reconstruct stream message from event delivery", source)
         })?;
 
     decode_recorded_job_event(stream_message)
-}
-
-fn next_watch_start_sequence(last_sequence: u64) -> u64 {
-    last_sequence.saturating_add(1).max(1)
-}
-
-fn event_watch_consumer_config(start_sequence: u64) -> pull::Config {
-    pull::Config {
-        deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
-        ack_policy: AckPolicy::Explicit,
-        replay_policy: ReplayPolicy::Instant,
-        inactive_threshold: Duration::from_secs(30),
-        ..Default::default()
-    }
 }
 
 fn event_replay_consumer_config(start_sequence: u64) -> pull::OrderedConfig {
@@ -660,89 +461,6 @@ fn event_replay_consumer_config(start_sequence: u64) -> pull::OrderedConfig {
         deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()
-    }
-}
-
-fn prepare_watched_projection_change(
-    state: &BTreeMap<String, ScheduleStreamState>,
-    message: &jetstream::Message,
-) -> Option<WatchedProjectionChange> {
-    let event = match decode_recorded_watch_message(message) {
-        Ok(event) => event,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to decode schedule event from watcher");
-            return None;
-        }
-    };
-
-    let data = match event.decode::<v1::ScheduleEvent>() {
-        Ok(data) => data,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to decode watched schedule event payload");
-            return None;
-        }
-    };
-    let data = data.into_decoded()?;
-
-    let stream_id = match schedule_id_from_event_subject(event.stream_id()) {
-        Ok(stream_id) => stream_id,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to derive watched schedule stream id from subject");
-            return None;
-        }
-    };
-
-    prepare_projection_change(state, stream_id.as_str(), &data)
-}
-
-fn prepare_projection_change(
-    state: &BTreeMap<String, ScheduleStreamState>,
-    stream_id: &str,
-    event: &v1::ScheduleEvent,
-) -> Option<WatchedProjectionChange> {
-    let current = state.get(stream_id).cloned().unwrap_or_else(initial_state);
-    let next = match apply(stream_id, current.clone(), event)
-        .map_err(|error| SchedulerError::event_source("failed to apply watched schedule event to stream state", error))
-    {
-        Ok(next) => next,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to apply schedule event to current state");
-            return None;
-        }
-    };
-    let change = projection_change(&current, &next);
-
-    Some(WatchedProjectionChange {
-        stream_id: stream_id.to_string(),
-        next_state: next,
-        change,
-    })
-}
-
-fn commit_watched_projection_state(
-    state: &mut BTreeMap<String, ScheduleStreamState>,
-    stream_id: String,
-    next: ScheduleStreamState,
-) {
-    match next {
-        ScheduleStreamState::Present(_) | ScheduleStreamState::Deleted(_) => {
-            state.insert(stream_id, next);
-        }
-        ScheduleStreamState::Initial => {
-            state.remove(stream_id.as_str());
-        }
-    }
-}
-
-async fn ack_watch_message(message: &jetstream::Message) {
-    if let Err(error) = message.ack().await {
-        tracing::error!(error = %error, "Failed to acknowledge watched schedule event");
-    }
-}
-
-async fn nak_watch_message(message: &jetstream::Message) {
-    if let Err(error) = message.ack_with(jetstream::AckKind::Nak(None)).await {
-        tracing::error!(error = %error, "Failed to negatively acknowledge watched schedule event");
     }
 }
 
@@ -845,13 +563,6 @@ async fn apply_projection_change(kv: &kv::Store, change: &ProjectionChange) -> R
     }
 
     Ok(())
-}
-
-fn change_from_projection_change(change: ProjectionChange) -> ScheduleChange {
-    match change {
-        ProjectionChange::Upsert(job) => ScheduleChange::Put(job),
-        ProjectionChange::Delete(id) => ScheduleChange::Delete(id),
-    }
 }
 
 fn apply_event_to_read_model_state(
@@ -1116,58 +827,9 @@ mod tests {
     }
 
     #[test]
-    fn watched_projection_change_does_not_mutate_state_before_commit() {
-        let mut state = BTreeMap::new();
-        let prepared = prepare_projection_change(&state, "backup", &added_event("backup")).unwrap();
-
-        assert!(state.is_empty());
-        assert_eq!(
-            prepared.change,
-            Some(ProjectionChange::Upsert(expected_schedule("backup")))
-        );
-
-        commit_watched_projection_state(&mut state, prepared.stream_id, prepared.next_state);
-
-        assert!(matches!(state.get("backup"), Some(ScheduleStreamState::Present(_))));
-    }
-
-    #[test]
-    fn watched_projection_commits_tombstone_even_without_public_change() {
-        let mut state = BTreeMap::new();
-        let prepared = prepare_projection_change(&state, "backup", &removed_event("backup")).unwrap();
-
-        assert!(prepared.change.is_none());
-
-        commit_watched_projection_state(&mut state, prepared.stream_id, prepared.next_state);
-
-        assert_eq!(
-            state.get("backup"),
-            Some(&ScheduleStreamState::Deleted("backup".to_string()))
-        );
-    }
-
-    #[test]
     fn initial_removal_creates_deleted_tombstone() {
         let state = apply("backup", initial_state(), &removed_event("backup")).unwrap();
         assert_eq!(state, ScheduleStreamState::Deleted("backup".to_string()));
-    }
-
-    #[test]
-    fn watch_start_sequence_moves_past_bootstrap_tail() {
-        assert_eq!(next_watch_start_sequence(0), 1);
-        assert_eq!(next_watch_start_sequence(41), 42);
-    }
-
-    #[test]
-    fn watch_consumer_replays_only_after_bootstrap_boundary() {
-        let config = event_watch_consumer_config(42);
-
-        assert_eq!(
-            config.deliver_policy,
-            DeliverPolicy::ByStartSequence { start_sequence: 42 }
-        );
-        assert_eq!(config.ack_policy, AckPolicy::Explicit);
-        assert_eq!(config.replay_policy, ReplayPolicy::Instant);
     }
 
     #[test]
