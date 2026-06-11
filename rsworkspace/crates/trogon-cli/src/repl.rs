@@ -6,6 +6,9 @@ use crate::app::{
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
+use crate::session_rewind::{
+    RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns,
+};
 use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
 use rustyline::completion::{Completer, Pair};
@@ -542,6 +545,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // Messages typed while a response was streaming. Auto-submitted in order
     // (one per turn) once the current turn finishes.
     let mut queued_prompts: VecDeque<String> = VecDeque::new();
+    let mut rewind_state = SessionRewindState::default();
     let custom_commands = crate::commands::load_commands(&project_dir);
     let mut spawn_tracker = SpawnTracker::default();
 
@@ -724,6 +728,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
                                 spawn_tracker = SpawnTracker::default();
+                                rewind_state.reset();
                             }
                             Err(e) => eprintln!(
                                 "error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."
@@ -759,6 +764,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     );
                                     eprintln!("resumed session {}", session.session_id());
                                     spawn_tracker = SpawnTracker::default();
+                                    rewind_state.reset();
                                 }
                                 Err(e) => {
                                     // MED-3: the old session's MCP bridges were shut down
@@ -926,6 +932,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         }
                                         Err(e) => eprintln!("Error setting model on new runner: {e}"),
                                     }
+                                    rewind_state.reset();
                                 }
                             }
                             Err(e) => eprintln!("Error switching model: {e}"),
@@ -979,6 +986,17 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         );
                     } else if cmd == "/allowed-tools" {
                         println!("{}", allowed_tools_for_mode(&session_mode));
+                    } else if cmd == "/checkpoint" {
+                        match handle_checkpoint_command(&session, &mut rewind_state, arg).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/rewind" {
+                        match handle_rewind_command(&session, &mut rewind_state, arg).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(RewindError::ListRequested) => println!("{}", rewind_state.list_checkpoints()),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
                     } else if cmd == "/review" {
                         // Drive the model to review via its shell tools; runs like a
                         // normal prompt on the next loop turn.
@@ -1336,6 +1354,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             if let Some(helper) = rl.helper_mut() {
                                 helper.cwd = cwd.clone();
                             }
+                            rewind_state.on_turn_complete();
                         }
 
                         // Auto-submit messages queued during this turn: Ctrl+G
@@ -1841,6 +1860,50 @@ pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Resu
     }
 }
 
+// ── checkpoint / rewind ───────────────────────────────────────────────────────
+
+async fn handle_checkpoint_command<S: Session>(
+    session: &S,
+    rewind_state: &mut SessionRewindState,
+    arg: &str,
+) -> anyhow::Result<String> {
+    let export = session.export_history().await?;
+    let name = arg.trim();
+    let name = if name.is_empty() { None } else { Some(name) };
+    Ok(rewind_state.record_checkpoint(name, export))
+}
+
+async fn handle_rewind_command<S: Session>(
+    session: &S,
+    rewind_state: &mut SessionRewindState,
+    arg: &str,
+) -> Result<String, RewindError> {
+    let resolution = rewind_state.resolve_rewind(arg)?;
+    let (messages_json, target_turn) = match resolution {
+        RewindResolution::Snapshot {
+            messages_json,
+            target_turn,
+        } => (messages_json, target_turn),
+        RewindResolution::TruncateToTurns { target_turn } => {
+            let export = session
+                .export_history()
+                .await
+                .map_err(|e| RewindError::ExportParse(e.to_string()))?;
+            let truncated = truncate_export_to_turns(&export, target_turn)?;
+            (truncated, target_turn)
+        }
+    };
+
+    session
+        .import_history(&messages_json)
+        .await
+        .map_err(|e| RewindError::ExportParse(e.to_string()))?;
+    rewind_state.after_rewind(target_turn);
+    Ok(format!(
+        "rewound to turn {target_turn} — conversation continues from that point"
+    ))
+}
+
 // ── new slash-command helpers ───────────────────────────────────────────────────
 
 /// Describe how the current permission mode gates each tool category — i.e. which
@@ -1941,6 +2004,8 @@ Commands:
   {m}/mcp__<server>__<prompt>{r}  run an MCP prompt as a command (see {m}/mcp prompts{r})
   {m}/compact{r}            force context compaction now
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
+  {m}/checkpoint{r} [name]  save conversation state at the current turn
+  {m}/rewind{r} [name|N]    restore to a checkpoint or back N turns  |  {m}/rewind{r} lists checkpoints
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
@@ -2045,10 +2110,7 @@ Ctrl+D    quit");
         }
 
         "/rewind" | "/checkpoint" => {
-            "Message-level rewind/checkpointing isn't supported yet. To revert state today: \
-             /clear starts a fresh session, /resume <id> reattaches a prior one, and switching \
-             models with /model opens a new session. (Code changes are reverted with git.)"
-                .to_string()
+            "use /checkpoint and /rewind in the REPL — they need the live session".to_string()
         }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
@@ -3192,7 +3254,16 @@ mod tests {
     fn help_lists_new_commands() {
         let fs = MockFs::new();
         let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
-        for c in ["/plan", "/allowed-tools", "/vim", "/review", "/pr-comments", "/bug"] {
+        for c in [
+            "/plan",
+            "/allowed-tools",
+            "/vim",
+            "/review",
+            "/pr-comments",
+            "/bug",
+            "/checkpoint",
+            "/rewind",
+        ] {
             assert!(out.contains(c), "/help must mention {c}");
         }
     }
@@ -3826,5 +3897,91 @@ mod tests {
         assert!(outcome.same_runner);
         session.set_model("claude-opus-4-7").await.unwrap();
         assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
+    }
+
+    // ── /checkpoint and /rewind ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn checkpoint_command_exports_and_records_turn() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        session.set_exported_history(r#"[{"role":"user","text":"hello"}]"#);
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+
+        let msg = handle_checkpoint_command(&session, &mut rewind_state, "save-point")
+            .await
+            .unwrap();
+        assert!(msg.contains("save-point"));
+        assert_eq!(rewind_state.checkpoints().len(), 1);
+        assert_eq!(rewind_state.checkpoints()[0].turn_index, 1);
+    }
+
+    #[tokio::test]
+    async fn rewind_to_checkpoint_imports_snapshot_and_truncates_state() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        let snapshot = r#"[{"role":"user","text":"first"}]"#;
+        session.set_exported_history(snapshot);
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+        rewind_state.record_checkpoint(Some("t1"), snapshot.to_string());
+        rewind_state.on_turn_complete();
+        rewind_state.on_turn_complete();
+
+        let msg = handle_rewind_command(&session, &mut rewind_state, "t1")
+            .await
+            .unwrap();
+        assert!(msg.contains("turn 1"));
+        assert_eq!(session.imported_history(), vec![snapshot]);
+        assert_eq!(rewind_state.turn_count(), 1);
+        assert_eq!(rewind_state.checkpoints().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rewind_by_n_truncates_export_when_no_checkpoint() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        session.set_exported_history(
+            r#"[
+                {"role":"user","text":"one"},
+                {"role":"assistant","text":"a1"},
+                {"role":"user","text":"two"},
+                {"role":"assistant","text":"a2"}
+            ]"#,
+        );
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+        rewind_state.on_turn_complete();
+
+        let msg = handle_rewind_command(&session, &mut rewind_state, "1")
+            .await
+            .unwrap();
+        assert!(msg.contains("turn 1"));
+        let imported = session.imported_history();
+        assert_eq!(imported.len(), 1);
+        assert!(imported[0].contains(r#""text":"one""#));
+        assert!(!imported[0].contains(r#""text":"two""#));
+        assert_eq!(rewind_state.turn_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn rewind_without_arg_lists_checkpoints() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+        rewind_state.record_checkpoint(Some("alpha"), "[]".to_string());
+
+        let err = handle_rewind_command(&session, &mut rewind_state, "")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RewindError::ListRequested));
+        let listed = rewind_state.list_checkpoints();
+        assert!(listed.contains("alpha"));
     }
 }
