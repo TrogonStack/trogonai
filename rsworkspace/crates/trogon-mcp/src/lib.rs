@@ -1,8 +1,12 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
-//! MCP (Model Context Protocol) HTTP client for trogon.
+//! MCP (Model Context Protocol) clients for trogon.
 //!
-//! Connects to MCP servers via the streamable-HTTP transport (JSON-RPC over
-//! POST), discovers their tools, and dispatches tool calls.
+//! Two transports are provided:
+//! - [`McpClient`] — streamable-HTTP (JSON-RPC over POST).
+//! - [`StdioMcpClient`] — native in-process stdio: drives a server subprocess
+//!   over its stdin/stdout, so stdio servers need no local HTTP bridge process.
+//!
+//! Both discover tools and dispatch tool calls via the shared [`McpCallTool`].
 //!
 //! # Usage
 //!
@@ -16,11 +20,13 @@
 //! ```
 
 mod client;
+mod stdio;
 
 pub use client::{
     McpCallTool, McpClient, McpPrompt, McpPromptArgument, McpResource, McpResourceContent,
     McpTool,
 };
+pub use stdio::StdioMcpClient;
 
 #[cfg(feature = "test-support")]
 pub use client::mock::MockMcpClient;
