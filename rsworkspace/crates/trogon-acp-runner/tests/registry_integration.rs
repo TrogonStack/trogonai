@@ -8,7 +8,7 @@
 //! Run with:
 //!   cargo test -p trogon-acp-runner --test registry_integration
 
-use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
+use trogon_registry::{AgentCapability, MockRegistryStore, Registry, RunnerCapability};
 
 const ACP_PREFIX: &str = "acp";
 const AGENT_TYPE: &str = "claude";
@@ -22,7 +22,9 @@ const MODELS: &[&str] = &[
 fn make_cap() -> AgentCapability {
     AgentCapability {
         agent_type: AGENT_TYPE.to_string(),
-        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+        capabilities: RunnerCapability::to_strings(
+            trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap(),
+        ),
         nats_subject: format!("{ACP_PREFIX}.agent.>"),
         current_load: 0,
         metadata: serde_json::json!({
