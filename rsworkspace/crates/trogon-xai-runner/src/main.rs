@@ -86,7 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .collect();
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+        capabilities: trogon_registry::RunnerCapability::to_strings(
+            trogon_registry::expected_runner_capabilities("xai").expect("xai capabilities"),
+        ),
         nats_subject: format!("{}.agent.>", prefix),
         current_load: 0,
         metadata: serde_json::json!({ "acp_prefix": &prefix, "models": model_ids }),

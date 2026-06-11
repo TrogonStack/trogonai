@@ -98,7 +98,9 @@ async fn main() -> anyhow::Result<()> {
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+        capabilities: trogon_registry::RunnerCapability::to_strings(
+            trogon_registry::expected_runner_capabilities("claude").expect("claude capabilities"),
+        ),
         nats_subject: format!("{}.agent.>", acp_prefix),
         current_load: 0,
         metadata: serde_json::json!({
