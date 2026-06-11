@@ -520,4 +520,100 @@ mod tests {
         let scope = Scope::from_wire(wire, "/repo").unwrap();
         assert_eq!(scope.on_exceed(), OnExceed::Deny);
     }
+
+    // ── SCOPE-1 primitives ────────────────────────────────────────────────
+
+    #[test]
+    fn globset_empty_matches_nothing() {
+        let set = GlobSet::empty();
+        assert!(set.is_empty());
+        assert!(!set.matches("anything/at/all"));
+        assert!(set.sources().is_empty());
+    }
+
+    #[test]
+    fn globset_star_and_doublestar_match_everything() {
+        for pattern in ["*", "**"] {
+            let set = GlobSet::compile(&[pattern.to_string()]).unwrap();
+            assert!(set.matches("/a/b/c"), "`{pattern}` should match all");
+            assert!(set.matches("x"));
+        }
+    }
+
+    #[test]
+    fn globset_specific_pattern_matches_only_its_paths() {
+        let set = GlobSet::compile(&["src/**".to_string()]).unwrap();
+        assert!(set.matches("src/a/b.rs"));
+        assert!(!set.matches("lib/a.rs"));
+        assert!(!set.is_empty());
+        assert_eq!(set.sources(), &["src/**".to_string()]);
+    }
+
+    #[test]
+    fn globset_invalid_pattern_errors() {
+        let err = GlobSet::compile(&["[".to_string()]).unwrap_err();
+        assert!(matches!(err, ScopeError::InvalidGlob { .. }));
+    }
+
+    #[test]
+    fn globset_equality_is_by_sources_and_match_all() {
+        let a = GlobSet::compile(&["src/**".to_string()]).unwrap();
+        let b = GlobSet::compile(&["src/**".to_string()]).unwrap();
+        let c = GlobSet::compile(&["tests/**".to_string()]).unwrap();
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn commandset_any_matches_everything_empty_matches_nothing() {
+        let any = CommandSet::any();
+        assert!(!any.is_empty());
+        assert!(any.matches("rm -rf /"));
+        assert!(any.matches("cargo test"));
+
+        let none = CommandSet::empty();
+        assert!(none.is_empty());
+        assert!(!none.matches("ls"));
+    }
+
+    #[test]
+    fn commandset_prefix_matching_respects_word_boundary() {
+        let set = CommandSet::from_patterns(vec!["cargo".to_string(), "git".to_string()]);
+        assert!(set.matches("cargo build")); // prefix + space
+        assert!(set.matches("git")); // exact
+        assert!(set.matches("cargo\ntest")); // prefix + newline
+        assert!(!set.matches("cargojunk")); // no boundary
+        assert!(!set.matches("rm")); // not listed
+        assert_eq!(set.sources().len(), 2);
+    }
+
+    #[test]
+    fn scope_error_display_and_source() {
+        let invalid = GlobSet::compile(&["[".to_string()]).unwrap_err();
+        assert!(format!("{invalid}").contains("invalid glob"));
+        assert!(std::error::Error::source(&invalid).is_some());
+
+        let net = ScopeError::UnknownNetwork("weird".to_string());
+        assert!(format!("{net}").contains("weird"));
+        assert!(std::error::Error::source(&net).is_none());
+
+        let on_exceed = ScopeError::UnknownOnExceed("maybe".to_string());
+        assert!(format!("{on_exceed}").contains("maybe"));
+        assert!(std::error::Error::source(&on_exceed).is_none());
+    }
+
+    #[test]
+    fn enums_serde_round_trip_snake_case() {
+        assert_eq!(serde_json::to_string(&OnExceed::Escalate).unwrap(), "\"escalate\"");
+        assert_eq!(serde_json::to_string(&NetworkPolicy::Denied).unwrap(), "\"denied\"");
+        let allow = NetworkPolicy::AllowList(vec!["h".to_string()]);
+        let json = serde_json::to_string(&allow).unwrap();
+        assert_eq!(serde_json::from_str::<NetworkPolicy>(&json).unwrap(), allow);
+    }
+
+    #[test]
+    fn scope_decision_variants_are_distinct() {
+        assert_ne!(ScopeDecision::InScope, ScopeDecision::OutOfScope);
+        assert_ne!(ScopeDecision::OutOfScope, ScopeDecision::Forbidden);
+    }
 }
