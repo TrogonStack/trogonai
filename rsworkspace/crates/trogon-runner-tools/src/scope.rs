@@ -457,7 +457,7 @@ impl Scope {
 /// Field grammars:
 /// - `network`: `off` | `on` | `allow:host1,host2,...` (absent => denied)
 /// - `on_exceed`: `escalate` | `deny` (absent => escalate)
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct ScopeWire {
     #[serde(default)]
     pub write: Vec<String>,
@@ -469,6 +469,68 @@ pub struct ScopeWire {
     pub protected: Vec<String>,
     #[serde(default)]
     pub on_exceed: Option<String>,
+}
+
+fn parse_scope_list(values: &str) -> Vec<String> {
+    values
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_scope_line(line: &str, wire: &mut ScopeWire) {
+    let trimmed = line.trim();
+    if trimmed.starts_with("```") {
+        return;
+    }
+
+    let Some((key, values)) = trimmed.split_once(':') else {
+        return;
+    };
+
+    match key.trim() {
+        "scope.write" => wire.write.extend(parse_scope_list(values)),
+        "scope.run" => wire.run.extend(parse_scope_list(values)),
+        "scope.protected" => wire.protected.extend(parse_scope_list(values)),
+        "scope.network" => {
+            let val = values.trim();
+            if !val.is_empty() {
+                wire.network = Some(val.to_string());
+            }
+        }
+        "scope.on_exceed" => {
+            let val = values.trim();
+            if !val.is_empty() {
+                wire.on_exceed = Some(val.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+impl ScopeWire {
+    /// Parse scope configuration from TROGON.md text.
+    ///
+    /// Reads `scope.*:` bare lines, but **skips anything inside a fenced code
+    /// block** (```` ``` ```` or `~~~`). A leading `[scope]` header line, if
+    /// present, is ignored. Missing keys leave fields at their defaults.
+    pub fn from_trogon_md(text: &str) -> Self {
+        let mut wire = Self::default();
+        let mut in_fence = false;
+        for line in text.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence {
+                continue;
+            }
+            parse_scope_line(line, &mut wire);
+        }
+        wire
+    }
 }
 
 /// Anchor relative glob patterns to `cwd` (escaped, so the path is literal) so
@@ -651,6 +713,79 @@ mod tests {
             Scope::from_wire(wire, "/repo").unwrap_err(),
             ScopeError::UnknownOnExceed(_)
         ));
+    }
+
+    // ── SCOPE-11 from_trogon_md ───────────────────────────────────────────
+
+    #[test]
+    fn from_trogon_md_happy_path() {
+        let md = "\
+[scope]
+scope.write: src/**, tests/**
+scope.run: cargo, git
+scope.protected: **/.env
+scope.network: allow:api.github.com, example.com
+scope.on_exceed: deny
+";
+        let wire = ScopeWire::from_trogon_md(md);
+        assert_eq!(wire.write, vec!["src/**", "tests/**"]);
+        assert_eq!(wire.run, vec!["cargo", "git"]);
+        assert_eq!(wire.protected, vec!["**/.env"]);
+        assert_eq!(
+            wire.network,
+            Some("allow:api.github.com, example.com".to_string())
+        );
+        assert_eq!(wire.on_exceed, Some("deny".to_string()));
+    }
+
+    #[test]
+    fn from_trogon_md_fenced_code_is_ignored() {
+        let md = "\
+```yaml
+scope.write: src/**
+scope.run: cargo
+scope.protected: **/.env
+scope.network: on
+scope.on_exceed: deny
+```
+";
+        let wire = ScopeWire::from_trogon_md(md);
+        assert_eq!(wire, ScopeWire::default());
+    }
+
+    #[test]
+    fn from_trogon_md_partial_keys() {
+        let md = "scope.write: src/**\nscope.network: off\n";
+        let wire = ScopeWire::from_trogon_md(md);
+        assert_eq!(wire.write, vec!["src/**"]);
+        assert_eq!(wire.network, Some("off".to_string()));
+        assert!(wire.run.is_empty());
+        assert!(wire.protected.is_empty());
+        assert!(wire.on_exceed.is_none());
+    }
+
+    #[test]
+    fn from_trogon_md_no_scope_keys_returns_default() {
+        let md = "# Project\n\n## Permissions\nallow_paths: src/**\n";
+        let wire = ScopeWire::from_trogon_md(md);
+        assert_eq!(wire, ScopeWire::default());
+    }
+
+    #[test]
+    fn from_trogon_md_end_to_end_builds_scope() {
+        let md = "\
+[scope]
+scope.write: src/**
+scope.run: cargo
+scope.network: on
+scope.on_exceed: deny
+";
+        let wire = ScopeWire::from_trogon_md(md);
+        let scope = Scope::from_wire(wire, "/repo").expect("valid scope from trogon md");
+        assert!(scope.write().matches("/repo/src/main.rs"));
+        assert!(scope.run().matches("cargo build"));
+        assert_eq!(scope.network(), &NetworkPolicy::Allowed);
+        assert_eq!(scope.on_exceed(), OnExceed::Deny);
     }
 
     #[test]
