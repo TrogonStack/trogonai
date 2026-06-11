@@ -240,17 +240,29 @@ pub async fn spawn_auto_deny_permissions(
     nats: async_nats::Client,
     prefix: &str,
     session_id: &str,
-) -> tokio::task::JoinHandle<()> {
+) -> Option<tokio::task::JoinHandle<()>> {
+    let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
+    let sub = nats.subscribe(subject).await;
+    spawn_auto_deny_permissions_inner(nats, sub).await.ok()
+}
+
+async fn spawn_auto_deny_permissions_inner<E: std::fmt::Display>(
+    nats: async_nats::Client,
+    sub: Result<async_nats::Subscriber, E>,
+) -> Result<tokio::task::JoinHandle<()>, E> {
     use agent_client_protocol::{RequestPermissionOutcome, RequestPermissionResponse};
     use futures::StreamExt as _;
 
-    let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
-    let sub = nats.subscribe(subject).await;
-    tokio::spawn(async move {
-        let mut sub = match sub {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+    let mut sub = match sub {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "error: could not subscribe to permission requests: {e} — approval-gated tools will be denied"
+            );
+            return Err(e);
+        }
+    };
+    Ok(tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
             let Some(reply) = msg.reply else { continue };
             // Best-effort: name the tool being denied so `--print` output explains
@@ -276,7 +288,7 @@ pub async fn spawn_auto_deny_permissions(
                 let _ = nats.publish(reply, payload.into()).await;
             }
         }
-    })
+    }))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -507,5 +519,29 @@ mod tests {
         )
         .await;
         assert_eq!(session.close_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn auto_deny_subscribe_failure_returns_err() {
+        use std::io;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::runners::AsyncRunner;
+
+        let container = Nats::default()
+            .start()
+            .await
+            .expect("NATS container failed — is Docker running?");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+            .await
+            .expect("connect to NATS");
+
+        let injected = io::Error::other("injected subscribe failure");
+        let result = super::spawn_auto_deny_permissions_inner(nats, Err(injected)).await;
+
+        assert!(
+            result.is_err(),
+            "subscribe failure must return Err instead of silently spawning a no-op responder"
+        );
     }
 }
