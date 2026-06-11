@@ -996,6 +996,7 @@ pub mod mock {
         pub last_prompt_text: Mutex<Option<String>>,
         exported_history: Mutex<String>,
         imported_history: Mutex<Vec<String>>,
+        load_session_count: Mutex<u32>,
     }
 
     impl MockSession {
@@ -1013,6 +1014,7 @@ pub mod mock {
                 last_prompt_text: Mutex::new(None),
                 exported_history: Mutex::new("[]".to_string()),
                 imported_history: Mutex::new(Vec::new()),
+                load_session_count: Mutex::new(0),
             }
         }
 
@@ -1058,6 +1060,10 @@ pub mod mock {
 
         pub fn last_cwd(&self) -> Option<PathBuf> {
             self.last_cwd.lock().unwrap().clone()
+        }
+
+        pub fn load_session_count(&self) -> u32 {
+            *self.load_session_count.lock().unwrap()
         }
     }
 
@@ -1132,6 +1138,7 @@ pub mod mock {
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             let cwd = cwd.to_path_buf();
             async move {
+                *self.load_session_count.lock().unwrap() += 1;
                 *self.last_cwd.lock().unwrap() = Some(cwd);
                 Ok(())
             }
