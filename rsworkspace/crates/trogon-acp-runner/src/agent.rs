@@ -564,8 +564,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         )
         .await;
 
-        // Cleanup on every path: drop the ephemeral session and the worktree.
-        let _ = self.store.delete(&sub_sid).await;
+        let persist = std::env::var("TROGON_SUBAGENT_PERSIST")
+            .ok()
+            .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+
+        // Cleanup on every path: drop the ephemeral session (unless persisted) and the worktree.
+        if !persist {
+            let _ = self.store.delete(&sub_sid).await;
+        }
         if let Some(w) = worktree {
             w.cleanup().await;
         }
@@ -579,6 +585,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 "agent_name": agent_name,
                 "sub_session_id": sub_sid,
                 "parent_session_id": parent_session_id,
+                "persisted": persist,
             });
             let _ = trogon_runner_tools::run_event_hooks(
                 &parent_state.tool_hooks.subagent_stop,
@@ -588,17 +595,29 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .await;
         }
 
+        let format_result = |body: String| -> String {
+            if persist {
+                format!(
+                    "{body}\n\n---\nSub-agent session persisted as `{sub_sid}`. \
+                     Resume with: trogon --session-id {sub_sid} --prefix {}",
+                    self.prefix
+                )
+            } else {
+                body
+            }
+        };
+
         match run {
             Err(_elapsed) => Err(format!(
                 "spawn_agent error: safety-net timeout after {}s",
                 SPAWN_SAFETY_TIMEOUT.as_secs()
             )),
             Ok(Err(e)) => Err(format!("spawn_agent error: {e}")),
-            Ok(Ok(_)) => Ok(if text.is_empty() {
+            Ok(Ok(_)) => Ok(format_result(if text.is_empty() {
                 "Sub-agent completed.".to_string()
             } else {
                 text
-            }),
+            })),
         }
     }
 
@@ -2367,11 +2386,11 @@ mod tests {
         let results = &state.messages[2];
         assert_eq!(results.role, "user");
         assert!(matches!(&results.content[0],
-            AgentContentBlock::ToolResult { tool_use_id, content }
+            AgentContentBlock::ToolResult { tool_use_id, content, .. }
             if tool_use_id == "t1" && content == "result-1"),
             "finished tool keeps its real output, got {:?}", results.content[0]);
         match &results.content[1] {
-            AgentContentBlock::ToolResult { tool_use_id, content } => {
+            AgentContentBlock::ToolResult { tool_use_id, content, .. } => {
                 assert_eq!(tool_use_id, "t2");
                 assert!(content.contains("interrupted"),
                     "in-flight tool gets a synthesized interrupt result, got {content:?}");
@@ -2467,6 +2486,7 @@ mod tests {
                 content: vec![AgentContentBlock::ToolResult {
                     tool_use_id: "call-1".to_string(),
                     content: "tool output here".to_string(),
+                    blocks: vec![],
                 }],
             }],
             ..Default::default()
@@ -2512,6 +2532,7 @@ mod tests {
                     AgentContentBlock::ToolResult {
                         tool_use_id: "c2".to_string(),
                         content: "result".to_string(),
+                        blocks: vec![],
                     },
                 ],
             }],
@@ -3322,6 +3343,134 @@ mod tests {
         let offered = runner.captured_chat_tools();
         assert!(offered.contains(&"read_file".to_string()));
         assert!(!offered.contains(&"write_file".to_string()));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawn_subagent_deletes_session_by_default_but_persists_when_env_set() {
+        use std::sync::{Arc, Mutex};
+
+        use async_trait::async_trait;
+        use trogon_runner_tools::session_store::{SessionState, SessionStore, mock::MemorySessionStore};
+
+        #[derive(Clone)]
+        struct DeleteTrackingStore {
+            inner: MemorySessionStore,
+            deleted: Arc<Mutex<Vec<String>>>,
+        }
+
+        #[async_trait]
+        impl SessionStore for DeleteTrackingStore {
+            async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
+                self.inner.load(session_id).await
+            }
+
+            async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
+                self.inner.save(session_id, state).await
+            }
+
+            async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
+                self.deleted.lock().unwrap().push(session_id.to_string());
+                self.inner.delete(session_id).await
+            }
+
+            async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+                self.inner.list_ids().await
+            }
+
+            async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>> {
+                self.inner.list_children(parent_id).await
+            }
+        }
+
+        async fn run_spawn(
+            persist: bool,
+        ) -> (Vec<String>, String, trogon_runner_tools::session_store::mock::MemorySessionStore) {
+            let inner = MemorySessionStore::new();
+            inner
+                .save(
+                    "parent-1",
+                    &SessionState {
+                        cwd: std::env::current_dir().unwrap().to_string_lossy().to_string(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+
+            let deleted = Arc::new(Mutex::new(Vec::new()));
+            let store = DeleteTrackingStore {
+                inner: inner.clone(),
+                deleted: Arc::clone(&deleted),
+            };
+
+            let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+                .with_response(vec![]);
+            let agent = std::sync::Arc::new(TrogonAgent::new(
+                crate::session_notifier::mock::MockSessionNotifier::new(),
+                store,
+                runner,
+                "acp.claude",
+                "claude-test",
+                None,
+                None,
+                std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            ));
+
+            if persist {
+                unsafe { std::env::set_var("TROGON_SUBAGENT_PERSIST", "1") };
+            } else {
+                unsafe { std::env::remove_var("TROGON_SUBAGENT_PERSIST") };
+            }
+
+            let result = {
+                let local = tokio::task::LocalSet::new();
+                local
+                    .run_until(async {
+                        agent.spawn_subagent("parent-1", "hello", "").await.unwrap()
+                    })
+                    .await
+            };
+
+            unsafe { std::env::remove_var("TROGON_SUBAGENT_PERSIST") };
+            (deleted.lock().unwrap().clone(), result, inner)
+        }
+
+        let (deleted_default, text_default, store_default) = run_spawn(false).await;
+        assert_eq!(deleted_default.len(), 1, "default path must delete sub-session");
+        assert!(
+            !text_default.contains("Sub-agent session persisted"),
+            "default path must not advertise persistence"
+        );
+
+        let sub_ids: Vec<_> = store_default.list_ids().await.unwrap();
+        assert!(
+            !sub_ids.iter().any(|id| id != "parent-1"),
+            "sub-session must be gone after default spawn"
+        );
+
+        let (deleted_persist, text_persist, store_persist) = run_spawn(true).await;
+        assert!(
+            deleted_persist.is_empty(),
+            "persist path must not delete sub-session"
+        );
+        assert!(
+            text_persist.contains("Sub-agent session persisted"),
+            "persist path must include resume hint: {text_persist}"
+        );
+        assert!(
+            text_persist.contains("--session-id"),
+            "persist path must include session id for resume"
+        );
+
+        let remaining: Vec<_> = store_persist
+            .list_ids()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|id| id != "parent-1")
+            .collect();
+        assert_eq!(remaining.len(), 1, "exactly one persisted sub-session");
     }
 
     #[cfg(feature = "test-helpers")]
