@@ -12,7 +12,7 @@ use tracing::debug;
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[cfg_attr(coverage, coverage(off))]
-fn next_id() -> u64 {
+pub(crate) fn next_id() -> u64 {
     REQUEST_ID.fetch_add(1, Ordering::Relaxed)
 }
 
