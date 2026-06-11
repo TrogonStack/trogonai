@@ -47,8 +47,7 @@ impl SpawnAgentTool {
     pub fn tool_def_with_agents(agent_names: &[String]) -> ToolDef {
         let mut description = "Spawn a specialised sub-agent in an isolated worktree and return \
             its output. Provide `prompt` (the task). Optionally set `agent` to delegate to a \
-            named custom subagent defined in .claude/agents/, or `capability` (e.g. 'explore', \
-            'plan')."
+            named custom subagent defined in .claude/agents/."
             .to_string();
         if !agent_names.is_empty() {
             description.push_str(" Available custom agents: ");
@@ -64,10 +63,6 @@ impl SpawnAgentTool {
                     "agent": {
                         "type": "string",
                         "description": "Name of a custom subagent from .claude/agents/ to use"
-                    },
-                    "capability": {
-                        "type": "string",
-                        "description": "Agent capability to use, e.g. 'explore' or 'plan'"
                     },
                     "prompt": {
                         "type": "string",
@@ -102,13 +97,9 @@ impl McpCallTool for SpawnAgentTool {
             let prompt = arguments["prompt"]
                 .as_str()
                 .ok_or_else(|| "missing 'prompt' argument".to_string())?;
-            // Both optional: `agent` selects a named .claude/agents/ definition;
-            // `capability` is the legacy selector. The handler uses `agent` if set.
-            let capability = arguments["capability"].as_str().unwrap_or("");
             let agent = arguments["agent"].as_str().unwrap_or("");
 
             let payload = serde_json::to_vec(&serde_json::json!({
-                "capability": capability,
                 "agent": agent,
                 "prompt": prompt,
                 "session_id": self.session_id,
@@ -160,9 +151,11 @@ mod tests {
             .expect("required must be an array");
         let names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert_eq!(names, vec!["prompt"], "only prompt is required");
-        // `agent` and `capability` are both optional selectors.
         assert!(def.input_schema["properties"].get("agent").is_some());
-        assert!(def.input_schema["properties"].get("capability").is_some());
+        assert!(
+            def.input_schema["properties"].get("capability").is_none(),
+            "capability was removed from the schema"
+        );
     }
 
     #[test]
