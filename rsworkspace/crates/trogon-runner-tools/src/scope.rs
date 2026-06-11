@@ -244,6 +244,26 @@ pub struct Scope {
 }
 
 impl Scope {
+    /// The hardcoded, compiled-in default scope: the agent may write anywhere
+    /// **within the current working directory** and run any command silently,
+    /// network is denied, and anything outside the boundary escalates once.
+    ///
+    /// The write root is cwd-anchored (`{cwd}/**`) rather than a bare `**`, so a
+    /// write resolved outside the working directory falls *out of scope* and
+    /// escalates instead of being silently allowed. `cwd` is escaped so glob
+    /// metacharacters in the path are treated literally. Pure; performs no I/O.
+    pub fn baseline(cwd: &str) -> Self {
+        let root = format!("{}/**", globset::escape(cwd.trim_end_matches('/')));
+        let write = GlobSet::compile(&[root]).expect("cwd-anchored `**` is a valid glob");
+        Self {
+            write,
+            run: CommandSet::any(),
+            network: NetworkPolicy::Denied,
+            protected: GlobSet::empty(),
+            on_exceed: OnExceed::Escalate,
+        }
+    }
+
     /// Globs the agent may write to silently.
     pub fn write(&self) -> &GlobSet {
         &self.write
@@ -267,5 +287,33 @@ impl Scope {
     /// Behavior when a tool call falls outside the scope.
     pub fn on_exceed(&self) -> OnExceed {
         self.on_exceed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn baseline_anchors_writes_to_cwd_and_denies_network() {
+        let scope = Scope::baseline("/repo");
+        // Writes inside the working directory are in scope.
+        assert!(scope.write().matches("/repo/src/main.rs"));
+        assert!(scope.write().matches("/repo/Cargo.toml"));
+        // Writes outside it are not (they will escalate, not auto-allow).
+        assert!(!scope.write().matches("/etc/passwd"));
+        assert!(!scope.write().matches("/repo-sibling/x"));
+        // Any command runs; network is denied; out-of-scope escalates.
+        assert!(scope.run().matches("cargo test --workspace"));
+        assert_eq!(scope.network(), &NetworkPolicy::Denied);
+        assert_eq!(scope.on_exceed(), OnExceed::Escalate);
+        assert!(scope.protected().is_empty());
+    }
+
+    #[test]
+    fn baseline_trims_trailing_slash_in_cwd() {
+        let scope = Scope::baseline("/repo/");
+        assert!(scope.write().matches("/repo/src/lib.rs"));
+        assert!(!scope.write().matches("/other/file"));
     }
 }
