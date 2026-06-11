@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use trogon_tools::Message;
 
 use crate::egress::EgressPolicy;
+use crate::scope::Scope;
 
 /// A URL-based MCP server configuration stored per session.
 /// Stdio servers are not supported in the NATS model.
@@ -161,6 +162,10 @@ pub struct SessionState {
     /// Structured per-tool path policies evaluated before the interactive gate.
     #[serde(default)]
     pub tool_policies: Vec<ToolPolicy>,
+    /// Optional Scope envelope for the low-friction permission model (Phase 2).
+    /// `None` falls back to the mode-based permission path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     /// Egress policy for outbound MCP server connections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub egress_policy: Option<EgressPolicy>,
@@ -255,6 +260,7 @@ impl Default for SessionState {
             parent_session_id: None,
             branched_at_index: None,
             tool_policies: Vec::new(),
+            scope: None,
             egress_policy: None,
             audit_log: Vec::new(),
             terminal_id: None,
@@ -826,6 +832,24 @@ mod tests {
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains("claude-opus-4-6"), "model must be serialized: {json}");
+    }
+
+    #[test]
+    fn session_state_scope_round_trips() {
+        let scope = Scope::baseline("/repo");
+        let state = SessionState {
+            scope: Some(scope.clone()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.scope, Some(scope));
+    }
+
+    #[test]
+    fn session_state_scope_none_omitted_from_json() {
+        let json = serde_json::to_string(&SessionState::default()).unwrap();
+        assert!(!json.contains("\"scope\""), "None scope must be omitted: {json}");
     }
 
     // ── branching fields ──────────────────────────────────────────────────────

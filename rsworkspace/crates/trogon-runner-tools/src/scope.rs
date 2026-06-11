@@ -238,15 +238,60 @@ impl CommandSet {
 ///
 /// Inside the envelope the agent runs silently; crossing it triggers
 /// [`OnExceed`]; touching `protected` is a hard deny. Constructed via the
-/// (forthcoming) `baseline` / `from_wire` builders — fields are private so an
-/// invalid `Scope` is unrepresentable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `baseline` / `from_wire` builders — fields are private so an invalid `Scope`
+/// is unrepresentable.
+///
+/// Serde persistence routes through [`ScopePersist`] (the source patterns, which
+/// are already cwd-anchored at construction), so a `Scope` round-trips without
+/// needing the cwd again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ScopePersist", into = "ScopePersist")]
 pub struct Scope {
     write: GlobSet,
     run: CommandSet,
     network: NetworkPolicy,
     protected: GlobSet,
     on_exceed: OnExceed,
+}
+
+/// Serde-friendly form of a [`Scope`]: the raw (already-anchored) source patterns
+/// plus the enum fields. Rebuilding recompiles the globs without re-anchoring.
+#[derive(Serialize, Deserialize)]
+struct ScopePersist {
+    #[serde(default)]
+    write: Vec<String>,
+    #[serde(default)]
+    run: Vec<String>,
+    network: NetworkPolicy,
+    #[serde(default)]
+    protected: Vec<String>,
+    on_exceed: OnExceed,
+}
+
+impl From<Scope> for ScopePersist {
+    fn from(scope: Scope) -> Self {
+        Self {
+            write: scope.write.sources().to_vec(),
+            run: scope.run.sources().to_vec(),
+            network: scope.network,
+            protected: scope.protected.sources().to_vec(),
+            on_exceed: scope.on_exceed,
+        }
+    }
+}
+
+impl TryFrom<ScopePersist> for Scope {
+    type Error = ScopeError;
+
+    fn try_from(persist: ScopePersist) -> Result<Self, Self::Error> {
+        Ok(Self {
+            write: GlobSet::compile(&persist.write)?,
+            run: CommandSet::from_patterns(persist.run),
+            network: persist.network,
+            protected: GlobSet::compile(&persist.protected)?,
+            on_exceed: persist.on_exceed,
+        })
+    }
 }
 
 impl Scope {
@@ -1000,5 +1045,35 @@ mod tests {
                 "{tool} should fail closed"
             );
         }
+    }
+
+    // ── SCOPE-6 serde persistence ─────────────────────────────────────────
+
+    #[test]
+    fn scope_serde_round_trips_through_sources() {
+        let wire = ScopeWire {
+            write: vec!["src/**".to_string()],
+            run: vec!["cargo".to_string()],
+            network: Some("allow:api.github.com".to_string()),
+            protected: vec!["**/secret".to_string()],
+            on_exceed: Some("deny".to_string()),
+        };
+        let scope = Scope::from_wire(wire, "/repo").unwrap();
+        let json = serde_json::to_string(&scope).unwrap();
+        let back: Scope = serde_json::from_str(&json).unwrap();
+        assert_eq!(scope, back);
+        // Behavior survives the round-trip, not just the source strings.
+        assert_eq!(
+            back.evaluate("write_file", &json!({"path": "src/a.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+    }
+
+    #[test]
+    fn scope_baseline_serde_round_trips() {
+        let scope = Scope::baseline("/repo");
+        let json = serde_json::to_string(&scope).unwrap();
+        let back: Scope = serde_json::from_str(&json).unwrap();
+        assert_eq!(scope, back);
     }
 }
