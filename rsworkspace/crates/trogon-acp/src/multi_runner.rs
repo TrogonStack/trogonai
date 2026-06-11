@@ -376,7 +376,7 @@ fn messages_from_portable(history: &[PortableMessage]) -> Vec<Message> {
                     }),
                 PortableBlock::ToolResult { id, output_summary } =>
                     Some(ContentBlock::ToolResult {
-                        tool_use_id: id.clone(), content: output_summary.clone(),
+                        tool_use_id: id.clone(), content: output_summary.clone(), blocks: vec![],
                     }),
                 PortableBlock::Thinking { .. } => None,
             }).collect()
@@ -394,7 +394,7 @@ fn portable_from_messages(messages: &[Message]) -> Vec<PortableMessage> {
                 Some(PortableBlock::ToolUse {
                     id: id.clone(), name: name.clone(), input_summary: input.to_string(),
                 }),
-            ContentBlock::ToolResult { tool_use_id, content } =>
+            ContentBlock::ToolResult { tool_use_id, content, .. } =>
                 Some(PortableBlock::ToolResult {
                     id: tool_use_id.clone(), output_summary: content.clone(),
                 }),
@@ -562,12 +562,12 @@ where
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
         let acp_sid = args.session_id.0.to_string();
         // Fast path: already routed to an external runner.
-        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
-            if let Some(bridge) = self.get_or_create_bridge(&prefix) {
-                let resp = bridge.prompt_to(args, &runner_sid).await?;
-                self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
-                return Ok(resp);
-            }
+        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid)
+            && let Some(bridge) = self.get_or_create_bridge(&prefix)
+        {
+            let resp = bridge.prompt_to(args, &runner_sid).await?;
+            self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
+            return Ok(resp);
         }
         // One-time lazy re-init for sessions not seen in this process lifetime:
         // process restart, fork_session, load_session, or resume_session all produce
@@ -575,33 +575,33 @@ where
         // state once, re-open the external runner session if the model requires it, and
         // register routing — subsequent prompts hit the fast path above.
         let known = self.session_cwd.borrow().contains_key(&acp_sid);
-        if !known {
-            if let Ok(state) = self.store.load(&acp_sid).await {
-                self.session_cwd
-                    .borrow_mut()
-                    .insert(acp_sid.clone(), state.cwd.clone());
-                if let Some(ref model) = state.model {
-                    if let Some(prefix) = self.resolve_external_prefix(model).await {
-                        let cwd = state.cwd.clone();
-                        if let Some(runner_sid) =
-                            self.open_runner_session(&prefix, &cwd, model).await
-                        {
-                            if !state.messages.is_empty() {
-                                self.import_history(&prefix, &runner_sid, &state.messages)
-                                    .await;
-                            }
-                            self.active_sessions
-                                .borrow_mut()
-                                .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
-                            self.id_remap
-                                .borrow_mut()
-                                .insert(runner_sid.clone(), acp_sid.clone());
-                            if let Some(bridge) = self.get_or_create_bridge(&prefix) {
-                                let resp = bridge.prompt_to(args, &runner_sid).await?;
-                                self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
-                                return Ok(resp);
-                            }
-                        }
+        if !known
+            && let Ok(state) = self.store.load(&acp_sid).await
+        {
+            self.session_cwd
+                .borrow_mut()
+                .insert(acp_sid.clone(), state.cwd.clone());
+            if let Some(ref model) = state.model
+                && let Some(prefix) = self.resolve_external_prefix(model).await
+            {
+                let cwd = state.cwd.clone();
+                if let Some(runner_sid) =
+                    self.open_runner_session(&prefix, &cwd, model).await
+                {
+                    if !state.messages.is_empty() {
+                        self.import_history(&prefix, &runner_sid, &state.messages)
+                            .await;
+                    }
+                    self.active_sessions
+                        .borrow_mut()
+                        .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
+                    self.id_remap
+                        .borrow_mut()
+                        .insert(runner_sid.clone(), acp_sid.clone());
+                    if let Some(bridge) = self.get_or_create_bridge(&prefix) {
+                        let resp = bridge.prompt_to(args, &runner_sid).await?;
+                        self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
+                        return Ok(resp);
                     }
                 }
             }
@@ -611,10 +611,10 @@ where
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
         let acp_sid = args.session_id.0.to_string();
-        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
-            if let Some(bridge) = self.get_or_create_bridge(&prefix) {
-                return bridge.cancel_to(args, &runner_sid).await;
-            }
+        if let Some((prefix, runner_sid)) = self.route_of(&acp_sid)
+            && let Some(bridge) = self.get_or_create_bridge(&prefix)
+        {
+            return bridge.cancel_to(args, &runner_sid).await;
         }
         self.inner.cancel(args).await
     }
@@ -684,21 +684,20 @@ where
         // if the runner is temporarily down, fall through to inner (best-effort).
         if args.config_id.0.as_ref() == "compactor_model" {
             let acp_sid = args.session_id.0.to_string();
-            if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
-                if prefix != self.embedded_prefix {
-                    if let Some(bridge) = self.get_or_create_bridge(&prefix) {
-                        let mut ext_args = args.clone();
-                        ext_args.session_id = runner_sid.into();
-                        match bridge.set_session_config_option(ext_args).await {
-                            Ok(resp) => return Ok(resp),
-                            Err(e) => warn!(
-                                error = %e, prefix,
-                                "multi-runner: compactor_model forward failed — falling to inner"
-                            ),
-                        }
-                    }
-                    // Bridge unavailable: fall through to inner (same best-effort
-                    // pattern as open_runner_session returning None → caller uses inner).
+            // Best-effort forward to the external runner; on any miss (no route,
+            // not external, no bridge, or a forward error) fall through to inner.
+            if let Some((prefix, runner_sid)) = self.route_of(&acp_sid)
+                && prefix != self.embedded_prefix
+                && let Some(bridge) = self.get_or_create_bridge(&prefix)
+            {
+                let mut ext_args = args.clone();
+                ext_args.session_id = runner_sid.into();
+                match bridge.set_session_config_option(ext_args).await {
+                    Ok(resp) => return Ok(resp),
+                    Err(e) => warn!(
+                        error = %e, prefix,
+                        "multi-runner: compactor_model forward failed — falling to inner"
+                    ),
                 }
             }
         }
@@ -2130,13 +2129,13 @@ mod tests {
             assert!(
                 export_rx.is_terminated()
                     || export_rx.try_recv().is_ok()
-                    || matches!(export_rx.try_recv(), Err(_)),
+                    || export_rx.try_recv().is_err(),
                 "session/export must have been called on the source runner (xai) during migration"
             );
             assert!(
                 import_rx.is_terminated()
                     || import_rx.try_recv().is_ok()
-                    || matches!(import_rx.try_recv(), Err(_)),
+                    || import_rx.try_recv().is_err(),
                 "session/import must have been called on the target runner (openrouter) during migration"
             );
 
