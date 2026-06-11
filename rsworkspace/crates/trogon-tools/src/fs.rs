@@ -1,5 +1,8 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::Value;
 
+use crate::types::{ContentBlock, ImageSource, ToolOutput};
 use crate::ToolContext;
 
 /// Build a collision-resistant sibling temp path for atomic writes.
@@ -165,10 +168,119 @@ fn normalize_components(path: &std::path::Path) -> std::path::PathBuf {
     out
 }
 
-pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
+/// Detected media type for a file read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MediaKind {
+    Png,
+    Jpeg,
+    Gif,
+    Webp,
+    Pdf,
+}
+
+impl MediaKind {
+    fn mime_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Gif => "image/gif",
+            Self::Webp => "image/webp",
+            Self::Pdf => "application/pdf",
+        }
+    }
+}
+
+/// Sniff magic bytes to identify common image and PDF formats.
+pub(crate) fn media_kind_from_bytes(data: &[u8]) -> Option<MediaKind> {
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(MediaKind::Png);
+    }
+    if data.starts_with(b"\xff\xd8\xff") {
+        return Some(MediaKind::Jpeg);
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return Some(MediaKind::Gif);
+    }
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        return Some(MediaKind::Webp);
+    }
+    if data.starts_with(b"%PDF") {
+        return Some(MediaKind::Pdf);
+    }
+    None
+}
+
+/// Map a file extension to a media kind (used when magic bytes are inconclusive).
+pub(crate) fn media_kind_from_extension(path: &std::path::Path) -> Option<MediaKind> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some(MediaKind::Png),
+        "jpg" | "jpeg" => Some(MediaKind::Jpeg),
+        "gif" => Some(MediaKind::Gif),
+        "webp" => Some(MediaKind::Webp),
+        "pdf" => Some(MediaKind::Pdf),
+        _ => None,
+    }
+}
+
+/// Resolve the media kind from file path and raw bytes (magic bytes take precedence).
+pub(crate) fn detect_media_kind(path: &std::path::Path, data: &[u8]) -> Option<MediaKind> {
+    media_kind_from_bytes(data).or_else(|| media_kind_from_extension(path))
+}
+
+fn image_output(data: &[u8], media_type: &str) -> ToolOutput {
+    ToolOutput::Blocks(vec![ContentBlock::Image {
+        source: ImageSource::Base64 {
+            media_type: media_type.to_string(),
+            data: BASE64.encode(data),
+        },
+    }])
+}
+
+fn extract_pdf_text(data: &[u8]) -> String {
+    match pdf_extract::extract_text_from_mem(data) {
+        Ok(text) if !text.trim().is_empty() => text,
+        Ok(_) => format!(
+            "PDF document ({} bytes). No extractable text found.",
+            data.len()
+        ),
+        Err(e) => format!(
+            "PDF document ({} bytes). Text extraction failed: {e}",
+            data.len()
+        ),
+    }
+}
+
+fn format_numbered_text(content: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset.unwrap_or(0);
+
+    // MED-13: `offset == lines.len()` previously slipped through (`>` only) and
+    // returned an empty string with no signal that the read was past the end.
+    // An empty file (0 lines) at offset 0 is still a legitimate empty read.
+    if start >= lines.len() && !lines.is_empty() {
+        return Err(format!(
+            "Error: offset {start} is at or past end of file ({} lines)",
+            lines.len()
+        ));
+    }
+
+    let end = limit
+        .map(|l| (start + l).min(lines.len()))
+        .unwrap_or(lines.len());
+
+    Ok(lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{:>6}\t{line}", start + i + 1))
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+pub async fn read_file(ctx: &ToolContext, input: &Value) -> ToolOutput {
     let path = match input.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
-        None => return "Error: missing required parameter 'path'".to_string(),
+        None => return ToolOutput::Text("Error: missing required parameter 'path'".to_string()),
     };
     let offset = input
         .get("offset")
@@ -181,46 +293,48 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
-        Err(e) => return format!("Error: {e}"),
+        Err(e) => return ToolOutput::Text(format!("Error: {e}")),
     };
 
-    let content = match tokio::fs::read_to_string(&full_path).await {
-        Ok(c) => c,
-        Err(e) => return format!("Error reading {path}: {e}"),
+    let bytes = match tokio::fs::read(&full_path).await {
+        Ok(b) => b,
+        Err(e) => return ToolOutput::Text(format!("Error reading {path}: {e}")),
     };
 
-    let lines: Vec<&str> = content.lines().collect();
-    let start = offset.unwrap_or(0);
+    let kind = detect_media_kind(&full_path, &bytes);
 
-    // MED-13: `offset == lines.len()` previously slipped through (`>` only) and
-    // returned an empty string with no signal that the read was past the end.
-    // An empty file (0 lines) at offset 0 is still a legitimate empty read.
-    if start >= lines.len() && !lines.is_empty() {
-        return format!(
-            "Error: offset {start} is at or past end of file ({} lines)",
-            lines.len()
-        );
-    }
-
-    let end = limit
-        .map(|l| (start + l).min(lines.len()))
-        .unwrap_or(lines.len());
-
-    let mut result = lines[start..end]
-        .iter()
-        .enumerate()
-        .map(|(i, line)| format!("{:>6}\t{line}", start + i + 1))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut output = match kind {
+        Some(k @ (MediaKind::Png | MediaKind::Jpeg | MediaKind::Gif | MediaKind::Webp)) => {
+            image_output(&bytes, k.mime_type())
+        }
+        Some(MediaKind::Pdf) => ToolOutput::Text(extract_pdf_text(&bytes)),
+        None => {
+            let content = match String::from_utf8(bytes) {
+                Ok(c) => c,
+                Err(_) => {
+                    return ToolOutput::Text(format!(
+                        "Error reading {path}: file is not valid UTF-8 text"
+                    ));
+                }
+            };
+            match format_numbered_text(&content, offset, limit) {
+                Ok(text) => ToolOutput::Text(text),
+                Err(e) => return ToolOutput::Text(e),
+            }
+        }
+    };
 
     // On-demand TROGON.md: surface a subdirectory's rules when a file there is
     // read. The session-start loader walks UP from cwd, so cwd + ancestors are
     // already in the system prompt; subdirectories are not — this fills that gap.
-    if let Some(extra) = subdir_trogon_md(&ctx.cwd, &full_path).await {
-        result.push_str("\n\n");
-        result.push_str(&extra);
+    if kind.is_none()
+        && let ToolOutput::Text(ref mut text) = output
+        && let Some(extra) = subdir_trogon_md(&ctx.cwd, &full_path).await
+    {
+        text.push_str("\n\n");
+        text.push_str(&extra);
     }
-    result
+    output
 }
 
 /// When `file_path` lives in a directory *strictly below* `cwd`, return that
@@ -471,8 +585,25 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ToolOutput;
     use serde_json::json;
     use tempfile::TempDir;
+
+    fn as_text(output: ToolOutput) -> String {
+        output.display_text()
+    }
+
+    /// Smallest valid 1×1 PNG (67 bytes).
+    const TINY_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+        0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08,
+        0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
+        0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// Valid PDF fixture with extractable text "Hello PDF".
+    const TEST_PDF: &[u8] = include_bytes!("../tests/fixtures/hello.pdf");
 
     fn ctx(dir: &TempDir) -> ToolContext {
         ToolContext {
@@ -637,11 +768,88 @@ mod tests {
         assert_eq!(resolved, abs);
     }
 
+    #[test]
+    fn media_kind_from_bytes_detects_png_jpeg_gif_webp_pdf() {
+        assert_eq!(media_kind_from_bytes(TINY_PNG), Some(MediaKind::Png));
+        assert_eq!(media_kind_from_bytes(b"\xff\xd8\xff\x00"), Some(MediaKind::Jpeg));
+        assert_eq!(media_kind_from_bytes(b"GIF89a"), Some(MediaKind::Gif));
+        assert_eq!(
+            media_kind_from_bytes(b"RIFF\x00\x00\x00\x00WEBP"),
+            Some(MediaKind::Webp)
+        );
+        assert_eq!(media_kind_from_bytes(TEST_PDF), Some(MediaKind::Pdf));
+        assert_eq!(media_kind_from_bytes(b"plain text"), None);
+    }
+
+    #[test]
+    fn media_kind_from_extension_maps_common_suffixes() {
+        assert_eq!(
+            media_kind_from_extension(std::path::Path::new("photo.JPG")),
+            Some(MediaKind::Jpeg)
+        );
+        assert_eq!(
+            media_kind_from_extension(std::path::Path::new("doc.pdf")),
+            Some(MediaKind::Pdf)
+        );
+        assert_eq!(
+            media_kind_from_extension(std::path::Path::new("readme.txt")),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_pdf_text_from_minimal_fixture() {
+        let text = extract_pdf_text(TEST_PDF);
+        assert!(
+            text.contains("Hello PDF"),
+            "expected extracted PDF text, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_png_returns_image_block() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("pixel.png"), TINY_PNG)
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = read_file(&ctx, &json!({"path": "pixel.png"})).await;
+        match result {
+            ToolOutput::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    ContentBlock::Image {
+                        source: ImageSource::Base64 { media_type, data },
+                    } => {
+                        assert_eq!(media_type, "image/png");
+                        assert_eq!(data, &BASE64.encode(TINY_PNG));
+                    }
+                    other => panic!("expected Image block, got {other:?}"),
+                }
+            }
+            other => panic!("expected Blocks output, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_pdf_returns_extracted_text() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("doc.pdf"), TEST_PDF)
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = as_text(read_file(&ctx, &json!({"path": "doc.pdf"})).await);
+        assert!(
+            result.contains("Hello PDF"),
+            "expected PDF text extraction, got: {result}"
+        );
+    }
+
     #[tokio::test]
     async fn read_file_missing_path_returns_error() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({})).await;
+        let result = as_text(read_file(&ctx, &json!({})).await);
         assert!(result.contains("missing required parameter 'path'"), "got: {result}");
     }
 
@@ -650,7 +858,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         tokio::fs::write(dir.path().join("f.txt"), "a\nb\nc").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 100})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "f.txt", "offset": 100})).await);
         assert!(result.contains("Error"), "got: {result}");
         assert!(result.contains("past end"), "got: {result}");
     }
@@ -661,7 +869,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         tokio::fs::write(dir.path().join("f.txt"), "a\nb\nc").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 3})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "f.txt", "offset": 3})).await);
         assert!(result.contains("past end"), "got: {result}");
     }
 
@@ -671,7 +879,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         tokio::fs::write(dir.path().join("empty.txt"), "").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "empty.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "empty.txt"})).await);
         assert!(!result.contains("Error"), "got: {result}");
         assert_eq!(result, "");
     }
@@ -683,7 +891,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "hello.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "hello.txt"})).await);
         assert!(result.contains("1\tline1"));
         assert!(result.contains("2\tline2"));
         assert!(result.contains("3\tline3"));
@@ -699,7 +907,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "src/main.rs"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "src/main.rs"})).await);
         assert!(result.contains("fn main()"), "file content missing: {result}");
         assert!(result.contains("Directory rules"), "subdir TROGON.md not surfaced: {result}");
         assert!(result.contains("prefer iterators"), "subdir rule body missing: {result}");
@@ -711,7 +919,7 @@ mod tests {
         tokio::fs::write(dir.path().join("TROGON.md"), "cwd rule").await.unwrap();
         tokio::fs::write(dir.path().join("a.txt"), "hello").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "a.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "a.txt"})).await);
         assert!(result.contains("hello"));
         assert!(
             !result.contains("Directory rules"),
@@ -726,7 +934,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 1, "limit": 2})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "f.txt", "offset": 1, "limit": 2})).await);
         assert!(result.contains("2\tb"));
         assert!(result.contains("3\tc"));
         assert!(!result.contains("1\ta"));
@@ -737,7 +945,7 @@ mod tests {
     async fn read_file_missing_returns_error() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "no_such_file.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "no_such_file.txt"})).await);
         assert!(result.starts_with("Error"));
     }
 
@@ -745,7 +953,7 @@ mod tests {
     async fn read_file_traversal_rejected() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "../../etc/passwd"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "../../etc/passwd"})).await);
         assert!(result.contains("Error"));
     }
 

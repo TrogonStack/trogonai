@@ -9,6 +9,10 @@ use serde_json::json;
 use tempfile::TempDir;
 use trogon_tools::{ToolContext, all_tool_defs, dispatch_tool};
 
+async fn dispatch(ctx: &ToolContext, name: &str, input: &serde_json::Value) -> String {
+    dispatch_tool(ctx, name, input).await.display_text()
+}
+
 fn ctx(dir: &TempDir) -> ToolContext {
     ToolContext {
         proxy_url: String::new(),
@@ -56,7 +60,7 @@ async fn shared_dispatch_str_replace_replace_all() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "str_replace",
         &json!({"path": "f.txt", "old_str": "a", "new_str": "b", "replace_all": true}),
@@ -77,7 +81,7 @@ async fn shared_dispatch_multi_edit_sequence() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "multi_edit",
         &json!({
@@ -104,7 +108,7 @@ async fn shared_dispatch_multi_edit_atomic_failure() {
         .await
         .unwrap();
 
-    let result = dispatch_tool(
+    let result = dispatch(
         &ctx(&dir),
         "multi_edit",
         &json!({
