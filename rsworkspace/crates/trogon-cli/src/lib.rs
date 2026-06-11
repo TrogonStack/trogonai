@@ -21,6 +21,7 @@ pub mod stdio_mcp_bridge;
 pub mod stream_input;
 pub mod terminal;
 pub mod tool_update;
+pub mod transcript;
 pub mod tui_client;
 
 pub use fs::{Fs, RealFs};
