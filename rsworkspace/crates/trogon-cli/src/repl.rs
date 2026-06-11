@@ -11,6 +11,7 @@ use crate::session_rewind::{
 };
 use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
+use crate::transcript::SessionTranscriptRecorder;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -1308,9 +1309,21 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             }
                         }
 
+                        let stop = renderer.take_stop();
+                        if let Some(recorder) =
+                            SessionTranscriptRecorder::for_session(&fs, session.session_id())
+                        {
+                            recorder.record_turn(
+                                &line,
+                                renderer.assistant_text(),
+                                stop.as_ref(),
+                                interrupted,
+                            );
+                        }
+
                         // Persist on a clean turn end (matches programming-gaps'
                         // in-arm persistence — skips cancelled / maxTurnRequests).
-                        if let Some(TurnStop::Done { reason }) = renderer.take_stop()
+                        if let Some(TurnStop::Done { reason }) = stop
                             && reason != "cancelled"
                             && reason != "maxTurnRequests"
                         {
