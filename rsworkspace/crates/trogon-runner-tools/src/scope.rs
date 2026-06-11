@@ -17,6 +17,12 @@
 
 use globset::{Glob, GlobSet as GlobSetInner, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::permission::{
+    is_edit_tool, is_read_only_bash_command, is_read_only_tool, lexical_abs, touches_protected_path,
+};
+use crate::permission_rules::{extract_path_from_input, normalize_tool_name};
 
 /// What happens when a tool call falls **outside** the scope.
 ///
@@ -283,6 +289,97 @@ impl Scope {
         })
     }
 
+    /// Classify a single tool call against this scope.
+    ///
+    /// Order of decision:
+    /// 1. **Protected** — the global secrets/VCS-internals set, or this scope's
+    ///    `protected` globs, are a hard boundary (`Forbidden`, never escalatable).
+    /// 2. **Reads** — read-only tools and read-only bash are always `InScope`.
+    /// 3. **Network tools** (`fetch_url`, `web_search`, `git_push`, `gh`) depend on
+    ///    the network policy. `AllowList` is permitted at this gate; per-host
+    ///    enforcement is delegated to `EgressPolicy` downstream.
+    /// 4. **File writes/edits** — `InScope` only when the resolved target path
+    ///    falls under a write root; a missing path fails closed.
+    /// 5. **Local VCS writes** (`git_commit`, `git_create_branch`) — `InScope` only
+    ///    when the working directory is itself within a write root.
+    /// 6. **Write-bash** — `InScope` only when the command matches a `run` pattern.
+    /// 7. **Anything else** — fails closed (`OutOfScope`).
+    ///
+    /// `OutOfScope` is not a denial: the caller applies [`Scope::on_exceed`]
+    /// (escalate once, or deny). Only `Forbidden` is a hard stop.
+    pub fn evaluate(&self, tool_name: &str, tool_input: &Value, cwd: &str) -> ScopeDecision {
+        // 1. Hard boundary first.
+        if touches_protected_path(tool_name, tool_input) {
+            return ScopeDecision::Forbidden;
+        }
+        if let Some(path) = extract_path_from_input(tool_input) {
+            let abs = lexical_abs(cwd, path);
+            if self.protected.matches(&abs.to_string_lossy()) {
+                return ScopeDecision::Forbidden;
+            }
+        }
+
+        let normalized = normalize_tool_name(tool_name);
+
+        // 2. Reads are always in scope.
+        if is_read_only_tool(tool_name)
+            || (normalized == "bash" && is_read_only_bash_command(tool_input))
+        {
+            return ScopeDecision::InScope;
+        }
+
+        // 3. Network-capable tools depend on the network policy.
+        if matches!(normalized, "fetch_url" | "web_search" | "git_push" | "gh") {
+            return if matches!(self.network, NetworkPolicy::Denied) {
+                ScopeDecision::OutOfScope
+            } else {
+                ScopeDecision::InScope
+            };
+        }
+
+        // 4. File-write / edit tools: in scope iff the resolved path is writable.
+        if is_edit_tool(tool_name) || matches!(normalized, "multi_edit" | "delete_file") {
+            let Some(path) = extract_path_from_input(tool_input) else {
+                return ScopeDecision::OutOfScope; // no path → fail closed
+            };
+            let abs = lexical_abs(cwd, path);
+            return if self.write.matches(&abs.to_string_lossy()) {
+                ScopeDecision::InScope
+            } else {
+                ScopeDecision::OutOfScope
+            };
+        }
+
+        // 5. Local VCS writes: in scope iff the working directory is writable.
+        //    git writes occur under cwd, so probe a representative path under it.
+        if matches!(normalized, "git_commit" | "git_create_branch") {
+            let under_cwd = lexical_abs(cwd, "_scope_probe_");
+            return if self.write.matches(&under_cwd.to_string_lossy()) {
+                ScopeDecision::InScope
+            } else {
+                ScopeDecision::OutOfScope
+            };
+        }
+
+        // 6. Write-bash: in scope iff the command matches an allowed run pattern.
+        //    (Outright-dangerous commands are caught by deny rules upstream of
+        //    scope, so run-any baselines stay safe in the live flow.)
+        if normalized == "bash" {
+            let cmd = tool_input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            return if self.run.matches(cmd) {
+                ScopeDecision::InScope
+            } else {
+                ScopeDecision::OutOfScope
+            };
+        }
+
+        // 7. Unknown tool: fail closed.
+        ScopeDecision::OutOfScope
+    }
+
     /// Globs the agent may write to silently.
     pub fn write(&self) -> &GlobSet {
         &self.write
@@ -387,6 +484,7 @@ fn parse_on_exceed(value: Option<String>) -> Result<OnExceed, ScopeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn baseline_anchors_writes_to_cwd_and_denies_network() {
@@ -615,5 +713,123 @@ mod tests {
     fn scope_decision_variants_are_distinct() {
         assert_ne!(ScopeDecision::InScope, ScopeDecision::OutOfScope);
         assert_ne!(ScopeDecision::OutOfScope, ScopeDecision::Forbidden);
+    }
+
+    // ── SCOPE-4 evaluate ──────────────────────────────────────────────────
+
+    #[test]
+    fn evaluate_baseline_classifies_reads_writes_protected() {
+        let s = Scope::baseline("/repo");
+        // Reads are always in scope.
+        assert_eq!(
+            s.evaluate("read_file", &json!({"path": "src/main.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("git_status", &json!({}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "cat src/main.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        // Protected paths are a hard stop, even for reads / read-only bash.
+        assert_eq!(
+            s.evaluate("read_file", &json!({"path": ".env"}), "/repo"),
+            ScopeDecision::Forbidden
+        );
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "cat .env"}), "/repo"),
+            ScopeDecision::Forbidden
+        );
+        // Writes inside cwd are in scope; outside escalates.
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "src/main.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "/tmp/x"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+        // Baseline: run-any bash in scope; network denied; local commit allowed.
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "cargo test"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("fetch_url", &json!({"url": "https://x"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+        assert_eq!(
+            s.evaluate("git_commit", &json!({}), "/repo"),
+            ScopeDecision::InScope
+        );
+        // Unknown tool fails closed.
+        assert_eq!(
+            s.evaluate("frobnicate", &json!({}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+    }
+
+    #[test]
+    fn evaluate_configured_scope_enforces_roots_network_and_run() {
+        let wire = ScopeWire {
+            write: vec!["src/**".to_string()],
+            run: vec!["cargo".to_string()],
+            network: Some("on".to_string()),
+            protected: vec!["**/secret.txt".to_string()],
+            on_exceed: Some("deny".to_string()),
+        };
+        let s = Scope::from_wire(wire, "/repo").unwrap();
+        // Write roots.
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "src/a.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "tests/a.rs"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+        assert_eq!(
+            s.evaluate("delete_file", &json!({"path": "src/old.rs"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        // Scope-level protected glob is a hard stop.
+        assert_eq!(
+            s.evaluate("write_file", &json!({"path": "src/secret.txt"}), "/repo"),
+            ScopeDecision::Forbidden
+        );
+        // Run patterns.
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "cargo build"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("bash", &json!({"command": "npm install"}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+        // Network on.
+        assert_eq!(
+            s.evaluate("fetch_url", &json!({"url": "https://x"}), "/repo"),
+            ScopeDecision::InScope
+        );
+        assert_eq!(
+            s.evaluate("git_push", &json!({}), "/repo"),
+            ScopeDecision::InScope
+        );
+        // Repo root is not under src/**, so committing escalates.
+        assert_eq!(
+            s.evaluate("git_commit", &json!({}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
+    }
+
+    #[test]
+    fn evaluate_write_without_path_fails_closed() {
+        let s = Scope::baseline("/repo");
+        assert_eq!(
+            s.evaluate("write_file", &json!({}), "/repo"),
+            ScopeDecision::OutOfScope
+        );
     }
 }

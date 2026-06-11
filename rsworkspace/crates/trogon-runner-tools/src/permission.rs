@@ -301,12 +301,12 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
     "gh",
 ];
 
-fn is_read_only_tool(tool_name: &str) -> bool {
+pub(crate) fn is_read_only_tool(tool_name: &str) -> bool {
     READ_ONLY_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
 /// Bash commands that only read or inspect the filesystem (no writes, no exec).
-fn is_read_only_bash_command(tool_input: &Value) -> bool {
+pub(crate) fn is_read_only_bash_command(tool_input: &Value) -> bool {
     let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) else {
         return false;
     };
@@ -345,7 +345,7 @@ fn is_read_only_bash_command(tool_input: &Value) -> bool {
     )
 }
 
-fn is_edit_tool(tool_name: &str) -> bool {
+pub(crate) fn is_edit_tool(tool_name: &str) -> bool {
     ACCEPT_EDITS_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
@@ -382,7 +382,7 @@ fn is_protected_path(path: &str) -> bool {
 
 /// True when a tool call targets a protected path: an explicit path argument, or
 /// a (read-only) bash command that references one (e.g. `cat .env`).
-fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
+pub(crate) fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
     if extract_path_from_input(tool_input)
         .map(is_protected_path)
         .unwrap_or(false)
@@ -401,7 +401,7 @@ fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
 
 /// Lexically resolve `p` (relative to `base`) to a normalized absolute path,
 /// collapsing `.`/`..` WITHOUT touching the filesystem.
-fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
+pub(crate) fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
     use std::path::{Component, Path, PathBuf};
     let raw = if Path::new(p).is_absolute() {
         PathBuf::from(p)
