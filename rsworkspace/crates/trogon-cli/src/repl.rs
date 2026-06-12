@@ -1266,17 +1266,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         };
 
                         // Capture input typed during this turn: plain lines are queued
-                        // and auto-submitted when the turn ends; Ctrl+G starts a side
-                        // question answered in a scratch session. The reader restores
-                        // the terminal when it drops at the end of this block.
+                        // and auto-submitted when the turn ends; Ctrl+G steers the
+                        // live turn (published to the runner's steer subject). The
+                        // reader restores the terminal when it drops at end of block.
                         let (_input_reader, mut input_rx) = match StreamInputReader::start() {
                             Some((r, rx)) => (Some(r), Some(rx)),
                             None => (None, None),
                         };
                         // Normal queued messages (typed + Enter), submitted in order.
+                        // (Ctrl+G no longer queues — it steers the live turn instead.)
                         let mut queued: Vec<String> = Vec::new();
-                        // Ctrl+G messages — jump to the front, submitted before `queued`.
-                        let mut front_queued: Vec<String> = Vec::new();
                         let mut interrupted = false;
                         // Drives the live `Thinking… (Ns)` status line between events.
                         let mut status_ticker =
@@ -1302,11 +1301,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             queued.push(msg);
                                         }
                                         Some(StreamInputEvent::Priority(q)) => {
-                                            // Ctrl+G: jump to the front of the queue —
-                                            // sent first once the current turn finishes.
+                                            // Ctrl+G: steer the IN-FLIGHT turn. Publish to the
+                                            // steer subject so the runner injects it into the
+                                            // live loop and the model addresses it on its next
+                                            // step — instead of waiting for the turn to end.
                                             reset_display();
-                                            eprintln!("\x1b[2m⏳ queued (next): {q}\x1b[0m");
-                                            front_queued.push(q);
+                                            eprintln!("\x1b[2m↪ steering: {q}\x1b[0m");
+                                            session.steer(q).await;
                                         }
                                         // Reader stopped — stop polling it to avoid spinning.
                                         None => { input_rx = None; }
@@ -1384,13 +1385,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             rewind_state.on_turn_complete();
                         }
 
-                        // Auto-submit messages queued during this turn: Ctrl+G
-                        // (front_queued) messages go first, then the rest in order.
+                        // Auto-submit messages queued during this turn, in order.
                         // If the user interrupted (Ctrl+C), discard the queue since
                         // they're likely changing direction. `_input_reader` drops at
                         // the end of this block, restoring the terminal before readline.
                         if !interrupted {
-                            queued_prompts.extend(front_queued);
                             queued_prompts.extend(queued);
                         }
                     }

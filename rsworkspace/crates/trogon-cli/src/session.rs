@@ -87,6 +87,14 @@ pub trait Session: Send + Sync + 'static {
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 
+    /// Inject a steering message into the in-flight turn (Ctrl+G priority input).
+    /// Published to `{prefix}.session.{id}.agent.steer`; the runner drains it into
+    /// the live tool-use loop so the model addresses it on its next step. Default
+    /// no-op (mocks / runners without steer support).
+    fn steer(&self, _text: String) -> impl std::future::Future<Output = ()> + Send + '_ {
+        async {}
+    }
+
     fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_;
@@ -555,6 +563,15 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             if let Ok(payload) = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })) {
                 let _ = self.nats.publish_bytes(subject, payload.into()).await;
             }
+        }
+    }
+
+    fn steer(&self, text: String) -> impl std::future::Future<Output = ()> + Send + '_ {
+        // The runner's `subscribe_steer` takes the raw payload as the steer text
+        // (no JSON envelope), so publish the message verbatim.
+        let subject = format!("{}.session.{}.agent.steer", self.prefix, self.session_id);
+        async move {
+            let _ = self.nats.publish_bytes(subject, text.into_bytes().into()).await;
         }
     }
 
