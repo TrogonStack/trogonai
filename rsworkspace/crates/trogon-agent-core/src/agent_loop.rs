@@ -181,6 +181,25 @@ impl std::error::Error for AgentError {
     }
 }
 
+/// Number of consecutive rounds with the identical tool-call set before the loop
+/// guard halts the turn (a generous `max_iterations` is the coarse backstop).
+const LOOP_REPEAT_LIMIT: u32 = 3;
+
+/// Order-independent signature of a round's tool calls (`name` + `input`, ignoring
+/// the per-call id). Two rounds with the same signature are an identical repeat,
+/// which the loop guard uses to detect a model spinning on the same call.
+fn tool_call_signature(content: &[ContentBlock]) -> String {
+    let mut parts: Vec<String> = content
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::ToolUse { name, input, .. } => Some(format!("{name}\u{1}{input}")),
+            _ => None,
+        })
+        .collect();
+    parts.sort();
+    parts.join("\u{2}")
+}
+
 impl From<reqwest::Error> for AgentError {
     fn from(e: reqwest::Error) -> Self {
         Self::Http(HttpError(e.to_string()))
@@ -676,6 +695,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         let mut total_output: u32 = 0;
         let mut total_cache_creation: u32 = 0;
         let mut total_cache_read: u32 = 0;
+        // Loop detection: the signature of the previous round's tool calls and how
+        // many consecutive rounds have repeated it. `max_iterations` is the coarse
+        // backstop; this catches a model spinning on the *same* call far sooner.
+        let mut last_tool_sig: Option<String> = None;
+        let mut repeat_count: u32 = 0;
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Streaming chat loop iteration");
@@ -858,6 +882,27 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     return Err(AgentError::MaxTokens);
                 }
                 "tool_use" => {
+                    // Loop guard: if the model emits the identical set of tool calls
+                    // several rounds running, it's stuck — stop gracefully rather than
+                    // spin until the coarse `max_iterations` backstop.
+                    let sig = tool_call_signature(&response_content);
+                    if last_tool_sig.as_deref() == Some(sig.as_str()) {
+                        repeat_count += 1;
+                    } else {
+                        repeat_count = 1;
+                        last_tool_sig = Some(sig);
+                    }
+                    if repeat_count >= LOOP_REPEAT_LIMIT {
+                        let _ = event_tx
+                            .send(AgentEvent::SystemStatus {
+                                message: format!(
+                                    "stopped: the model repeated the same tool call {LOOP_REPEAT_LIMIT}× in a row (possible loop) — rephrase or steer it to continue"
+                                ),
+                            })
+                            .await;
+                        warn!(repeat = repeat_count, "loop detected — identical tool calls repeated; halting turn");
+                        return Ok(messages);
+                    }
                     let results = self
                         .execute_tools_streaming(&response_content, &event_tx)
                         .await;
@@ -1475,6 +1520,25 @@ mod tests {
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content.len(), 1);
         assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "hello"));
+    }
+
+    #[test]
+    fn tool_call_signature_detects_identical_repeats() {
+        let tu = |id: &str, name: &str, arg: &str| ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input: serde_json::json!({ "path": arg }),
+            parent_tool_use_id: None,
+        };
+        // Same name+input, different id and surrounding text → identical signature.
+        let a = vec![ContentBlock::Text { text: "let me read".into() }, tu("id1", "read_file", "x")];
+        let b = vec![tu("id2", "read_file", "x")];
+        assert_eq!(tool_call_signature(&a), tool_call_signature(&b));
+        // Different input → different signature.
+        let c = vec![tu("id3", "read_file", "y")];
+        assert_ne!(tool_call_signature(&a), tool_call_signature(&c));
+        // No tool calls → empty signature (never matches a real round).
+        assert_eq!(tool_call_signature(&[ContentBlock::Text { text: "hi".into() }]), "");
     }
 
     #[test]

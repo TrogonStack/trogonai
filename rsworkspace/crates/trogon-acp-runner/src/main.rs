@@ -27,7 +27,7 @@
 //! | `PROXY_URL`            | `http://localhost:8080` | trogon-secret-proxy base URL     |
 //! | `ANTHROPIC_TOKEN`      | —                       | Proxy token for Anthropic API    |
 //! | `AGENT_MODEL`          | `claude-opus-4-6`       | Claude model ID                  |
-//! | `AGENT_MAX_ITERATIONS` | `10`                    | Max loop iterations per prompt   |
+//! | `AGENT_MAX_ITERATIONS` | `100`                    | Max loop iterations per prompt   |
 //! | `MAX_THINKING_TOKENS`  | —                       | Extended thinking token budget   |
 
 use std::sync::Arc;
@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let max_iterations: u32 = std::env::var("AGENT_MAX_ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
+        .unwrap_or(100);
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok());
