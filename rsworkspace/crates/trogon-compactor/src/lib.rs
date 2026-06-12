@@ -46,6 +46,8 @@ pub enum DynLlmProvider {
 }
 
 impl LlmProvider for DynLlmProvider {
+    // Explicit `impl Future + Send` mirrors the trait's RPITIT `+ Send` bound.
+    #[allow(clippy::manual_async_fn)]
     fn generate_summary<'a>(
         &'a self,
         messages: &'a [Message],
