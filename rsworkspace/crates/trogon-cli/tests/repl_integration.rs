@@ -212,6 +212,17 @@ impl Session for QueuedSession {
         async move { Ok(()) }
     }
 
+    fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_ {
+        async move { Ok("[]".to_string()) }
+    }
+
+    fn import_history(
+        &self,
+        _messages_json: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        async move { Ok(()) }
+    }
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
         async move {}
     }
