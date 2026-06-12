@@ -78,7 +78,15 @@ pub enum ImageSource {
 pub enum ContentBlock {
     Text { text: String },
     Image { source: ImageSource },
-    Thinking { thinking: String },
+    Thinking {
+        thinking: String,
+        // Anthropic requires `thinking` blocks to be echoed back unchanged — including
+        // this signature — during a tool-use loop, or the next request 400s with
+        // "thinking blocks ... cannot be modified". Captured from the `signature_delta`
+        // stream event (and the non-streaming response field).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -221,12 +229,14 @@ mod tests {
     fn content_block_thinking_roundtrip() {
         let block = ContentBlock::Thinking {
             thinking: "step-by-step reasoning".to_string(),
+            signature: Some("sig-xyz".to_string()),
         };
         let json = serde_json::to_string(&block).unwrap();
         let back: ContentBlock = serde_json::from_str(&json).unwrap();
         match back {
-            ContentBlock::Thinking { thinking } => {
+            ContentBlock::Thinking { thinking, signature } => {
                 assert_eq!(thinking, "step-by-step reasoning");
+                assert_eq!(signature.as_deref(), Some("sig-xyz"));
             }
             other => panic!("wrong variant: {other:?}"),
         }
@@ -234,7 +244,7 @@ mod tests {
 
     #[test]
     fn content_block_thinking_serializes_with_type_tag() {
-        let block = ContentBlock::Thinking { thinking: "t".to_string() };
+        let block = ContentBlock::Thinking { thinking: "t".to_string(), signature: None };
         let json = serde_json::to_string(&block).unwrap();
         assert!(json.contains("\"type\":\"thinking\""), "must have type tag: {json}");
     }

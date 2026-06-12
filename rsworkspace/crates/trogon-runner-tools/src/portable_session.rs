@@ -64,7 +64,10 @@ fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max.saturating_sub(1)])
+        // Slice on a UTF-8 char boundary: `&s[..max-1]` panics when that byte
+        // index falls inside a multibyte char (e.g. tool output with accents/CJK).
+        let boundary = s.floor_char_boundary(max.saturating_sub(1));
+        format!("{}…", &s[..boundary])
     }
 }
 
@@ -98,7 +101,7 @@ pub fn message_to_v2(m: &Message) -> PortableMessageV2 {
                 id: tool_use_id.clone(),
                 output_summary: truncate_str(content, 500),
             },
-            ContentBlock::Thinking { thinking } => PortableBlock::Thinking {
+            ContentBlock::Thinking { thinking, .. } => PortableBlock::Thinking {
                 text: thinking.clone(),
             },
             ContentBlock::Image { .. } => PortableBlock::Text {
@@ -117,6 +120,32 @@ pub fn messages_to_export_v2(messages: &[Message]) -> PortableExportV2 {
     PortableExportV2 {
         version: EXPORT_VERSION_V2,
         messages: messages.iter().map(message_to_v2).collect(),
+    }
+}
+
+/// Convert a codex-style history (`Vec<PortableMessage>` that already carries rich
+/// `blocks` for tool turns) into a V2 export. Text-only messages (empty `blocks`)
+/// become a single `Text` block so importers never reconstruct an empty-content
+/// message — and so the export is emitted as V2 rather than a bare V1 array, which
+/// every V1 importer would flatten by dropping `blocks` (turning tool results into
+/// empty text and triggering an Anthropic 400).
+pub fn portable_messages_to_export_v2(messages: &[PortableMessage]) -> PortableExportV2 {
+    PortableExportV2 {
+        version: EXPORT_VERSION_V2,
+        messages: messages
+            .iter()
+            .map(|m| {
+                if m.blocks.is_empty() {
+                    text_to_v2(&m.role, &m.text)
+                } else {
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: m.role.clone(),
+                        blocks: m.blocks.clone(),
+                    }
+                }
+            })
+            .collect(),
     }
 }
 
@@ -149,6 +178,10 @@ pub fn v2_to_messages(export: &PortableExportV2) -> Vec<Message> {
                     },
                     PortableBlock::Thinking { text } => ContentBlock::Thinking {
                         thinking: text.clone(),
+                        // The portable format does not carry the Anthropic thinking
+                        // signature; a restored block is treated as a prior-turn block
+                        // (which may be sent without a signature).
+                        signature: None,
                     },
                 })
                 .collect();
@@ -180,7 +213,7 @@ pub fn messages_to_v1(messages: &[Message]) -> Vec<PortableMessage> {
                 .filter_map(|b| match b {
                     ContentBlock::Text { text } => Some(text.as_str()),
                     ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
-                    ContentBlock::Thinking { thinking } => Some(thinking.as_str()),
+                    ContentBlock::Thinking { thinking, .. } => Some(thinking.as_str()),
                     // MED-18: the text-only V1 format cannot represent a tool call
                     // (no id/input/result pairing). Emitting the bare tool name as
                     // prose corrupted the message and broke API round-trips, so drop
@@ -431,5 +464,67 @@ mod tests {
             }
             _ => panic!("expected ToolResult"),
         }
+    }
+
+    #[test]
+    fn codex_history_exports_as_v2_preserving_tool_blocks() {
+        // Bug 2: codex history carries rich `blocks` (tool turns) plus text-only turns.
+        // It must export as V2 so importers reconstruct tool blocks instead of
+        // flattening to empty text via the V1 path.
+        let history = vec![
+            PortableMessage {
+                role: "assistant".into(),
+                text: "[tool call]".into(),
+                blocks: vec![PortableBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "read_file".into(),
+                    input_summary: "{\"path\":\"x\"}".into(),
+                }],
+            },
+            PortableMessage {
+                role: "user".into(),
+                text: String::new(),
+                blocks: vec![PortableBlock::ToolResult {
+                    id: "t1".into(),
+                    output_summary: "contents".into(),
+                }],
+            },
+            PortableMessage::text_only("assistant", "done"),
+        ];
+
+        let export = portable_messages_to_export_v2(&history);
+        assert_eq!(export.version, EXPORT_VERSION_V2);
+
+        // Serialize → parse: must classify as V2 (object), not a V1 array.
+        let json = serde_json::to_string(&export).unwrap();
+        assert!(matches!(parse_export_json(&json).unwrap(), ParsedExport::V2(_)));
+
+        // Reconstruct into wire Messages: tool blocks preserved, NO empty text block.
+        let msgs = v2_to_messages(&export);
+        assert_eq!(msgs.len(), 3);
+        assert!(
+            msgs.iter().any(|m| m
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. }))),
+            "ToolUse must survive the round-trip"
+        );
+        assert!(
+            msgs.iter().any(|m| m
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolResult { .. }))),
+            "ToolResult must survive the round-trip"
+        );
+        assert!(
+            !msgs.iter().any(|m| m
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Text { text } if text.is_empty()))),
+            "no empty text block (would trigger an Anthropic 400)"
+        );
+        // The text-only turn became a real Text block.
+        let last = msgs.last().unwrap();
+        assert!(matches!(last.content.first(), Some(ContentBlock::Text { text }) if text == "done"));
     }
 }
