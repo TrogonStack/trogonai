@@ -260,7 +260,7 @@ impl TurnRenderer {
     /// the model works (no symbol, just the word + elapsed seconds), or the
     /// `▸ N tools · name running… (Ns)` pill while tools run.
     fn render_status_line(&mut self) {
-        let secs = self.turn_start.elapsed().as_secs();
+        let elapsed = fmt_elapsed(self.turn_start.elapsed().as_secs());
         let line = if self.running_tool.is_some() || self.tools_done > 0 {
             let running = self
                 .running_tool
@@ -268,9 +268,9 @@ impl TurnRenderer {
                 .map(|n| format!(" · {n} running…"))
                 .unwrap_or_default();
             let total = self.tools_done + u32::from(self.running_tool.is_some());
-            format!("▸ {total} tools{running} ({secs}s)")
+            format!("▸ {total} tools{running} ({elapsed})")
         } else {
-            format!("Thinking… ({secs}s)")
+            format!("Thinking… ({elapsed})")
         };
         if self.pill_line {
             eprint!("\r\x1b[2K\x1b[2m{line}\x1b[0m");
@@ -288,6 +288,18 @@ impl TurnRenderer {
         if self.stop.is_none() && (self.thinking || self.running_tool.is_some()) {
             self.render_status_line();
         }
+    }
+}
+
+/// Human-readable elapsed time for the live status line: `45s`, `1m 10s`,
+/// `2h 5m` — never a bare `70s`.
+fn fmt_elapsed(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
     }
 }
 
@@ -347,5 +359,13 @@ mod tests {
         assert_eq!(fmt_tokens(42), "42");
         assert_eq!(fmt_tokens(1_500), "1.5k");
         assert_eq!(fmt_tokens(2_000_000), "2.0M");
+    }
+
+    #[test]
+    fn fmt_elapsed_is_human_readable() {
+        assert_eq!(fmt_elapsed(45), "45s");
+        assert_eq!(fmt_elapsed(70), "1m 10s");
+        assert_eq!(fmt_elapsed(600), "10m 0s");
+        assert_eq!(fmt_elapsed(3_725), "1h 2m");
     }
 }
