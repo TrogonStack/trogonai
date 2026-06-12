@@ -27,7 +27,10 @@ pub fn sanitize_tool_output(output: &str) -> String {
         .join("\n")
 }
 
-/// Print tool output on stderr after resetting the cursor so lines start at column 0.
+/// Print tool output on stderr after resetting the cursor so lines start at
+/// column 0. Rendered in gray (`\x1b[90m`) so tool output, file contents, and
+/// code read as dim chrome — visually distinct from the model's dialogue, the
+/// way Claude dims tool results.
 pub fn print_tool_output(output: &str) {
     let clean = sanitize_tool_output(output);
     if clean.is_empty() {
@@ -35,7 +38,7 @@ pub fn print_tool_output(output: &str) {
     }
     reset_display();
     for line in clean.lines() {
-        let _ = writeln!(std::io::stderr(), "\x1b[2K\r{line}");
+        let _ = writeln!(std::io::stderr(), "\x1b[2K\r\x1b[90m{line}\x1b[0m");
     }
     let _ = std::io::stderr().flush();
     reset_display();
