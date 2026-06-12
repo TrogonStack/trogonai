@@ -71,6 +71,13 @@ fn invalid_params(msg: impl Into<String>) -> Error {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
+/// Per-session cache for a Codex thread.
+///
+/// **Known limitation:** Codex owns the authoritative conversation state via
+/// `thread_id` in the `codex app-server` subprocess. This struct is an
+/// in-memory cache only — there is no NATS KV session store, so sessions are
+/// lost on runner respawn and cannot be migrated to another runner. This is
+/// intentional for the Codex integration, not a bug.
 #[derive(serde::Serialize)]
 struct CodexSession {
     thread_id: String,
@@ -133,8 +140,14 @@ impl SessionNotifier for NatsClientProxy<async_nats::Client> {
 /// ACP Agent implementation backed by a `codex app-server` subprocess.
 ///
 /// Each `CodexAgent` manages one `codex app-server` process. ACP sessions map
-/// to Codex threads (thread_id). Prompt calls run Codex turns and stream the
+/// to Codex threads (`thread_id`). Prompt calls run Codex turns and stream the
 /// resulting events back to the ACP client as `SessionNotification`s.
+///
+/// **Session portability (known limitation):** unlike the xAI and ACP runners,
+/// Codex sessions are not persisted to NATS KV. Conversation state lives in the
+/// provider-owned Codex subprocess and is cached in memory here only. Sessions
+/// are lost when the runner respawns or the subprocess crashes — this is expected
+/// behaviour, not a bug.
 ///
 /// The subprocess is spawned lazily and re-spawned automatically if it crashes.
 /// Re-spawning clears all in-memory sessions since Codex thread state is lost.
@@ -609,10 +622,10 @@ where
             user_input
         };
 
-        if prepend_trogon {
-            if let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
-            }
+        if prepend_trogon
+            && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
+        {
+            user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
         // HIGH-19: restore session state if the turn never actually starts.
