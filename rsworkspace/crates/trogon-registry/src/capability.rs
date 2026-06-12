@@ -14,6 +14,10 @@ pub struct AgentCapability {
 
     /// Human-readable tags describing what this agent can do.
     /// Used by the Router when presenting options to the LLM.
+    ///
+    /// LLM runners should register [`crate::RunnerCapability`] tags via
+    /// [`RunnerCapability::to_strings`]. These tags are descriptive only and
+    /// MUST NOT be used to gate feature availability.
     /// Example: `["code_review", "security_analysis"]`
     pub capabilities: Vec<String>,
 
