@@ -273,18 +273,14 @@ async fn call_tool_returns_error_when_no_subscriber_responds() {
     assert!(result.is_err(), "expected error with no subscriber");
 }
 
-/// The timeout error message mentions the timeout duration in seconds.
-///
-/// We verify the format string indirectly by confirming the SpawnAgentTool
-/// tool_def description mentions the expected timeout behavior via a unit-level
-/// check on the constant (120 s).
+/// `tool_def` describes spawning a sub-agent in an isolated worktree (not the
+/// old registry-based wording).
 #[test]
-fn spawn_timeout_is_120_seconds() {
-    // If this fails the format string in call_tool must be updated too.
+fn tool_def_describes_isolated_sub_agent_spawn() {
     let def = SpawnAgentTool::tool_def();
     assert!(
-        def.description.contains("sub-agent"),
-        "description must reference sub-agent spawning"
+        def.description.contains("sub-agent") && def.description.contains("isolated worktree"),
+        "description must reference sub-agent spawning in an isolated worktree"
     );
 }
 
