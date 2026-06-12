@@ -243,10 +243,10 @@ fn extract_json_block(text: &str) -> &str {
         }
     }
     // Otherwise try to find the outermost JSON object
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            return &text[start..=end];
-        }
+    if let Some(start) = text.find('{')
+        && let Some(end) = text.rfind('}')
+    {
+        return &text[start..=end];
     }
     text.trim()
 }
