@@ -2,7 +2,7 @@
 
 use async_nats::Client;
 use futures::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{Instrument, error, info, info_span, warn};
 
 use crate::detector::CompactionSettings;
 use crate::error::CompactorError;
@@ -115,6 +115,9 @@ pub async fn run(nats: Client, state: ServiceState) -> Result<(), async_nats::Er
 }
 
 async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse, CompactorError> {
+    // S4: count every request that enters the handler, before any attempt.
+    crate::telemetry::metrics::record_request();
+
     let req = wire::decode_request(payload)?;
 
     let session_provider = if req.provider.is_empty() {
@@ -122,6 +125,19 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
     } else {
         req.provider.clone()
     };
+
+    // S4 trace-context: `trogon-nats` exposes no W3C trace-context extraction
+    // (only `REQ_ID_HEADER`/header passthrough), so use a local span carrying a
+    // fresh correlation id and the session identity. All compaction work below
+    // runs inside this span.
+    let correlation_id = uuid::Uuid::new_v4();
+    let span = info_span!(
+        "compactor.handle",
+        correlation_id = %correlation_id,
+        session_provider = %session_provider,
+        // Filled once the session model is resolved below.
+        session_model = tracing::field::Empty,
+    );
 
     let compactor_provider = compactor_provider_name(&req);
     let session_model = resolve_model(
@@ -141,6 +157,8 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
             .unwrap_or(""),
     );
 
+    span.record("session_model", session_model.as_str());
+
     let settings = match req.context_window {
         Some(cw) => CompactionSettings::from_context_window(cw as usize),
         None => state.default_settings.clone(),
@@ -152,85 +170,110 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
     // monotonic; never use a wall-clock `Date::now`-style source here.
     let started = std::time::Instant::now();
 
-    // M4: try chosen model first, fallback to session model on any error.
-    match compact_with_provider(
-        state,
-        &compactor_provider,
-        &chosen_model,
-        settings.clone(),
-        req.messages.clone(),
-    )
-    .await
-    {
-        Ok((messages, kept_count)) => {
-            let tokens_after = estimate_total_tokens(&messages);
-            let compacted = tokens_after < tokens_before;
-            crate::telemetry::metrics::record_compaction(
-                &compactor_provider,
-                &chosen_model,
-                compacted,
-                tokens_before as u64,
-                tokens_after as u64,
-                started.elapsed().as_millis() as u64,
-                None,
-            );
-            Ok(CompactResponse {
-                compacted,
-                messages,
-                tokens_before,
-                tokens_after,
-                kept_count,
-                fallback_model: None,
-            })
-        }
-        Err(primary_err) => {
-            warn!(
-                error = %primary_err,
-                compactor_provider,
-                chosen_model,
-                "compaction failed with chosen model; falling back to session model"
-            );
-            // Primary (chosen-model) failure: record before attempting fallback.
-            crate::telemetry::metrics::record_failure(
-                &compactor_provider,
-                &chosen_model,
-                error_kind(&primary_err),
-            );
-            match compact_with_provider(state, &session_provider, &session_model, settings, req.messages).await {
-                Ok((messages, kept_count)) => {
-                    let tokens_after = estimate_total_tokens(&messages);
-                    let compacted = tokens_after < tokens_before;
-                    crate::telemetry::metrics::record_compaction(
-                        &session_provider,
-                        &session_model,
-                        compacted,
-                        tokens_before as u64,
-                        tokens_after as u64,
-                        started.elapsed().as_millis() as u64,
-                        Some(&session_model),
-                    );
-                    Ok(CompactResponse {
-                        compacted,
-                        messages,
-                        tokens_before,
-                        tokens_after,
-                        kept_count,
-                        fallback_model: Some(session_model),
-                    })
-                }
-                Err(final_err) => {
-                    // Final failure: fallback also failed. Emit the failure metric
-                    // (preserving the typed error and its context) before propagating.
-                    crate::telemetry::metrics::record_failure(
-                        &session_provider,
-                        &session_model,
-                        error_kind(&final_err),
-                    );
-                    Err(final_err)
+    async move {
+        // The four explicit S4 identity attributes. `compactor_*` always reflects
+        // the originally-chosen compactor pair, even on the fallback path where the
+        // *used* pair becomes the session pair. Built here (inside the moved block)
+        // to borrow the owned identity strings without escaping their lifetimes.
+        let identity = crate::telemetry::metrics::CompactionIdentity {
+            session_provider: &session_provider,
+            session_model: &session_model,
+            compactor_provider: &compactor_provider,
+            compactor_model: &chosen_model,
+        };
+
+        // M4: try chosen model first, fallback to session model on any error.
+        match compact_with_provider(
+            state,
+            &compactor_provider,
+            &chosen_model,
+            settings.clone(),
+            req.messages.clone(),
+        )
+        .await
+        {
+            Ok((messages, kept_count)) => {
+                let tokens_after = estimate_total_tokens(&messages);
+                let compacted = tokens_after < tokens_before;
+                crate::telemetry::metrics::record_compaction(
+                    &compactor_provider,
+                    &chosen_model,
+                    identity,
+                    compacted,
+                    tokens_before as u64,
+                    tokens_after as u64,
+                    started.elapsed().as_millis() as u64,
+                    None,
+                );
+                Ok(CompactResponse {
+                    compacted,
+                    messages,
+                    tokens_before,
+                    tokens_after,
+                    kept_count,
+                    fallback_model: None,
+                })
+            }
+            Err(primary_err) => {
+                // Stable, low-cardinality reason for the M4 fallback, derived from the
+                // primary (chosen-model) error.
+                let fallback_reason = error_kind(&primary_err);
+                warn!(
+                    error = %primary_err,
+                    compactor_provider,
+                    chosen_model,
+                    fallback_reason,
+                    "compaction failed with chosen model; falling back to session model"
+                );
+                // Primary (chosen-model) failure: record before attempting fallback.
+                crate::telemetry::metrics::record_failure(
+                    &compactor_provider,
+                    &chosen_model,
+                    identity,
+                    fallback_reason,
+                );
+                match compact_with_provider(state, &session_provider, &session_model, settings, req.messages).await {
+                    Ok((messages, kept_count)) => {
+                        let tokens_after = estimate_total_tokens(&messages);
+                        let compacted = tokens_after < tokens_before;
+                        // Used pair is now the session pair; `identity.compactor_*`
+                        // still names the originally-chosen compactor.
+                        crate::telemetry::metrics::record_compaction(
+                            &session_provider,
+                            &session_model,
+                            identity,
+                            compacted,
+                            tokens_before as u64,
+                            tokens_after as u64,
+                            started.elapsed().as_millis() as u64,
+                            Some((session_model.as_str(), fallback_reason)),
+                        );
+                        Ok(CompactResponse {
+                            compacted,
+                            messages,
+                            tokens_before,
+                            tokens_after,
+                            kept_count,
+                            fallback_model: Some(session_model),
+                        })
+                    }
+                    Err(final_err) => {
+                        // Final failure: fallback also failed. Emit the failure metric
+                        // (preserving the typed error and its context) before propagating.
+                        crate::telemetry::metrics::record_failure(
+                            &session_provider,
+                            &session_model,
+                            identity,
+                            error_kind(&final_err),
+                        );
+                        Err(final_err)
+                    }
                 }
             }
         }
     }
+    .instrument(span)
+    .await
 }
 
 async fn compact_with_provider(

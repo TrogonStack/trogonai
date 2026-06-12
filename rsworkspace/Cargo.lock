@@ -5656,6 +5656,7 @@ dependencies = [
  "httpmock",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
  "reqwest",
  "serde",
  "serde_json",
@@ -5669,6 +5670,7 @@ dependencies = [
  "trogonai-catalog-client",
  "trogonai-catalog-proto",
  "trogonai-compactor-proto",
+ "uuid",
 ]
 
 [[package]]
