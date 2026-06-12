@@ -45,9 +45,16 @@ pub fn print_command_echo(line: &str) {
     eprintln!("\x1b[90m{line}\x1b[0m");
 }
 
-/// Bold assistant prefix, printed once before an assistant text run.
+/// Cyan `●` bullet used to mark the model's actual response, distinguishing it
+/// from trogon's own dim chrome (status line, tool pills, token footer, command
+/// echoes). Exposed as a const so the marker is referenceable and testable.
+pub const ASSISTANT_MARKER: &str = "\x1b[36m●\x1b[0m";
+
+/// Prefix printed once before an assistant text run: the [`ASSISTANT_MARKER`]
+/// bullet plus the bold `Trogon` label. The colored bullet is the visual anchor
+/// that separates the model's streamed answer from trogon's own UI dialogue.
 pub fn print_assistant_prefix() {
-    eprint!("\n\x1b[1mTrogon\x1b[0m  ");
+    eprint!("\n{ASSISTANT_MARKER} \x1b[1mTrogon\x1b[0m  ");
 }
 
 #[cfg(test)]
@@ -69,6 +76,14 @@ mod tests {
         assert!(!warn_if_codex_observational("acp.grok"));
         assert!(!warn_if_codex_observational("acp.openrouter"));
         assert!(!warn_if_codex_observational("acp.wasm"));
+    }
+
+    #[test]
+    fn assistant_marker_is_a_colored_bullet() {
+        // The bullet distinguishes the model's answer from trogon's own chrome.
+        assert!(ASSISTANT_MARKER.contains('●'));
+        assert!(ASSISTANT_MARKER.contains("\x1b[36m")); // cyan
+        assert!(ASSISTANT_MARKER.ends_with("\x1b[0m")); // reset, no color bleed
     }
 
     #[test]
