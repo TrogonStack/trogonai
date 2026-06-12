@@ -290,7 +290,7 @@ where
                                     return;
                                 }
                             }
-                            AgentContentBlock::Thinking { thinking } if !thinking.is_empty() => {
+                            AgentContentBlock::Thinking { thinking, .. } if !thinking.is_empty() => {
                                 let n = SessionNotification::new(
                                     session_id.clone(),
                                     SessionUpdate::AgentThoughtChunk(ContentChunk::new(

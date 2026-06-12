@@ -749,7 +749,10 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             let cb = &data["content_block"];
                             block_builders[idx] = match cb["type"].as_str() {
                                 Some("text") => Some(ContentBlockBuilder::Text(String::new())),
-                                Some("thinking") => Some(ContentBlockBuilder::Thinking(String::new())),
+                                Some("thinking") => Some(ContentBlockBuilder::Thinking {
+                                    text: String::new(),
+                                    signature: cb["signature"].as_str().map(String::from),
+                                }),
                                 Some("tool_use") => {
                                     let id = cb["id"].as_str().unwrap_or("").to_string();
                                     let name = cb["name"].as_str().unwrap_or("").to_string();
@@ -772,12 +775,20 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                                 .await;
                                         }
                                     }
-                                    (Some("thinking_delta"), ContentBlockBuilder::Thinking(t)) => {
+                                    (Some("thinking_delta"), ContentBlockBuilder::Thinking { text, .. }) => {
                                         if let Some(thinking) = delta["thinking"].as_str() {
-                                            t.push_str(thinking);
+                                            text.push_str(thinking);
                                             let _ = event_tx
                                                 .send(AgentEvent::ThinkingDelta { text: thinking.to_string() })
                                                 .await;
+                                        }
+                                    }
+                                    (Some("signature_delta"), ContentBlockBuilder::Thinking { signature, .. }) => {
+                                        // Anthropic delivers the thinking-block signature here; it
+                                        // must be preserved so the block can be echoed back unchanged
+                                        // on the next tool-use turn (else a 400).
+                                        if let Some(sig) = delta["signature"].as_str() {
+                                            signature.get_or_insert_with(String::new).push_str(sig);
                                         }
                                     }
                                     (Some("input_json_delta"), ContentBlockBuilder::ToolUse { input_buf, .. }) => {
@@ -806,7 +817,9 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 .into_iter()
                 .filter_map(|opt| match opt? {
                     ContentBlockBuilder::Text(t) => Some(ContentBlock::Text { text: t }),
-                    ContentBlockBuilder::Thinking(t) => Some(ContentBlock::Thinking { thinking: t }),
+                    ContentBlockBuilder::Thinking { text, signature } => {
+                        Some(ContentBlock::Thinking { thinking: text, signature })
+                    }
                     ContentBlockBuilder::ToolUse { id, name, input_buf, parent_tool_use_id } => {
                         let input = serde_json::from_str(&input_buf)
                             .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -1164,7 +1177,7 @@ impl SseParser {
 /// Accumulator for a single content block during SSE streaming.
 enum ContentBlockBuilder {
     Text(String),
-    Thinking(String),
+    Thinking { text: String, signature: Option<String> },
     ToolUse {
         id: String,
         name: String,
@@ -1654,6 +1667,53 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                 .iter()
                 .any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "hi")),
             "expected TextDelta('hi'), got {events:?}"
+        );
+    }
+
+    /// Anthropic requires `thinking` blocks to be echoed back unchanged — including
+    /// their `signature` — during a tool-use loop, or the next request 400s. The SSE
+    /// parser must capture the `signature_delta` event rather than dropping it.
+    #[tokio::test]
+    async fn run_chat_streaming_preserves_thinking_signature() {
+        struct MockStreamingClient {
+            sse: &'static [u8],
+        }
+        impl AnthropicStreamingClient for MockStreamingClient {
+            fn complete_streaming(
+                &self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+                let data = Bytes::from_static(self.sse);
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(data))))
+            }
+        }
+
+        let sse: &'static [u8] = b"\
+event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"let me reason\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG_TEST_abc123\"}}\n\n\
+event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n\
+event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+        let mut agent = make_test_agent();
+        agent.streaming_client = Some(Arc::new(MockStreamingClient { sse }));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let messages = agent
+            .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
+            .await
+            .expect("streaming must succeed");
+
+        let json = serde_json::to_string(&messages).unwrap();
+        assert!(
+            json.contains("SIG_TEST_abc123"),
+            "thinking signature must be preserved in the assistant message (Anthropic \
+             400s on tool use if a thinking block is re-sent without its signature); got: {json}"
         );
     }
 

@@ -110,15 +110,32 @@ pub fn resolve_path(
         return Err("path is outside the working directory".to_string());
     }
 
+    let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
+
     // Resolve symlinks for parts that exist so a symlink pointing outside cwd
-    // is caught. For paths that don't exist yet (new files), fall back to the
-    // lexically-normalized result which already passed the starts_with check.
+    // is caught.
     if let Ok(canonical) = std::fs::canonicalize(&normalized) {
-        let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
         if !canonical.starts_with(&cwd_canonical) {
             return Err("path is outside the working directory".to_string());
         }
         return Ok(canonical);
+    }
+
+    // The target does not exist yet (new file), so `canonicalize` above failed and
+    // could not check intermediate symlinks. Verify the deepest EXISTING ancestor
+    // still resolves inside cwd — otherwise a symlinked intermediate directory
+    // (e.g. `cwd/link -> /outside`) lets a new file escape the sandbox.
+    let mut ancestor = normalized.parent();
+    while let Some(a) = ancestor {
+        match std::fs::canonicalize(a) {
+            Ok(canon) => {
+                if !canon.starts_with(&cwd_canonical) {
+                    return Err("path is outside the working directory".to_string());
+                }
+                break;
+            }
+            Err(_) => ancestor = a.parent(),
+        }
     }
 
     Ok(normalized)
@@ -179,7 +196,7 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
     }
 
     let end = limit
-        .map(|l| (start + l).min(lines.len()))
+        .map(|l| start.saturating_add(l).min(lines.len()))
         .unwrap_or(lines.len());
 
     let mut result = lines[start..end]
@@ -537,6 +554,37 @@ mod tests {
         let resolved = resolve_path(&cwd, "link/file.txt").unwrap();
         // canonicalize() resolves the symlink to the real path inside cwd.
         assert!(resolved.starts_with(cwd_dir.path().canonicalize().unwrap()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_path_symlink_escape_for_new_file_rejected() {
+        // C4: a NEW (non-existent) file routed through a symlinked directory that
+        // points outside cwd must be rejected. `canonicalize` fails for the
+        // not-yet-existing leaf, so the deepest-existing-ancestor check must catch it.
+        let cwd_dir = TempDir::new().unwrap();
+        let outside_dir = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside_dir.path(), cwd_dir.path().join("evil")).unwrap();
+
+        let cwd = cwd_dir.path().to_string_lossy().into_owned();
+        let err = resolve_path(&cwd, "evil/new_file.txt").unwrap_err();
+        assert!(err.contains("outside"), "new file via symlink must be rejected, got: {err}");
+        let err2 = resolve_path(&cwd, "evil/sub/deep.txt").unwrap_err();
+        assert!(err2.contains("outside"), "deep new path via symlink must be rejected, got: {err2}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_path_new_file_in_cwd_allowed() {
+        // Containment regression guard: legitimate new files (directly in cwd, in a
+        // brand-new subdir, and in an existing real subdir) must still be allowed.
+        let cwd_dir = TempDir::new().unwrap();
+        std::fs::create_dir(cwd_dir.path().join("realsub")).unwrap();
+        let cwd = cwd_dir.path().to_string_lossy().into_owned();
+
+        assert!(resolve_path(&cwd, "newfile.txt").is_ok());
+        assert!(resolve_path(&cwd, "newdir/file.txt").is_ok());
+        assert!(resolve_path(&cwd, "realsub/file.txt").is_ok());
     }
 
     #[test]

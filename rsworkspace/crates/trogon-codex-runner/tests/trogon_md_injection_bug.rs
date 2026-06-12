@@ -1,14 +1,16 @@
-//! Regression test for the TROGON.md injection fix in codex-runner.
+//! Regression test for TROGON.md injection in codex-runner.
 //!
-//! The original bug: `s.first_turn` was set to `false` before being captured,
-//! and `s.cwd` was never captured. As a result the `else if first_turn` branch
-//! that calls `load_trogon_md` never ran.
+//! History:
+//!   1. Original bug: `s.first_turn` was consumed before being captured and
+//!      `s.cwd` was never captured, so TROGON.md was never injected.
+//!   2. Double-injection bug: two independent injection paths coexisted — an
+//!      `else if first_turn` match arm AND the `if prepend_trogon` block — so on
+//!      the first turn TROGON.md was prepended TWICE.
 //!
-//! The fix captures both `ft = s.first_turn` and `cwd = s.cwd.clone()` before
-//! `s.first_turn = false`, and adds the `else if first_turn` arm.
-//!
-//! This test verifies the fix: TROGON.md content MUST appear in the
-//! `userInput` sent to the Codex subprocess on the first turn.
+//! Current invariant (what this test pins): TROGON.md is injected EXACTLY ONCE on
+//! the first turn, through the single `if prepend_trogon` block, and NOT AT ALL on
+//! subsequent turns. The count assertion below guards against re-introducing a
+//! second injection path — `contains` alone cannot catch duplication.
 //!
 //! Run with:
 //!   cargo test -p trogon-codex-runner --test trogon_md_injection_bug
@@ -118,6 +120,22 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
     assert!(
         recorded.contains("first prompt"),
         "original user message must also be present; got: {recorded:?}"
+    );
+    // TROGON.md must be injected EXACTLY ONCE. A second injection path (e.g. an
+    // `else if first_turn` arm alongside the `if prepend_trogon` block) would
+    // duplicate it; `contains` passes either way, so we count occurrences of a
+    // marker unique to the TROGON.md body.
+    let header_occurrences = recorded.matches("# Project rules").count();
+    assert_eq!(
+        header_occurrences, 1,
+        "TROGON.md must be injected exactly once on the first turn, found {header_occurrences} \
+         occurrences (double-injection regression); got: {recorded:?}"
+    );
+    let body_occurrences = recorded.matches("Always use Rust").count();
+    assert_eq!(
+        body_occurrences, 1,
+        "TROGON.md body must appear exactly once on the first turn, found {body_occurrences} \
+         occurrences; got: {recorded:?}"
     );
 }
 

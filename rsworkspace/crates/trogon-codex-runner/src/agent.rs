@@ -565,15 +565,17 @@ where
             );
         }
 
-        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn, first_turn) = {
+        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
             let orig_first_turn = s.first_turn;
+            // TROGON.md must be prepended on the first turn and whenever imported
+            // history is being replayed. The single `if prepend_trogon` block below
+            // owns that injection — do not add a second injection path.
             let prepend_trogon = s.first_turn || s.pending_history.is_some();
             let ph = s.pending_history.take();
-            let ft = s.first_turn;
             let cwd = s.cwd.clone();
             s.first_turn = false;
             s.history.push(trogon_runner_tools::portable_session::PortableMessage::text_only(
@@ -586,7 +588,6 @@ where
                 cwd,
                 prepend_trogon,
                 orig_first_turn,
-                ft,
             )
         };
 
@@ -600,19 +601,17 @@ where
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("Prior conversation:\n{formatted}\n\n---\n\n{user_input}")
-        } else if first_turn {
-            match trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                Some(md) => format!("{md}\n\n{user_input}"),
-                None => user_input,
-            }
         } else {
             user_input
         };
 
-        if prepend_trogon {
-            if let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
-            }
+        // Single TROGON.md injection point (covers both the first turn and
+        // imported-history replay via `prepend_trogon`). Injecting here AND in the
+        // match arm above would duplicate TROGON.md in the first user message.
+        if prepend_trogon
+            && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
+        {
+            user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
         // HIGH-19: restore session state if the turn never actually starts.
@@ -843,7 +842,14 @@ where
             } else {
                 s.history.len()
             };
-            let raw = serde_json::to_string(&s.history[..end])
+            // Emit V2 (not a bare V1 array): codex history carries rich `blocks` for
+            // tool turns, and a V1 array would be flattened by every importer —
+            // dropping tool blocks and turning tool-result messages into empty text
+            // (Anthropic 400). V2 preserves the blocks for the receiving runner.
+            let export = trogon_runner_tools::portable_session::portable_messages_to_export_v2(
+                &s.history[..end],
+            );
+            let raw = serde_json::to_string(&export)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()));
@@ -1092,6 +1098,20 @@ mod tests {
             MockProcessSpawner::new(),
             "o4-mini",
         )
+    }
+
+    /// Parse a session/export payload (now emitted as V2) into text-only
+    /// PortableMessages for role/text assertions in these tests.
+    fn export_texts(
+        json: &str,
+    ) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
+        use trogon_runner_tools::portable_session::{
+            ParsedExport, parse_export_json, v2_message_to_text,
+        };
+        match parse_export_json(json).expect("export must be valid V1/V2") {
+            ParsedExport::V2(exp) => exp.messages.iter().map(v2_message_to_text).collect(),
+            ParsedExport::V1(msgs) => msgs,
+        }
     }
 
     // ── close_session ─────────────────────────────────────────────────────────
@@ -1770,7 +1790,7 @@ mod tests {
         .unwrap();
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
-        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+        let msgs = export_texts(resp.0.get());
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].text, "hello");
         assert_eq!(msgs[1].text, "hi there");
@@ -1798,7 +1818,7 @@ mod tests {
             .ext_method(ExtRequest::new("session/export", raw_params.into()))
             .await
             .unwrap();
-        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+        let msgs = export_texts(resp.0.get());
         assert_eq!(msgs.len(), 2, "the trailing in-progress user turn must be excluded");
         assert_eq!(msgs[1].text, "a1");
     }
@@ -1825,7 +1845,6 @@ mod tests {
 
     #[tokio::test]
     async fn export_after_real_turn_contains_accumulated_history() {
-        use trogon_runner_tools::portable_session::PortableMessage;
         let spawner = MockProcessSpawner {
             events: vec![
                 CodexEvent::TextDelta {
@@ -1854,7 +1873,7 @@ mod tests {
         .unwrap();
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
-        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+        let msgs = export_texts(resp.0.get());
 
         assert_eq!(msgs.len(), 2, "expected user + assistant messages");
         assert_eq!(msgs[0].role, "user");
@@ -1959,8 +1978,7 @@ mod tests {
             .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
             .await
             .unwrap();
-        let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(export_dst_resp.0.get()).unwrap();
+        let dst_portable = export_texts(export_dst_resp.0.get());
         assert_eq!(dst_portable.len(), 2, "export after import must return imported messages");
         assert_eq!(dst_portable[0].role, "user");
         assert_eq!(dst_portable[0].text, "q");

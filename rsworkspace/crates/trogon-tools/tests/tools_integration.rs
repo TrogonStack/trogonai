@@ -20,6 +20,14 @@ fn ctx(dir: &TempDir) -> ToolContext {
     }
 }
 
+/// `fetch_url` reaches a localhost httpmock server in these tests, so they must opt
+/// out of the SSRF guard (active in non-`--lib` builds, where it blocks loopback).
+fn allow_local_fetch() {
+    // SAFETY: only ever sets a value all fetch_url tests agree on; no test asserts
+    // the guard is active, so the process-wide write cannot race a conflicting read.
+    unsafe { std::env::set_var("TROGON_ALLOW_LOCAL_FETCH", "1") };
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /// Initialize a bare git repo in `dir` so `.gitignore` rules are respected by
@@ -196,6 +204,7 @@ async fn str_replace_duplicate_occurrences_rejected_via_dispatch() {
 async fn fetch_url_html_to_text_via_dispatch() {
     use httpmock::prelude::*;
 
+    allow_local_fetch();
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(GET).path("/page");
@@ -227,6 +236,7 @@ async fn fetch_url_html_to_text_via_dispatch() {
 async fn fetch_url_truncates_large_response_via_dispatch() {
     use httpmock::prelude::*;
 
+    allow_local_fetch();
     let server = MockServer::start();
     let big_body = "x".repeat(8 * 1024 + 200);
     server.mock(|when, then| {

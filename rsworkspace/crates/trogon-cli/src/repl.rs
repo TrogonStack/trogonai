@@ -2366,7 +2366,10 @@ fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
         .find_map(|name| {
             fs.read_to_string(&root.join(name)).ok().map(|content| {
                 let truncated = if content.len() > 3000 {
-                    format!("{}…(truncated)", &content[..3000])
+                    // Slice on a UTF-8 char boundary: `&content[..3000]` panics when
+                    // byte 3000 falls inside a multibyte char in the README.
+                    let boundary = content.floor_char_boundary(3000);
+                    format!("{}…(truncated)", &content[..boundary])
                 } else {
                     content
                 };
