@@ -1899,6 +1899,37 @@ mod tests {
         );
     }
 
+    // SCOPE-14 dogfood (test proxy): the four "don't babysit me" scenarios driven
+    // through the real check() path with scope active. `dontAsk` is used as the
+    // mode precisely because, without scope, dontAsk auto-allows everything — so a
+    // `false` here proves scope pre-empts even the most permissive mode.
+
+    #[tokio::test]
+    async fn scope_dogfood_out_of_cwd_write_escalates() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check("tc-tmp", "write_file", &serde_json::json!({"path": "/tmp/escape.txt"}))
+                .await,
+            "write outside cwd must escalate (dropped channel → false), not silently allow"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_dogfood_dotenv_is_hard_denied() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check("tc-env", "read_file", &serde_json::json!({"path": ".env"}))
+                .await,
+            ".env is protected — scope must hard-deny it even under dontAsk"
+        );
+    }
+
     #[tokio::test]
     async fn scope_none_regression_dont_ask_auto_allows_without_channel() {
         let (tx, rx) = mpsc::channel(1);
