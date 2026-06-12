@@ -19,6 +19,9 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-service-config = { path = "crates/trogon-service-config" }
+trogon-decider = { path = "crates/trogon-decider" }
+trogon-decider-nats = { path = "crates/trogon-decider-nats" }
+trogonai-proto = { path = "crates/trogonai-proto" }
 trogon-std = { path = "crates/trogon-std" }
 
 # ACP
@@ -69,6 +72,8 @@ anyhow = "=1.0.102"
 thiserror = "=2.0.18"
 
 # Misc
+chrono-tz = "=0.10.4"
+rrule = "=0.14.0"
 tempfile = "=3.27.0"
 time = "=0.3.47"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
