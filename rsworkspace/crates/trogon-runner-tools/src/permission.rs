@@ -80,11 +80,6 @@ fn extract_input_summary(tool_name: &str, tool_input: &Value) -> String {
     tool_name.to_string()
 }
 
-/// Whether the Scope permission model is active. Off by default; opt-in via env.
-fn scope_enabled() -> bool {
-    matches!(std::env::var("TROGON_SCOPE").as_deref(), Ok("1") | Ok("true"))
-}
-
 fn push_audit(buf: &AuditBuf, tool: &str, input: &Value, outcome: AuditOutcome) {
     let entry = AuditEntry {
         timestamp: crate::session_store::now_iso8601(),
@@ -835,12 +830,10 @@ pub fn build_mode_permission_checker(
         tool_policies,
         inner,
     };
-    // Resolve the scope before moving `extras.cwd` into the struct below.
-    let scope = if scope_enabled() {
-        extras.cwd.as_deref().map(Scope::baseline)
-    } else {
-        None
-    };
+    // Scope is on by default (Phase 5 / SCOPE-15): resolve the baseline before
+    // moving `extras.cwd` into the struct below. Active whenever a cwd is known;
+    // sessions without a cwd fall back to the legacy mode logic.
+    let scope = extras.cwd.as_deref().map(Scope::baseline);
     Some(Arc::new(ModePermissionChecker {
         mode: mode.to_string(),
         inner: rules_checker,
