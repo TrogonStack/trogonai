@@ -74,6 +74,8 @@ fn make_agent(base_url: &str) -> AgentLoop {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: std::env::current_dir().unwrap_or_default().to_string_lossy().to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
