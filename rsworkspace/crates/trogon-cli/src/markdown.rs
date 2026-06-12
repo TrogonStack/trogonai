@@ -15,53 +15,63 @@ pub fn render_plain(text: &str) -> String {
 fn render_with_ansi(text: &str, use_ansi: bool) -> String {
     let mut out = String::with_capacity(text.len() + 256);
     let mut in_code_block = false;
+    let mut first = true;
 
-    let lines: Vec<&str> = text.split('\n').collect();
-    let last = lines.len().saturating_sub(1);
-
-    for (i, line) in lines.iter().enumerate() {
-        if line.starts_with("```") {
-            in_code_block = !in_code_block;
-            // skip the fence line itself (no newline either — avoids blank lines at fence positions)
-            continue;
+    for line in text.split('\n') {
+        if let Some(rendered) = render_line(line, use_ansi, &mut in_code_block) {
+            if !first {
+                out.push('\n');
+            }
+            out.push_str(&rendered);
+            first = false;
         }
-
-        if i > 0 {
-            out.push('\n');
-        }
-
-        if in_code_block {
-            push_style(&mut out, Style::Dim, use_ansi);
-            out.push_str(line);
-            push_reset(&mut out, use_ansi);
-            continue;
-        }
-
-        if let Some(rest) = line.strip_prefix("### ") {
-            push_style(&mut out, Style::Bold, use_ansi);
-            out.push_str(&render_inline(rest, use_ansi));
-            push_reset(&mut out, use_ansi);
-        } else if let Some(rest) = line.strip_prefix("## ") {
-            push_style(&mut out, Style::BoldUnderline, use_ansi);
-            out.push_str(&render_inline(rest, use_ansi));
-            push_reset(&mut out, use_ansi);
-        } else if let Some(rest) = line.strip_prefix("# ") {
-            push_style(&mut out, Style::BoldCyan, use_ansi);
-            out.push_str(&render_inline(rest, use_ansi));
-            push_reset(&mut out, use_ansi);
-        } else if *line == "---" || *line == "***" || *line == "___" {
-            // horizontal rule
-            push_style(&mut out, Style::Dim, use_ansi);
-            out.push_str("────────────────────────────────────────");
-            push_reset(&mut out, use_ansi);
-        } else {
-            out.push_str(&render_inline(line, use_ansi));
-        }
-
-        let _ = last; // suppress unused warning when iterating
     }
 
     out
+}
+
+/// Render a single markdown line, updating `in_code_block` (block state the
+/// caller owns so it persists across calls). Returns `None` for a code-fence
+/// line (which produces no output), else the styled line. Inline spans (bold,
+/// italic, inline code) are resolved per line — this lets the streaming REPL
+/// render markdown line-by-line as text arrives, not just in buffered mode.
+pub fn render_line(line: &str, use_ansi: bool, in_code_block: &mut bool) -> Option<String> {
+    if line.starts_with("```") {
+        *in_code_block = !*in_code_block;
+        // The fence line itself produces no output.
+        return None;
+    }
+
+    let mut out = String::new();
+    if *in_code_block {
+        push_style(&mut out, Style::Dim, use_ansi);
+        out.push_str(line);
+        push_reset(&mut out, use_ansi);
+        return Some(out);
+    }
+
+    if let Some(rest) = line.strip_prefix("### ") {
+        push_style(&mut out, Style::Bold, use_ansi);
+        out.push_str(&render_inline(rest, use_ansi));
+        push_reset(&mut out, use_ansi);
+    } else if let Some(rest) = line.strip_prefix("## ") {
+        push_style(&mut out, Style::BoldUnderline, use_ansi);
+        out.push_str(&render_inline(rest, use_ansi));
+        push_reset(&mut out, use_ansi);
+    } else if let Some(rest) = line.strip_prefix("# ") {
+        push_style(&mut out, Style::BoldCyan, use_ansi);
+        out.push_str(&render_inline(rest, use_ansi));
+        push_reset(&mut out, use_ansi);
+    } else if line == "---" || line == "***" || line == "___" {
+        // horizontal rule
+        push_style(&mut out, Style::Dim, use_ansi);
+        out.push_str("────────────────────────────────────────");
+        push_reset(&mut out, use_ansi);
+    } else {
+        out.push_str(&render_inline(line, use_ansi));
+    }
+
+    Some(out)
 }
 
 enum Style {
