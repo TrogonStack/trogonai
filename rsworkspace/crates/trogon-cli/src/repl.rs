@@ -1278,6 +1278,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         // Ctrl+G messages — jump to the front, submitted before `queued`.
                         let mut front_queued: Vec<String> = Vec::new();
                         let mut interrupted = false;
+                        // Drives the live `Thinking… (Ns)` status line between events.
+                        let mut status_ticker =
+                            tokio::time::interval(std::time::Duration::from_millis(500));
 
                         loop {
                             tokio::select! {
@@ -1339,6 +1342,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             }
                                         }
                                     }
+                                }
+                                // Animate the `Thinking… (Ns)` / tool status line
+                                // while waiting on the model (lowest priority).
+                                _ = status_ticker.tick() => {
+                                    renderer.tick();
                                 }
                             }
                         }
