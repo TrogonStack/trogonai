@@ -78,6 +78,18 @@ fn compactor_provider_name(req: &CompactRequest) -> String {
     req.compactor_provider.clone().unwrap_or_else(|| req.provider.clone())
 }
 
+/// Stable, low-cardinality classification of a compaction error for the
+/// `error_kind` metric attribute. Maps to the enum variant name (never the
+/// `Display` string, which carries unbounded, high-cardinality detail).
+fn error_kind(err: &CompactorError) -> &'static str {
+    match err {
+        CompactorError::Http(_) => "http",
+        CompactorError::EmptyResponse => "empty_response",
+        CompactorError::UnexpectedStopReason(_) => "unexpected_stop_reason",
+        CompactorError::InvalidRequest(_) => "invalid_request",
+    }
+}
+
 pub async fn run(nats: Client, state: ServiceState) -> Result<(), async_nats::Error> {
     let mut sub = nats.subscribe(COMPACT_SUBJECT).await?;
     info!(subject = COMPACT_SUBJECT, "compactor service listening");
@@ -136,6 +148,10 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
 
     let tokens_before = estimate_total_tokens(&req.messages);
 
+    // Wall-clock latency of the compaction (incl. fallback). `Instant` is
+    // monotonic; never use a wall-clock `Date::now`-style source here.
+    let started = std::time::Instant::now();
+
     // M4: try chosen model first, fallback to session model on any error.
     match compact_with_provider(
         state,
@@ -155,6 +171,7 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
                 compacted,
                 tokens_before as u64,
                 tokens_after as u64,
+                started.elapsed().as_millis() as u64,
                 None,
             );
             Ok(CompactResponse {
@@ -173,26 +190,45 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
                 chosen_model,
                 "compaction failed with chosen model; falling back to session model"
             );
-            let (messages, kept_count) =
-                compact_with_provider(state, &session_provider, &session_model, settings, req.messages).await?;
-            let tokens_after = estimate_total_tokens(&messages);
-            let compacted = tokens_after < tokens_before;
-            crate::telemetry::metrics::record_compaction(
-                &session_provider,
-                &session_model,
-                compacted,
-                tokens_before as u64,
-                tokens_after as u64,
-                Some(&session_model),
+            // Primary (chosen-model) failure: record before attempting fallback.
+            crate::telemetry::metrics::record_failure(
+                &compactor_provider,
+                &chosen_model,
+                error_kind(&primary_err),
             );
-            Ok(CompactResponse {
-                compacted,
-                messages,
-                tokens_before,
-                tokens_after,
-                kept_count,
-                fallback_model: Some(session_model),
-            })
+            match compact_with_provider(state, &session_provider, &session_model, settings, req.messages).await {
+                Ok((messages, kept_count)) => {
+                    let tokens_after = estimate_total_tokens(&messages);
+                    let compacted = tokens_after < tokens_before;
+                    crate::telemetry::metrics::record_compaction(
+                        &session_provider,
+                        &session_model,
+                        compacted,
+                        tokens_before as u64,
+                        tokens_after as u64,
+                        started.elapsed().as_millis() as u64,
+                        Some(&session_model),
+                    );
+                    Ok(CompactResponse {
+                        compacted,
+                        messages,
+                        tokens_before,
+                        tokens_after,
+                        kept_count,
+                        fallback_model: Some(session_model),
+                    })
+                }
+                Err(final_err) => {
+                    // Final failure: fallback also failed. Emit the failure metric
+                    // (preserving the typed error and its context) before propagating.
+                    crate::telemetry::metrics::record_failure(
+                        &session_provider,
+                        &session_model,
+                        error_kind(&final_err),
+                    );
+                    Err(final_err)
+                }
+            }
         }
     }
 }
@@ -323,6 +359,20 @@ mod tests {
     fn resolve_model_compactor_model_overrides_session_model() {
         let m = resolve_model(Some("haiku".into()), Some("opus".into()), "default-x");
         assert_eq!(m, "haiku");
+    }
+
+    #[test]
+    fn error_kind_maps_each_variant_to_a_stable_label() {
+        assert_eq!(error_kind(&CompactorError::Http("boom".into())), "http");
+        assert_eq!(error_kind(&CompactorError::EmptyResponse), "empty_response");
+        assert_eq!(
+            error_kind(&CompactorError::UnexpectedStopReason("length".into())),
+            "unexpected_stop_reason"
+        );
+        assert_eq!(
+            error_kind(&CompactorError::InvalidRequest("provider not configured".into())),
+            "invalid_request"
+        );
     }
 
     #[tokio::test]
