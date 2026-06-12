@@ -369,6 +369,53 @@ mod tests {
         assert_eq!(list_mock.hits(), 1, "tools/list should run once");
     }
 
+    /// A changed MCP server list forces a fresh `tools/list` on the next `get_or_build`.
+    #[tokio::test]
+    async fn session_mcp_cache_invalidates_on_config_change() {
+        let mcp_a = MockServer::start();
+        mcp_a.mock(|when, then| {
+            when.method(POST).body_contains("\"initialize\"");
+            then.status(200).json_body(json!({"jsonrpc":"2.0","id":1,"result":{}}));
+        });
+        let list_a = mcp_a.mock(|when, then| {
+            when.method(POST).body_contains("tools/list");
+            then.status(200).json_body(json!({
+                "jsonrpc":"2.0","id":2,
+                "result":{"tools":[
+                    {"name":"search","description":"Search","inputSchema":{"type":"object"}}
+                ]}
+            }));
+        });
+
+        let mcp_b = MockServer::start();
+        mcp_b.mock(|when, then| {
+            when.method(POST).body_contains("\"initialize\"");
+            then.status(200).json_body(json!({"jsonrpc":"2.0","id":1,"result":{}}));
+        });
+        let list_b = mcp_b.mock(|when, then| {
+            when.method(POST).body_contains("tools/list");
+            then.status(200).json_body(json!({
+                "jsonrpc":"2.0","id":2,
+                "result":{"tools":[
+                    {"name":"fetch","description":"Fetch","inputSchema":{"type":"object"}}
+                ]}
+            }));
+        });
+
+        let http = reqwest::Client::new();
+        let servers_a = [server("web", &mcp_a.url("/mcp"))];
+        let servers_b = [server("web", &mcp_b.url("/mcp"))];
+        let policy = EgressPolicy::default_safe();
+        let cache = SessionMcpCache::new();
+
+        cache.get_or_build(&http, &servers_a, &policy).await;
+        cache.get_or_build(&http, &servers_a, &policy).await;
+        let (_, _) = cache.get_or_build(&http, &servers_b, &policy).await;
+
+        assert_eq!(list_a.hits(), 1, "tools/list for first server config");
+        assert_eq!(list_b.hits(), 1, "tools/list after server config change");
+    }
+
     /// `invalidate` forces a fresh `tools/list` on the next `get_or_build`.
     #[tokio::test]
     async fn session_mcp_cache_invalidates() {
