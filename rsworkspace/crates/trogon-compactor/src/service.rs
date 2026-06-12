@@ -30,6 +30,9 @@ pub struct ServiceState {
     pub anthropic: Option<ProviderConfig>,
     pub xai: Option<ProviderConfig>,
     pub openrouter: Option<ProviderConfig>,
+    /// Model catalog snapshot for per-model summary-token caps (C3). `None`
+    /// (or a missing entry) falls back to the global `max_summary_tokens`.
+    pub catalog: Option<trogonai_catalog_client::CatalogSnapshot>,
 }
 
 impl ServiceState {
@@ -39,6 +42,23 @@ impl ServiceState {
             "xai" => self.xai.as_ref(),
             "openrouter" => self.openrouter.as_ref(),
             _ => None,
+        }
+    }
+
+    /// Per-model summary-token cap (C3): the model's `max_output` from the catalog,
+    /// bounded by the global `max_summary_tokens` budget. Falls back to the global
+    /// value when the catalog has no entry for `(provider, model)`.
+    fn summary_tokens_for(&self, provider: &str, model: &str) -> u32 {
+        let catalog_max = self.catalog.as_ref().and_then(|snapshot| {
+            snapshot
+                .entries
+                .iter()
+                .find(|entry| entry.provider == provider && entry.model_id == model)
+                .map(|entry| entry.max_output)
+        });
+        match catalog_max {
+            Some(max_output) if max_output > 0 => max_output.min(self.max_summary_tokens),
+            _ => self.max_summary_tokens,
         }
     }
 }
@@ -128,8 +148,17 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
     {
         Ok((messages, kept_count)) => {
             let tokens_after = estimate_total_tokens(&messages);
+            let compacted = tokens_after < tokens_before;
+            crate::telemetry::metrics::record_compaction(
+                &compactor_provider,
+                &chosen_model,
+                compacted,
+                tokens_before as u64,
+                tokens_after as u64,
+                None,
+            );
             Ok(CompactResponse {
-                compacted: tokens_after < tokens_before,
+                compacted,
                 messages,
                 tokens_before,
                 tokens_after,
@@ -147,8 +176,17 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
             let (messages, kept_count) =
                 compact_with_provider(state, &session_provider, &session_model, settings, req.messages).await?;
             let tokens_after = estimate_total_tokens(&messages);
+            let compacted = tokens_after < tokens_before;
+            crate::telemetry::metrics::record_compaction(
+                &session_provider,
+                &session_model,
+                compacted,
+                tokens_before as u64,
+                tokens_after as u64,
+                Some(&session_model),
+            );
             Ok(CompactResponse {
-                compacted: tokens_after < tokens_before,
+                compacted,
                 messages,
                 tokens_before,
                 tokens_after,
@@ -175,7 +213,7 @@ async fn compact_with_provider(
         api_key: pc.token.clone(),
         auth_style: pc.auth_style.clone(),
         model: model.to_string(),
-        max_summary_tokens: state.max_summary_tokens,
+        max_summary_tokens: state.summary_tokens_for(provider_name, model),
     };
     let provider = build_provider(provider_name, llm, state.client.clone());
     let compactor = Compactor::with_provider(settings, provider);
@@ -201,7 +239,31 @@ mod tests {
             }),
             xai: None,
             openrouter: None,
+            catalog: None,
         }
+    }
+
+    #[test]
+    fn summary_tokens_for_uses_catalog_capped_by_budget() {
+        use trogonai_catalog_client::{CatalogEntry, CatalogSnapshot};
+        use trogonai_catalog_proto::ModelModality;
+
+        let entry = |model: &str, max_output: u32| CatalogEntry {
+            model_id: model.to_string(),
+            provider: "anthropic".to_string(),
+            context_window: 200_000,
+            max_output,
+            modality: ModelModality::TEXT,
+        };
+        let mut state = test_state();
+        // budget = 1000; small model bounds it down, large model is capped by budget.
+        state.catalog = Some(CatalogSnapshot {
+            entries: vec![entry("small", 512), entry("large", 64_000)],
+        });
+        assert_eq!(state.summary_tokens_for("anthropic", "small"), 512);
+        assert_eq!(state.summary_tokens_for("anthropic", "large"), 1_000);
+        // Unknown model falls back to the configured budget.
+        assert_eq!(state.summary_tokens_for("anthropic", "unknown"), 1_000);
     }
 
     #[tokio::test]

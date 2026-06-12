@@ -67,6 +67,33 @@ pub fn resolve(catalog: &super::CatalogSnapshot, bare_id: &str) -> Result<Qualif
     }
 }
 
+/// C4 migration: backfill the compactor provider for a session persisted before
+/// M3 with only a bare `compactor_model` (no provider). Resolves the provider from
+/// the catalog and fills `compactor_provider` in place; returns `true` if it did.
+///
+/// No-ops (returns `false`) when the provider is already set, no model is set, or
+/// the model is unknown/ambiguous in the catalog — leaving the pair untouched so the
+/// session keeps degrading gracefully rather than guessing a provider.
+pub fn backfill_compactor_provider(
+    compactor_provider: &mut Option<String>,
+    compactor_model: Option<&str>,
+    catalog: &super::CatalogSnapshot,
+) -> bool {
+    if compactor_provider.is_some() {
+        return false;
+    }
+    let Some(model) = compactor_model else {
+        return false;
+    };
+    match resolve(catalog, model) {
+        Ok(qualified) => {
+            *compactor_provider = Some(qualified.provider);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +127,31 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn backfill_resolves_unique_model_only() {
+        let catalog = sample_catalog();
+
+        // Unique model → provider backfilled.
+        let mut provider = None;
+        assert!(backfill_compactor_provider(&mut provider, Some("grok-2"), &catalog));
+        assert_eq!(provider.as_deref(), Some("xai"));
+
+        // Ambiguous model → left untouched (no guess).
+        let mut provider = None;
+        assert!(!backfill_compactor_provider(&mut provider, Some("claude-haiku"), &catalog));
+        assert!(provider.is_none());
+
+        // Already set → no-op.
+        let mut provider = Some("anthropic".to_string());
+        assert!(!backfill_compactor_provider(&mut provider, Some("grok-2"), &catalog));
+        assert_eq!(provider.as_deref(), Some("anthropic"));
+
+        // No model → no-op.
+        let mut provider = None;
+        assert!(!backfill_compactor_provider(&mut provider, None, &catalog));
+        assert!(provider.is_none());
     }
 
     #[test]

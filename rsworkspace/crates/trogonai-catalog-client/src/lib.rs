@@ -14,7 +14,9 @@ mod snapshot;
 mod store;
 
 pub use catalog_entry::CatalogEntry;
-pub use codec::{CodecError, QualifiedModel, parse, qualify, resolve};
+pub use codec::{
+    CodecError, QualifiedModel, backfill_compactor_provider, parse, qualify, resolve,
+};
 pub use config::CatalogClientConfig;
 pub use error::CatalogClientError;
 pub use predicate::{CompactableFilter, compactable_models};

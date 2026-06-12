@@ -27,7 +27,7 @@ pub use catalog_picker::{
 };
 pub use compaction::{
     COMPACT_SUBJECT, CompactError, CompactProviders, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET,
-    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold,
+    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold, request_compaction,
 };
 pub use compactor_wire::{CompactWireResponse, decode_compact_response, encode_compact_request};
 pub use egress::EgressPolicy;

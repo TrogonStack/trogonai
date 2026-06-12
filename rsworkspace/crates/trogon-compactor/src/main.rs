@@ -32,14 +32,19 @@ use tracing::info;
 use trogon_compactor::AuthStyle;
 use trogon_compactor::detector::CompactionSettings;
 use trogon_compactor::service::{self, ProviderConfig, ServiceState};
+use trogon_std::{env::SystemEnv, fs::SystemFs};
+use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "trogon_compactor=info".into()),
-        )
-        .init();
+    // OpenTelemetry setup (ADR 0008): logs + traces + metrics via trogon-telemetry,
+    // so compaction billing metrics (S4) reach the OTLP collector.
+    trogon_telemetry::init_logger(
+        ServiceName::TrogonCompactor,
+        Vec::<ResourceAttribute>::new(),
+        &SystemEnv,
+        &SystemFs,
+    );
 
     // ── Config from environment ───────────────────────────────────────────────
 
@@ -143,6 +148,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats = async_nats::connect(&nats_url).await?;
     info!(url = %nats_url, "connected to NATS");
 
+    // ── Model catalog (C3: per-model summary-token caps) ──────────────────────
+    // Best-effort: if the catalog is unavailable, fall back to the global cap.
+    let js = async_nats::jetstream::new(nats.clone());
+    let catalog = match trogonai_catalog_client::open(
+        &js,
+        trogonai_catalog_client::CatalogClientConfig::default(),
+    )
+    .await
+    {
+        Ok(client) => match client.catalog_snapshot().await {
+            Ok(snapshot) => {
+                info!(models = snapshot.entries.len(), "loaded model catalog for summary caps");
+                Some(snapshot)
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "catalog snapshot unavailable; using global summary cap");
+                None
+            }
+        },
+        Err(err) => {
+            tracing::warn!(error = %err, "catalog client unavailable; using global summary cap");
+            None
+        }
+    };
+
     // ── Service state ─────────────────────────────────────────────────────────
 
     let state = ServiceState {
@@ -156,9 +186,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         anthropic,
         xai,
         openrouter,
+        catalog,
     };
 
     service::run(nats, state).await?;
 
+    if let Err(err) = trogon_telemetry::shutdown_otel() {
+        eprintln!("WARN: failed to shut down OpenTelemetry cleanly: {err}");
+    }
     Ok(())
 }

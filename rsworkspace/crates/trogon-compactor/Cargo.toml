@@ -17,9 +17,15 @@ tokio       = { workspace = true, features = ["rt-multi-thread", "macros", "time
 tracing     = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 trogonai-compactor-proto = { workspace = true }
+trogonai-catalog-client = { workspace = true }
+trogon-telemetry = { workspace = true }
+trogon-std = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
 buffa = "=0.7.0"
 
 [dev-dependencies]
+trogonai-catalog-proto = { workspace = true }
 httpmock               = "0.7"
 tokio                  = { workspace = true, features = ["macros", "rt-multi-thread"] }
 testcontainers-modules = { workspace = true }

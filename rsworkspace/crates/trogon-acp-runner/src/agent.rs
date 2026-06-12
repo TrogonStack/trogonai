@@ -34,7 +34,7 @@ use trogon_runner_tools::session_store::{
     AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601,
 };
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
-use trogon_runner_tools::{CompactError, decode_compact_response, encode_compact_request, parse_compactor_config};
+use trogon_runner_tools::{CompactError, CompactProviders, parse_compactor_config, request_compaction};
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
 /// Gateway credentials that override the default proxy/token when set.
@@ -133,24 +133,6 @@ fn estimate_token_count(messages: &[Message]) -> u64 {
 /// Times out after 25 s (well under the registry TTL of 30 s) so that a slow or
 /// absent compactor never holds the session semaphore long enough to cause the
 /// registry entry to expire or the CLI to time out.
-/// Builds the protobuf payload for a compaction request. Extracted so the wire
-/// contract is unit-testable without NATS.
-fn build_compact_payload(
-    messages: &[Message],
-    model: &str,
-    compactor_provider: Option<&str>,
-    compactor_model: Option<&str>,
-) -> Vec<u8> {
-    encode_compact_request(
-        messages,
-        SESSION_PROVIDER,
-        model,
-        Some(context_window_tokens(model)),
-        compactor_provider,
-        compactor_model,
-    )
-}
-
 /// Requests compaction from `trogon-compactor`.
 ///
 /// Returns `Ok(Some(messages))` when the compactor compacted, `Ok(None)` when it
@@ -159,6 +141,13 @@ fn build_compact_payload(
 /// caller pick its policy: the manual `/compact` handler propagates the `Err` so
 /// the user sees the compactor-down failure, while the auto-path degrades and
 /// continues uncompacted in the background.
+///
+/// The shared [`request_compaction`] helper owns building the request, the NATS
+/// request-reply, and decoding. This per-runner wrapper keeps acp-specific
+/// concerns: the session provider identity, the model's `context_window_tokens`,
+/// the 25 s timeout (well under the 30 s registry TTL), and `session_id`-scoped
+/// telemetry. It does **not** decide *when* to compact — the threshold check lives
+/// at the call sites.
 async fn compact_messages(
     nats: &async_nats::Client,
     messages: &[Message],
@@ -167,40 +156,30 @@ async fn compact_messages(
     compactor_provider: Option<&str>,
     compactor_model: Option<&str>,
 ) -> Result<Option<Vec<Message>>, CompactError> {
-    let payload = build_compact_payload(messages, model, compactor_provider, compactor_model);
-
-    let reply = match tokio::time::timeout(
+    let outcome = request_compaction(
+        nats,
+        messages,
+        Some(context_window_tokens(model)),
+        CompactProviders {
+            session_provider: SESSION_PROVIDER,
+            session_model: model,
+            compactor_provider,
+            compactor_model,
+        },
         std::time::Duration::from_secs(25),
-        nats.request("trogon.compactor.compact", payload.into()),
     )
-    .await
-    {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Err(CompactError::Request(e.to_string())),
-        Err(_elapsed) => {
-            return Err(CompactError::InvalidResponse(
-                "compactor did not respond within 25 s".into(),
-            ));
-        }
-    };
+    .await?;
 
-    let resp = decode_compact_response(&reply.payload)?;
-
-    if let Some(ref fallback) = resp.fallback_model {
-        warn!(session_id, fallback_model = %fallback, "compactor used fallback model");
-    }
-
-    if resp.compacted {
+    if let Some(ref new_msgs) = outcome {
         info!(
             session_id,
-            tokens_before = resp.tokens_before,
-            tokens_after = resp.tokens_after,
+            tokens_before = estimate_token_count(messages),
+            tokens_after = estimate_token_count(new_msgs),
             "context compacted"
         );
-        Ok(Some(resp.messages))
-    } else {
-        Ok(None)
     }
+
+    Ok(outcome)
 }
 
 /// Agent implementation that handles all ACP methods via NATS.
@@ -234,6 +213,12 @@ pub struct TrogonAgent<
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     /// NATS client forwarded to `WasmRuntimeBashTool` when an execution backend is available.
     execution_nats: Option<async_nats::Client>,
+    /// Optional Session Kernel sink: when set, each turn's conversation is mirrored
+    /// into the canonical event log (shadow mode). `None` keeps the legacy path.
+    conversation_sink: Option<Arc<dyn crate::kernel_sink::ConversationSink>>,
+    /// Model catalog snapshot used for C4 compactor-provider backfill on load.
+    /// `None` (catalog unavailable) keeps the legacy behavior unchanged.
+    catalog: Option<trogonai_catalog_client::CatalogSnapshot>,
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N, FsTrogonMdLoader> {
@@ -263,6 +248,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             http: reqwest::Client::new(),
             registry: None,
             execution_nats: None,
+            conversation_sink: None,
+            catalog: None,
         }
     }
 }
@@ -284,7 +271,20 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             http: self.http,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            conversation_sink: self.conversation_sink,
+            catalog: self.catalog,
         }
+    }
+
+    /// Mirror each turn's conversation into the canonical Session Kernel event log
+    /// (shadow mode). Best-effort and non-fatal; leaves the legacy store
+    /// authoritative. Wired only when the Session Kernel is enabled.
+    pub fn with_conversation_sink(
+        mut self,
+        sink: Arc<dyn crate::kernel_sink::ConversationSink>,
+    ) -> Self {
+        self.conversation_sink = Some(sink);
+        self
     }
 
     /// Enable context compaction via `trogon-compactor`.
@@ -295,6 +295,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     /// continues without compaction.
     pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
         self.compactor_nats = Some(nats);
+        self
+    }
+
+    /// Attach a model catalog snapshot for C4 compactor-provider backfill.
+    ///
+    /// On load, a legacy serde session carrying a bare `compactor_model` (no
+    /// provider) has its `compactor_provider` resolved from this catalog and the
+    /// record rewritten as protobuf. `None` (catalog unavailable) leaves legacy
+    /// records untouched — graceful degradation.
+    pub fn with_catalog(mut self, catalog: trogonai_catalog_client::CatalogSnapshot) -> Self {
+        self.catalog = Some(catalog);
         self
     }
 
@@ -399,6 +410,23 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 return Err(internal_error(format!("session load failed: {e}")));
             }
         };
+
+        // C4 migration: a pre-M3 serde session carries a bare `compactor_model`
+        // with no `compactor_provider`. When a catalog is available, resolve the
+        // provider and durably rewrite the record as the protobuf pair on save.
+        // Best-effort: a save failure never fails the prompt.
+        if let Some(ref catalog) = self.catalog {
+            let backfilled = trogonai_catalog_client::backfill_compactor_provider(
+                &mut state.compactor_provider,
+                state.compactor_model.as_deref(),
+                catalog,
+            );
+            if backfilled
+                && let Err(e) = self.store.save(&session_id, &state).await
+            {
+                warn!(session_id, error = %e, "agent: failed to persist C4 compactor-provider backfill");
+            }
+        }
 
         // MED-17: remember the cwd/mode at load time so the final save can tell
         // which fields this prompt actually changed and re-apply only those on top
@@ -824,6 +852,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             append_audit_entries(&mut merged.audit_log, new_entries);
             if let Err(e) = self.store.save(&session_id, &merged).await {
                 warn!(session_id, error = %e, "agent: failed to save session");
+            }
+
+            // Shadow-mirror the conversation into the canonical event log when the
+            // Session Kernel is enabled (§3). V2 export preserves tool-call structure
+            // for structured tool events. Best-effort and non-fatal.
+            if let Some(sink) = &self.conversation_sink {
+                let export_json = serde_json::to_string(
+                    &trogon_runner_tools::portable_session::messages_to_export_v2(&merged.messages),
+                )
+                .unwrap_or_else(|_| "{\"version\":2,\"messages\":[]}".to_string());
+                sink.sync(&session_id, &export_json, &merged.cwd).await;
             }
         }
 
@@ -1475,15 +1514,27 @@ mod tests {
         assert_eq!(estimate_token_count(&[]), 0);
     }
 
-    // ── build_compact_payload: wire contract ──────────────────────────────────
+    // ── compaction request wire contract (acp provider identity) ──────────────
+    //
+    // acp delegates build+NATS+decode to `request_compaction`; here we assert the
+    // acp-specific inputs (SESSION_PROVIDER + context_window_tokens) produce the
+    // expected wire payload via the underlying `encode_compact_request`.
 
     #[test]
-    fn build_compact_payload_includes_provider_model_and_override() {
+    fn compact_request_includes_provider_model_and_override() {
         use buffa::Message as _;
+        use trogon_runner_tools::encode_compact_request;
         use trogonai_compactor_proto::CompactRequest as ProtoRequest;
 
         let msgs = vec![Message::user_text("hi")];
-        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", Some("xai"), Some("grok-4"));
+        let bytes = encode_compact_request(
+            &msgs,
+            SESSION_PROVIDER,
+            "claude-opus-4-6",
+            Some(context_window_tokens("claude-opus-4-6")),
+            Some("xai"),
+            Some("grok-4"),
+        );
         let proto = ProtoRequest::decode_from_slice(&bytes).unwrap();
         assert_eq!(proto.provider, "anthropic");
         assert_eq!(proto.model, "claude-opus-4-6");
@@ -1493,12 +1544,20 @@ mod tests {
     }
 
     #[test]
-    fn build_compact_payload_omits_compactor_fields_when_none() {
+    fn compact_request_omits_compactor_fields_when_none() {
         use buffa::Message as _;
+        use trogon_runner_tools::encode_compact_request;
         use trogonai_compactor_proto::CompactRequest as ProtoRequest;
 
         let msgs = vec![Message::user_text("hi")];
-        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", None, None);
+        let bytes = encode_compact_request(
+            &msgs,
+            SESSION_PROVIDER,
+            "claude-opus-4-6",
+            Some(context_window_tokens("claude-opus-4-6")),
+            None,
+            None,
+        );
         let proto = ProtoRequest::decode_from_slice(&bytes).unwrap();
         assert_eq!(proto.model, "claude-opus-4-6");
         assert!(proto.compactor_provider.is_none());
@@ -2147,6 +2206,74 @@ mod tests {
         assert_eq!(saved.total_output_tokens, 50);
         assert_eq!(saved.total_cache_creation_tokens, 10);
         assert_eq!(saved.total_cache_read_tokens, 5);
+    }
+
+    /// C4 migration end-to-end at the agent level: a legacy session loaded with a
+    /// bare `compactor_model` (no provider) has its provider resolved from the
+    /// catalog and the migrated state durably persisted via the store.
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_prompt_backfills_and_persists_compactor_provider_from_catalog() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+        use trogonai_catalog_client::{CatalogEntry, CatalogSnapshot};
+        use trogonai_catalog_proto::ModelModality;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        // Legacy session: compactor_model set, compactor_provider absent.
+        store_clone
+            .save(
+                "s1",
+                &SessionState {
+                    compactor_model: Some("grok-2".to_string()),
+                    compactor_provider: None,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let catalog = CatalogSnapshot {
+            entries: vec![CatalogEntry {
+                model_id: "grok-2".into(),
+                provider: "xai".into(),
+                context_window: 131_072,
+                max_output: 8192,
+                modality: ModelModality::TEXT,
+            }],
+        };
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022");
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        )
+        .with_catalog(catalog);
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let req = PromptRequest::new("s1", vec![]);
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent.run_prompt(&req, &client, None, None).await.unwrap();
+            })
+            .await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.compactor_model.as_deref(), Some("grok-2"));
+        assert_eq!(
+            saved.compactor_provider.as_deref(),
+            Some("xai"),
+            "C4 backfill must resolve and persist the provider"
+        );
     }
 
     #[cfg(feature = "test-helpers")]

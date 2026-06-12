@@ -108,6 +108,17 @@ pub trait SessionStoring: Send + Sync + 'static {
     fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()>;
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()>;
     fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>>;
+    /// Persist only the compaction override `(provider, model)` for a session,
+    /// rewriting the separate `.compaction` protobuf record without touching the
+    /// console-shared JSON blob. Used by C4 to durably backfill the resolved
+    /// provider for pre-M3 sessions. Best-effort: logs on failure, never panics.
+    fn set_compaction<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+        provider: Option<&'a str>,
+        model: Option<&'a str>,
+    ) -> BoxFuture<'a, ()>;
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -155,6 +166,20 @@ impl NatsSessionStore {
         }
     }
 
+    async fn set_compaction_impl(
+        &self,
+        tenant_id: &str,
+        session_id: &str,
+        provider: Option<&str>,
+        model: Option<&str>,
+    ) {
+        let comp_key = format!("{tenant_id}.{session_id}.compaction");
+        let comp_bytes = trogon_runner_tools::encode_compaction(provider, model);
+        if let Err(e) = self.sessions_kv.put(&comp_key, comp_bytes.into()).await {
+            warn!(session_id, error = %e, "failed to write compaction override record");
+        }
+    }
+
     async fn remove_impl(&self, tenant_id: &str, session_id: &str) {
         let key = format!("{tenant_id}.{session_id}");
         if let Err(e) = self.sessions_kv.delete(&key).await {
@@ -180,6 +205,13 @@ impl NatsSessionStore {
                     snap.compactor_provider = provider;
                     snap.compactor_model = model;
                 }
+                // C4 migration: pre-M3 records stored `compactor_model` directly in the
+                // main JSON blob (now `#[serde(skip)]`) and have no `.compaction` record.
+                // Surface that legacy value so the agent's `backfill_compactor_provider`
+                // resolves the provider and rewrites the protobuf pair via `set_compaction`.
+                if snap.compactor_model.is_none() {
+                    snap.compactor_model = legacy_compactor_model(&entry.value);
+                }
                 Some(snap)
             }
             Err(e) => {
@@ -188,6 +220,17 @@ impl NatsSessionStore {
             }
         }
     }
+}
+
+/// Extract a legacy pre-M3 `compactor_model` from the raw main-JSON snapshot bytes.
+/// Returns the non-empty top-level `"compactor_model"` string, or `None` if the JSON
+/// is malformed, not an object, or the field is missing/empty. Best-effort migration.
+fn legacy_compactor_model(raw_json: &[u8]) -> Option<String> {
+    let serde_json::Value::Object(map) = serde_json::from_slice(raw_json).ok()? else {
+        return None;
+    };
+    let value = map.get("compactor_model")?.as_str()?;
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 impl SessionStoring for NatsSessionStore {
@@ -201,6 +244,16 @@ impl SessionStoring for NatsSessionStore {
 
     fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>> {
         Box::pin(self.load_impl(tenant_id, session_id))
+    }
+
+    fn set_compaction<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+        provider: Option<&'a str>,
+        model: Option<&'a str>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(self.set_compaction_impl(tenant_id, session_id, provider, model))
     }
 }
 
@@ -248,6 +301,10 @@ pub mod mock {
         pub removes: Mutex<Vec<(String, String)>>,
         /// Pre-populated snapshots returned by `load()`. Matched by session id.
         pub loads: Mutex<Vec<SessionSnapshot>>,
+        /// Compaction overrides persisted via `set_compaction()`:
+        /// `(tenant_id, session_id, provider, model)`.
+        #[allow(clippy::type_complexity)]
+        pub compaction_writes: Mutex<Vec<(String, String, Option<String>, Option<String>)>>,
     }
 
     impl MockSessionStore {
@@ -256,6 +313,7 @@ pub mod mock {
                 saves: Mutex::new(vec![]),
                 removes: Mutex::new(vec![]),
                 loads: Mutex::new(vec![]),
+                compaction_writes: Mutex::new(vec![]),
             }
         }
     }
@@ -284,12 +342,65 @@ pub mod mock {
                 .cloned();
             Box::pin(std::future::ready(result))
         }
+
+        fn set_compaction<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            session_id: &'a str,
+            provider: Option<&'a str>,
+            model: Option<&'a str>,
+        ) -> BoxFuture<'a, ()> {
+            self.compaction_writes.lock().expect("compaction_writes lock poisoned").push((
+                tenant_id.to_string(),
+                session_id.to_string(),
+                provider.map(str::to_string),
+                model.map(str::to_string),
+            ));
+            Box::pin(std::future::ready(()))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_compactor_model_surfaces_from_main_json_without_compaction_record() {
+        // Pre-M3 main-JSON blob: `compactor_model` lives in the main snapshot and there
+        // is NO `.compaction` protobuf record. The current `SessionSnapshot` deserialize
+        // ignores it (`#[serde(skip)]`), so the C4 migration helper must surface it.
+        let raw = br#"{
+            "id":"s1","tenant_id":"t1","name":"Test",
+            "compactor_model":"claude-haiku",
+            "tools":[],"messages":[],
+            "created_at":"2026-01-01T00:00:00.000Z",
+            "updated_at":"2026-01-01T00:00:00.000Z"
+        }"#;
+
+        // Deserialize as the store does, then apply the migration (no `.compaction` record).
+        let mut snap: SessionSnapshot = serde_json::from_slice(raw).unwrap();
+        assert_eq!(snap.compactor_model, None, "serde(skip) drops it on deserialize");
+        if snap.compactor_model.is_none() {
+            snap.compactor_model = legacy_compactor_model(raw);
+        }
+
+        assert_eq!(snap.compactor_model.as_deref(), Some("claude-haiku"));
+        assert_eq!(snap.compactor_provider, None);
+    }
+
+    #[test]
+    fn legacy_compactor_model_is_none_for_malformed_or_missing() {
+        assert_eq!(legacy_compactor_model(b"not json"), None);
+        assert_eq!(legacy_compactor_model(br#"["array","not","object"]"#), None);
+        assert_eq!(legacy_compactor_model(br#"{"id":"s1"}"#), None);
+        assert_eq!(legacy_compactor_model(br#"{"compactor_model":""}"#), None);
+        assert_eq!(legacy_compactor_model(br#"{"compactor_model":42}"#), None);
+        assert_eq!(
+            legacy_compactor_model(br#"{"compactor_model":"grok-4"}"#).as_deref(),
+            Some("grok-4")
+        );
+    }
 
     #[test]
     fn snapshot_serializes_to_chat_session_schema() {

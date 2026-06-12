@@ -8,6 +8,7 @@ pub enum ServiceName {
     AcpNatsWs,
     McpNatsStdio,
     McpNatsServer,
+    TrogonCompactor,
     TrogonGateway,
     TrogonPrActor,
     TrogonRouter,
@@ -27,6 +28,7 @@ impl ServiceName {
             Self::AcpNatsWs => "acp-nats-ws",
             Self::McpNatsStdio => "mcp-nats-stdio",
             Self::McpNatsServer => "mcp-nats-server",
+            Self::TrogonCompactor => "trogon-compactor",
             Self::TrogonGateway => "trogon-gateway",
             Self::TrogonPrActor => "trogon-pr-actor",
             Self::TrogonRouter => "trogon-router",
@@ -57,6 +59,7 @@ mod tests {
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
         assert_eq!(ServiceName::McpNatsStdio.as_str(), "mcp-nats-stdio");
         assert_eq!(ServiceName::McpNatsServer.as_str(), "mcp-nats-server");
+        assert_eq!(ServiceName::TrogonCompactor.as_str(), "trogon-compactor");
         assert_eq!(ServiceName::TrogonGateway.as_str(), "trogon-gateway");
         assert_eq!(ServiceName::TrogonPrActor.as_str(), "trogon-pr-actor");
         assert_eq!(ServiceName::TrogonRouter.as_str(), "trogon-router");

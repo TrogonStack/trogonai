@@ -330,8 +330,20 @@ impl SessionStore for NatsSessionStore {
     async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
         match self.kv.get(session_id).await? {
             // M3/ADR 0009: KV value is a versioned `SessionRecord` protobuf.
-            // Pre-protobuf serde records require C4 migration (separate).
-            Some(bytes) => crate::session_proto::decode(&bytes),
+            Some(bytes) => match crate::session_proto::decode(&bytes) {
+                Ok(state) => Ok(state),
+                // C4 migration (serde→protobuf read path): pre-M3 acp records were
+                // persisted as serde-JSON `SessionState` and fail protobuf decode.
+                // Fall back to deserializing the legacy JSON blob directly. Its bare
+                // `compactor_model` is a normal serde field, so it round-trips here
+                // with `compactor_provider = None`; the caller backfills the provider
+                // from the catalog and rewrites the record as protobuf on save.
+                Err(proto_err) => match serde_json::from_slice::<SessionState>(&bytes) {
+                    Ok(state) => Ok(state),
+                    // Neither format decoded — surface the original protobuf error.
+                    Err(_) => Err(proto_err),
+                },
+            },
             None => Ok(SessionState::default()),
         }
     }
@@ -1020,6 +1032,62 @@ mod tests {
         assert_eq!(back.total_output_tokens, 500);
         assert_eq!(back.total_cache_creation_tokens, 200);
         assert_eq!(back.total_cache_read_tokens, 75);
+    }
+
+    // ── C4 migration: legacy serde-JSON read fallback ─────────────────────────
+
+    /// A pre-M3 acp record was a bare serde-JSON `SessionState` with a
+    /// `compactor_model` and no `compactor_provider`. It fails protobuf decode,
+    /// so `NatsSessionStore::load` falls back to `serde_json::from_slice`. This
+    /// exercises that exact fallback chain against a legacy blob.
+    #[test]
+    fn legacy_serde_record_falls_back_to_json_decode() {
+        // Legacy on-disk JSON: model + bare compactor_model, no provider.
+        let legacy_json = serde_json::json!({
+            "messages": [],
+            "compactor_model": "claude-haiku-4-5-20251001",
+            "model": "claude-sonnet-4-6",
+            "mode": "default",
+        });
+        let bytes = serde_json::to_vec(&legacy_json).unwrap();
+
+        // Mirror NatsSessionStore::load: protobuf first, serde-JSON fallback.
+        let state = match crate::session_proto::decode(&bytes) {
+            Ok(s) => s,
+            Err(proto_err) => {
+                serde_json::from_slice::<SessionState>(&bytes).map_err(|_| proto_err).unwrap()
+            }
+        };
+
+        assert_eq!(state.compactor_model.as_deref(), Some("claude-haiku-4-5-20251001"));
+        assert_eq!(state.compactor_provider, None);
+        assert_eq!(state.model.as_deref(), Some("claude-sonnet-4-6"));
+    }
+
+    /// A protobuf record still decodes via the protobuf path (no regression),
+    /// and a blob that is neither protobuf nor JSON surfaces the protobuf error.
+    #[test]
+    fn protobuf_record_still_decodes_and_garbage_errors() {
+        let state = SessionState {
+            compactor_model: Some("grok-2".to_string()),
+            compactor_provider: Some("xai".to_string()),
+            ..Default::default()
+        };
+        let proto = crate::session_proto::encode(&state);
+
+        let decoded = match crate::session_proto::decode(&proto) {
+            Ok(s) => s,
+            Err(e) => serde_json::from_slice::<SessionState>(&proto).map_err(|_| e).unwrap(),
+        };
+        assert_eq!(decoded.compactor_model.as_deref(), Some("grok-2"));
+        assert_eq!(decoded.compactor_provider.as_deref(), Some("xai"));
+
+        let garbage = b"\xff\xfe not protobuf and not json";
+        let result = match crate::session_proto::decode(garbage) {
+            Ok(s) => Ok(s),
+            Err(proto_err) => serde_json::from_slice::<SessionState>(garbage).map_err(|_| proto_err),
+        };
+        assert!(result.is_err(), "garbage must surface the protobuf decode error");
     }
 
     #[test]

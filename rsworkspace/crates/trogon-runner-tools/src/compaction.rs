@@ -67,31 +67,30 @@ pub struct CompactProviders<'a> {
     pub compactor_model: Option<&'a str>,
 }
 
-/// Request compaction from `trogon-compactor` when history is over the threshold.
+/// Thin, thresholdless compaction call: build request + NATS request-reply + decode.
 ///
-/// Returns `Ok(None)` when under threshold or the compactor chose not to compact.
-/// Returns `Ok(Some(messages))` when compaction succeeded.
-pub async fn maybe_compact(
+/// Does **not** decide *when* to compact (no threshold check) and does **not**
+/// consolidate per-runner message conversion — callers own those. This helper only
+/// builds the [`encode_compact_request`] payload from `providers` + `context_window`,
+/// performs the NATS request-reply with `timeout`, decodes the response, and maps it
+/// to `Ok(Some(messages))` when the compactor compacted else `Ok(None)`.
+pub async fn request_compaction(
     nats: &async_nats::Client,
     messages: &[Message],
-    token_budget: usize,
-    threshold_pct: u8,
+    context_window: Option<u64>,
     providers: CompactProviders<'_>,
+    timeout: Duration,
 ) -> Result<Option<Vec<Message>>, CompactError> {
-    if !over_threshold(messages, token_budget, threshold_pct) {
-        return Ok(None);
-    }
-
     let payload = encode_compact_request(
         messages,
         providers.session_provider,
         providers.session_model,
-        None,
+        context_window,
         providers.compactor_provider,
         providers.compactor_model,
     );
 
-    let reply = tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into()))
+    let reply = tokio::time::timeout(timeout, nats.request(COMPACT_SUBJECT, payload.into()))
         .await
         .map_err(|_| CompactError::InvalidResponse("compactor request timed out".into()))?
         .map_err(|e| CompactError::Request(e.to_string()))?;
@@ -107,6 +106,24 @@ pub async fn maybe_compact(
     } else {
         Ok(None)
     }
+}
+
+/// Request compaction from `trogon-compactor` when history is over the threshold.
+///
+/// Returns `Ok(None)` when under threshold or the compactor chose not to compact.
+/// Returns `Ok(Some(messages))` when compaction succeeded.
+pub async fn maybe_compact(
+    nats: &async_nats::Client,
+    messages: &[Message],
+    token_budget: usize,
+    threshold_pct: u8,
+    providers: CompactProviders<'_>,
+) -> Result<Option<Vec<Message>>, CompactError> {
+    if !over_threshold(messages, token_budget, threshold_pct) {
+        return Ok(None);
+    }
+
+    request_compaction(nats, messages, None, providers, COMPACT_TIMEOUT).await
 }
 
 #[cfg(test)]

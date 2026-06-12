@@ -28,6 +28,7 @@ pub mod error;
 pub mod serializer;
 pub mod service;
 pub mod summarizer;
+pub mod telemetry;
 pub mod tokens;
 pub mod traits;
 pub mod types;

@@ -215,6 +215,16 @@ impl SessionStoring for RecordingStore {
     > {
         Box::pin(async move { None })
     }
+
+    fn set_compaction<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+        _provider: Option<&'a str>,
+        _model: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {})
+    }
 }
 
 // ── Test harness ──────────────────────────────────────────────────────────────
@@ -5344,7 +5354,7 @@ async fn cancel_saves_token_totals_to_kv() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 {
+                if !nats.published_payloads().is_empty() {
                     break;
                 }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
@@ -5522,7 +5532,7 @@ async fn completion_saves_token_totals_to_kv() {
             );
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 {
+                if !nats.published_payloads().is_empty() {
                     break;
                 }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");

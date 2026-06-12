@@ -717,6 +717,30 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         if let Some(evicted) = evicted_id {
             store.remove(&self.tenant_id, &evicted).await;
         }
+        // C4: pre-M3 sessions persisted a bare `compactor_model` without a provider.
+        // Backfill the provider from the catalog on load (no-op when already set or
+        // when the model is unknown/ambiguous).
+        let mut compactor_provider = snap.compactor_provider.clone();
+        if let Some(catalog) = self.catalog_client.as_ref().and_then(|c| c.cached_snapshot()) {
+            let backfilled = trogonai_catalog_client::backfill_compactor_provider(
+                &mut compactor_provider,
+                snap.compactor_model.as_deref(),
+                &catalog,
+            );
+            // Durably rewrite the resolved pair so the migration is permanent
+            // (best-effort: never fail the restore on a save error).
+            if backfilled {
+                store
+                    .set_compaction(
+                        &self.tenant_id,
+                        session_id,
+                        compactor_provider.as_deref(),
+                        snap.compactor_model.as_deref(),
+                    )
+                    .await;
+            }
+        }
+
         let mut sessions = self.sessions.lock().await;
         sessions.insert(
             session_id.to_string(),
@@ -736,7 +760,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: snap.mcp_servers.clone(),
-                compactor_provider: snap.compactor_provider.clone(),
+                compactor_provider,
                 compactor_model: snap.compactor_model.clone(),
                 terminal_id: None,
                 terminal_wasm_prefix: None,

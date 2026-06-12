@@ -1125,8 +1125,29 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 })
                 .collect();
             let model = snap.model.clone();
-            let compactor_provider = snap.compactor_provider.clone();
+            let mut compactor_provider = snap.compactor_provider.clone();
             let compactor_model = snap.compactor_model.clone();
+            // C4: pre-M3 sessions persisted a bare `compactor_model` without a
+            // provider; backfill it from the catalog on load (no-op otherwise).
+            if let Some(catalog) = self.catalog_client.as_ref().and_then(|c| c.cached_snapshot()) {
+                let backfilled = trogonai_catalog_client::backfill_compactor_provider(
+                    &mut compactor_provider,
+                    compactor_model.as_deref(),
+                    &catalog,
+                );
+                // Durably rewrite the resolved pair so the migration is permanent
+                // (best-effort: never fail the restore on a save error).
+                if backfilled {
+                    store
+                        .set_compaction(
+                            &self.tenant_id,
+                            &session_id,
+                            compactor_provider.as_deref(),
+                            compactor_model.as_deref(),
+                        )
+                        .await;
+                }
+            }
             let created_at_iso = snap.created_at.clone();
             let parent_session_id = snap.parent_session_id.clone();
             let branched_at_index = snap.branched_at_index;
@@ -2730,7 +2751,7 @@ impl<H, N, M> OpenRouterAgent<H, N, M> {
 #[cfg(any(test, feature = "test-helpers"))]
 impl<H, N, M> OpenRouterAgent<H, N, M> {
     pub fn test_notifier(&self) -> &N {
-        &*self.notifier
+        &self.notifier
     }
 
     pub async fn test_session_mode(&self, id: &str) -> Option<String> {
@@ -6172,10 +6193,23 @@ mod tests {
             let snap = self.snapshot.clone();
             Box::pin(async move { snap })
         }
+
+        fn set_compaction<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+            _provider: Option<&'a str>,
+            _model: Option<&'a str>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
+        }
     }
 
     struct RecordingSessionStore {
         saves: Arc<std::sync::Mutex<Vec<String>>>,
+        #[allow(clippy::type_complexity)]
+        compaction_writes:
+            Arc<std::sync::Mutex<Vec<(String, String, Option<String>, Option<String>)>>>,
     }
 
     impl RecordingSessionStore {
@@ -6184,6 +6218,7 @@ mod tests {
             (
                 Self {
                     saves: Arc::clone(&saves),
+                    compaction_writes: Arc::new(std::sync::Mutex::new(Vec::new())),
                 },
                 saves,
             )
@@ -6218,6 +6253,25 @@ mod tests {
             Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>,
         > {
             Box::pin(async move { None })
+        }
+
+        fn set_compaction<'a>(
+            &'a self,
+            tenant_id: &'a str,
+            session_id: &'a str,
+            provider: Option<&'a str>,
+            model: Option<&'a str>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            let entry = (
+                tenant_id.to_string(),
+                session_id.to_string(),
+                provider.map(str::to_string),
+                model.map(str::to_string),
+            );
+            let writes = Arc::clone(&self.compaction_writes);
+            Box::pin(async move {
+                writes.lock().unwrap().push(entry);
+            })
         }
     }
 
@@ -7101,6 +7155,16 @@ mod tests {
             Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>,
         > {
             Box::pin(async move { None })
+        }
+
+        fn set_compaction<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+            _provider: Option<&'a str>,
+            _model: Option<&'a str>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
         }
     }
 
