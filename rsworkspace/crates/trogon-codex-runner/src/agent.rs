@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::permissions::{ModeGateAction, mode_gate_action};
 use crate::process::{CodexEvent, RealProcessSpawner};
 use crate::traits::{CodexProcessClient, ProcessSpawner, SessionNotifier, SessionNotifierFactory};
 
@@ -67,6 +68,27 @@ fn is_valid_mode(mode: &str) -> bool {
 
 fn invalid_params(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InvalidParams.into(), msg.into())
+}
+
+/// Apply the coarse permission-mode gate Trogon controls at session/turn boundaries.
+fn apply_mode_gate(mode: &str, warn_at_forward: bool) -> Result<Option<&'static str>, Error> {
+    match mode_gate_action(mode) {
+        ModeGateAction::Forward {
+            approval_policy,
+            warn_unenforced,
+        } => {
+            if warn_at_forward && warn_unenforced {
+                warn!(
+                    mode,
+                    approval_policy = approval_policy.as_wire_str(),
+                    "codex: permission mode forwarded as approvalPolicy; \
+                     per-tool gating is not enforced inside the app-server subprocess"
+                );
+            }
+            Ok(Some(approval_policy.as_wire_str()))
+        }
+        ModeGateAction::Refuse { reason } => Err(invalid_params(reason)),
+    }
 }
 
 // ── Session ───────────────────────────────────────────────────────────────────
@@ -493,11 +515,16 @@ where
         &self,
         req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
+        // Permission modes are stored for ACP clients and mapped to Codex `approvalPolicy`
+        // on each `turn/start`. The app-server runs tools in-subprocess; Trogon observes
+        // tool events but cannot pre-gate individual tool calls — only this coarse boundary
+        // and explicit refusal of unenforceable modes (e.g. `plan`) are under Trogon control.
         let mode_id = req.mode_id.to_string();
         let session_id = req.session_id.to_string();
         if !is_valid_mode(&mode_id) {
-            return Err(internal_error(format!("unknown mode: {mode_id}")));
+            return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
+        apply_mode_gate(&mode_id, false)?;
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
@@ -565,7 +592,7 @@ where
             );
         }
 
-        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn, first_turn) = {
+        let (thread_id, model, mode, pending_history, cwd, prepend_trogon, orig_first_turn, first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -582,6 +609,7 @@ where
             (
                 s.thread_id.clone(),
                 s.model.clone().or_else(|| Some(self.default_model.clone())),
+                s.mode.clone(),
                 ph,
                 cwd,
                 prepend_trogon,
@@ -589,6 +617,8 @@ where
                 ft,
             )
         };
+
+        let approval_policy = apply_mode_gate(&mode, true)?;
 
         // Keep a backup so we can restore if the turn never actually starts.
         let ph_backup = pending_history.clone();
@@ -609,10 +639,10 @@ where
             user_input
         };
 
-        if prepend_trogon {
-            if let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
-            }
+        if prepend_trogon
+            && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
+        {
+            user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
         // HIGH-19: restore session state if the turn never actually starts.
@@ -628,7 +658,15 @@ where
                 return Err(e);
             }
         };
-        let mut event_rx = match proc.turn_start(&thread_id, &user_input, model.as_deref()).await {
+        let mut event_rx = match proc
+            .turn_start(
+                &thread_id,
+                &user_input,
+                model.as_deref(),
+                approval_policy,
+            )
+            .await
+        {
             Ok(rx) => rx,
             Err(e) => {
                 drop(proc);
@@ -1046,6 +1084,7 @@ mod tests {
             _thread_id: &str,
             _user_input: &str,
             _model: Option<&str>,
+            _approval_policy: Option<&str>,
         ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
         {
             let (tx, rx) = broadcast::channel(64);
@@ -1320,13 +1359,28 @@ mod tests {
     // ── set_session_mode ──────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn set_session_mode_always_succeeds() {
+    async fn set_session_mode_default_succeeds() {
         let agent = make_agent().await;
         agent.test_insert_session("sm1", "/tmp", None).await;
         agent
             .set_session_mode(SetSessionModeRequest::new("sm1", "default"))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_plan_is_rejected() {
+        let agent = make_agent().await;
+        agent.test_insert_session("sm2", "/tmp", None).await;
+        let err = agent
+            .set_session_mode(SetSessionModeRequest::new("sm2", "plan"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.message.contains("plan mode"),
+            "expected plan refusal, got: {}",
+            err.message
+        );
     }
 
     // ── set_session_config_option ─────────────────────────────────────────────
