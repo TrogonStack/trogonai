@@ -185,6 +185,13 @@ impl std::error::Error for AgentError {
 /// guard halts the turn (a generous `max_iterations` is the coarse backstop).
 const LOOP_REPEAT_LIMIT: u32 = 3;
 
+/// Injected as a user message when a turn ran tools but then ended with no text
+/// — the model did work and went silent. This guarantees the user gets a recap
+/// (the prompt-level guidance is soft; this is the hard backstop). Only ever
+/// sent once per turn, and only when tools actually ran (never on a greeting or
+/// a plain answered question).
+const AUTO_SUMMARY_NUDGE: &str = "You ended your turn without telling the user what you did. In 1-2 sentences of natural language, briefly summarize what you just did and the result. Do not call any more tools.";
+
 /// Order-independent signature of a round's tool calls (`name` + `input`, ignoring
 /// the per-call id). Two rounds with the same signature are an identical repeat,
 /// which the loop guard uses to detect a model spinning on the same call.
@@ -198,6 +205,15 @@ fn tool_call_signature(content: &[ContentBlock]) -> String {
         .collect();
     parts.sort();
     parts.join("\u{2}")
+}
+
+/// Whether a model response contains any non-empty visible text block. Used by
+/// the auto-summary guarantee: an `end_turn` response with tools-having-run but
+/// no visible text means the model went silent after doing work.
+fn response_has_visible_text(content: &[ContentBlock]) -> bool {
+    content
+        .iter()
+        .any(|b| matches!(b, ContentBlock::Text { text } if !text.trim().is_empty()))
 }
 
 impl From<reqwest::Error> for AgentError {
@@ -700,6 +716,10 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         // backstop; this catches a model spinning on the *same* call far sooner.
         let mut last_tool_sig: Option<String> = None;
         let mut repeat_count: u32 = 0;
+        // Auto-summary guarantee: whether any tool ran this turn, and whether we
+        // have already nudged the model for a recap (nudge at most once).
+        let mut used_tools = false;
+        let mut auto_summary_requested = false;
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Streaming chat loop iteration");
@@ -854,6 +874,19 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
 
             match stop_reason.as_str() {
                 "end_turn" => {
+                    // Auto-summary guarantee: if the model did real work (ran tools)
+                    // this turn but ended with no text, it went silent — nudge it once
+                    // for a brief recap so the user is never left guessing. Skipped for
+                    // greetings / plain answers (no tools ran) and never repeated.
+                    let has_text = response_has_visible_text(&response_content);
+                    if used_tools && !has_text && !auto_summary_requested {
+                        auto_summary_requested = true;
+                        messages.push(Message::assistant(response_content));
+                        messages.push(Message::user_text(AUTO_SUMMARY_NUDGE));
+                        debug!("turn ended silently after tool use — requesting a recap");
+                        continue;
+                    }
+
                     // TextDelta and ThinkingDelta were already emitted incrementally above.
                     let _ = event_tx
                         .send(AgentEvent::UsageSummary {
@@ -903,6 +936,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         warn!(repeat = repeat_count, "loop detected — identical tool calls repeated; halting turn");
                         return Ok(messages);
                     }
+                    used_tools = true;
                     let results = self
                         .execute_tools_streaming(&response_content, &event_tx)
                         .await;
@@ -1520,6 +1554,20 @@ mod tests {
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content.len(), 1);
         assert!(matches!(&msg.content[0], ContentBlock::Text { text } if text == "hello"));
+    }
+
+    #[test]
+    fn response_has_visible_text_detects_silent_endings() {
+        // A response with only tool calls (or only whitespace) is "silent".
+        assert!(!response_has_visible_text(&[tu("id1", "bash", "x")]));
+        assert!(!response_has_visible_text(&[ContentBlock::Text { text: "   ".into() }]));
+        assert!(!response_has_visible_text(&[]));
+        // Any non-empty text makes it not silent.
+        assert!(response_has_visible_text(&[ContentBlock::Text { text: "done".into() }]));
+        assert!(response_has_visible_text(&[
+            ContentBlock::Text { text: "ran it".into() },
+            tu("id1", "bash", "x"),
+        ]));
     }
 
     #[test]
