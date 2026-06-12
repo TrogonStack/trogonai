@@ -1,0 +1,60 @@
+name: Enforce Cargo license
+description: Validate Cargo workspace package license metadata
+
+inputs:
+  working-directory:
+    description: Cargo workspace directory
+    required: false
+    default: rsworkspace
+  expected-license:
+    description: Expected SPDX license expression
+    required: false
+    default: Apache-2.0
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        EXPECTED_LICENSE: ${{ inputs.expected-license }}
+      run: |
+        metadata_path="${RUNNER_TEMP:-/tmp}/cargo-metadata.json"
+        cargo metadata --no-deps --format-version 1 > "$metadata_path"
+
+        METADATA_PATH="$metadata_path" node <<'NODE'
+        const fs = require("node:fs");
+        const expectedLicense = process.env.EXPECTED_LICENSE;
+        const metadata = JSON.parse(fs.readFileSync(process.env.METADATA_PATH, "utf8"));
+        const violations = [];
+
+        for (const pkg of metadata.packages) {
+          const manifest = fs.readFileSync(pkg.manifest_path, "utf8");
+          const packageLines = [];
+          let inPackage = false;
+
+          for (const line of manifest.split(/\r?\n/)) {
+            if (line.startsWith("[")) {
+              if (inPackage) break;
+              inPackage = line.trim() === "[package]";
+              continue;
+            }
+
+            if (inPackage) {
+              packageLines.push(line);
+            }
+          }
+
+          if (pkg.license !== expectedLicense || !packageLines.includes(`license = "${expectedLicense}"`)) {
+            violations.push(`${pkg.manifest_path}: license is ${pkg.license ?? "missing"}`);
+          }
+        }
+
+        if (violations.length > 0) {
+          console.error(`Every Rust crate must declare license = "${expectedLicense}" in Cargo.toml.`);
+          for (const violation of violations) {
+            console.error(violation);
+          }
+          process.exit(1);
+        }
+        NODE

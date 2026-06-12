@@ -14,6 +14,12 @@ Normal repository taxonomy, naming, packaging, dependency, and polish rules are
 relaxed here. It is acceptable for experiments to be messy, mixed-stack,
 temporary, duplicated, or incomplete while an idea is being tested.
 
+## License
+
+By default, experiments are UNLICENSED and proprietary to Straw Hat, LLC unless
+a more specific license file, package manifest, source header, or written notice
+in the relevant child path says otherwise.
+
 Do not assume anything under this directory is a package, workspace member,
 published artifact, supported interface, runnable service, or maintained build
 target. Files here only carry repository expectations where this README says
