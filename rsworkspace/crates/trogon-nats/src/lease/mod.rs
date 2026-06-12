@@ -44,37 +44,25 @@ pub use renew_interval::{LeaseRenewInterval, LeaseRenewIntervalError};
 pub use traits::{ReleaseLease, RenewLease, TryAcquireLease};
 pub use ttl::{LeaseTtl, LeaseTtlError};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EnsureLeaderError {
-    Acquire(kv::CreateError),
-    Renew(kv::UpdateError),
+    #[error("failed to acquire lease: {0}")]
+    Acquire(#[source] kv::CreateError),
+    #[error("failed to renew lease: {0}")]
+    Renew(#[source] kv::UpdateError),
 }
 
-impl std::fmt::Display for EnsureLeaderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Acquire(source) => write!(f, "failed to acquire lease: {source}"),
-            Self::Renew(source) => write!(f, "failed to renew lease: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for EnsureLeaderError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Acquire(source) => Some(source),
-            Self::Renew(source) => Some(source),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum LeaseError {
+    #[error("lease provision error: {context}: {source}")]
     Provision {
         context: &'static str,
+        #[source]
         source: LeaseProvisionError,
     },
+    #[error("lease provision error: incompatible bucket config: {source}")]
     IncompatibleBucketConfig {
+        #[source]
         source: IncompatibleLeaseBucketConfig,
     },
 }
@@ -86,56 +74,20 @@ impl LeaseError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum LeaseProvisionError {
-    CreateBucket(CreateKeyValueError),
-    OpenExistingBucket(KeyValueError),
-    InspectBucket(kv::StatusError),
+    #[error("{0}")]
+    CreateBucket(#[source] CreateKeyValueError),
+    #[error("{0}")]
+    OpenExistingBucket(#[source] KeyValueError),
+    #[error("{0}")]
+    InspectBucket(#[source] kv::StatusError),
 }
 
-impl std::fmt::Display for LeaseProvisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CreateBucket(source) => write!(f, "{source}"),
-            Self::OpenExistingBucket(source) => write!(f, "{source}"),
-            Self::InspectBucket(source) => write!(f, "{source}"),
-        }
-    }
-}
-
-impl std::error::Error for LeaseProvisionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::CreateBucket(source) => Some(source),
-            Self::OpenExistingBucket(source) => Some(source),
-            Self::InspectBucket(source) => Some(source),
-        }
-    }
-}
-
-impl std::fmt::Display for LeaseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Provision { context, source } => {
-                write!(f, "lease provision error: {context}: {source}")
-            }
-            Self::IncompatibleBucketConfig { source } => {
-                write!(f, "lease provision error: incompatible bucket config: {source}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for LeaseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Provision { source, .. } => Some(source),
-            Self::IncompatibleBucketConfig { source } => Some(source),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "expected history={expected_history}, max_age={expected_max_age:?}, allow_message_ttl={expected_allow_message_ttl}, subject_delete_marker_ttl={expected_subject_delete_marker_ttl:?}, got history={actual_history}, max_age={actual_max_age:?}, allow_message_ttl={actual_allow_message_ttl}, subject_delete_marker_ttl={actual_subject_delete_marker_ttl:?}"
+)]
 pub struct IncompatibleLeaseBucketConfig {
     expected_history: i64,
     actual_history: i64,
@@ -146,25 +98,6 @@ pub struct IncompatibleLeaseBucketConfig {
     expected_subject_delete_marker_ttl: Option<Duration>,
     actual_subject_delete_marker_ttl: Option<Duration>,
 }
-
-impl std::fmt::Display for IncompatibleLeaseBucketConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "expected history={}, max_age={:?}, allow_message_ttl={}, subject_delete_marker_ttl={:?}, got history={}, max_age={:?}, allow_message_ttl={}, subject_delete_marker_ttl={:?}",
-            self.expected_history,
-            self.expected_max_age,
-            self.expected_allow_message_ttl,
-            self.expected_subject_delete_marker_ttl,
-            self.actual_history,
-            self.actual_max_age,
-            self.actual_allow_message_ttl,
-            self.actual_subject_delete_marker_ttl
-        )
-    }
-}
-
-impl std::error::Error for IncompatibleLeaseBucketConfig {}
 
 #[derive(Clone)]
 #[cfg_attr(coverage, allow(dead_code))]

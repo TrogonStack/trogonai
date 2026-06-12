@@ -19,6 +19,9 @@ expect_used = "deny"
 panic = "deny"
 unwrap_used = "deny"
 
+[dependencies]
+thiserror = { workspace = true }
+
 [dev-dependencies]
 trybuild = "1"
 

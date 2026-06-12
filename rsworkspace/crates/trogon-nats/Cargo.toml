@@ -7,7 +7,8 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv", "object-store", "server_2_11"] }
+thiserror = { workspace = true }
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv", "object-store", "server_2_11", "server_2_12"] }
 bytes = { workspace = true }
 futures = { workspace = true }
 opentelemetry = { workspace = true }

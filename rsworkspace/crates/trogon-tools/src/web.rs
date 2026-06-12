@@ -4,18 +4,46 @@ use crate::ToolContext;
 
 const MAX_RESPONSE: usize = 8 * 1024;
 
-/// Returns `true` if the IP falls in any SSRF-sensitive range (loopback, private,
-/// link-local, unspecified, or IPv6 unique-local).
+/// Returns `true` if an IPv4 address falls in an SSRF-sensitive range: loopback,
+/// RFC1918 private, link-local, unspecified, or CGNAT (100.64.0.0/10).
+fn is_blocked_v4(ip: &std::net::Ipv4Addr) -> bool {
+    let o = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || (o[0] == 100 && (o[1] & 0xc0) == 0x40) // CGNAT 100.64.0.0/10
+}
+
+/// Returns `true` if the IP falls in any SSRF-sensitive range. IPv6 forms that
+/// embed an IPv4 address (IPv4-mapped `::ffff:a.b.c.d` and the NAT64 well-known
+/// prefix `64:ff9b::/96`) are classified by their embedded IPv4 — on Linux these
+/// reach the IPv4 stack, so a mapped/translated loopback or metadata address would
+/// otherwise slip past an IPv6-only check.
 fn is_blocked_ip(ip: &std::net::IpAddr) -> bool {
     match ip {
-        std::net::IpAddr::V4(ip) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
-        }
+        std::net::IpAddr::V4(ip) => is_blocked_v4(ip),
         std::net::IpAddr::V6(ip) => {
+            // IPv4-mapped: ::ffff:a.b.c.d  (to_ipv4_mapped returns None for ::1, so
+            // genuine IPv6 loopback still falls through to the checks below).
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return is_blocked_v4(&v4);
+            }
+            // NAT64 well-known prefix 64:ff9b::/96 embeds the IPv4 in the low 32 bits.
+            let s = ip.segments();
+            if s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0 {
+                let v4 = std::net::Ipv4Addr::new(
+                    (s[6] >> 8) as u8,
+                    (s[6] & 0xff) as u8,
+                    (s[7] >> 8) as u8,
+                    (s[7] & 0xff) as u8,
+                );
+                return is_blocked_v4(&v4);
+            }
             ip.is_loopback()
                 || ip.is_unspecified()
-                || (ip.segments()[0] & 0xfe00 == 0xfc00) // ULA fc00::/7
-                || (ip.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
+                || (s[0] & 0xfe00 == 0xfc00) // ULA fc00::/7
+                || (s[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
         }
     }
 }
@@ -69,11 +97,13 @@ pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
         return "Error: only http:// and https:// URLs are supported".to_string();
     }
     // cfg(test) is true only in `cargo test -p trogon-tools --lib`, allowing httpmock
-    // servers on 127.0.0.1 to work. is_ssrf_blocked is covered by dedicated unit tests.
-    // When trogon-tools is compiled as a dependency (e.g. integration tests), cfg(test)
-    // is false and the guard is active.
+    // servers on 127.0.0.1 to work. When trogon-tools is compiled as a dependency
+    // (e.g. integration tests in other crates), cfg(test) is false and the guard is
+    // active; such tests set TROGON_ALLOW_LOCAL_FETCH=1 to reach a localhost mock.
+    // The default (env unset) keeps the SSRF guard on in production. is_ssrf_blocked
+    // itself is covered by dedicated unit tests that call it directly.
     #[cfg(not(test))]
-    {
+    if std::env::var_os("TROGON_ALLOW_LOCAL_FETCH").is_none() {
         if is_ssrf_blocked(url) {
             return "Error: requests to private, loopback, or link-local addresses are not permitted"
                 .to_string();
@@ -180,6 +210,28 @@ mod tests {
         assert!(is_blocked_ip(&"::1".parse::<IpAddr>().unwrap()));
         assert!(is_blocked_ip(&"fc00::1".parse::<IpAddr>().unwrap()));
         assert!(!is_blocked_ip(&"8.8.8.8".parse::<IpAddr>().unwrap()));
+    }
+
+    #[test]
+    fn is_blocked_ip_blocks_mapped_cgnat_nat64() {
+        use std::net::IpAddr;
+        // C3: IPv4-mapped IPv6 must be classified by its embedded IPv4.
+        assert!(is_blocked_ip(&"::ffff:127.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"::ffff:169.254.169.254".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"::ffff:10.0.0.1".parse::<IpAddr>().unwrap()));
+        // CGNAT 100.64.0.0/10.
+        assert!(is_blocked_ip(&"100.64.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"100.127.255.255".parse::<IpAddr>().unwrap()));
+        // NAT64 well-known prefix embedding a loopback / metadata IPv4.
+        assert!(is_blocked_ip(&"64:ff9b::7f00:1".parse::<IpAddr>().unwrap())); // 127.0.0.1
+        assert!(is_blocked_ip(&"64:ff9b::a9fe:a9fe".parse::<IpAddr>().unwrap())); // 169.254.169.254
+
+        // Must NOT over-block: genuine public addresses stay allowed.
+        assert!(!is_blocked_ip(&"::ffff:8.8.8.8".parse::<IpAddr>().unwrap())); // mapped public
+        assert!(!is_blocked_ip(&"64:ff9b::808:808".parse::<IpAddr>().unwrap())); // NAT64 of 8.8.8.8
+        assert!(!is_blocked_ip(&"100.63.255.255".parse::<IpAddr>().unwrap())); // just below CGNAT
+        assert!(!is_blocked_ip(&"100.128.0.0".parse::<IpAddr>().unwrap())); // just above CGNAT
+        assert!(!is_blocked_ip(&"2606:4700:4700::1111".parse::<IpAddr>().unwrap())); // public v6
     }
 
     #[tokio::test]

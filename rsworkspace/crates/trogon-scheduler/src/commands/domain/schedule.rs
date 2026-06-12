@@ -9,58 +9,32 @@ use super::{
     ScheduleEventSamplingSource, ScheduleEventSchedule,
 };
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ScheduleError {
-    CronExpression(CronExpressionError),
-    RRuleDateTime(RRuleDateTimeError),
-    RRuleExpression(RRuleExpressionError),
-    TimeZone(TimeZoneError),
-}
-
-impl std::fmt::Display for ScheduleError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CronExpression(source) => source.fmt(formatter),
-            Self::RRuleDateTime(source) => source.fmt(formatter),
-            Self::RRuleExpression(source) => source.fmt(formatter),
-            Self::TimeZone(source) => source.fmt(formatter),
-        }
-    }
-}
-
-impl std::error::Error for ScheduleError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::CronExpression(source) => Some(source),
-            Self::RRuleDateTime(source) => Some(source),
-            Self::RRuleExpression(source) => Some(source),
-            Self::TimeZone(source) => Some(source),
-        }
-    }
-}
-
-impl From<CronExpressionError> for ScheduleError {
-    fn from(source: CronExpressionError) -> Self {
-        Self::CronExpression(source)
-    }
-}
-
-impl From<RRuleDateTimeError> for ScheduleError {
-    fn from(source: RRuleDateTimeError) -> Self {
-        Self::RRuleDateTime(source)
-    }
-}
-
-impl From<RRuleExpressionError> for ScheduleError {
-    fn from(source: RRuleExpressionError) -> Self {
-        Self::RRuleExpression(source)
-    }
-}
-
-impl From<TimeZoneError> for ScheduleError {
-    fn from(source: TimeZoneError) -> Self {
-        Self::TimeZone(source)
-    }
+    #[error("{0}")]
+    CronExpression(
+        #[from]
+        #[source]
+        CronExpressionError,
+    ),
+    #[error("{0}")]
+    RRuleDateTime(
+        #[from]
+        #[source]
+        RRuleDateTimeError,
+    ),
+    #[error("{0}")]
+    RRuleExpression(
+        #[from]
+        #[source]
+        RRuleExpressionError,
+    ),
+    #[error("{0}")]
+    TimeZone(
+        #[from]
+        #[source]
+        TimeZoneError,
+    ),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,24 +90,13 @@ impl Schedule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EveryDuration(Duration);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EveryDurationError {
+    #[error("every duration must be positive")]
     MustBePositive,
+    #[error("every duration must be at most {max:?}, got {actual:?}")]
     TooLarge { max: Duration, actual: Duration },
 }
-
-impl std::fmt::Display for EveryDurationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MustBePositive => formatter.write_str("every duration must be positive"),
-            Self::TooLarge { max, actual } => {
-                write!(formatter, "every duration must be at most {max:?}, got {actual:?}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for EveryDurationError {}
 
 impl EveryDuration {
     pub fn new(every: Duration) -> Result<Self, EveryDurationError> {
@@ -178,28 +141,14 @@ impl TryFrom<u64> for EveryDuration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CronExpression(String);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CronExpressionError {
+    #[error("cron expression '{expr}' is invalid: {source}")]
     Invalid {
         expr: String,
+        #[source]
         source: Box<dyn std::error::Error>,
     },
-}
-
-impl std::fmt::Display for CronExpressionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { expr, source } => write!(formatter, "cron expression '{expr}' is invalid: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for CronExpressionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Invalid { source, .. } => Some(source.as_ref()),
-        }
-    }
 }
 
 impl CronExpression {
@@ -240,28 +189,14 @@ impl TryFrom<&str> for CronExpression {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleExpression(String);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RRuleExpressionError {
+    #[error("rrule '{rrule}' is invalid: {source}")]
     Invalid {
         rrule: String,
+        #[source]
         source: Box<dyn std::error::Error>,
     },
-}
-
-impl std::fmt::Display for RRuleExpressionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { rrule, source } => write!(formatter, "rrule '{rrule}' is invalid: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for RRuleExpressionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Invalid { source, .. } => Some(source.as_ref()),
-        }
-    }
 }
 
 impl RRuleExpression {
@@ -299,31 +234,15 @@ impl TryFrom<&str> for RRuleExpression {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleDateTime(String);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RRuleDateTimeError {
+    #[error("{field} datetime '{value}' is invalid: {source}")]
     Invalid {
         field: &'static str,
         value: String,
+        #[source]
         source: Box<dyn std::error::Error>,
     },
-}
-
-impl std::fmt::Display for RRuleDateTimeError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { field, value, source } => {
-                write!(formatter, "{field} datetime '{value}' is invalid: {source}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for RRuleDateTimeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Invalid { source, .. } => Some(source.as_ref()),
-        }
-    }
 }
 
 impl RRuleDateTime {
@@ -430,38 +349,20 @@ pub struct TimeZone {
     tzdb_version: TzdbVersion,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TimeZoneError {
+    #[error("timezone '{timezone}' is invalid")]
     Invalid { timezone: String },
 }
-
-impl std::fmt::Display for TimeZoneError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { timezone } => write!(formatter, "timezone '{timezone}' is invalid"),
-        }
-    }
-}
-
-impl std::error::Error for TimeZoneError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TzdbVersion(String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TzdbVersionError {
+    #[error("timezone database version '{version}' is invalid")]
     Invalid { version: String },
 }
-
-impl std::fmt::Display for TzdbVersionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { version } => write!(formatter, "timezone database version '{version}' is invalid"),
-        }
-    }
-}
-
-impl std::error::Error for TzdbVersionError {}
 
 pub type ScheduleTimezone = TimeZone;
 pub type RRuleTimezone = TimeZone;
@@ -555,28 +456,16 @@ fn is_valid_tzdb_version(version: &str) -> bool {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScheduleHeaders(MessageHeaders);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ScheduleHeadersError {
-    MessageHeaders { source: MessageHeadersError },
+    #[error("{source}")]
+    MessageHeaders {
+        #[from]
+        #[source]
+        source: MessageHeadersError,
+    },
+    #[error("header name '{name}' is reserved")]
     ReservedName { name: String },
-}
-
-impl std::fmt::Display for ScheduleHeadersError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MessageHeaders { source } => source.fmt(formatter),
-            Self::ReservedName { name } => write!(formatter, "header name '{name}' is reserved"),
-        }
-    }
-}
-
-impl std::error::Error for ScheduleHeadersError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::MessageHeaders { source } => Some(source),
-            Self::ReservedName { .. } => None,
-        }
-    }
 }
 
 impl ScheduleHeaders {
@@ -627,28 +516,14 @@ pub struct ScheduleMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryRoute(DottedNatsToken);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DeliveryRouteError {
+    #[error("delivery route '{route}' is invalid: {source}")]
     Invalid {
         route: String,
+        #[source]
         source: trogon_nats::SubjectTokenViolation,
     },
-}
-
-impl std::fmt::Display for DeliveryRouteError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { route, source } => write!(formatter, "delivery route '{route}' is invalid: {source}"),
-        }
-    }
-}
-
-impl std::error::Error for DeliveryRouteError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Invalid { source, .. } => Some(source),
-        }
-    }
 }
 
 impl DeliveryRoute {
@@ -690,30 +565,14 @@ impl TryFrom<&str> for DeliveryRoute {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SamplingSubject(DottedNatsToken);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SamplingSubjectError {
+    #[error("sampling subject '{subject}' is invalid: {source}")]
     Invalid {
         subject: String,
+        #[source]
         source: trogon_nats::SubjectTokenViolation,
     },
-}
-
-impl std::fmt::Display for SamplingSubjectError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Invalid { subject, source } => {
-                write!(formatter, "sampling subject '{subject}' is invalid: {source}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SamplingSubjectError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Invalid { source, .. } => Some(source),
-        }
-    }
 }
 
 impl SamplingSubject {
@@ -751,24 +610,13 @@ impl TryFrom<&str> for SamplingSubject {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TtlDuration(Duration);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TtlDurationError {
+    #[error("ttl duration must be positive")]
     MustBePositive,
+    #[error("ttl duration must be at most {max:?}, got {actual:?}")]
     TooLarge { max: Duration, actual: Duration },
 }
-
-impl std::fmt::Display for TtlDurationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MustBePositive => formatter.write_str("ttl duration must be positive"),
-            Self::TooLarge { max, actual } => {
-                write!(formatter, "ttl duration must be at most {max:?}, got {actual:?}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for TtlDurationError {}
 
 impl TtlDuration {
     pub fn new(ttl: Duration) -> Result<Self, TtlDurationError> {

@@ -8,31 +8,14 @@ use std::sync::Arc;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ExtError {
-    MalformedJson(serde_json::Error),
+    #[error("malformed JSON: {0}")]
+    MalformedJson(#[source] serde_json::Error),
+    #[error("params is null or missing")]
     MissingParams,
-    ClientError(agent_client_protocol::Error),
-}
-
-impl std::fmt::Display for ExtError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MalformedJson(e) => write!(f, "malformed JSON: {}", e),
-            Self::MissingParams => write!(f, "params is null or missing"),
-            Self::ClientError(e) => write!(f, "client error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ExtError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::MalformedJson(e) => Some(e),
-            Self::MissingParams => None,
-            Self::ClientError(e) => Some(e),
-        }
-    }
+    #[error("client error: {0}")]
+    ClientError(#[source] agent_client_protocol::Error),
 }
 
 pub fn error_code_and_message(e: &ExtError) -> (ErrorCode, String) {

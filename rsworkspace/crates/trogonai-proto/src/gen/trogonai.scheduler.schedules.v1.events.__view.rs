@@ -431,3 +431,115 @@ impl ::buffa::ViewReborrow for ScheduleEventView<'static> {
         this
     }
 }
+/** Self-contained, `'static` owned view of a `ScheduleEvent` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`ScheduleEventView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`ScheduleEventView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct ScheduleEventOwnedView(::buffa::OwnedView<ScheduleEventView<'static>>);
+impl ScheduleEventOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ScheduleEventOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ScheduleEventOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::ScheduleEvent,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ScheduleEventOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`ScheduleEventView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &ScheduleEventView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ScheduleEvent {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Oneof `event`.
+    #[must_use]
+    pub fn event(
+        &self,
+    ) -> ::core::option::Option<
+        &super::super::__buffa::view::oneof::schedule_event::Event<'_>,
+    > {
+        self.0.reborrow().event.as_ref()
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<ScheduleEventView<'static>>>
+for ScheduleEventOwnedView {
+    fn from(inner: ::buffa::OwnedView<ScheduleEventView<'static>>) -> Self {
+        ScheduleEventOwnedView(inner)
+    }
+}
+impl ::core::convert::From<ScheduleEventOwnedView>
+for ::buffa::OwnedView<ScheduleEventView<'static>> {
+    fn from(wrapper: ScheduleEventOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<ScheduleEventView<'static>>>
+for ScheduleEventOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<ScheduleEventView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::ScheduleEvent {
+    type View<'a> = ScheduleEventView<'a>;
+    type ViewHandle = ScheduleEventOwnedView;
+}
+impl ::serde::Serialize for ScheduleEventOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}

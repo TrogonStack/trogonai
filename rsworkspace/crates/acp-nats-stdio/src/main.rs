@@ -17,7 +17,7 @@ use {
 
 #[cfg(not(coverage))]
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     trogon_telemetry::init_logger(
         ServiceName::AcpNatsStdio,
@@ -74,7 +74,7 @@ async fn run_bridge<N, J, W, R>(
     stdout: W,
     stdin: R,
     shutdown_signal: impl std::future::Future<Output = ()>,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> anyhow::Result<()>
 where
     N: acp_nats::RequestClient + acp_nats::PublishClient + acp_nats::FlushClient + acp_nats::SubscribeClient + 'static,
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
@@ -120,7 +120,7 @@ where
                 }
                 Err(e) => {
                     error!(error = %e, "Client task ended with error");
-                    Err(Box::new(e) as Box<dyn std::error::Error>)
+                    Err(e.into())
                 }
             }
         }
@@ -128,7 +128,7 @@ where
             match result {
                 Err(e) => {
                     error!(error = %e, "IO task error");
-                    Err(Box::new(e) as Box<dyn std::error::Error>)
+                    Err(e.into())
                 }
                 Ok(()) => {
                     info!("ACP bridge shutting down (IO closed)");

@@ -49,6 +49,7 @@ async-trait = "=0.1.89"
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "json", "stream"] }
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.11.1"
+base64 = "=0.22.1"
 buffa = { version = "=0.7.0", features = ["json"] }
 buffa-types = { version = "=0.7.0", features = ["json"] }
 futures = "=0.3.32"
@@ -78,6 +79,10 @@ tracing-subscriber = "=0.3.23"
 # Discord
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "=0.17.1"
+
+# Error handling
+anyhow = "=1.0.102"
+thiserror = "=2.0.18"
 
 # Misc
 tempfile = "=3.27.0"

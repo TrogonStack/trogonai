@@ -39,6 +39,10 @@ pub mod __buffa {
 #[doc(inline)]
 pub use self::__buffa::view::DateTimeView;
 #[doc(inline)]
+pub use self::__buffa::view::DateTimeOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::TimeZoneView;
+#[doc(inline)]
+pub use self::__buffa::view::TimeZoneOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

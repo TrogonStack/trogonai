@@ -1,5 +1,3 @@
-use std::{error::Error, fmt};
-
 use super::{Act, ActBuilder, Decider, Events};
 
 /// Outcome of [`Decider::decide`].
@@ -19,37 +17,13 @@ where
     Act(Act<C>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[doc(hidden)]
 pub enum DecisionFailure<DecideError, EvolveError> {
-    Decide(DecideError),
-    Evolve(EvolveError),
-}
-
-impl<DecideError, EvolveError> fmt::Display for DecisionFailure<DecideError, EvolveError>
-where
-    DecideError: fmt::Display,
-    EvolveError: fmt::Display,
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Decide(error) => write!(formatter, "decide failed: {error}"),
-            Self::Evolve(error) => write!(formatter, "evolve failed: {error}"),
-        }
-    }
-}
-
-impl<DecideError, EvolveError> Error for DecisionFailure<DecideError, EvolveError>
-where
-    DecideError: Error + 'static,
-    EvolveError: Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Decide(error) => Some(error),
-            Self::Evolve(error) => Some(error),
-        }
-    }
+    #[error("decide failed: {0}")]
+    Decide(#[source] DecideError),
+    #[error("evolve failed: {0}")]
+    Evolve(#[source] EvolveError),
 }
 
 #[doc(hidden)]
@@ -100,24 +74,14 @@ where
     /// # }
     /// # #[derive(Debug, PartialEq, Eq)]
     /// # enum OrderState { New, Placed }
-    /// # #[derive(Debug, PartialEq, Eq)]
-    /// # enum PlaceAndDiscountError { NotPlaced }
-    /// # impl std::fmt::Display for PlaceAndDiscountError {
-    /// #     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    /// #         match self {
-    /// #             Self::NotPlaced => f.write_str("order is not placed"),
-    /// #         }
-    /// #     }
+    /// # #[derive(thiserror::Error, Debug, PartialEq, Eq)]
+    /// # enum PlaceAndDiscountError {
+    /// #     #[error("order is not placed")]
+    /// #     NotPlaced,
     /// # }
-    /// # impl std::error::Error for PlaceAndDiscountError {}
-    /// # #[derive(Debug, PartialEq, Eq)]
+    /// # #[derive(thiserror::Error, Debug, PartialEq, Eq)]
+    /// # #[error("invalid order event")]
     /// # struct PlaceAndDiscountEvolveError;
-    /// # impl std::fmt::Display for PlaceAndDiscountEvolveError {
-    /// #     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    /// #         f.write_str("invalid order event")
-    /// #     }
-    /// # }
-    /// # impl std::error::Error for PlaceAndDiscountEvolveError {}
     /// # impl Decider for PlaceAndDiscount {
     /// #     type StreamId = str;
     /// #     type State = OrderState;

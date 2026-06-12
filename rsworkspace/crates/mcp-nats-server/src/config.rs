@@ -88,43 +88,28 @@ fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Htt
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    Prefix(McpPrefixError),
-    ClientIdPrefix(McpPeerIdError),
-    ServerId(McpPeerIdError),
-    AllowedHost(AllowedHostError),
-    InvalidHost { value: String, source: AddrParseError },
-    InvalidPort { value: String, source: ParseIntError },
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Prefix(_) => write!(f, "invalid MCP prefix"),
-            Self::ClientIdPrefix(_) => write!(f, "invalid MCP client id prefix"),
-            Self::ServerId(_) => write!(f, "invalid MCP server id"),
-            Self::AllowedHost(_) => write!(f, "invalid MCP HTTP allowed host"),
-            Self::InvalidHost { value, source } => {
-                write!(f, "invalid value for {ENV_MCP_HTTP_HOST}: {value:?} ({source})")
-            }
-            Self::InvalidPort { value, source } => {
-                write!(f, "invalid value for {ENV_MCP_HTTP_PORT}: {value:?} ({source})")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Prefix(source) => Some(source),
-            Self::ClientIdPrefix(source) | Self::ServerId(source) => Some(source),
-            Self::AllowedHost(source) => Some(source),
-            Self::InvalidHost { source, .. } => Some(source),
-            Self::InvalidPort { source, .. } => Some(source),
-        }
-    }
+    #[error("invalid MCP prefix")]
+    Prefix(#[source] McpPrefixError),
+    #[error("invalid MCP client id prefix")]
+    ClientIdPrefix(#[source] McpPeerIdError),
+    #[error("invalid MCP server id")]
+    ServerId(#[source] McpPeerIdError),
+    #[error("invalid MCP HTTP allowed host")]
+    AllowedHost(#[source] AllowedHostError),
+    #[error("invalid value for {ENV_MCP_HTTP_HOST}: {value:?} ({source})")]
+    InvalidHost {
+        value: String,
+        #[source]
+        source: AddrParseError,
+    },
+    #[error("invalid value for {ENV_MCP_HTTP_PORT}: {value:?} ({source})")]
+    InvalidPort {
+        value: String,
+        #[source]
+        source: ParseIntError,
+    },
 }
 
 fn read_env_host<E: ReadEnv>(env_provider: &E) -> Result<Option<IpAddr>, ConfigError> {

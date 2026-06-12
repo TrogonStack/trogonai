@@ -7,28 +7,12 @@ use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum FsReadTextFileError {
-    InvalidRequest(serde_json::Error),
-    ClientError(agent_client_protocol::Error),
-}
-
-impl std::fmt::Display for FsReadTextFileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidRequest(e) => write!(f, "invalid request: {}", e),
-            Self::ClientError(e) => write!(f, "client error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for FsReadTextFileError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidRequest(e) => Some(e),
-            Self::ClientError(e) => Some(e),
-        }
-    }
+    #[error("invalid request: {0}")]
+    InvalidRequest(#[source] serde_json::Error),
+    #[error("client error: {0}")]
+    ClientError(#[source] agent_client_protocol::Error),
 }
 
 pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {

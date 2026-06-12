@@ -76,25 +76,10 @@ struct VerificationRequest {
     verification_token: NotionVerificationToken,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum VerificationRequestParseError {
-    InvalidVerificationToken(EmptySecret),
-}
-
-impl fmt::Display for VerificationRequestParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidVerificationToken(_) => f.write_str("verification_token must not be empty"),
-        }
-    }
-}
-
-impl std::error::Error for VerificationRequestParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidVerificationToken(err) => Some(err),
-        }
-    }
+    #[error("verification_token must not be empty")]
+    InvalidVerificationToken(#[source] EmptySecret),
 }
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {

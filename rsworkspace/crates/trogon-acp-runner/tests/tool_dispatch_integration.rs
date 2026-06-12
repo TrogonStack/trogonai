@@ -839,6 +839,11 @@ async fn acp_glob_tool_dispatched_via_wire_format() {
 async fn acp_fetch_url_tool_dispatched_via_wire_format() {
     use httpmock::prelude::*;
 
+    // This test fetches a localhost mock; opt out of fetch_url's SSRF guard, which is
+    // active when the runner is compiled as a dependency (non-`--lib` build).
+    // SAFETY: sets a fixed value no other test in this binary reads or asserts against.
+    unsafe { std::env::set_var("TROGON_ALLOW_LOCAL_FETCH", "1") };
+
     // Server that serves the URL being fetched.
     let target_server = MockServer::start();
     target_server.mock(|when, then| {

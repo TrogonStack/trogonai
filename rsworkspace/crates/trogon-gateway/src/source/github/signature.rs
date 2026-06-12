@@ -1,35 +1,17 @@
-use std::fmt;
-
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SignatureError {
+    #[error("missing sha256= prefix")]
     MissingPrefix,
-    InvalidHex(hex::FromHexError),
+    #[error("invalid hex encoding")]
+    InvalidHex(#[source] hex::FromHexError),
+    #[error("signature mismatch")]
     Mismatch,
-}
-
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SignatureError::MissingPrefix => f.write_str("missing sha256= prefix"),
-            SignatureError::InvalidHex(_) => f.write_str("invalid hex encoding"),
-            SignatureError::Mismatch => f.write_str("signature mismatch"),
-        }
-    }
-}
-
-impl std::error::Error for SignatureError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            SignatureError::InvalidHex(e) => Some(e),
-            _ => None,
-        }
-    }
 }
 
 /// Verifies a GitHub webhook signature using constant-time comparison.

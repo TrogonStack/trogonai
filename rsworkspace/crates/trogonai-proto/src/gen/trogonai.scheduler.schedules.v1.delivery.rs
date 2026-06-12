@@ -763,12 +763,18 @@ pub mod delivery {
         #[doc(inline)]
         pub use super::super::__buffa::view::delivery::nats_message::SourceView;
         #[doc(inline)]
+        pub use super::super::__buffa::view::delivery::nats_message::SourceOwnedView;
+        #[doc(inline)]
         pub use super::super::__buffa::view::delivery::nats_message::LatestFromSubjectView;
+        #[doc(inline)]
+        pub use super::super::__buffa::view::delivery::nats_message::LatestFromSubjectOwnedView;
     }
     #[doc(inline)]
     pub use super::__buffa::oneof::delivery::Kind;
     #[doc(inline)]
     pub use super::__buffa::view::delivery::NatsMessageView;
+    #[doc(inline)]
+    pub use super::__buffa::view::delivery::NatsMessageOwnedView;
     #[doc(inline)]
     pub use super::__buffa::view::oneof::delivery::Kind as KindView;
 }

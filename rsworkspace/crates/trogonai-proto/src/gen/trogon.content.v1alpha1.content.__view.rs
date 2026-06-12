@@ -230,3 +230,123 @@ impl ::buffa::ViewReborrow for ContentView<'static> {
         this
     }
 }
+/** Self-contained, `'static` owned view of a `Content` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`ContentView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`ContentView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct ContentOwnedView(::buffa::OwnedView<ContentView<'static>>);
+impl ContentOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(ContentOwnedView(::buffa::OwnedView::decode(bytes)?))
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ContentOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::Content,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ContentOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`ContentView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &ContentView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::Content {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// content_type is the IANA media type that classifies data.
+    ///
+    /// Format follows RFC 6838 (for example "application/json",
+    /// "application/protobuf", "text/plain; charset=utf-8"). Consumers use this
+    /// value to select a decoder for data.
+    ///
+    /// Field 1: `content_type`
+    #[must_use]
+    pub fn content_type(&self) -> &'_ str {
+        self.0.reborrow().content_type
+    }
+    /// data is the opaque payload bytes whose interpretation is given by
+    /// content_type.
+    ///
+    /// Field 2: `data`
+    #[must_use]
+    pub fn data(&self) -> &'_ [u8] {
+        self.0.reborrow().data
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<ContentView<'static>>>
+for ContentOwnedView {
+    fn from(inner: ::buffa::OwnedView<ContentView<'static>>) -> Self {
+        ContentOwnedView(inner)
+    }
+}
+impl ::core::convert::From<ContentOwnedView>
+for ::buffa::OwnedView<ContentView<'static>> {
+    fn from(wrapper: ContentOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<ContentView<'static>>>
+for ContentOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<ContentView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::Content {
+    type View<'a> = ContentView<'a>;
+    type ViewHandle = ContentOwnedView;
+}
+impl ::serde::Serialize for ContentOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
