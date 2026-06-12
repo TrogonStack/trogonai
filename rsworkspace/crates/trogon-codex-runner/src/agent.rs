@@ -658,6 +658,16 @@ where
             user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
+        // Codex takes no separate system prompt, so deliver the "always summarize
+        // what you did" guidance the same way as TROGON.md: prepended once on the
+        // first turn. Codex carries it through the rest of the session.
+        if first_turn {
+            user_input = format!(
+                "Instructions: {}\n\n---\n\n{user_input}",
+                trogon_runner_tools::COMPLETION_GUIDANCE
+            );
+        }
+
         // HIGH-19: restore session state if the turn never actually starts.
         let proc = match self.process().await {
             Ok(p) => p,
