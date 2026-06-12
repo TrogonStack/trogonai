@@ -240,10 +240,15 @@ fn default_session_mode() -> String {
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
 ///
-/// Each `XaiAgent` manages multiple in-memory sessions. Because xAI exposes a
-/// stateless HTTP endpoint, the runner maintains conversation history locally
-/// and builds the full input on each turn (or uses `previous_response_id` as a
-/// shortcut when the server still holds the prior response in its cache).
+/// Each `XaiAgent` manages multiple sessions in an in-memory map. Because xAI
+/// exposes a stateless HTTP endpoint, the runner maintains conversation history
+/// locally and builds the full input on each turn (or uses `previous_response_id`
+/// as a shortcut when the server still holds the prior response in its cache).
+///
+/// When NATS JetStream KV is available, the production binary default-enables
+/// the `SESSIONS` bucket via [`open_default_session_store`](crate::open_default_session_store)
+/// so snapshots persist across runner respawn. When KV is unavailable the agent
+/// falls back to in-memory-only sessions (unit tests use this path by default).
 ///
 /// This mirrors the structure of `trogon-codex-runner` but replaces the
 /// subprocess (`codex app-server`) with an HTTP client — making the core logic
@@ -609,6 +614,24 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     /// Attach a session store so sessions are visible in trogon-console.
     pub fn with_session_store(mut self, store: Arc<dyn SessionStoring>) -> Self {
         self.session_store = Some(store);
+        self
+    }
+
+    /// Attach the default session store selected at startup.
+    ///
+    /// When [`DefaultSessionStore::Persistent`] is passed (KV open succeeded),
+    /// snapshots are written to NATS KV. When [`DefaultSessionStore::InMemory`]
+    /// is passed, the agent keeps sessions in its in-memory map only.
+    pub fn with_default_session_store(
+        mut self,
+        selection: crate::session_store::DefaultSessionStore,
+    ) -> Self {
+        match selection {
+            crate::session_store::DefaultSessionStore::Persistent(store) => {
+                self.session_store = Some(store);
+            }
+            crate::session_store::DefaultSessionStore::InMemory => {}
+        }
         self
     }
 
@@ -3483,6 +3506,10 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
 
     pub fn test_max_turns(&self) -> Option<u32> {
         self.max_turns
+    }
+
+    pub fn test_session_persistence_enabled(&self) -> bool {
+        self.session_store.is_some()
     }
 
     pub async fn test_session_enabled_tools(&self, id: &str) -> Vec<String> {
@@ -7085,6 +7112,23 @@ mod tests {
     }
 
     // ── with_session_store ────────────────────────────────────────────────────
+
+    #[test]
+    fn with_default_session_store_selects_kv_when_available() {
+        use crate::session_store::{DefaultSessionStore, SessionStoring, mock::MockSessionStore};
+
+        let store = Arc::new(MockSessionStore::new()) as Arc<dyn SessionStoring>;
+        let agent = make_agent().with_default_session_store(DefaultSessionStore::Persistent(store));
+        assert!(agent.test_session_persistence_enabled());
+    }
+
+    #[test]
+    fn with_default_session_store_falls_back_to_in_memory() {
+        use crate::session_store::DefaultSessionStore;
+
+        let agent = make_agent().with_default_session_store(DefaultSessionStore::InMemory);
+        assert!(!agent.test_session_persistence_enabled());
+    }
 
     fn make_agent_with_store() -> (TestAgent, Arc<crate::session_store::mock::MockSessionStore>) {
         use crate::session_store::mock::MockSessionStore;

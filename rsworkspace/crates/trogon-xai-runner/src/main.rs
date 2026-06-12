@@ -6,7 +6,7 @@ use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_xai_runner::{
-    AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent,
+    AgentLoader, NatsSessionNotifier, SkillLoader, XaiAgent, open_default_session_store,
 };
 
 #[tokio::main]
@@ -148,15 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        match NatsSessionStore::open(&js, session_ttl_secs).await {
-            Ok(store) => {
-                info!("xai: session persistence enabled");
-                agent = agent.with_session_store(Arc::new(store));
-            }
-            Err(e) => {
-                warn!(error = %e, "xai: failed to open SESSIONS KV bucket — session persistence disabled");
-            }
-        }
+        agent = agent.with_default_session_store(
+            open_default_session_store(&js, session_ttl_secs).await,
+        );
     }
 
     let local = tokio::task::LocalSet::new();

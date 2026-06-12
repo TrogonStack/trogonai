@@ -1,10 +1,11 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_nats::jetstream::{self, kv};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{info, warn};
 
 const SESSIONS_BUCKET: &str = "SESSIONS";
 
@@ -184,6 +185,67 @@ impl SessionStoring for NatsSessionStore {
         session_id: &'a str,
     ) -> BoxFuture<'a, Option<SessionSnapshot>> {
         Box::pin(self.load_impl(tenant_id, session_id))
+    }
+}
+
+// ── Default session store selection ───────────────────────────────────────────
+
+/// Session persistence backend selected at runner startup.
+///
+/// Production runners call [`open_default_session_store`] after connecting to
+/// NATS JetStream. When KV is available the agent writes snapshots to the
+/// shared `SESSIONS` bucket (same mechanism as `trogon-acp-runner`); otherwise
+/// sessions remain in the agent's in-memory map only.
+#[derive(Clone)]
+pub enum DefaultSessionStore {
+    /// NATS KV `SESSIONS` bucket — snapshots survive runner respawn.
+    Persistent(Arc<dyn SessionStoring>),
+    /// KV unavailable — sessions live only in the agent's in-memory map.
+    InMemory,
+}
+
+impl std::fmt::Debug for DefaultSessionStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Persistent(_) => f.write_str("Persistent"),
+            Self::InMemory => f.write_str("InMemory"),
+        }
+    }
+}
+
+impl DefaultSessionStore {
+    pub fn is_persistent(&self) -> bool {
+        matches!(self, Self::Persistent(_))
+    }
+}
+
+/// Open the default NATS KV session store when JetStream KV is available.
+///
+/// Mirrors the ACP runner's unconditional `NatsSessionStore::open`, but falls
+/// back to [`DefaultSessionStore::InMemory`] instead of failing startup.
+pub async fn open_default_session_store(
+    js: &jetstream::Context,
+    session_ttl_secs: u64,
+) -> DefaultSessionStore {
+    session_store_from_open(NatsSessionStore::open(js, session_ttl_secs).await)
+}
+
+/// Select the session store backend from a NATS KV open attempt.
+pub fn session_store_from_open(
+    result: Result<NatsSessionStore, impl Into<String>>,
+) -> DefaultSessionStore {
+    match result {
+        Ok(store) => {
+            info!("xai: session persistence enabled");
+            DefaultSessionStore::Persistent(Arc::new(store))
+        }
+        Err(error) => {
+            warn!(
+                error = %error.into(),
+                "xai: failed to open SESSIONS KV bucket — session persistence disabled"
+            );
+            DefaultSessionStore::InMemory
+        }
     }
 }
 
@@ -463,5 +525,11 @@ mod tests {
             v.get("cache_read_input_tokens").is_none(),
             "'cache_read_input_tokens' must be absent from JSON when zero"
         );
+    }
+
+    #[test]
+    fn session_store_from_open_falls_back_to_in_memory_on_error() {
+        let sel = session_store_from_open(Err("jetstream unavailable"));
+        assert!(!sel.is_persistent());
     }
 }
