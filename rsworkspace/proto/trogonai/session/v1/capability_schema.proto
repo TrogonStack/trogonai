@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+
+enum CapabilitySource {
+  CAPABILITY_SOURCE_UNSPECIFIED = 0;
+  CAPABILITY_SOURCE_REGISTRY = 1;
+  CAPABILITY_SOURCE_PROBE = 2;
+  CAPABILITY_SOURCE_MANUAL = 3;
+  CAPABILITY_SOURCE_CONTRACT_TEST = 4;
+}
+
+enum ToolResultFormat {
+  TOOL_RESULT_FORMAT_UNSPECIFIED = 0;
+  TOOL_RESULT_FORMAT_TEXT = 1;
+  TOOL_RESULT_FORMAT_JSON = 2;
+  TOOL_RESULT_FORMAT_STRUCTURED = 3;
+}
+
+message CapabilityTestResult {
+  string name = 1;
+  bool passed = 2;
+  optional string detail = 3;
+}
+
+// Model/runner capability contract used during switch negotiation.
+message CapabilitySchema {
+  uint32 schema_version = 1;
+  string model_id = 2;
+  string runner_id = 3;
+  uint64 max_context_tokens = 4;
+  uint64 max_output_tokens = 5;
+  bool tool_use = 6;
+  bool parallel_tool_calls = 7;
+  bool image_input = 8;
+  bool file_input = 9;
+  bool structured_output = 10;
+  bool json_schema = 11;
+  bool reasoning = 12;
+  bool streaming = 13;
+  ToolResultFormat tool_result_format = 14;
+  bool system_prompt_support = 15;
+  repeated string provider_restrictions = 16;
+  bool compaction_supported = 17;
+  CapabilitySource source = 18;
+  google.protobuf.Timestamp last_verified_at = 19;
+  uint64 ttl_seconds = 20;
+  double confidence = 21;
+  repeated CapabilityTestResult test_results = 22;
+}

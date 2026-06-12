@@ -4,12 +4,14 @@ pub mod agent;
 pub mod agent_runner;
 pub use trogon_runner_tools::trogon_md;
 pub mod elicitation;
+pub mod kernel_sink;
 pub mod permission_bridge;
 pub mod prompt_converter;
 pub mod session_notifier;
 
 pub use agent::{GatewayConfig, TrogonAgent};
 pub use agent_runner::AgentRunner;
+pub use kernel_sink::{ConversationSink, KernelConversationSink};
 pub use elicitation::{ElicitationReq, ElicitationTx};
 pub use session_notifier::{NatsSessionNotifier, PromptEventClient, SessionNotifier};
 pub use trogon_runner_tools::egress::EgressPolicy;

@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/v1/capability_schema.proto";
+import "trogonai/session/v1/common.proto";
+
+enum ProjectionBlockKind {
+  PROJECTION_BLOCK_KIND_UNSPECIFIED = 0;
+  PROJECTION_BLOCK_KIND_SYSTEM_RULES = 1;
+  PROJECTION_BLOCK_KIND_SAFETY_PERMISSIONS = 2;
+  PROJECTION_BLOCK_KIND_CONTEXT_TWIN = 3;
+  PROJECTION_BLOCK_KIND_SWITCH_ADAPTATION = 4;
+  PROJECTION_BLOCK_KIND_CONTINUITY_WARNING = 5;
+  PROJECTION_BLOCK_KIND_CURRENT_REQUEST = 6;
+  PROJECTION_BLOCK_KIND_RECENT_TURN = 7;
+  PROJECTION_BLOCK_KIND_TOOL_SCHEMA = 8;
+  PROJECTION_BLOCK_KIND_ARTIFACT_PREVIEW = 9;
+  PROJECTION_BLOCK_KIND_UNRESOLVED_ERROR = 10;
+  PROJECTION_BLOCK_KIND_SUMMARY = 11;
+  PROJECTION_BLOCK_KIND_OLDER_TRANSCRIPT = 12;
+}
+
+enum DegradationKind {
+  DEGRADATION_KIND_UNSPECIFIED = 0;
+  DEGRADATION_KIND_IMAGES_OMITTED = 1;
+  DEGRADATION_KIND_TOOL_CALLS_TEXTUALIZED = 2;
+  DEGRADATION_KIND_ARTIFACTS_REFERENCED = 3;
+  DEGRADATION_KIND_HISTORY_SUMMARIZED = 4;
+  DEGRADATION_KIND_CONTEXT_TWIN_INCLUDED = 5;
+  DEGRADATION_KIND_SWITCH_ADAPTATION_APPLIED = 6;
+  DEGRADATION_KIND_REASONING_NOT_PORTABLE = 7;
+  DEGRADATION_KIND_BLOCK_EXCLUDED = 8;
+}
+
+message ProjectionBlock {
+  string block_id = 1;
+  ProjectionBlockKind kind = 2;
+  string label = 3;
+  repeated ContentBlock content = 4;
+  uint64 token_estimate = 5;
+  uint64 source_seq = 6;
+  optional string source_message_id = 7;
+}
+
+message DegradationMetadata {
+  DegradationKind kind = 1;
+  string detail = 2;
+  optional string block_id = 3;
+}
+
+// Derived, discardable prompt view compiled from canonical session state.
+message PromptProjection {
+  uint32 schema_version = 1;
+  string projection_id = 2;
+  string session_id = 3;
+  string model_id = 4;
+  uint64 token_estimate = 5;
+  repeated ProjectionBlock included_blocks = 6;
+  repeated ProjectionBlock excluded_blocks = 7;
+  repeated DegradationMetadata degradation_metadata = 8;
+  CapabilitySchema capability_snapshot = 9;
+  google.protobuf.Timestamp created_at = 10;
+}

@@ -38,6 +38,12 @@ trogon-transcript = { path = "crates/trogon-transcript" }
 trogonai-catalog-proto = { path = "crates/trogonai-catalog-proto" }
 trogonai-compactor-proto = { path = "crates/trogonai-compactor-proto" }
 trogonai-session-proto = { path = "crates/trogonai-session-proto" }
+trogonai-session-contracts = { path = "crates/trogonai-session-contracts" }
+trogonai-session-kernel = { path = "crates/trogonai-session-kernel" }
+trogonai-artifacts = { path = "crates/trogonai-artifacts" }
+trogonai-capabilities = { path = "crates/trogonai-capabilities" }
+trogonai-session-projection = { path = "crates/trogonai-session-projection" }
+trogonai-switching = { path = "crates/trogonai-switching" }
 trogonai-catalog-client = { path = "crates/trogonai-catalog-client" }
 
 # ACP

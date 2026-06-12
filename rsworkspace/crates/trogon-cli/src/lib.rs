@@ -9,6 +9,7 @@ pub mod nats;
 pub mod print;
 pub mod repl;
 pub mod runtime;
+pub mod session_kernel;
 pub mod session;
 pub mod session_store;
 pub mod stdio_mcp_bridge;

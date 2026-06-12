@@ -609,10 +609,10 @@ where
             user_input
         };
 
-        if prepend_trogon {
-            if let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
-            }
+        if prepend_trogon
+            && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
+        {
+            user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
         // HIGH-19: restore session state if the turn never actually starts.

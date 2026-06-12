@@ -30,6 +30,11 @@ tracing                = { workspace = true }
 trogon-nats            = { workspace = true }
 trogon-registry        = { workspace = true }
 trogon-runner-tools    = { path = "../trogon-runner-tools" }
+trogonai-capabilities  = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-session-kernel = { workspace = true }
+trogonai-session-projection = { workspace = true }
+trogonai-switching     = { workspace = true }
 trogonai-catalog-client = { workspace = true }
 trogon-tools           = { path = "../trogon-tools" }
 trogon-std             = { workspace = true }

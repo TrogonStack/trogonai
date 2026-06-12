@@ -163,6 +163,7 @@ mod tests {
         dir
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn returns_none_when_no_file_exists() {
         let _guard = home_test_mutex().lock().unwrap();

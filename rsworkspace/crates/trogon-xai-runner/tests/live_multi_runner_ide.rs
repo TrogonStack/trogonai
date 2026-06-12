@@ -180,12 +180,11 @@ fn collect_text(v: &Value, out: &mut Vec<String>) {
     match v {
         Value::Object(map) => {
             for (k, val) in map {
-                if k == "text" {
-                    if let Some(s) = val.as_str() {
-                        if !s.is_empty() {
-                            out.push(s.to_string());
-                        }
-                    }
+                if k == "text"
+                    && let Some(s) = val.as_str()
+                    && !s.is_empty()
+                {
+                    out.push(s.to_string());
                 }
                 collect_text(val, out);
             }

@@ -42,9 +42,14 @@ use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
 use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
+use trogon_acp_runner::kernel_sink::{ConversationSink, KernelConversationSink};
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
 use trogon_acp_runner::{ElicitationReq, PermissionReq};
 use trogon_runner_tools::session_store::SessionStore as _;
+use trogonai_session_kernel::{
+    EventLog, SessionKernel, SessionKernelConfig, SessionKvLeaseFactory, SessionLeaseManager,
+    SnapshotStore, provision_lease_store, provision_snapshot_store,
+};
 
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -187,7 +192,31 @@ async fn main() -> anyhow::Result<()> {
 
     // ── TrogonAgent ───────────────────────────────────────────────────────────
 
-    let agent = trogon_acp_runner::TrogonAgent::new(
+    let conversation_sink = build_conversation_sink(&js).await;
+
+    // ── Model catalog (best-effort) ───────────────────────────────────────────
+    // Used for C4 compactor-provider backfill on legacy session load. If the
+    // catalog is unavailable the agent keeps legacy behavior (no backfill).
+    let catalog_snapshot = match trogonai_catalog_client::open(
+        &js,
+        trogonai_catalog_client::CatalogClientConfig::default(),
+    )
+    .await
+    {
+        Ok(client) => match client.catalog_snapshot().await {
+            Ok(snap) => Some(snap),
+            Err(e) => {
+                tracing::warn!(error = %e, "acp: catalog snapshot unavailable — C4 backfill disabled");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "acp: failed to open catalog client — C4 backfill disabled");
+            None
+        }
+    };
+
+    let mut agent = trogon_acp_runner::TrogonAgent::new(
         notifier,
         store.clone(),
         agent_loop,
@@ -199,6 +228,12 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_compactor(nats.clone())
     .with_execution_backend(nats.clone(), registry_for_agent);
+    if let Some(sink) = conversation_sink {
+        agent = agent.with_conversation_sink(sink);
+    }
+    if let Some(catalog) = catalog_snapshot {
+        agent = agent.with_catalog(catalog);
+    }
 
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let nats_for_perm = nats.clone();
@@ -416,4 +451,45 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
+}
+
+/// Provision the Session Kernel conversation shadow sink when
+/// `TROGON_SESSION_KERNEL_ENABLED` is set. Returns `None` (legacy path) by default
+/// or if provisioning fails — the runner never blocks on the kernel.
+async fn build_conversation_sink(
+    js: &jetstream::Context,
+) -> Option<std::sync::Arc<dyn ConversationSink>> {
+    let enabled = std::env::var("TROGON_SESSION_KERNEL_ENABLED")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+
+    let config = SessionKernelConfig::default();
+    let snapshot_kv = match provision_snapshot_store(js, &config).await {
+        Ok(kv) => kv,
+        Err(err) => {
+            tracing::warn!(error = %err, "session kernel: snapshot store provisioning failed; sink disabled");
+            return None;
+        }
+    };
+    let lease_kv = match provision_lease_store(js, &config).await {
+        Ok(kv) => kv,
+        Err(err) => {
+            tracing::warn!(error = %err, "session kernel: lease store provisioning failed; sink disabled");
+            return None;
+        }
+    };
+
+    let js_client = NatsJetStreamClient::new(js.clone());
+    let event_log = EventLog::new(js_client.clone(), js_client, config.clone());
+    let snapshots = SnapshotStore::new(snapshot_kv, config.clone());
+    let leases = SessionLeaseManager::new(
+        SessionKvLeaseFactory::new(lease_kv, &config),
+        "trogon-acp-runner",
+    );
+    let kernel = SessionKernel::new(config, event_log, snapshots, leases);
+    info!("session kernel: conversation shadow sink enabled");
+    Some(std::sync::Arc::new(KernelConversationSink::new(kernel)))
 }

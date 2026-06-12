@@ -1014,6 +1014,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffa-types"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3056f933af716224d8c1e842a2937f47fe6b996dba549ed8e761c400deccf86"
+dependencies = [
+ "buffa 0.7.0",
+ "bytes",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5468,7 +5481,11 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-catalog-client",
+ "trogonai-catalog-proto",
  "trogonai-compactor-proto",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
  "uuid",
 ]
 
@@ -5596,7 +5613,12 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-std",
  "trogon-tools",
+ "trogonai-capabilities",
  "trogonai-catalog-client",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
+ "trogonai-session-projection",
+ "trogonai-switching",
  "uuid",
 ]
 
@@ -5632,6 +5654,8 @@ dependencies = [
  "buffa 0.7.0",
  "futures",
  "httpmock",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
  "reqwest",
  "serde",
  "serde_json",
@@ -5640,6 +5664,10 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-std",
+ "trogon-telemetry",
+ "trogonai-catalog-client",
+ "trogonai-catalog-proto",
  "trogonai-compactor-proto",
 ]
 
@@ -6361,6 +6389,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogonai-artifacts"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa 0.7.0",
+ "buffa-types 0.7.0",
+ "bytes",
+ "hex",
+ "opentelemetry",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
+ "uuid",
+]
+
+[[package]]
+name = "trogonai-capabilities"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "buffa 0.7.0",
+ "buffa-types 0.7.0",
+ "opentelemetry",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "trogon-registry",
+ "trogonai-session-contracts",
+ "uuid",
+]
+
+[[package]]
 name = "trogonai-catalog"
 version = "0.1.0"
 dependencies = [
@@ -6419,9 +6487,63 @@ name = "trogonai-proto"
 version = "0.1.0"
 dependencies = [
  "buffa 0.6.0",
- "buffa-types",
+ "buffa-types 0.6.0",
  "serde",
  "trogon-decider-runtime",
+]
+
+[[package]]
+name = "trogonai-session-contracts"
+version = "0.1.0"
+dependencies = [
+ "buffa 0.7.0",
+ "buffa-build",
+ "buffa-types 0.7.0",
+]
+
+[[package]]
+name = "trogonai-session-kernel"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa 0.7.0",
+ "buffa-types 0.7.0",
+ "bytes",
+ "confique",
+ "futures",
+ "futures-util",
+ "opentelemetry",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-service-config",
+ "trogonai-session-contracts",
+]
+
+[[package]]
+name = "trogonai-session-projection"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa 0.7.0",
+ "buffa-types 0.7.0",
+ "bytes",
+ "confique",
+ "opentelemetry",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-service-config",
+ "trogonai-capabilities",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
+ "uuid",
 ]
 
 [[package]]
@@ -6431,6 +6553,34 @@ dependencies = [
  "buffa 0.7.0",
  "buffa-build",
  "trogonai-compactor-proto",
+]
+
+[[package]]
+name = "trogonai-switching"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "buffa 0.7.0",
+ "buffa-types 0.7.0",
+ "bytes",
+ "confique",
+ "opentelemetry",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-service-config",
+ "trogonai-artifacts",
+ "trogonai-capabilities",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
+ "trogonai-session-projection",
+ "trogonai-switching",
+ "uuid",
 ]
 
 [[package]]

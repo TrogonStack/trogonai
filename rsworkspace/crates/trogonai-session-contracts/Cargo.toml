@@ -1,0 +1,15 @@
+[package]
+name = "trogonai-session-contracts"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+
+[build-dependencies]
+buffa-build = "0.7.0"

@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/v1/artifact_metadata.proto";
+import "trogonai/session/v1/common.proto";
+import "trogonai/session/v1/context_twin.proto";
+import "trogonai/session/v1/runner_binding.proto";
+
+message SessionConfig {
+  optional string model = 1;
+  optional string runner = 2;
+  optional string compactor_model = 3;
+  optional string system_prompt = 4;
+  optional string system_prompt_override = 5;
+  repeated string additional_roots = 6;
+  repeated string additional_read_dirs = 7;
+  repeated string mcp_servers_json = 8;
+  repeated string tool_policies_json = 9;
+  optional string egress_policy_json = 10;
+  optional string permission_rules_text = 11;
+  bool disabled_builtin_tools = 12;
+}
+
+message SessionSummary {
+  string summary_id = 1;
+  string content = 2;
+  uint64 from_seq = 3;
+  uint64 to_seq = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message SwitchAdaptationPlan {
+  string plan_id = 1;
+  string from_model = 2;
+  string to_model = 3;
+  repeated SwitchAdaptation adaptations = 4;
+  repeated string warnings = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message SwitchSafetyDecision {
+  string evaluation_id = 1;
+  SwitchSafetyStatus status = 2;
+  repeated SwitchSafetyReason reasons = 3;
+  optional string required_action = 4;
+  google.protobuf.Timestamp evaluated_at = 5;
+}
+
+message ContinuityCheckpointResult {
+  string checkpoint_id = 1;
+  ContinuityCheckpointStatus status = 2;
+  double confidence = 3;
+  repeated ContinuityMismatch mismatches = 4;
+  repeated ContinuityRepair repairs_applied = 5;
+  google.protobuf.Timestamp completed_at = 6;
+}
+
+message SessionMetadata {
+  string id = 1;
+  string title = 2;
+  string cwd = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  optional string parent_session_id = 6;
+  optional uint64 branched_at_seq = 7;
+}
+
+// Materialized session state derived from the event log.
+message SessionSnapshotState {
+  SessionMetadata session = 1;
+  SessionConfig config = 2;
+  repeated CanonicalMessage conversation = 3;
+  repeated CanonicalToolCall tool_calls = 4;
+  repeated ArtifactMetadata artifacts = 5;
+  repeated SessionSummary summaries = 6;
+  ContextTwin context_twin = 7;
+  optional SwitchAdaptationPlan switch_adaptation_plan = 8;
+  optional SwitchSafetyDecision switch_safety = 9;
+  optional ContinuityCheckpointResult continuity_checkpoint = 10;
+  repeated TodoItem todos = 11;
+  repeated AuditEntry audit_log = 12;
+  SessionUsage usage = 13;
+  NonPortableState nonportable = 14;
+  optional RunnerBinding active_runner_binding = 15;
+  optional TerminalContinuity terminal = 16;
+}
+
+// Snapshot envelope persisted in NATS KV.
+message SessionSnapshot {
+  uint32 schema_version = 1;
+  string session_id = 2;
+  uint64 last_applied_seq = 3;
+  SessionSnapshotState state = 4;
+  google.protobuf.Timestamp materialized_at = 5;
+}

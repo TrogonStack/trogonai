@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Who emitted a session event.
+enum ActorType {
+  ACTOR_TYPE_UNSPECIFIED = 0;
+  ACTOR_TYPE_USER = 1;
+  ACTOR_TYPE_ASSISTANT = 2;
+  ACTOR_TYPE_RUNNER = 3;
+  ACTOR_TYPE_SYSTEM = 4;
+  ACTOR_TYPE_KERNEL = 5;
+}
+
+message Actor {
+  ActorType type = 1;
+  string id = 2;
+}
+
+enum ToolCallStatus {
+  TOOL_CALL_STATUS_UNSPECIFIED = 0;
+  TOOL_CALL_STATUS_PENDING = 1;
+  TOOL_CALL_STATUS_STARTED = 2;
+  TOOL_CALL_STATUS_COMPLETED = 3;
+  TOOL_CALL_STATUS_FAILED = 4;
+  TOOL_CALL_STATUS_REQUIRES_RECONCILIATION = 5;
+}
+
+enum FileChangeKind {
+  FILE_CHANGE_KIND_UNSPECIFIED = 0;
+  FILE_CHANGE_KIND_CREATED = 1;
+  FILE_CHANGE_KIND_MODIFIED = 2;
+  FILE_CHANGE_KIND_DELETED = 3;
+  FILE_CHANGE_KIND_RENAMED = 4;
+}
+
+enum ArtifactRetentionPolicy {
+  ARTIFACT_RETENTION_POLICY_UNSPECIFIED = 0;
+  ARTIFACT_RETENTION_POLICY_SESSION = 1;
+  ARTIFACT_RETENTION_POLICY_WORKSPACE = 2;
+  ARTIFACT_RETENTION_POLICY_EPHEMERAL = 3;
+}
+
+enum EncryptionStatus {
+  ENCRYPTION_STATUS_UNSPECIFIED = 0;
+  ENCRYPTION_STATUS_NONE = 1;
+  ENCRYPTION_STATUS_ENCRYPTED = 2;
+}
+
+enum SwitchSafetyStatus {
+  SWITCH_SAFETY_STATUS_UNSPECIFIED = 0;
+  SWITCH_SAFETY_STATUS_ALLOWED = 1;
+  SWITCH_SAFETY_STATUS_ALLOWED_WITH_WARNING = 2;
+  SWITCH_SAFETY_STATUS_REQUIRES_USER_CONFIRMATION = 3;
+  SWITCH_SAFETY_STATUS_BLOCKED_UNTIL_SAFE = 4;
+}
+
+enum ContinuityCheckpointStatus {
+  CONTINUITY_CHECKPOINT_STATUS_UNSPECIFIED = 0;
+  CONTINUITY_CHECKPOINT_STATUS_PASSED = 1;
+  CONTINUITY_CHECKPOINT_STATUS_FAILED = 2;
+  CONTINUITY_CHECKPOINT_STATUS_REPAIRED = 3;
+}
+
+enum ModelSwitchReason {
+  MODEL_SWITCH_REASON_UNSPECIFIED = 0;
+  MODEL_SWITCH_REASON_USER_REQUESTED = 1;
+  MODEL_SWITCH_REASON_CAPABILITY_FALLBACK = 2;
+  MODEL_SWITCH_REASON_RUNNER_FAILURE = 3;
+  MODEL_SWITCH_REASON_POLICY = 4;
+}
+
+enum RunnerBindingStatus {
+  RUNNER_BINDING_STATUS_UNSPECIFIED = 0;
+  RUNNER_BINDING_STATUS_ATTACHED = 1;
+  RUNNER_BINDING_STATUS_DETACHED = 2;
+  RUNNER_BINDING_STATUS_FAILED = 3;
+}
+
+enum CapabilityAdaptationAction {
+  CAPABILITY_ADAPTATION_ACTION_UNSPECIFIED = 0;
+  CAPABILITY_ADAPTATION_ACTION_PRESERVE = 1;
+  CAPABILITY_ADAPTATION_ACTION_USE_ARTIFACT_REFS = 2;
+  CAPABILITY_ADAPTATION_ACTION_PRESERVE_STRUCTURED_TOOLS = 3;
+  CAPABILITY_ADAPTATION_ACTION_USE_CONTEXT_TWIN_PLUS_RECENT_TURNS = 4;
+  CAPABILITY_ADAPTATION_ACTION_TEXTUALIZE = 5;
+  CAPABILITY_ADAPTATION_ACTION_OMIT = 6;
+  CAPABILITY_ADAPTATION_ACTION_NOT_PORTABLE = 7;
+}
+
+message TextToolResult {
+  string content = 1;
+  bool truncated = 2;
+}
+
+message ArtifactRef {
+  string artifact_id = 1;
+  string sha256 = 2;
+  uint64 size_bytes = 3;
+  string mime = 4;
+  string preview = 5;
+  bool truncated = 6;
+}
+
+message ToolCallResult {
+  oneof kind {
+    TextToolResult text = 1;
+    ArtifactRef artifact_ref = 2;
+  }
+}
+
+message TokenUsage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_creation_tokens = 3;
+  uint64 cache_read_tokens = 4;
+}
+
+message ContentBlock {
+  oneof kind {
+    string text = 1;
+    ArtifactRef image_ref = 2;
+    string thinking = 3;
+    ToolUseBlock tool_use = 4;
+    ToolResultBlock tool_result = 5;
+  }
+}
+
+message ToolUseBlock {
+  string id = 1;
+  string name = 2;
+  string input_json = 3;
+  optional string parent_tool_use_id = 4;
+}
+
+message ToolResultBlock {
+  string tool_use_id = 1;
+  ToolCallResult result = 2;
+}
+
+message CanonicalMessage {
+  string message_id = 1;
+  string role = 2;
+  repeated ContentBlock content = 3;
+  optional string model = 4;
+  optional string runner = 5;
+  optional string cwd = 6;
+  optional TokenUsage usage = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message CanonicalToolCall {
+  string id = 1;
+  optional string parent_tool_use_id = 2;
+  string name = 3;
+  string input_json = 4;
+  ToolCallStatus status = 5;
+  string tool_execution_id = 6;
+  google.protobuf.Timestamp started_at = 7;
+  optional google.protobuf.Timestamp completed_at = 8;
+  optional ToolCallResult result = 9;
+  optional string error = 10;
+}
+
+message TodoItem {
+  string id = 1;
+  string content = 2;
+  string status = 3;
+}
+
+message AuditEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string tool = 2;
+  string input_summary = 3;
+  string outcome = 4;
+}
+
+message SessionUsage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_creation_tokens = 3;
+  uint64 cache_read_tokens = 4;
+}
+
+message NonPortableState {
+  repeated string provider_response_ids = 1;
+  repeated string runner_thread_ids = 2;
+  repeated string terminal_ids = 3;
+  repeated string live_processes = 4;
+}
+
+// Portable terminal/process continuity preserved across runner switches
+// (§ Terminal and Process Policy). Distinct from NonPortableState, which holds
+// the non-preserved runtime handles (terminal_ids, live PTYs, etc.).
+message TerminalContinuity {
+  string terminal_cwd = 1;
+  repeated string env_allowlisted = 2;
+  string last_commands_summary = 3;
+  string running_process_summary = 4;
+  repeated string dirty_files = 5;
+}
+
+message SwitchAdaptation {
+  string capability = 1;
+  CapabilityAdaptationAction action = 2;
+  optional string detail = 3;
+}
+
+message SwitchSafetyReason {
+  string kind = 1;
+  string detail = 2;
+}
+
+message ContinuityMismatch {
+  string field = 1;
+  string expected = 2;
+  string actual = 3;
+}
+
+message ContinuityRepair {
+  string kind = 1;
+  string detail = 2;
+}

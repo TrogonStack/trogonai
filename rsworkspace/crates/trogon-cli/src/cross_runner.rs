@@ -1,10 +1,23 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsJetStreamClient};
-use agent_client_protocol::{Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification};
+use agent_client_protocol::{
+    Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+};
 use tokio::sync::mpsc;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
+use trogonai_session_contracts::{
+    IdempotencyKey, ModelSwitchReason, OperationId, SessionConfig, SessionId,
+};
+use trogonai_session_kernel::{shadow_sync_from_export, SessionKernelFeatureFlags};
+use trogonai_switching::{
+    messages_json_for_runner_hydration, portable_config_from_snapshot, PassthroughCheckpointRunner,
+    SwitchGateOutcome, SwitchModelRequest, SwitchOrchestrator, SwitchingError,
+};
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
 
@@ -34,6 +47,7 @@ pub struct CrossRunnerSwitcher<S: RegistryStore> {
     nats: async_nats::Client,
     base_config: Config,
     registry: Registry<S>,
+  kernel_stack: Option<crate::session_kernel::SessionKernelStack>,
     /// Each entry is `(Bridge, notification_rx)`.  The receiver is kept alive
     /// for exactly as long as the bridge; they are inserted and removed together.
     bridges: HashMap<String, BridgeSlot>,
@@ -45,8 +59,24 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             nats,
             base_config,
             registry,
+            kernel_stack: None,
             bridges: HashMap::new(),
         }
+    }
+
+    pub fn with_kernel_stack(
+        mut self,
+        stack: crate::session_kernel::SessionKernelStack,
+    ) -> Self {
+        self.kernel_stack = Some(stack);
+        self
+    }
+
+    pub fn kernel_flags(&self) -> SessionKernelFeatureFlags {
+        self.kernel_stack
+            .as_ref()
+            .map(|stack| stack.flags.clone())
+            .unwrap_or_default()
     }
 
     /// Switch the active session to whichever runner owns `model_id`.
@@ -80,7 +110,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         self.ensure_bridge(current_prefix)?;
         self.ensure_bridge(&target_prefix)?;
 
-        // 3. Export history as raw JSON
+        // 3. Export history as raw JSON (used for shadow mode and handoff fallback)
         let export_params = serde_json::value::RawValue::from_string(
             serde_json::json!({ "sessionId": current_session_id }).to_string(),
         )
@@ -93,10 +123,251 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 .map_err(|e| e.to_string())?
                 .0
         };
+        let raw_messages = messages_json.get();
 
-        // 4. Open new session on target runner (same workspace path)
+        let canonical_stack = self
+            .kernel_stack
+            .as_ref()
+            .filter(|stack| stack.flags.use_canonical_runner_binding())
+            .cloned();
+        if let Some(stack) = canonical_stack {
+            let started = Instant::now();
+            match self
+                .switch_via_session_kernel(
+                    current_prefix,
+                    current_session_id,
+                    &target_prefix,
+                    model_id,
+                    cwd,
+                    raw_messages,
+                    &stack,
+                )
+                .await
+            {
+                Ok(result) => {
+                    trogonai_switching::telemetry::metrics::record_switch_latency_ms(
+                        current_session_id,
+                        &result.operation_id,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                        &result.source_model,
+                        model_id,
+                        current_prefix,
+                        &target_prefix,
+                        "completed",
+                        result.checkpoint_result.as_deref(),
+                    );
+                    return Ok((target_prefix, result.runner_session_id));
+                }
+                Err(err) => {
+                    trogonai_switching::telemetry::metrics::record_hydration_fallback(
+                        current_session_id,
+                        &err.operation_id,
+                        &err.reason,
+                    );
+                    tracing::warn!(
+                        session_id = current_session_id,
+                        target_model = model_id,
+                        error = %err.reason,
+                        "canonical session kernel switch failed — falling back to export/import handoff"
+                    );
+                }
+            }
+        }
+
+        self.handoff_switch(&target_prefix, cwd, raw_messages).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn switch_via_session_kernel(
+        &mut self,
+        _current_prefix: &str,
+        trogon_session_id: &str,
+        target_prefix: &str,
+        model_id: &str,
+        cwd: &str,
+        export_json: &str,
+        stack: &crate::session_kernel::SessionKernelStack,
+    ) -> Result<CanonicalSwitchOutcome, CanonicalSwitchFailure> {
+        let session_id = SessionId::new(trogon_session_id).map_err(|err| CanonicalSwitchFailure {
+            operation_id: trogon_session_id.to_string(),
+            reason: err.to_string(),
+        })?;
+        let operation_id = OperationId::new(format!("op_switch_{}", uuid::Uuid::now_v7()))
+            .map_err(|err| CanonicalSwitchFailure {
+                operation_id: trogon_session_id.to_string(),
+                reason: err.to_string(),
+            })?;
+        let idempotency_key = IdempotencyKey::new(format!("idem_{}", uuid::Uuid::now_v7()))
+            .map_err(|err| CanonicalSwitchFailure {
+                operation_id: operation_id.as_str().to_string(),
+                reason: err.to_string(),
+            })?;
+
+        if stack.flags.event_log_shadow_mode {
+            let portable_config = legacy_portable_session_config(&self.nats, trogon_session_id).await;
+            let portable_snapshot = portable_config_to_session_config(&portable_config);
+            if let Err(err) = shadow_sync_from_export(
+                &stack.kernel,
+                &session_id,
+                export_json,
+                cwd,
+                portable_snapshot,
+            )
+            .await
+            {
+                tracing::warn!(
+                    session_id = trogon_session_id,
+                    error = %err,
+                    "shadow event log sync failed — continuing with operational handoff path"
+                );
+            }
+        }
+
+        let orchestrator = SwitchOrchestrator::new(
+            stack.kernel.clone(),
+            stack.snapshots.clone(),
+            stack.runner_bindings.clone(),
+            stack.twin_store.clone(),
+            self.registry.clone(),
+            Arc::new(PassthroughCheckpointRunner),
+            stack.switching_config.clone(),
+            stack.capability_config.clone(),
+            stack.projection_config.clone(),
+            stack.certification.clone(),
+        );
+
+        let switch_result = orchestrator
+            .switch_model(SwitchModelRequest {
+                session_id: session_id.clone(),
+                target_model: model_id.to_string(),
+                reason: ModelSwitchReason::UserRequested,
+                user_confirmed: true,
+                force: false,
+                force_acknowledged_losses: Vec::new(),
+                operation_id: operation_id.clone(),
+                correlation_id: format!("corr_{}", uuid::Uuid::now_v7()),
+                idempotency_key,
+            })
+            .await
+            .map_err(|err| map_switching_error(operation_id.as_str(), err))?;
+
+        let result = match switch_result {
+            Ok(result) => result,
+            Err(SwitchGateOutcome::Blocked(decision)) => {
+                trogonai_switching::telemetry::metrics::record_switch_blocked(
+                    trogon_session_id,
+                    operation_id.as_str(),
+                    model_id,
+                    decision
+                        .reasons
+                        .first()
+                        .map(|reason| reason.kind.as_str())
+                        .unwrap_or("blocked"),
+                );
+                return Err(CanonicalSwitchFailure {
+                    operation_id: operation_id.as_str().to_string(),
+                    reason: "switch blocked by safety gate".to_string(),
+                });
+            }
+            Err(SwitchGateOutcome::ConfirmationRequired(_)) => {
+                trogonai_switching::telemetry::metrics::record_switch_confirmation_required(
+                    trogon_session_id,
+                    operation_id.as_str(),
+                    model_id,
+                );
+                return Err(CanonicalSwitchFailure {
+                    operation_id: operation_id.as_str().to_string(),
+                    reason: "switch requires user confirmation".to_string(),
+                });
+            }
+        };
+
+        let portable = {
+            let legacy = legacy_portable_session_config(&self.nats, trogon_session_id).await;
+            let snapshot = stack.kernel.load_snapshot(&session_id).await.map_err(|err| {
+                CanonicalSwitchFailure {
+                    operation_id: operation_id.as_str().to_string(),
+                    reason: err.to_string(),
+                }
+            })?;
+            let mut portable = snapshot
+                .as_ref()
+                .and_then(|snap| snap.state.as_option())
+                .map(portable_config_from_snapshot)
+                .unwrap_or_default();
+            if portable.compactor_model.is_none() {
+                portable.compactor_model = legacy.compactor_model;
+            }
+            if portable.mode.is_none() {
+                portable.mode = legacy.mode;
+            }
+            if portable.system_prompt.is_none() {
+                portable.system_prompt = legacy.system_prompt;
+            }
+            if portable.mcp_servers_json.is_empty() {
+                portable.mcp_servers_json = legacy.mcp_servers_json;
+            }
+            portable
+        };
+
+        let import_messages = messages_json_for_runner_hydration(&result.projection, &[])
+            .map_err(|err| CanonicalSwitchFailure {
+                operation_id: operation_id.as_str().to_string(),
+                reason: err.to_string(),
+            })?;
+
+        let new_session_id = self
+            .open_and_hydrate_runner_session(
+                target_prefix,
+                cwd,
+                &import_messages,
+                model_id,
+                &portable,
+            )
+            .await
+            .map_err(|reason| CanonicalSwitchFailure {
+                operation_id: operation_id.as_str().to_string(),
+                reason,
+            })?;
+
+        trogonai_switching::telemetry::metrics::record_switch_completed(
+            trogon_session_id,
+            operation_id.as_str(),
+            &result.from_model,
+            &result.to_model,
+            &result.from_runner,
+            &result.to_runner,
+        );
+
+        let checkpoint_result = result.checkpoint.as_ref().map(|checkpoint| {
+            match checkpoint.status.as_known() {
+                Some(trogonai_session_contracts::ContinuityCheckpointStatus::Passed) => "passed",
+                Some(trogonai_session_contracts::ContinuityCheckpointStatus::Repaired) => "repaired",
+                Some(trogonai_session_contracts::ContinuityCheckpointStatus::Failed) => "failed",
+                _ => "unknown",
+            }
+        });
+
+        Ok(CanonicalSwitchOutcome {
+            operation_id: operation_id.as_str().to_string(),
+            source_model: result.from_model,
+            runner_session_id: new_session_id,
+            checkpoint_result: checkpoint_result.map(str::to_string),
+        })
+    }
+
+    async fn handoff_switch(
+        &mut self,
+        target_prefix: &str,
+        cwd: &str,
+        raw_messages: &str,
+    ) -> Result<(String, String), String> {
+        if raw_messages.trim() == "null" || raw_messages.trim().is_empty() {
+            return Err("session/export returned null — cannot import into new session".into());
+        }
+
         let new_session_id = {
-            let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(target_prefix).unwrap();
             bridge
                 .new_session(NewSessionRequest::new(cwd))
                 .await
@@ -105,28 +376,16 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 .to_string()
         };
 
-        // 5. Import: pipe export JSON directly without re-serialization.
-        // CrossRunnerSwitcher is agnostic to the message format — no deserialization needed.
-
-        // LOW-6: Guard against null export — {"messages":null} would corrupt the target session.
-        let raw_messages = messages_json.get();
-        if raw_messages.trim() == "null" || raw_messages.trim().is_empty() {
-            return Err("session/export returned null — cannot import into new session".into());
-        }
-
         let import_params = serde_json::value::RawValue::from_string(format!(
             r#"{{"sessionId":"{new_session_id}","messages":{raw_messages}}}"#
         ))
         .map_err(|e| e.to_string())?;
         {
-            let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(target_prefix).unwrap();
             if let Err(import_err) = bridge
                 .ext_method(ExtRequest::new("session/import", import_params.into()))
                 .await
             {
-                // MED-26: the target runner already opened new_session_id. If import
-                // fails we'd otherwise leak that empty session until LRU eviction —
-                // best-effort close it before surfacing the original error.
                 let _ = bridge
                     .close_session(CloseSessionRequest::new(new_session_id.clone()))
                     .await;
@@ -134,7 +393,46 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             }
         }
 
-        Ok((target_prefix, new_session_id))
+        Ok((target_prefix.to_string(), new_session_id))
+    }
+
+    async fn open_and_hydrate_runner_session(
+        &mut self,
+        target_prefix: &str,
+        cwd: &str,
+        import_messages_json: &str,
+        model_id: &str,
+        portable: &trogonai_switching::PortableRunnerConfig,
+    ) -> Result<String, String> {
+        let new_session_id = {
+            let (bridge, _) = self.bridges.get(target_prefix).unwrap();
+            bridge
+                .new_session(NewSessionRequest::new(cwd))
+                .await
+                .map_err(|e| e.to_string())?
+                .session_id
+                .to_string()
+        };
+
+        let import_params = serde_json::value::RawValue::from_string(format!(
+            r#"{{"sessionId":"{new_session_id}","messages":{import_messages_json}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        {
+            let (bridge, _) = self.bridges.get(target_prefix).unwrap();
+            if let Err(import_err) = bridge
+                .ext_method(ExtRequest::new("session/import", import_params.into()))
+                .await
+            {
+                let _ = bridge
+                    .close_session(CloseSessionRequest::new(new_session_id.clone()))
+                    .await;
+                return Err(import_err.to_string());
+            }
+            apply_portable_runner_config(bridge, &new_session_id, model_id, portable).await?;
+        }
+
+        Ok(new_session_id)
     }
 
     fn ensure_bridge(&mut self, prefix: &str) -> Result<(), String> {
@@ -210,6 +508,97 @@ pub mod mock {
             async move { result }
         }
     }
+}
+
+struct CanonicalSwitchOutcome {
+    operation_id: String,
+    source_model: String,
+    runner_session_id: String,
+    checkpoint_result: Option<String>,
+}
+
+struct CanonicalSwitchFailure {
+    operation_id: String,
+    reason: String,
+}
+
+fn map_switching_error(operation_id: &str, err: SwitchingError) -> CanonicalSwitchFailure {
+    CanonicalSwitchFailure {
+        operation_id: operation_id.to_string(),
+        reason: err.to_string(),
+    }
+}
+
+async fn legacy_portable_session_config(
+    nats: &async_nats::Client,
+    session_id: &str,
+) -> trogonai_switching::PortableRunnerConfig {
+    use trogon_runner_tools::SessionStore as _;
+    let js = async_nats::jetstream::new(nats.clone());
+    match trogon_runner_tools::NatsSessionStore::open(&js).await {
+        Ok(store) => match store.load(session_id).await {
+            Ok(state) => trogonai_switching::PortableRunnerConfig {
+                compactor_model: state.compactor_model.clone(),
+                mode: Some(state.mode.clone()),
+                system_prompt: state.system_prompt.clone(),
+                mcp_servers_json: state
+                    .mcp_servers
+                    .iter()
+                    .filter_map(|server| serde_json::to_string(server).ok())
+                    .collect(),
+            },
+            Err(_) => trogonai_switching::PortableRunnerConfig::default(),
+        },
+        Err(_) => trogonai_switching::PortableRunnerConfig::default(),
+    }
+}
+
+fn portable_config_to_session_config(
+    portable: &trogonai_switching::PortableRunnerConfig,
+) -> Option<SessionConfig> {
+    if portable.compactor_model.is_none()
+        && portable.system_prompt.is_none()
+        && portable.mcp_servers_json.is_empty()
+    {
+        return None;
+    }
+    Some(SessionConfig {
+        compactor_model: portable.compactor_model.clone(),
+        system_prompt: portable.system_prompt.clone(),
+        mcp_servers_json: portable.mcp_servers_json.clone(),
+        ..SessionConfig::default()
+    })
+}
+
+async fn apply_portable_runner_config(
+    bridge: &ConcreteBridge,
+    session_id: &str,
+    model_id: &str,
+    portable: &trogonai_switching::PortableRunnerConfig,
+) -> Result<(), String> {
+    bridge
+        .set_session_model(SetSessionModelRequest::new(session_id.to_string(), model_id.to_string()))
+        .await
+        .map_err(|err| err.to_string())?;
+    if let Some(mode) = &portable.mode {
+        bridge
+            .set_session_mode(SetSessionModeRequest::new(session_id.to_string(), mode.to_string()))
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    if let Some(compactor_model) = &portable.compactor_model {
+        bridge
+            .set_session_config_option(
+                SetSessionConfigOptionRequest::new(
+                    session_id.to_string(),
+                    "compactor_model",
+                    compactor_model.as_str(),
+                ),
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

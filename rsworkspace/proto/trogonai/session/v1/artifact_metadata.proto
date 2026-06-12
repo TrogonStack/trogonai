@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/v1/common.proto";
+
+// Metadata for a durable session artifact stored out-of-line.
+message ArtifactMetadata {
+  uint32 schema_version = 1;
+  string artifact_id = 2;
+  string session_id = 3;
+  string event_id = 4;
+  optional string tool_execution_id = 5;
+  string sha256 = 6;
+  uint64 size_bytes = 7;
+  string mime = 8;
+  string preview = 9;
+  string storage_ref = 10;
+  google.protobuf.Timestamp created_at = 11;
+  ArtifactRetentionPolicy retention_policy = 12;
+  string permission_scope = 13;
+  EncryptionStatus encryption_status = 14;
+  bool truncated = 15;
+}

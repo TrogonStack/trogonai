@@ -215,6 +215,7 @@ where
 /// NATS header name used to propagate spawn depth across actor boundaries.
 pub(crate) const SPAWN_DEPTH_HEADER: &str = "Trogon-Spawn-Depth";
 
+#[allow(clippy::too_many_arguments)]
 fn build_context<A, P, N, R, J>(
     entity_key: &str,
     session_id: String,

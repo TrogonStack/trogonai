@@ -187,7 +187,42 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let registry_for_repl = registry.clone();
-        let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
+        let kernel_flags = trogonai_session_kernel::SessionKernelFeatureFlags::default();
+        let kernel_policies = trogonai_session_kernel::SessionKernelOperationalPolicy::default();
+        let kernel_stack = if kernel_flags.session_kernel_enabled {
+            Some(
+                trogon_cli::session_kernel::SessionKernelStack::provision(
+                    nats.clone(),
+                    kernel_flags.clone(),
+                    kernel_policies,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("session kernel provisioning failed: {e}"))?,
+            )
+        } else if kernel_flags.event_log_shadow_mode {
+            match trogon_cli::session_kernel::SessionKernelStack::provision(
+                nats.clone(),
+                kernel_flags.clone(),
+                kernel_policies,
+            )
+            .await
+            {
+                Ok(stack) => Some(stack),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "session kernel shadow provisioning failed — continuing without shadow sync"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let mut switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
+        if let Some(stack) = kernel_stack {
+            switcher = switcher.with_kernel_stack(stack);
+        }
         let factory = NatsSessionFactory::new(nats.clone());
 
         let resume = if args.continue_session {

@@ -24,7 +24,7 @@ use std::vec::IntoIter as VecIntoIter;
 use time::OffsetDateTime;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
-use super::object_store::{ObjectStoreGet, ObjectStorePut};
+use super::object_store::{ObjectStoreDelete, ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
@@ -1462,6 +1462,15 @@ impl ObjectStoreGet for MockObjectStore {
             .find(|(k, _)| k == name)
             .map(|(_, v)| std::io::Cursor::new(v.to_vec()))
             .ok_or_else(|| MockError(format!("object not found: {name}")))
+    }
+}
+
+impl ObjectStoreDelete for MockObjectStore {
+    type Error = MockError;
+
+    async fn delete(&self, name: &str) -> Result<(), MockError> {
+        self.objects.lock().unwrap().retain(|(k, _)| k != name);
+        Ok(())
     }
 }
 
