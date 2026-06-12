@@ -1725,8 +1725,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
             let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
+            let completion_guidance = trogon_runner_tools::COMPLETION_GUIDANCE;
             let header = format!(
-                "Current working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
+                "Current working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}\n\n{completion_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),

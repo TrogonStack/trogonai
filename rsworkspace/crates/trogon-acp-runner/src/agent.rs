@@ -900,8 +900,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         // Load TROGON.md files (global → repo root → cwd) and prepend to system_prompt.
         let trogon_md = self.md_loader.load(&state.cwd).await;
         let identity = format!(
-            "You are Trogon, an AI coding assistant.\n\n{}",
-            trogon_runner_tools::URL_FETCH_GUIDANCE
+            "You are Trogon, an AI coding assistant.\n\n{}\n\n{}",
+            trogon_runner_tools::URL_FETCH_GUIDANCE,
+            trogon_runner_tools::COMPLETION_GUIDANCE,
         );
         // `--system-prompt` (systemPromptOverride) replaces the built-in identity;
         // TROGON.md and `--append-system-prompt` (system_prompt) still apply on top.

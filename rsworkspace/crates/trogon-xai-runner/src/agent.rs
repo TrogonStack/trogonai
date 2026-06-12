@@ -1708,8 +1708,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
             let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
+            let completion_guidance = trogon_runner_tools::COMPLETION_GUIDANCE;
             let header = format!(
-                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
+                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}\n\n{completion_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),

@@ -72,3 +72,10 @@ pub const URL_FETCH_GUIDANCE: &str = "When the user gives or refers to a URL or 
 /// read-only, then present a plan and stop until the user approves leaving plan
 /// mode. Mirrors Claude Code's plan mode behaviour.
 pub const PLAN_MODE_GUIDANCE: &str = "You are currently in PLAN MODE. Do NOT make any changes yet: do not edit, create, or delete files, and do not run commands that modify state (these are blocked and will be rejected). First investigate the codebase using read-only tools (read_file, list_dir, glob, search_files, read-only git/bash) until you fully understand the task. Then, when you have a complete plan, call the ExitPlanMode tool with your plan to ask the user to approve leaving plan mode. Do not begin implementing until that approval is granted.";
+
+/// Guidance appended to the system prompt so the model always reports back. With
+/// only the bare identity, a model given tools tends to run them and end its turn
+/// silently — the user sees tool calls happen and then nothing. This makes the
+/// model close every turn with a short plain-language summary of what it did and
+/// the result, the way Claude Code does, without producing a wall of text.
+pub const COMPLETION_GUIDANCE: &str = "When you finish working (after running tools, editing files, or answering), always end your turn with a short, plain-language summary of what you did and the result: what changed, whether it worked, and any next step the user should know. Never end a turn silently right after a tool call — the user cannot see your reasoning or the raw tool output, only what you tell them. Keep it concise: a sentence or a few short bullets, not a long report.";
