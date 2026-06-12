@@ -79,3 +79,9 @@ pub const PLAN_MODE_GUIDANCE: &str = "You are currently in PLAN MODE. Do NOT mak
 /// model close every turn with a short plain-language summary of what it did and
 /// the result, the way Claude Code does, without producing a wall of text.
 pub const COMPLETION_GUIDANCE: &str = "After you do real work — running tools or changing files — let the user know in natural, conversational language what you did and how it went, the way a helpful colleague would. Don't go silent right after a tool call: the user sees only what you say, not the raw tool output. When you did not run any tools or change anything (a greeting, a question you simply answered, ordinary back-and-forth), just reply naturally and add nothing extra — no recap. Keep it brief and human, and reach for a bullet list only when the work genuinely has several distinct parts worth itemizing, not by default.";
+
+/// Injected as a user message when a turn ran tools but ended with no text — the
+/// model did work and went silent. The hard backstop behind [`COMPLETION_GUIDANCE`]
+/// (which is soft): each runner detects the silent-after-tools case, sends this
+/// once, and loops once more to get the recap. Mirrors agent-core's own nudge.
+pub const AUTO_SUMMARY_NUDGE: &str = "You ended your turn without telling the user what you did. In 1-2 sentences of natural language, briefly summarize what you just did and the result. Do not call any more tools.";

@@ -1934,6 +1934,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // Set when the outer loop is executing a continuation request (Incomplete
         // response). Disables the stale-ID retry for that iteration.
         let mut continuation_in_progress = false;
+        // Auto-summary guarantee: set once we have nudged the model for a recap
+        // after a silent (tools-ran, no-text) turn, so we nudge at most once.
+        let mut auto_summary_done = false;
         // Counts client-driven continuation requests for Incomplete responses.
         let mut continuations: u32 = 0;
         const MAX_CONTINUATIONS: u32 = 5;
@@ -2578,6 +2581,24 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 // if it were, a retry would replay history without the
                 // function_call_output items — producing a wrong response.
                 continuation_in_progress = true;
+                continue 'outer;
+            }
+
+            // Auto-summary guarantee: the turn is complete, but if it ran tools
+            // and produced no text the model went silent — nudge it once for a
+            // brief recap (reuse the outer loop's stateful continuation path).
+            if tool_rounds > 0
+                && assistant_text.trim().is_empty()
+                && !auto_summary_done
+                && let Some(resp_id) = current_response_id.clone()
+            {
+                auto_summary_done = true;
+                current_prev_response_id = Some(resp_id);
+                current_input =
+                    vec![InputItem::user(trogon_runner_tools::AUTO_SUMMARY_NUDGE.to_string())];
+                current_response_id = None;
+                continuation_in_progress = true;
+                info!(session_id, "xai: turn ended silently after tools — requesting recap");
                 continue 'outer;
             }
 
