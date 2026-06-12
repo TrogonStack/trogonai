@@ -8,6 +8,10 @@ import "trogonai/compactor/v1/compactor.proto";
 message CompactionConfig {
   optional string compactor_model = 1;
   optional string compactor_provider = 2;
+  // C4 migration: set when a bare `compactor_model` could not be resolved to a
+  // provider (ambiguous/unknown/catalog unavailable). Persists so the next load
+  // retries the backfill; cleared once the provider resolves and is rewritten.
+  bool needs_compactor_migration = 3;
 }
 
 // HTTP/SSE MCP server configuration stored per session.

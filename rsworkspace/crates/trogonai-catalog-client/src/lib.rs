@@ -15,7 +15,8 @@ mod store;
 
 pub use catalog_entry::CatalogEntry;
 pub use codec::{
-    CodecError, QualifiedModel, backfill_compactor_provider, parse, qualify, resolve,
+    BackfillOutcome, CodecError, QualifiedModel, backfill_compactor_provider, parse, qualify,
+    resolve,
 };
 pub use config::CatalogClientConfig;
 pub use error::CatalogClientError;

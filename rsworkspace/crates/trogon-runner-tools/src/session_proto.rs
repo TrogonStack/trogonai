@@ -37,21 +37,23 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<SessionState> {
 // this plan adds — is persisted separately as a versioned `CompactionConfig`
 // protobuf record under a sibling key (ADR 0009), keeping the console JSON intact.
 
-/// Encode a compaction override `(provider, model)` to protobuf bytes.
-pub fn encode_compaction(provider: Option<&str>, model: Option<&str>) -> Vec<u8> {
+/// Encode a compaction override `(provider, model, needs_migration)` to protobuf bytes.
+pub fn encode_compaction(provider: Option<&str>, model: Option<&str>, needs_migration: bool) -> Vec<u8> {
     sp::CompactionConfig {
         compactor_model: model.map(str::to_string),
         compactor_provider: provider.map(str::to_string),
+        needs_compactor_migration: needs_migration,
         __buffa_unknown_fields: Default::default(),
     }
     .encode_to_vec()
 }
 
-/// Decode a compaction override record → `(provider, model)`. Malformed/missing → `(None, None)`.
-pub fn decode_compaction(bytes: &[u8]) -> (Option<String>, Option<String>) {
+/// Decode a compaction override record → `(provider, model, needs_migration)`.
+/// Malformed/missing → `(None, None, false)`.
+pub fn decode_compaction(bytes: &[u8]) -> (Option<String>, Option<String>, bool) {
     match sp::CompactionConfig::decode_from_slice(bytes) {
-        Ok(c) => (c.compactor_provider, c.compactor_model),
-        Err(_) => (None, None),
+        Ok(c) => (c.compactor_provider, c.compactor_model, c.needs_compactor_migration),
+        Err(_) => (None, None, false),
     }
 }
 
@@ -64,6 +66,7 @@ fn to_proto(s: &SessionState) -> sp::SessionRecord {
         compaction: buffa::MessageField::some(sp::CompactionConfig {
             compactor_model: s.compactor_model.clone(),
             compactor_provider: s.compactor_provider.clone(),
+            needs_compactor_migration: s.needs_compactor_migration,
             __buffa_unknown_fields: Default::default(),
         }),
         mode: s.mode.clone(),
@@ -99,16 +102,23 @@ fn to_proto(s: &SessionState) -> sp::SessionRecord {
 }
 
 fn from_proto(r: sp::SessionRecord) -> SessionState {
-    let (compactor_model, compactor_provider) = r
+    let (compactor_model, compactor_provider, needs_compactor_migration) = r
         .compaction
         .as_option()
-        .map(|c| (c.compactor_model.clone(), c.compactor_provider.clone()))
-        .unwrap_or((None, None));
+        .map(|c| {
+            (
+                c.compactor_model.clone(),
+                c.compactor_provider.clone(),
+                c.needs_compactor_migration,
+            )
+        })
+        .unwrap_or((None, None, false));
     SessionState {
         messages: r.messages.iter().filter_map(proto_to_message).collect(),
         model: r.model,
         compactor_provider,
         compactor_model,
+        needs_compactor_migration,
         mode: r.mode,
         cwd: r.cwd,
         created_at: r.created_at,
@@ -406,6 +416,7 @@ mod tests {
             model: Some("claude-opus-4-6".into()),
             compactor_provider: Some("anthropic".into()),
             compactor_model: Some("claude-haiku-4-5".into()),
+            needs_compactor_migration: false,
             mode: "acceptEdits".into(),
             cwd: "/work".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -527,16 +538,41 @@ mod tests {
 
     #[test]
     fn compaction_override_round_trips() {
-        let bytes = encode_compaction(Some("anthropic"), Some("claude-haiku-4-5"));
+        let bytes = encode_compaction(Some("anthropic"), Some("claude-haiku-4-5"), false);
         assert_eq!(
             decode_compaction(&bytes),
-            (Some("anthropic".to_string()), Some("claude-haiku-4-5".to_string()))
+            (Some("anthropic".to_string()), Some("claude-haiku-4-5".to_string()), false)
         );
     }
 
     #[test]
     fn compaction_override_none_round_trips() {
-        let bytes = encode_compaction(None, None);
-        assert_eq!(decode_compaction(&bytes), (None, None));
+        let bytes = encode_compaction(None, None, false);
+        assert_eq!(decode_compaction(&bytes), (None, None, false));
+    }
+
+    #[test]
+    fn compaction_override_needs_migration_round_trips() {
+        // C4: an unresolved bare model persists the flag so the next load retries.
+        let bytes = encode_compaction(None, Some("claude-haiku"), true);
+        assert_eq!(
+            decode_compaction(&bytes),
+            (None, Some("claude-haiku".to_string()), true)
+        );
+    }
+
+    #[test]
+    fn session_record_needs_compactor_migration_round_trips() {
+        let state = SessionState {
+            compactor_model: Some("claude-haiku".into()),
+            compactor_provider: None,
+            needs_compactor_migration: true,
+            ..Default::default()
+        };
+        let bytes = encode(&state);
+        let back = decode(&bytes).expect("decode");
+        assert!(back.needs_compactor_migration);
+        assert_eq!(back.compactor_model.as_deref(), Some("claude-haiku"));
+        assert_eq!(back.compactor_provider, None);
     }
 }

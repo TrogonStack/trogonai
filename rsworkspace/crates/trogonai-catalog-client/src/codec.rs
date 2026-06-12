@@ -67,30 +67,50 @@ pub fn resolve(catalog: &super::CatalogSnapshot, bare_id: &str) -> Result<Qualif
     }
 }
 
+/// Outcome of a C4 compactor-provider backfill attempt.
+///
+/// Typed result (repo policy: enums over `bool` at the edges) so call sites can
+/// distinguish a successful resolution from the cases that must NOT be silent —
+/// an ambiguous or unknown bare model — versus the genuine no-ops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillOutcome {
+    /// The bare model resolved to a single catalog entry; the provider was set.
+    Resolved,
+    /// The bare model maps to more than one provider — left untouched (no guess).
+    Ambiguous,
+    /// The bare model is absent from the catalog — left untouched (no guess).
+    Unknown,
+    /// No `compactor_model` was set; nothing to backfill.
+    NoModel,
+    /// `compactor_provider` was already set; nothing to do.
+    AlreadyResolved,
+}
+
 /// C4 migration: backfill the compactor provider for a session persisted before
 /// M3 with only a bare `compactor_model` (no provider). Resolves the provider from
-/// the catalog and fills `compactor_provider` in place; returns `true` if it did.
+/// the catalog and fills `compactor_provider` in place when it resolves uniquely.
 ///
-/// No-ops (returns `false`) when the provider is already set, no model is set, or
-/// the model is unknown/ambiguous in the catalog — leaving the pair untouched so the
-/// session keeps degrading gracefully rather than guessing a provider.
+/// Returns a [`BackfillOutcome`] so the caller can warn (and flag the session for
+/// retry) on `Ambiguous`/`Unknown` instead of silently degrading: the pair is left
+/// untouched in those cases rather than guessing a provider.
 pub fn backfill_compactor_provider(
     compactor_provider: &mut Option<String>,
     compactor_model: Option<&str>,
     catalog: &super::CatalogSnapshot,
-) -> bool {
+) -> BackfillOutcome {
     if compactor_provider.is_some() {
-        return false;
+        return BackfillOutcome::AlreadyResolved;
     }
     let Some(model) = compactor_model else {
-        return false;
+        return BackfillOutcome::NoModel;
     };
     match resolve(catalog, model) {
         Ok(qualified) => {
             *compactor_provider = Some(qualified.provider);
-            true
+            BackfillOutcome::Resolved
         }
-        Err(_) => false,
+        Err(CodecError::Ambiguous { .. }) => BackfillOutcome::Ambiguous,
+        Err(_) => BackfillOutcome::Unknown,
     }
 }
 
@@ -133,24 +153,44 @@ mod tests {
     fn backfill_resolves_unique_model_only() {
         let catalog = sample_catalog();
 
-        // Unique model → provider backfilled.
+        // Unique model → provider backfilled, Resolved.
         let mut provider = None;
-        assert!(backfill_compactor_provider(&mut provider, Some("grok-2"), &catalog));
+        assert_eq!(
+            backfill_compactor_provider(&mut provider, Some("grok-2"), &catalog),
+            BackfillOutcome::Resolved
+        );
         assert_eq!(provider.as_deref(), Some("xai"));
 
-        // Ambiguous model → left untouched (no guess).
+        // Ambiguous model → Ambiguous, left untouched (no guess).
         let mut provider = None;
-        assert!(!backfill_compactor_provider(&mut provider, Some("claude-haiku"), &catalog));
+        assert_eq!(
+            backfill_compactor_provider(&mut provider, Some("claude-haiku"), &catalog),
+            BackfillOutcome::Ambiguous
+        );
         assert!(provider.is_none());
 
-        // Already set → no-op.
+        // Unknown model → Unknown, left untouched (no guess).
+        let mut provider = None;
+        assert_eq!(
+            backfill_compactor_provider(&mut provider, Some("not-in-catalog"), &catalog),
+            BackfillOutcome::Unknown
+        );
+        assert!(provider.is_none());
+
+        // Already set → AlreadyResolved, no-op.
         let mut provider = Some("anthropic".to_string());
-        assert!(!backfill_compactor_provider(&mut provider, Some("grok-2"), &catalog));
+        assert_eq!(
+            backfill_compactor_provider(&mut provider, Some("grok-2"), &catalog),
+            BackfillOutcome::AlreadyResolved
+        );
         assert_eq!(provider.as_deref(), Some("anthropic"));
 
-        // No model → no-op.
+        // No model → NoModel, no-op.
         let mut provider = None;
-        assert!(!backfill_compactor_provider(&mut provider, None, &catalog));
+        assert_eq!(
+            backfill_compactor_provider(&mut provider, None, &catalog),
+            BackfillOutcome::NoModel
+        );
         assert!(provider.is_none());
     }
 

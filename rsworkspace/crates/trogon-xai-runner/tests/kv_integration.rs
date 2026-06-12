@@ -287,6 +287,7 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         model: Some("grok-3".to_string()),
         compactor_provider: None,
         compactor_model: None,
+        needs_compactor_migration: false,
         tools: vec![],
         memory_path: None,
         agent_id: None,

@@ -89,6 +89,11 @@ pub struct SessionState {
     /// the session model. Set via `set_session_config_option`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compactor_model: Option<String>,
+    /// C4 migration flag: `true` when a bare `compactor_model` (no provider) could
+    /// not be resolved on load (ambiguous/unknown model, or catalog unavailable).
+    /// Persisted so the retry survives restarts; cleared once the provider resolves.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub needs_compactor_migration: bool,
     /// Permission mode (e.g. "default", "acceptEdits", "bypassPermissions").
     #[serde(default)]
     pub mode: String,
@@ -194,6 +199,10 @@ fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
 impl Default for SessionState {
     fn default() -> Self {
         Self {
@@ -201,6 +210,7 @@ impl Default for SessionState {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             mode: String::new(),
             cwd: String::new(),
             created_at: String::new(),

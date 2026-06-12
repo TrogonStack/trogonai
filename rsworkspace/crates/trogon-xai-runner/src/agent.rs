@@ -109,6 +109,11 @@ struct XaiSession {
     /// session model. Set via `set_session_config_option`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     compactor_model: Option<String>,
+    /// C4 retry flag carried in-memory so a save does not clobber it: `true` when a
+    /// bare `compactor_model` could not be resolved on load (ambiguous/unknown/no
+    /// catalog). Persisted via the `.compaction` record; never in the JSON blob.
+    #[serde(skip)]
+    needs_compactor_migration: bool,
     /// API key bound to this session at `new_session` time.
     /// Falls back to the agent-wide `global_api_key` if None.
     // MED-25: never serialize the API key — session/get_state would otherwise
@@ -717,29 +722,79 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         if let Some(evicted) = evicted_id {
             store.remove(&self.tenant_id, &evicted).await;
         }
-        // C4: pre-M3 sessions persisted a bare `compactor_model` without a provider.
-        // Backfill the provider from the catalog on load (no-op when already set or
-        // when the model is unknown/ambiguous).
+        // C4 migration: a pre-M3 session may carry a bare `compactor_model` with no
+        // provider. Resolve it against the catalog on load and durably rewrite the
+        // pair. Ambiguous/unknown/catalog-unavailable cases are NOT silent: warn and
+        // flag `needs_compactor_migration` so the next load retries, preserving the
+        // bare value rather than guessing a provider.
+        use trogonai_catalog_client::BackfillOutcome;
         let mut compactor_provider = snap.compactor_provider.clone();
-        if let Some(catalog) = self.catalog_client.as_ref().and_then(|c| c.cached_snapshot()) {
-            let backfilled = trogonai_catalog_client::backfill_compactor_provider(
-                &mut compactor_provider,
-                snap.compactor_model.as_deref(),
-                &catalog,
-            );
-            // Durably rewrite the resolved pair so the migration is permanent
-            // (best-effort: never fail the restore on a save error).
-            if backfilled {
-                store
-                    .set_compaction(
-                        &self.tenant_id,
-                        session_id,
-                        compactor_provider.as_deref(),
-                        snap.compactor_model.as_deref(),
-                    )
-                    .await;
+        let cached_catalog = self.catalog_client.as_ref().and_then(|c| c.cached_snapshot());
+        let needs_compactor_migration = match cached_catalog {
+            Some(catalog) => {
+                let outcome = trogonai_catalog_client::backfill_compactor_provider(
+                    &mut compactor_provider,
+                    snap.compactor_model.as_deref(),
+                    &catalog,
+                );
+                match outcome {
+                    BackfillOutcome::Resolved => {
+                        store
+                            .set_compaction(
+                                &self.tenant_id,
+                                session_id,
+                                compactor_provider.as_deref(),
+                                snap.compactor_model.as_deref(),
+                                false,
+                            )
+                            .await;
+                        false
+                    }
+                    BackfillOutcome::Ambiguous | BackfillOutcome::Unknown => {
+                        warn!(
+                            session_id,
+                            compactor_model = snap.compactor_model.as_deref().unwrap_or(""),
+                            outcome = ?outcome,
+                            "xai: could not resolve compactor provider for bare model; \
+                             degrading and flagging for retry (needs_compactor_migration)"
+                        );
+                        store
+                            .set_compaction(
+                                &self.tenant_id,
+                                session_id,
+                                compactor_provider.as_deref(),
+                                snap.compactor_model.as_deref(),
+                                true,
+                            )
+                            .await;
+                        true
+                    }
+                    BackfillOutcome::NoModel | BackfillOutcome::AlreadyResolved => false,
+                }
             }
-        }
+            None => {
+                if compactor_provider.is_none() && snap.compactor_model.is_some() {
+                    warn!(
+                        session_id,
+                        compactor_model = snap.compactor_model.as_deref().unwrap_or(""),
+                        "xai: catalog unavailable; cannot resolve compactor provider for bare \
+                         model; flagging for retry (needs_compactor_migration)"
+                    );
+                    store
+                        .set_compaction(
+                            &self.tenant_id,
+                            session_id,
+                            compactor_provider.as_deref(),
+                            snap.compactor_model.as_deref(),
+                            true,
+                        )
+                        .await;
+                    true
+                } else {
+                    false
+                }
+            }
+        };
 
         let mut sessions = self.sessions.lock().await;
         sessions.insert(
@@ -762,6 +817,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mcp_servers: snap.mcp_servers.clone(),
                 compactor_provider,
                 compactor_model: snap.compactor_model.clone(),
+                needs_compactor_migration,
                 terminal_id: None,
                 terminal_wasm_prefix: None,
                 total_input_tokens: snap.total_input_tokens,
@@ -823,6 +879,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             model: Some(session.model.clone().unwrap_or_else(|| self.default_model.clone())),
             compactor_provider: session.compactor_provider.clone(),
             compactor_model: session.compactor_model.clone(),
+            needs_compactor_migration: session.needs_compactor_migration,
             tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
@@ -1071,6 +1128,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 model: session_model_override,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
@@ -1246,6 +1304,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 model: inherited_model.clone(),
                 compactor_provider: inherited_compactor_provider,
                 compactor_model: inherited_compactor_model,
+                needs_compactor_migration: false,
                 api_key: inherited_key,
                 history,
                 // Forks start without a response ID — xAI's server cache is per-response,
@@ -2994,6 +3053,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 model,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -3029,6 +3089,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 model: None,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -3108,6 +3169,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 model,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: response_id,
@@ -3143,6 +3205,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 model: None,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key: None,
                 history: Vec::new(),
                 last_response_id: None,
@@ -3178,6 +3241,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 model: None,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key: Some("test-key".to_string()),
                 history,
                 last_response_id: None,
@@ -3438,6 +3502,7 @@ mod tests {
             model: Some("grok-3".to_string()),
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec!["web_search".to_string()],
             memory_path: None,
             agent_id: None,
@@ -3494,6 +3559,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec!["web_search".to_string()],
             memory_path: None,
             agent_id: None,
@@ -3532,6 +3598,58 @@ mod tests {
         );
     }
 
+    /// C4: loading a session that carries a bare `compactor_model` with no provider
+    /// while no catalog is attached must NOT silently drop it. The agent flags the
+    /// session for retry via `set_compaction(..., needs_migration = true)`, leaving
+    /// the bare model intact for the next load.
+    #[tokio::test]
+    async fn load_session_bare_compactor_model_no_catalog_flags_migration() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        // No `.with_catalog(...)` → catalog unavailable.
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-c4".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Test".to_string(),
+            model: None,
+            compactor_provider: None,
+            compactor_model: Some("claude-haiku".to_string()),
+            needs_compactor_migration: false,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+            mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+        });
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-c4", "/tmp"))
+            .await
+            .expect("must succeed");
+
+        let writes = store.compaction_writes.lock().unwrap();
+        assert_eq!(writes.len(), 1, "exactly one migration flag write expected");
+        let (_, sid, provider, model, needs_migration) = &writes[0];
+        assert_eq!(sid, "sess-c4");
+        assert_eq!(provider.as_deref(), None, "bare value must not gain a guessed provider");
+        assert_eq!(model.as_deref(), Some("claude-haiku"), "bare model must be preserved");
+        assert!(needs_migration, "session must be flagged for retry");
+    }
+
     #[tokio::test]
     async fn load_session_kv_miss_returns_not_found() {
         use crate::session_store::SessionStoring;
@@ -3568,6 +3686,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -3630,6 +3749,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -3683,6 +3803,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -3746,6 +3867,7 @@ mod tests {
             model: Some("grok-3-mini".to_string()),
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             agent_id: None,

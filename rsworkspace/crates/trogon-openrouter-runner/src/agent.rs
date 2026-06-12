@@ -207,6 +207,11 @@ struct OpenRouterSession {
     /// `None` means compact with the session model. Set via `set_session_config_option`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     compactor_model: Option<String>,
+    /// C4 retry flag carried in-memory so a save does not clobber it: `true` when a
+    /// bare `compactor_model` could not be resolved on load (ambiguous/unknown/no
+    /// catalog). Persisted via the `.compaction` record; never in the JSON blob.
+    #[serde(skip)]
+    needs_compactor_migration: bool,
     // MED-25: never serialize the API key — session/get_state would otherwise
     // return it in plaintext to any ACP client, and it would be persisted to KV.
     // A restored/forked session falls back to the agent-wide global key.
@@ -696,6 +701,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             model: Some(session.model.clone().unwrap_or_else(|| self.default_model.clone())),
             compactor_provider: session.compactor_provider.clone(),
             compactor_model: session.compactor_model.clone(),
+            needs_compactor_migration: session.needs_compactor_migration,
             tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
@@ -1029,6 +1035,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 model: session_model_override,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key,
                 history: Vec::new(),
                 system_prompt,
@@ -1127,27 +1134,80 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             let model = snap.model.clone();
             let mut compactor_provider = snap.compactor_provider.clone();
             let compactor_model = snap.compactor_model.clone();
-            // C4: pre-M3 sessions persisted a bare `compactor_model` without a
-            // provider; backfill it from the catalog on load (no-op otherwise).
-            if let Some(catalog) = self.catalog_client.as_ref().and_then(|c| c.cached_snapshot()) {
-                let backfilled = trogonai_catalog_client::backfill_compactor_provider(
-                    &mut compactor_provider,
-                    compactor_model.as_deref(),
-                    &catalog,
-                );
-                // Durably rewrite the resolved pair so the migration is permanent
-                // (best-effort: never fail the restore on a save error).
-                if backfilled {
-                    store
-                        .set_compaction(
-                            &self.tenant_id,
-                            &session_id,
-                            compactor_provider.as_deref(),
-                            compactor_model.as_deref(),
-                        )
-                        .await;
+            // C4 migration: a pre-M3 session may carry a bare `compactor_model` with
+            // no provider. Resolve it against the catalog on load and durably rewrite
+            // the pair. Ambiguous/unknown/catalog-unavailable cases are NOT silent:
+            // warn and flag `needs_compactor_migration` so the next load retries,
+            // preserving the bare value rather than guessing a provider.
+            use trogonai_catalog_client::BackfillOutcome;
+            let cached_catalog = self.catalog_client.as_ref().and_then(|c| c.cached_snapshot());
+            let needs_compactor_migration = match cached_catalog {
+                Some(catalog) => {
+                    let outcome = trogonai_catalog_client::backfill_compactor_provider(
+                        &mut compactor_provider,
+                        compactor_model.as_deref(),
+                        &catalog,
+                    );
+                    match outcome {
+                        BackfillOutcome::Resolved => {
+                            // Persist the resolved pair, clearing the migration flag.
+                            store
+                                .set_compaction(
+                                    &self.tenant_id,
+                                    &session_id,
+                                    compactor_provider.as_deref(),
+                                    compactor_model.as_deref(),
+                                    false,
+                                )
+                                .await;
+                            false
+                        }
+                        BackfillOutcome::Ambiguous | BackfillOutcome::Unknown => {
+                            warn!(
+                                session_id = %session_id,
+                                compactor_model = compactor_model.as_deref().unwrap_or(""),
+                                outcome = ?outcome,
+                                "openrouter: could not resolve compactor provider for bare model; \
+                                 degrading and flagging for retry (needs_compactor_migration)"
+                            );
+                            store
+                                .set_compaction(
+                                    &self.tenant_id,
+                                    &session_id,
+                                    compactor_provider.as_deref(),
+                                    compactor_model.as_deref(),
+                                    true,
+                                )
+                                .await;
+                            true
+                        }
+                        BackfillOutcome::NoModel | BackfillOutcome::AlreadyResolved => false,
+                    }
                 }
-            }
+                None => {
+                    // Catalog unavailable: only act when there is a bare model to migrate.
+                    if compactor_provider.is_none() && compactor_model.is_some() {
+                        warn!(
+                            session_id = %session_id,
+                            compactor_model = compactor_model.as_deref().unwrap_or(""),
+                            "openrouter: catalog unavailable; cannot resolve compactor provider for \
+                             bare model; flagging for retry (needs_compactor_migration)"
+                        );
+                        store
+                            .set_compaction(
+                                &self.tenant_id,
+                                &session_id,
+                                compactor_provider.as_deref(),
+                                compactor_model.as_deref(),
+                                true,
+                            )
+                            .await;
+                        true
+                    } else {
+                        false
+                    }
+                }
+            };
             let created_at_iso = snap.created_at.clone();
             let parent_session_id = snap.parent_session_id.clone();
             let branched_at_index = snap.branched_at_index;
@@ -1174,6 +1234,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     model,
                     compactor_provider,
                     compactor_model,
+                    needs_compactor_migration,
                     api_key,
                     history,
                     system_prompt,
@@ -1295,6 +1356,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 model: inherited_model.clone(),
                 compactor_provider: inherited_compactor_provider,
                 compactor_model: inherited_compactor_model,
+                needs_compactor_migration: false,
                 api_key: inherited_key,
                 history,
                 system_prompt: inherited_system_prompt,
@@ -2710,6 +2772,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
                 model: None,
                 compactor_provider: None,
                 compactor_model: None,
+                needs_compactor_migration: false,
                 api_key: None,
                 history,
                 system_prompt: None,
@@ -2921,6 +2984,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             api_key: None,
             history: vec![],
             system_prompt: None,
@@ -3314,6 +3378,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec!["read_file".to_string(), "write_file".to_string()],
             memory_path: None,
             messages: vec![],
@@ -3365,6 +3430,104 @@ mod tests {
             .await;
     }
 
+    /// C4: loading a session with a bare `compactor_model` (no provider) while no
+    /// catalog is attached must flag the session for retry rather than silently
+    /// degrade — `set_compaction(..., needs_migration = true)` with the bare model
+    /// preserved and no guessed provider.
+    #[tokio::test]
+    async fn load_session_bare_compactor_model_no_catalog_flags_migration() {
+        #[derive(Clone)]
+        struct FlagStore {
+            snapshot: crate::session_store::SessionSnapshot,
+            #[allow(clippy::type_complexity)]
+            writes: Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>, bool)>>>,
+        }
+        impl crate::session_store::SessionStoring for FlagStore {
+            fn save<'a>(
+                &'a self,
+                _snapshot: &'a crate::session_store::SessionSnapshot,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+                Box::pin(async move {})
+            }
+            fn remove<'a>(
+                &'a self,
+                _tenant_id: &'a str,
+                _session_id: &'a str,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+                Box::pin(async move {})
+            }
+            fn load<'a>(
+                &'a self,
+                _tenant_id: &'a str,
+                _session_id: &'a str,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>,
+            > {
+                let snap = self.snapshot.clone();
+                Box::pin(async move { Some(snap) })
+            }
+            fn set_compaction<'a>(
+                &'a self,
+                _tenant_id: &'a str,
+                _session_id: &'a str,
+                provider: Option<&'a str>,
+                model: Option<&'a str>,
+                needs_migration: bool,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+                let entry = (provider.map(str::to_string), model.map(str::to_string), needs_migration);
+                let writes = Arc::clone(&self.writes);
+                Box::pin(async move {
+                    writes.lock().unwrap().push(entry);
+                })
+            }
+        }
+
+        let snap = crate::session_store::SessionSnapshot {
+            id: "c4-sess".to_string(),
+            tenant_id: "default".to_string(),
+            name: "C4 Session".to_string(),
+            model: None,
+            compactor_provider: None,
+            compactor_model: Some("claude-haiku".to_string()),
+            needs_compactor_migration: false,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+            mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
+        };
+        let writes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let store = FlagStore {
+            snapshot: snap,
+            writes: Arc::clone(&writes),
+        };
+        // make_agent() has no catalog attached → catalog unavailable path.
+        let agent = make_agent().with_session_store(Arc::new(store));
+        local()
+            .run_until(async move {
+                agent
+                    .load_session(LoadSessionRequest::new(SessionId::from("c4-sess"), "/"))
+                    .await
+                    .expect("load must succeed");
+            })
+            .await;
+
+        let writes = writes.lock().unwrap();
+        assert_eq!(writes.len(), 1, "exactly one migration flag write expected");
+        let (provider, model, needs_migration) = &writes[0];
+        assert_eq!(provider.as_deref(), None, "no provider may be guessed");
+        assert_eq!(model.as_deref(), Some("claude-haiku"), "bare model must be preserved");
+        assert!(needs_migration, "session must be flagged for retry");
+    }
+
     #[tokio::test]
     async fn load_session_restores_nonzero_token_totals_from_kv() {
         let snap = crate::session_store::SessionSnapshot {
@@ -3374,6 +3537,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             messages: vec![],
@@ -6200,6 +6364,7 @@ mod tests {
             _session_id: &'a str,
             _provider: Option<&'a str>,
             _model: Option<&'a str>,
+            _needs_migration: bool,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {})
         }
@@ -6209,7 +6374,7 @@ mod tests {
         saves: Arc<std::sync::Mutex<Vec<String>>>,
         #[allow(clippy::type_complexity)]
         compaction_writes:
-            Arc<std::sync::Mutex<Vec<(String, String, Option<String>, Option<String>)>>>,
+            Arc<std::sync::Mutex<Vec<(String, String, Option<String>, Option<String>, bool)>>>,
     }
 
     impl RecordingSessionStore {
@@ -6261,12 +6426,14 @@ mod tests {
             session_id: &'a str,
             provider: Option<&'a str>,
             model: Option<&'a str>,
+            needs_migration: bool,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             let entry = (
                 tenant_id.to_string(),
                 session_id.to_string(),
                 provider.map(str::to_string),
                 model.map(str::to_string),
+                needs_migration,
             );
             let writes = Arc::clone(&self.compaction_writes);
             Box::pin(async move {
@@ -7006,6 +7173,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools,
             memory_path: None,
             messages: vec![],
@@ -7163,6 +7331,7 @@ mod tests {
             _session_id: &'a str,
             _provider: Option<&'a str>,
             _model: Option<&'a str>,
+            _needs_migration: bool,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {})
         }

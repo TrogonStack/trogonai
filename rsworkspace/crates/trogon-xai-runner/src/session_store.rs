@@ -30,6 +30,11 @@ pub struct SessionSnapshot {
     /// Persisted as a separate `CompactionConfig` protobuf record (ADR 0009).
     #[serde(skip)]
     pub compactor_model: Option<String>,
+    /// C4 migration flag: `true` when a bare `compactor_model` could not be resolved
+    /// to a provider on load. Persisted in the `CompactionConfig` protobuf record so
+    /// the retry survives restarts; never written to the console-shared JSON blob.
+    #[serde(skip)]
+    pub needs_compactor_migration: bool,
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,12 +117,17 @@ pub trait SessionStoring: Send + Sync + 'static {
     /// rewriting the separate `.compaction` protobuf record without touching the
     /// console-shared JSON blob. Used by C4 to durably backfill the resolved
     /// provider for pre-M3 sessions. Best-effort: logs on failure, never panics.
+    ///
+    /// `needs_migration` persists the C4 retry flag: `true` when the bare model
+    /// could not be resolved (ambiguous/unknown/catalog unavailable), `false` once
+    /// the provider resolves and the pair is rewritten.
     fn set_compaction<'a>(
         &'a self,
         tenant_id: &'a str,
         session_id: &'a str,
         provider: Option<&'a str>,
         model: Option<&'a str>,
+        needs_migration: bool,
     ) -> BoxFuture<'a, ()>;
 }
 
@@ -160,6 +170,7 @@ impl NatsSessionStore {
         let comp_bytes = trogon_runner_tools::encode_compaction(
             snapshot.compactor_provider.as_deref(),
             snapshot.compactor_model.as_deref(),
+            snapshot.needs_compactor_migration,
         );
         if let Err(e) = self.sessions_kv.put(&comp_key, comp_bytes.into()).await {
             warn!(session_id = %snapshot.id, error = %e, "failed to write compaction override record");
@@ -172,9 +183,10 @@ impl NatsSessionStore {
         session_id: &str,
         provider: Option<&str>,
         model: Option<&str>,
+        needs_migration: bool,
     ) {
         let comp_key = format!("{tenant_id}.{session_id}.compaction");
-        let comp_bytes = trogon_runner_tools::encode_compaction(provider, model);
+        let comp_bytes = trogon_runner_tools::encode_compaction(provider, model, needs_migration);
         if let Err(e) = self.sessions_kv.put(&comp_key, comp_bytes.into()).await {
             warn!(session_id, error = %e, "failed to write compaction override record");
         }
@@ -201,9 +213,10 @@ impl NatsSessionStore {
             Ok(mut snap) => {
                 // Overlay the compaction override from its separate protobuf record.
                 if let Ok(Some(c)) = self.sessions_kv.entry(&format!("{key}.compaction")).await {
-                    let (provider, model) = trogon_runner_tools::decode_compaction(&c.value);
+                    let (provider, model, needs_migration) = trogon_runner_tools::decode_compaction(&c.value);
                     snap.compactor_provider = provider;
                     snap.compactor_model = model;
+                    snap.needs_compactor_migration = needs_migration;
                 }
                 // C4 migration: pre-M3 records stored `compactor_model` directly in the
                 // main JSON blob (now `#[serde(skip)]`) and have no `.compaction` record.
@@ -252,8 +265,9 @@ impl SessionStoring for NatsSessionStore {
         session_id: &'a str,
         provider: Option<&'a str>,
         model: Option<&'a str>,
+        needs_migration: bool,
     ) -> BoxFuture<'a, ()> {
-        Box::pin(self.set_compaction_impl(tenant_id, session_id, provider, model))
+        Box::pin(self.set_compaction_impl(tenant_id, session_id, provider, model, needs_migration))
     }
 }
 
@@ -302,9 +316,9 @@ pub mod mock {
         /// Pre-populated snapshots returned by `load()`. Matched by session id.
         pub loads: Mutex<Vec<SessionSnapshot>>,
         /// Compaction overrides persisted via `set_compaction()`:
-        /// `(tenant_id, session_id, provider, model)`.
+        /// `(tenant_id, session_id, provider, model, needs_migration)`.
         #[allow(clippy::type_complexity)]
-        pub compaction_writes: Mutex<Vec<(String, String, Option<String>, Option<String>)>>,
+        pub compaction_writes: Mutex<Vec<(String, String, Option<String>, Option<String>, bool)>>,
     }
 
     impl MockSessionStore {
@@ -349,12 +363,14 @@ pub mod mock {
             session_id: &'a str,
             provider: Option<&'a str>,
             model: Option<&'a str>,
+            needs_migration: bool,
         ) -> BoxFuture<'a, ()> {
             self.compaction_writes.lock().expect("compaction_writes lock poisoned").push((
                 tenant_id.to_string(),
                 session_id.to_string(),
                 provider.map(str::to_string),
                 model.map(str::to_string),
+                needs_migration,
             ));
             Box::pin(std::future::ready(()))
         }
@@ -411,6 +427,7 @@ mod tests {
             model: Some("grok-4".into()),
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             agent_id: Some("agent-42".into()),
@@ -483,6 +500,7 @@ mod tests {
             model: None,
             compactor_provider: None,
             compactor_model: None,
+            needs_compactor_migration: false,
             tools: vec![],
             memory_path: None,
             agent_id: None,

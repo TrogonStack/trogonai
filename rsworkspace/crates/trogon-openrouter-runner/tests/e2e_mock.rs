@@ -222,6 +222,7 @@ impl SessionStoring for RecordingStore {
         _session_id: &'a str,
         _provider: Option<&'a str>,
         _model: Option<&'a str>,
+        _needs_migration: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {})
     }

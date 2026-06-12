@@ -414,16 +414,56 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         };
 
         // C4 migration: a pre-M3 serde session carries a bare `compactor_model`
-        // with no `compactor_provider`. When a catalog is available, resolve the
-        // provider and durably rewrite the record as the protobuf pair on save.
-        // Best-effort: a save failure never fails the prompt.
-        if let Some(ref catalog) = self.catalog {
-            let backfilled = trogonai_catalog_client::backfill_compactor_provider(
-                &mut state.compactor_provider,
-                state.compactor_model.as_deref(),
-                catalog,
-            );
-            if backfilled
+        // with no `compactor_provider`. Resolve the provider against the catalog and
+        // durably rewrite the record as the protobuf pair on save. Ambiguous/unknown/
+        // catalog-unavailable cases are NOT silent: warn and persist
+        // `needs_compactor_migration` so the next load retries, preserving the bare
+        // value rather than guessing a provider. Best-effort: a save failure never
+        // fails the prompt.
+        {
+            use trogonai_catalog_client::BackfillOutcome;
+            let prev_needs_migration = state.needs_compactor_migration;
+            let mut dirty = false;
+            match self.catalog.as_ref() {
+                Some(catalog) => {
+                    let outcome = trogonai_catalog_client::backfill_compactor_provider(
+                        &mut state.compactor_provider,
+                        state.compactor_model.as_deref(),
+                        catalog,
+                    );
+                    match outcome {
+                        BackfillOutcome::Resolved => {
+                            state.needs_compactor_migration = false;
+                            dirty = true;
+                        }
+                        BackfillOutcome::Ambiguous | BackfillOutcome::Unknown => {
+                            warn!(
+                                session_id,
+                                compactor_model = state.compactor_model.as_deref().unwrap_or(""),
+                                outcome = ?outcome,
+                                "agent: could not resolve compactor provider for bare model; \
+                                 degrading and flagging for retry (needs_compactor_migration)"
+                            );
+                            state.needs_compactor_migration = true;
+                            dirty = !prev_needs_migration;
+                        }
+                        BackfillOutcome::NoModel | BackfillOutcome::AlreadyResolved => {}
+                    }
+                }
+                None => {
+                    if state.compactor_provider.is_none() && state.compactor_model.is_some() {
+                        warn!(
+                            session_id,
+                            compactor_model = state.compactor_model.as_deref().unwrap_or(""),
+                            "agent: catalog unavailable; cannot resolve compactor provider for bare \
+                             model; flagging for retry (needs_compactor_migration)"
+                        );
+                        state.needs_compactor_migration = true;
+                        dirty = !prev_needs_migration;
+                    }
+                }
+            }
+            if dirty
                 && let Err(e) = self.store.save(&session_id, &state).await
             {
                 warn!(session_id, error = %e, "agent: failed to persist C4 compactor-provider backfill");

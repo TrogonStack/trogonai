@@ -898,6 +898,7 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
         model: None,
         compactor_provider: None,
         compactor_model: None,
+        needs_compactor_migration: false,
         tools: vec![],
         memory_path: None,
         messages: vec![],
