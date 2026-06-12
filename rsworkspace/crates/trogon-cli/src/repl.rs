@@ -1274,8 +1274,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             None => (None, None),
                         };
                         // Normal queued messages (typed + Enter), submitted in order.
-                        // (Ctrl+G no longer queues — it steers the live turn instead.)
                         let mut queued: Vec<String> = Vec::new();
+                        // Ctrl+G fallback for runners that don't yet subscribe to steer:
+                        // jump to the front of the queue (submitted before `queued`).
+                        let mut front_queued: Vec<String> = Vec::new();
                         let mut interrupted = false;
                         // Drives the live `Thinking… (Ns)` status line between events.
                         let mut status_ticker =
@@ -1301,13 +1303,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             queued.push(msg);
                                         }
                                         Some(StreamInputEvent::Priority(q)) => {
-                                            // Ctrl+G: steer the IN-FLIGHT turn. Publish to the
-                                            // steer subject so the runner injects it into the
-                                            // live loop and the model addresses it on its next
-                                            // step — instead of waiting for the turn to end.
                                             reset_display();
-                                            eprintln!("\x1b[2m↪ steering: {q}\x1b[0m");
-                                            session.steer(q).await;
+                                            // Steer the IN-FLIGHT turn on runners that subscribe to
+                                            // the steer subject (currently the acp/Claude runner):
+                                            // the model addresses it on its next step. Other runners
+                                            // don't subscribe yet, so fall back to front-of-queue so
+                                            // the side question is never lost.
+                                            if crate::app::display::runner_label(&prefix) == "claude" {
+                                                eprintln!("\x1b[2m↪ steering: {q}\x1b[0m");
+                                                session.steer(q).await;
+                                            } else {
+                                                eprintln!("\x1b[2m⏳ queued (next): {q}\x1b[0m");
+                                                front_queued.push(q);
+                                            }
                                         }
                                         // Reader stopped — stop polling it to avoid spinning.
                                         None => { input_rx = None; }
@@ -1385,11 +1393,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             rewind_state.on_turn_complete();
                         }
 
-                        // Auto-submit messages queued during this turn, in order.
+                        // Auto-submit messages queued during this turn: Ctrl+G
+                        // fallback (front_queued) first, then the rest in order.
                         // If the user interrupted (Ctrl+C), discard the queue since
                         // they're likely changing direction. `_input_reader` drops at
                         // the end of this block, restoring the terminal before readline.
                         if !interrupted {
+                            queued_prompts.extend(front_queued);
                             queued_prompts.extend(queued);
                         }
                     }
