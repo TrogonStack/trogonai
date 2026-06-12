@@ -253,6 +253,8 @@ pub struct TrogonAgent<
     gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
     /// Per-session semaphore (1 permit) to serialize concurrent prompt calls.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
+    /// Per-session MCP tool-list cache (stdio clients stay alive across turns).
+    session_mcp_caches: Arc<std::sync::Mutex<HashMap<String, Arc<trogon_runner_tools::SessionMcpCache>>>>,
     /// NATS client used to call trogon-compactor.  `None` disables compaction.
     compactor_nats: Option<async_nats::Client>,
     /// HTTP client injected into per-session MCP connections.
@@ -283,6 +285,7 @@ impl<S: Clone, A, N: Clone, M: Clone> Clone for TrogonAgent<S, A, N, M> {
             elicitation_tx: self.elicitation_tx.clone(),
             gateway_config: self.gateway_config.clone(),
             session_locks: self.session_locks.clone(),
+            session_mcp_caches: self.session_mcp_caches.clone(),
             compactor_nats: self.compactor_nats.clone(),
             http: self.http.clone(),
             registry: self.registry.clone(),
@@ -317,6 +320,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
             elicitation_tx,
             gateway_config,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_mcp_caches: Arc::new(std::sync::Mutex::new(HashMap::new())),
             compactor_nats: None,
             http: reqwest::Client::new(),
             registry: None,
@@ -341,6 +345,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             elicitation_tx: self.elicitation_tx,
             gateway_config: self.gateway_config,
             session_locks: self.session_locks,
+            session_mcp_caches: self.session_mcp_caches,
             compactor_nats: self.compactor_nats,
             http: self.http,
             registry: self.registry,
@@ -447,6 +452,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         locks
             .entry(session_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+    }
+
+    /// Return the per-session MCP tool cache, creating it on first use.
+    fn session_mcp_cache(&self, session_id: &str) -> Arc<trogon_runner_tools::SessionMcpCache> {
+        let mut caches = self.session_mcp_caches.lock().unwrap();
+        caches
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(trogon_runner_tools::SessionMcpCache::new()))
             .clone()
     }
 
@@ -737,9 +751,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         .as_ref()
                         .cloned()
                         .unwrap_or_else(EgressPolicy::default_safe);
-                    let (mcp_defs, mcp_dispatch) =
-                        trogon_runner_tools::build_session_mcp(&self.http, &state.mcp_servers, &policy)
-                            .await;
+                    let mcp_cache = self.session_mcp_cache(&session_id);
+                    let (mcp_defs, mcp_dispatch) = mcp_cache
+                        .get_or_build(&self.http, &state.mcp_servers, &policy)
+                        .await;
                     let (mcp_defs, mcp_dispatch): (Vec<_>, Vec<_>) = if state.tool_allowlist.is_empty() {
                         (mcp_defs, mcp_dispatch)
                     } else {
@@ -1789,6 +1804,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         // session is gone. Any in-flight prompt holds its own `Arc` clone, so the
         // live semaphore stays valid until that prompt finishes.
         self.session_locks.lock().unwrap().remove(&session_id);
+        self.session_mcp_caches.lock().unwrap().remove(&session_id);
 
         Ok(CloseSessionResponse::new())
     }
