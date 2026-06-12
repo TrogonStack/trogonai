@@ -14,6 +14,7 @@ use trogon_tools::PermissionChecker;
 use crate::permission_rules::{
     extract_path_from_input, is_always_allowed, normalize_tool_name, PermissionRules, RuleDecision,
 };
+use crate::scope::Scope;
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
 /// A single permission check request sent from the Runner to the ACP connection handler.
@@ -301,12 +302,12 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
     "gh",
 ];
 
-fn is_read_only_tool(tool_name: &str) -> bool {
+pub(crate) fn is_read_only_tool(tool_name: &str) -> bool {
     READ_ONLY_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
 /// Bash commands that only read or inspect the filesystem (no writes, no exec).
-fn is_read_only_bash_command(tool_input: &Value) -> bool {
+pub(crate) fn is_read_only_bash_command(tool_input: &Value) -> bool {
     let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) else {
         return false;
     };
@@ -345,7 +346,7 @@ fn is_read_only_bash_command(tool_input: &Value) -> bool {
     )
 }
 
-fn is_edit_tool(tool_name: &str) -> bool {
+pub(crate) fn is_edit_tool(tool_name: &str) -> bool {
     ACCEPT_EDITS_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
@@ -382,7 +383,7 @@ fn is_protected_path(path: &str) -> bool {
 
 /// True when a tool call targets a protected path: an explicit path argument, or
 /// a (read-only) bash command that references one (e.g. `cat .env`).
-fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
+pub(crate) fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
     if extract_path_from_input(tool_input)
         .map(is_protected_path)
         .unwrap_or(false)
@@ -401,7 +402,7 @@ fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
 
 /// Lexically resolve `p` (relative to `base`) to a normalized absolute path,
 /// collapsing `.`/`..` WITHOUT touching the filesystem.
-fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
+pub(crate) fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
     use std::path::{Component, Path, PathBuf};
     let raw = if Path::new(p).is_absolute() {
         PathBuf::from(p)
@@ -487,6 +488,11 @@ pub struct ModePermissionChecker {
     pub classifier: Option<Arc<dyn SafetyClassifier>>,
     /// PreToolUse hook matchers; a blocking hook denies the tool.
     pub pre_tool_use: Vec<crate::hooks::HookMatcher>,
+    /// Optional Scope envelope for the low-friction permission model (Phase 2).
+    /// When `Some`, it governs the decision before the mode match; `None` uses
+    /// the legacy mode logic. Resolved in the builder (SCOPE-7), consulted in
+    /// `check` (SCOPE-8).
+    pub scope: Option<Scope>,
 }
 
 impl ModePermissionChecker {
@@ -712,6 +718,30 @@ impl PermissionChecker for ModePermissionChecker {
                 return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
             }
 
+            // Scope envelope (when active) governs the decision before mode logic.
+            if let Some(scope) = &self.scope {
+                let cwd = self.cwd.as_deref().unwrap_or(".");
+                return match scope.evaluate(tool_name, tool_input, cwd) {
+                    crate::scope::ScopeDecision::Forbidden => {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                        false
+                    }
+                    crate::scope::ScopeDecision::InScope => {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                        true
+                    }
+                    crate::scope::ScopeDecision::OutOfScope => match scope.on_exceed() {
+                        crate::scope::OnExceed::Escalate => {
+                            self.inner.inner.check(tool_call_id, tool_name, tool_input).await
+                        }
+                        crate::scope::OnExceed::Deny => {
+                            push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                            false
+                        }
+                    },
+                };
+            }
+
             match self.mode.as_str() {
                 "dontAsk" => {
                     push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -800,6 +830,10 @@ pub fn build_mode_permission_checker(
         tool_policies,
         inner,
     };
+    // Scope is on by default (Phase 5 / SCOPE-15): resolve the baseline before
+    // moving `extras.cwd` into the struct below. Active whenever a cwd is known;
+    // sessions without a cwd fall back to the legacy mode logic.
+    let scope = extras.cwd.as_deref().map(Scope::baseline);
     Some(Arc::new(ModePermissionChecker {
         mode: mode.to_string(),
         inner: rules_checker,
@@ -807,6 +841,7 @@ pub fn build_mode_permission_checker(
         read_dirs: extras.additional_read_dirs,
         classifier: extras.classifier,
         pre_tool_use: extras.pre_tool_use,
+        scope,
     }))
 }
 
@@ -1029,6 +1064,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1048,6 +1084,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1070,6 +1107,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -1094,6 +1132,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1113,6 +1152,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -1140,6 +1180,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1159,6 +1200,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1177,6 +1219,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1195,6 +1238,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1217,6 +1261,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1236,6 +1281,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1255,6 +1301,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1275,6 +1322,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1296,6 +1344,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1776,7 +1825,148 @@ mod tests {
             read_dirs,
             classifier,
             pre_tool_use: vec![],
+            scope: None,
         }
+    }
+
+    fn scoped_checker(
+        mode: &str,
+        tx: PermissionTx,
+        cwd: &str,
+    ) -> ModePermissionChecker {
+        ModePermissionChecker {
+            mode: mode.to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: Some(cwd.to_string()),
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: Some(Scope::baseline(cwd)),
+        }
+    }
+
+    #[tokio::test]
+    async fn scope_in_cwd_write_file_auto_allowed_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("default", tx, "/abs/cwd");
+        assert!(
+            checker
+                .check(
+                    "tc-sw",
+                    "write_file",
+                    &serde_json::json!({"path": "src/x.rs", "content": "x"}),
+                )
+                .await,
+            "in-cwd write_file must be auto-allowed by scope without prompting"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_in_cwd_read_file_auto_allowed_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("default", tx, "/abs/cwd");
+        assert!(
+            checker
+                .check("tc-sr", "read_file", &serde_json::json!({"path": "src/x.rs"}))
+                .await,
+            "read-only tool in cwd must be auto-allowed by scope without prompting"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_fetch_url_out_of_scope_escalates_not_silent_allow() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check(
+                    "tc-sn",
+                    "fetch_url",
+                    &serde_json::json!({"url": "https://example.com"}),
+                )
+                .await,
+            "fetch_url (network denied by baseline) must escalate; dropped channel → false"
+        );
+    }
+
+    // SCOPE-14 dogfood (test proxy): the four "don't babysit me" scenarios driven
+    // through the real check() path with scope active. `dontAsk` is used as the
+    // mode precisely because, without scope, dontAsk auto-allows everything — so a
+    // `false` here proves scope pre-empts even the most permissive mode.
+
+    #[tokio::test]
+    async fn scope_dogfood_out_of_cwd_write_escalates() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check("tc-tmp", "write_file", &serde_json::json!({"path": "/tmp/escape.txt"}))
+                .await,
+            "write outside cwd must escalate (dropped channel → false), not silently allow"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_dogfood_dotenv_is_hard_denied() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check("tc-env", "read_file", &serde_json::json!({"path": ".env"}))
+                .await,
+            ".env is protected — scope must hard-deny it even under dontAsk"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_none_regression_dont_ask_auto_allows_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "dontAsk".to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: None,
+        };
+        assert!(
+            checker
+                .check("tc-reg-da", "bash", &serde_json::json!({"command": "rm -rf /"}))
+                .await,
+            "scope: None must preserve dontAsk auto-allow behavior"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_none_regression_default_auto_allows_read_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "default".to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: None,
+        };
+        assert!(
+            checker
+                .check(
+                    "tc-reg-dr",
+                    "read_file",
+                    &serde_json::json!({"path": "src/main.rs"}),
+                )
+                .await,
+            "scope: None must preserve default read-only auto-allow behavior"
+        );
     }
 
     #[tokio::test]
@@ -2078,6 +2268,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         let got_request = tokio::spawn(async move {
             match rx.recv().await {

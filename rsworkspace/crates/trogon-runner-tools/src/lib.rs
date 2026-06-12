@@ -11,6 +11,7 @@ pub mod permission_bridge;
 pub mod permission_rules;
 pub mod portable_session;
 pub mod safety_classifier;
+pub mod scope;
 pub mod subagents;
 pub mod trogon_md;
 pub mod session_store;
@@ -39,6 +40,9 @@ pub use hooks::{
     run_event_hooks, HookMatcher, HookOutcome, HookPostToolObserver, HooksConfig,
 };
 pub use safety_classifier::{build_auto_safety_classifier, LlmSafetyClassifier};
+pub use scope::{
+    CommandSet, GlobSet, NetworkPolicy, OnExceed, Scope, ScopeDecision, ScopeError, ScopeWire,
+};
 pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{
