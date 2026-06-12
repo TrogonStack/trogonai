@@ -19,7 +19,8 @@ use tracing::{debug, info, warn};
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
 pub use trogon_tools::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
+    ToolResult,
 };
 
 /// A single block in the Anthropic `system` array.
@@ -180,6 +181,41 @@ impl std::error::Error for AgentError {
     }
 }
 
+/// Number of consecutive rounds with the identical tool-call set before the loop
+/// guard halts the turn (a generous `max_iterations` is the coarse backstop).
+const LOOP_REPEAT_LIMIT: u32 = 3;
+
+/// Injected as a user message when a turn ran tools but then ended with no text
+/// — the model did work and went silent. This guarantees the user gets a recap
+/// (the prompt-level guidance is soft; this is the hard backstop). Only ever
+/// sent once per turn, and only when tools actually ran (never on a greeting or
+/// a plain answered question).
+const AUTO_SUMMARY_NUDGE: &str = "You ended your turn without telling the user what you did. In 1-2 sentences of natural language, briefly summarize what you just did and the result. Do not call any more tools.";
+
+/// Order-independent signature of a round's tool calls (`name` + `input`, ignoring
+/// the per-call id). Two rounds with the same signature are an identical repeat,
+/// which the loop guard uses to detect a model spinning on the same call.
+fn tool_call_signature(content: &[ContentBlock]) -> String {
+    let mut parts: Vec<String> = content
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::ToolUse { name, input, .. } => Some(format!("{name}\u{1}{input}")),
+            _ => None,
+        })
+        .collect();
+    parts.sort();
+    parts.join("\u{2}")
+}
+
+/// Whether a model response contains any non-empty visible text block. Used by
+/// the auto-summary guarantee: an `end_turn` response with tools-having-run but
+/// no visible text means the model went silent after doing work.
+fn response_has_visible_text(content: &[ContentBlock]) -> bool {
+    content
+        .iter()
+        .any(|b| matches!(b, ContentBlock::Text { text } if !text.trim().is_empty()))
+}
+
 impl From<reqwest::Error> for AgentError {
     fn from(e: reqwest::Error) -> Self {
         Self::Http(HttpError(e.to_string()))
@@ -230,6 +266,9 @@ pub enum AgentEvent {
         exit_code: Option<i32>,
         signal: Option<String>,
     },
+    /// All tool calls in one assistant turn finished — emitted once after a
+    /// batch of `ToolCallFinished` events (drives the PostToolBatch hook).
+    ToolBatchFinished { count: usize },
     /// A system-level status message (forward compatibility with Anthropic API system events).
     SystemStatus { message: String },
     /// Token usage summary emitted at the end of a turn.
@@ -400,6 +439,9 @@ pub struct AgentLoop<H = reqwest::Client> {
     pub permission_checker: Option<Arc<dyn PermissionChecker>>,
     /// Optional provider for the built-in `ask_user` tool; `None` means the tool is not offered.
     pub elicitation_provider: Option<Arc<dyn ElicitationProvider>>,
+    /// Optional observer called after each tool finishes — may return a block
+    /// reason that is appended to the tool result the model sees (PostToolUse).
+    pub post_tool_observer: Option<Arc<dyn PostToolObserver>>,
 }
 
 #[allow(private_bounds)]
@@ -669,6 +711,15 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         let mut total_output: u32 = 0;
         let mut total_cache_creation: u32 = 0;
         let mut total_cache_read: u32 = 0;
+        // Loop detection: the signature of the previous round's tool calls and how
+        // many consecutive rounds have repeated it. `max_iterations` is the coarse
+        // backstop; this catches a model spinning on the *same* call far sooner.
+        let mut last_tool_sig: Option<String> = None;
+        let mut repeat_count: u32 = 0;
+        // Auto-summary guarantee: whether any tool ran this turn, and whether we
+        // have already nudged the model for a recap (nudge at most once).
+        let mut used_tools = false;
+        let mut auto_summary_requested = false;
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Streaming chat loop iteration");
@@ -836,6 +887,19 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
 
             match stop_reason.as_str() {
                 "end_turn" => {
+                    // Auto-summary guarantee: if the model did real work (ran tools)
+                    // this turn but ended with no text, it went silent — nudge it once
+                    // for a brief recap so the user is never left guessing. Skipped for
+                    // greetings / plain answers (no tools ran) and never repeated.
+                    let has_text = response_has_visible_text(&response_content);
+                    if used_tools && !has_text && !auto_summary_requested {
+                        auto_summary_requested = true;
+                        messages.push(Message::assistant(response_content));
+                        messages.push(Message::user_text(AUTO_SUMMARY_NUDGE));
+                        debug!("turn ended silently after tool use — requesting a recap");
+                        continue;
+                    }
+
                     // TextDelta and ThinkingDelta were already emitted incrementally above.
                     let _ = event_tx
                         .send(AgentEvent::UsageSummary {
@@ -864,9 +928,36 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     return Err(AgentError::MaxTokens);
                 }
                 "tool_use" => {
+                    // Loop guard: if the model emits the identical set of tool calls
+                    // several rounds running, it's stuck — stop gracefully rather than
+                    // spin until the coarse `max_iterations` backstop.
+                    let sig = tool_call_signature(&response_content);
+                    if last_tool_sig.as_deref() == Some(sig.as_str()) {
+                        repeat_count += 1;
+                    } else {
+                        repeat_count = 1;
+                        last_tool_sig = Some(sig);
+                    }
+                    if repeat_count >= LOOP_REPEAT_LIMIT {
+                        let _ = event_tx
+                            .send(AgentEvent::SystemStatus {
+                                message: format!(
+                                    "stopped: the model repeated the same tool call {LOOP_REPEAT_LIMIT}× in a row (possible loop) — rephrase or steer it to continue"
+                                ),
+                            })
+                            .await;
+                        warn!(repeat = repeat_count, "loop detected — identical tool calls repeated; halting turn");
+                        return Ok(messages);
+                    }
+                    used_tools = true;
                     let results = self
                         .execute_tools_streaming(&response_content, &event_tx)
                         .await;
+                    if !results.is_empty() {
+                        let _ = event_tx
+                            .send(AgentEvent::ToolBatchFinished { count: results.len() })
+                            .await;
+                    }
                     messages.push(Message::assistant(response_content));
                     let mut tool_results_msg = Message::tool_results(results);
                     if let Some(ref mut rx) = steer_rx {
@@ -907,74 +998,149 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             .collect();
 
         if self.permission_checker.is_some() {
-            // Serial path: permission checks must not overlap (interactive).
-            // We also maintain a local tool_context so that a change_directory
-            // call updates the cwd for all subsequent tools in the same turn.
+            // Hybrid path: read-only / auto-allowed tools run concurrently; tools
+            // that may block on the interactive permission gate stay serial.
+            // change_directory updates cwd for subsequent tools in this turn.
             let mut current_ctx = Arc::clone(&self.tool_context);
-            let mut results = Vec::new();
-            for (id, name, input, parent_tool_use_id) in tool_uses {
-                debug!(tool = %name, "Executing tool (streaming, serial)");
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolCallStarted {
-                        id: id.clone(),
-                        name: name.clone(),
-                        input: input.clone(),
-                        parent_tool_use_id,
-                    })
-                    .await;
-
-                let output = if name == "ask_user" {
-                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                    match &self.elicitation_provider {
-                        Some(provider) => match provider.elicit(question).await {
-                            Some(answer) => answer,
-                            None => "The user declined or cancelled the request.".to_string(),
-                        },
-                        None => "ask_user tool is not available in this context.".to_string(),
-                    }
-                } else {
-                    let allowed = match &self.permission_checker {
-                        Some(checker) => checker.check(&id, &name, &input).await,
-                        None => true,
-                    };
-                    if !allowed {
-                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
-                    } else if let Some((_, original, client)) =
-                        self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+            let mut results = Vec::with_capacity(tool_uses.len());
+            let mut i = 0;
+            while i < tool_uses.len() {
+                if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
+                    let start = i;
+                    while i < tool_uses.len()
+                        && is_parallel_safe_read_only_tool(&tool_uses[i].1)
                     {
-                        match client.call_tool(original, &input).await {
-                            Ok(out) => out,
-                            Err(e) => format!("Tool error: {e}"),
+                        i += 1;
+                    }
+                    let batch = &tool_uses[start..i];
+                    let futures: Vec<_> = batch
+                        .iter()
+                        .map(|(id, name, input, parent_tool_use_id)| {
+                            let event_tx = event_tx.clone();
+                            let tool_context = Arc::clone(&current_ctx);
+                            let mcp_dispatch = self.mcp_dispatch.clone();
+                            let post_tool_observer = self.post_tool_observer.clone();
+                            let id = id.clone();
+                            let name = name.clone();
+                            let input = input.clone();
+                            let parent_tool_use_id = parent_tool_use_id.clone();
+                            async move {
+                                debug!(tool = %name, "Executing tool (streaming, parallel-safe)");
+
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolCallStarted {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        input: input.clone(),
+                                        parent_tool_use_id,
+                                    })
+                                    .await;
+
+                                let output = if let Some((_, original, client)) =
+                                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                                {
+                                    match client.call_tool(original, &input).await {
+                                        Ok(out) => out,
+                                        Err(e) => format!("Tool error: {e}"),
+                                    }
+                                } else {
+                                    dispatch_tool(&tool_context, &name, &input).await.display_text()
+                                };
+
+                                let output = if let Some(obs) = &post_tool_observer {
+                                    match obs.observe(&id, &name, &output).await {
+                                        Some(reason) => {
+                                            format!("{output}\n\n[PostToolUse hook] {reason}")
+                                        }
+                                        None => output,
+                                    }
+                                } else {
+                                    output
+                                };
+
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolCallFinished {
+                                        id: id.clone(),
+                                        output: output.clone(),
+                                        exit_code: None,
+                                        signal: None,
+                                    })
+                                    .await;
+
+                                ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                            }
+                        })
+                        .collect();
+                    results.extend(futures_util::future::join_all(futures).await);
+                } else {
+                    let (id, name, input, parent_tool_use_id) = tool_uses[i].clone();
+                    i += 1;
+                    debug!(tool = %name, "Executing tool (streaming, serial)");
+
+                    let _ = event_tx
+                        .send(AgentEvent::ToolCallStarted {
+                            id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                            parent_tool_use_id,
+                        })
+                        .await;
+
+                    let output = if name == "ask_user" {
+                        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                        match &self.elicitation_provider {
+                            Some(provider) => match provider.elicit(question).await {
+                                Some(answer) => answer,
+                                None => "The user declined or cancelled the request.".to_string(),
+                            },
+                            None => "ask_user tool is not available in this context.".to_string(),
                         }
                     } else {
-                        dispatch_tool(&current_ctx, &name, &input).await
+                        let allowed = match &self.permission_checker {
+                            Some(checker) => checker.check(&id, &name, &input).await,
+                            None => true,
+                        };
+                        if !allowed {
+                            format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
+                        } else if let Some((_, original, client)) =
+                            self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                        {
+                            match client.call_tool(original, &input).await {
+                                Ok(out) => out,
+                                Err(e) => format!("Tool error: {e}"),
+                            }
+                        } else {
+                            dispatch_tool(&current_ctx, &name, &input).await.display_text()
+                        }
+                    };
+
+                    let output = if let Some(obs) = &self.post_tool_observer {
+                        match obs.observe(&id, &name, &output).await {
+                            Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                            None => output,
+                        }
+                    } else {
+                        output
+                    };
+
+                    const CD_PREFIX: &str = "Working directory is now ";
+                    if name == "change_directory"
+                        && let Some(new_path) = output.strip_prefix(CD_PREFIX)
+                    {
+                        current_ctx = Arc::new(current_ctx.with_cwd(new_path));
                     }
-                };
 
-                // If change_directory succeeded, update the local context so
-                // subsequent tools in this turn see the new working directory.
-                const CD_PREFIX: &str = "Working directory is now ";
-                if name == "change_directory"
-                    && let Some(new_path) = output.strip_prefix(CD_PREFIX)
-                {
-                    current_ctx = Arc::new(ToolContext {
-                        proxy_url: current_ctx.proxy_url.clone(),
-                        cwd: new_path.to_string(),
-                        http_client: current_ctx.http_client.clone(),
-                    });
+                    let _ = event_tx
+                        .send(AgentEvent::ToolCallFinished {
+                            id: id.clone(),
+                            output: output.clone(),
+                            exit_code: None,
+                            signal: None,
+                        })
+                        .await;
+
+                    results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
                 }
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolCallFinished {
-                        id: id.clone(),
-                        output: output.clone(),
-                        exit_code: None,
-                        signal: None,
-                    })
-                    .await;
-
-                results.push(ToolResult { tool_use_id: id, content: output });
             }
             results
         } else {
@@ -986,6 +1152,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     let tool_context = Arc::clone(&self.tool_context);
                     let mcp_dispatch = self.mcp_dispatch.clone();
                     let elicitation_provider = self.elicitation_provider.clone();
+                    let post_tool_observer = self.post_tool_observer.clone();
                     async move {
                         debug!(tool = %name, "Executing tool (streaming, parallel)");
 
@@ -1018,7 +1185,16 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 Err(e) => format!("Tool error: {e}"),
                             }
                         } else {
-                            dispatch_tool(&tool_context, &name, &input).await
+                            dispatch_tool(&tool_context, &name, &input).await.display_text()
+                        };
+
+                        let output = if let Some(obs) = &post_tool_observer {
+                            match obs.observe(&id, &name, &output).await {
+                                Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                                None => output,
+                            }
+                        } else {
+                            output
                         };
 
                         let _ = event_tx
@@ -1030,7 +1206,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             })
                             .await;
 
-                        ToolResult { tool_use_id: id, content: output }
+                        ToolResult { tool_use_id: id, content: output, blocks: vec![] }
                     }
                 })
                 .collect();
@@ -1052,40 +1228,102 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             .collect();
 
         if self.permission_checker.is_some() {
-            // Serial path: permission checks must not overlap (interactive).
-            let mut results = Vec::new();
-            for (id, name, input) in tool_uses {
-                debug!(tool = %name, "Executing tool (serial)");
-
-                let output = if name == "ask_user" {
-                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                    match &self.elicitation_provider {
-                        Some(provider) => match provider.elicit(question).await {
-                            Some(answer) => answer,
-                            None => "The user declined or cancelled the request.".to_string(),
-                        },
-                        None => "ask_user tool is not available in this context.".to_string(),
-                    }
-                } else {
-                    let allowed = match &self.permission_checker {
-                        Some(checker) => checker.check(&id, &name, &input).await,
-                        None => true,
-                    };
-                    if !allowed {
-                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
-                    } else if let Some((_, original, client)) =
-                        self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+            // Hybrid path: read-only / auto-allowed tools run concurrently; tools
+            // that may block on the interactive permission gate stay serial.
+            let mut results = Vec::with_capacity(tool_uses.len());
+            let mut i = 0;
+            while i < tool_uses.len() {
+                if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
+                    let start = i;
+                    while i < tool_uses.len()
+                        && is_parallel_safe_read_only_tool(&tool_uses[i].1)
                     {
-                        match client.call_tool(original, &input).await {
-                            Ok(out) => out,
-                            Err(e) => format!("Tool error: {e}"),
+                        i += 1;
+                    }
+                    let batch = &tool_uses[start..i];
+                    let futures: Vec<_> = batch
+                        .iter()
+                        .map(|(id, name, input)| {
+                            let tool_context = Arc::clone(&self.tool_context);
+                            let mcp_dispatch = self.mcp_dispatch.clone();
+                            let post_tool_observer = self.post_tool_observer.clone();
+                            let id = id.clone();
+                            let name = name.clone();
+                            let input = input.clone();
+                            async move {
+                                debug!(tool = %name, "Executing tool (parallel-safe)");
+
+                                let output = if let Some((_, original, client)) =
+                                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                                {
+                                    match client.call_tool(original, &input).await {
+                                        Ok(out) => out,
+                                        Err(e) => format!("Tool error: {e}"),
+                                    }
+                                } else {
+                                    dispatch_tool(&tool_context, &name, &input).await.display_text()
+                                };
+
+                                let output = if let Some(obs) = &post_tool_observer {
+                                    match obs.observe(&id, &name, &output).await {
+                                        Some(reason) => {
+                                            format!("{output}\n\n[PostToolUse hook] {reason}")
+                                        }
+                                        None => output,
+                                    }
+                                } else {
+                                    output
+                                };
+
+                                ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                            }
+                        })
+                        .collect();
+                    results.extend(futures_util::future::join_all(futures).await);
+                } else {
+                    let (id, name, input) = tool_uses[i].clone();
+                    i += 1;
+                    debug!(tool = %name, "Executing tool (serial)");
+
+                    let output = if name == "ask_user" {
+                        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                        match &self.elicitation_provider {
+                            Some(provider) => match provider.elicit(question).await {
+                                Some(answer) => answer,
+                                None => "The user declined or cancelled the request.".to_string(),
+                            },
+                            None => "ask_user tool is not available in this context.".to_string(),
                         }
                     } else {
-                        dispatch_tool(&self.tool_context, &name, &input).await
-                    }
-                };
+                        let allowed = match &self.permission_checker {
+                            Some(checker) => checker.check(&id, &name, &input).await,
+                            None => true,
+                        };
+                        if !allowed {
+                            format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
+                        } else if let Some((_, original, client)) =
+                            self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                        {
+                            match client.call_tool(original, &input).await {
+                                Ok(out) => out,
+                                Err(e) => format!("Tool error: {e}"),
+                            }
+                        } else {
+                            dispatch_tool(&self.tool_context, &name, &input).await.display_text()
+                        }
+                    };
 
-                results.push(ToolResult { tool_use_id: id, content: output });
+                    let output = if let Some(obs) = &self.post_tool_observer {
+                        match obs.observe(&id, &name, &output).await {
+                            Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                            None => output,
+                        }
+                    } else {
+                        output
+                    };
+
+                    results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
+                }
             }
             results
         } else {
@@ -1096,6 +1334,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     let tool_context = Arc::clone(&self.tool_context);
                     let mcp_dispatch = self.mcp_dispatch.clone();
                     let elicitation_provider = self.elicitation_provider.clone();
+                    let post_tool_observer = self.post_tool_observer.clone();
                     async move {
                         debug!(tool = %name, "Executing tool (parallel)");
 
@@ -1119,16 +1358,41 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 Err(e) => format!("Tool error: {e}"),
                             }
                         } else {
-                            dispatch_tool(&tool_context, &name, &input).await
+                            dispatch_tool(&tool_context, &name, &input).await.display_text()
                         };
 
-                        ToolResult { tool_use_id: id, content: output }
+                        let output = if let Some(obs) = &post_tool_observer {
+                            match obs.observe(&id, &name, &output).await {
+                                Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
+                                None => output,
+                            }
+                        } else {
+                            output
+                        };
+
+                        ToolResult { tool_use_id: id, content: output, blocks: vec![] }
                     }
                 })
                 .collect();
             futures_util::future::join_all(futures).await
         }
     }
+}
+
+/// Read-only tools that are auto-allowed and safe to run concurrently even when
+/// an interactive permission checker is configured.
+fn is_parallel_safe_read_only_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "read_file"
+            | "list_dir"
+            | "glob"
+            | "search_files"
+            | "git_status"
+            | "git_diff"
+            | "git_log"
+            | "fetch_url"
+    )
 }
 
 // ── SSE streaming helpers ─────────────────────────────────────────────────────
@@ -1306,16 +1570,56 @@ mod tests {
     }
 
     #[test]
+    fn response_has_visible_text_detects_silent_endings() {
+        let tu = |id: &str, name: &str, arg: &str| ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input: serde_json::json!({ "path": arg }),
+            parent_tool_use_id: None,
+        };
+        // A response with only tool calls (or only whitespace) is "silent".
+        assert!(!response_has_visible_text(&[tu("id1", "bash", "x")]));
+        assert!(!response_has_visible_text(&[ContentBlock::Text { text: "   ".into() }]));
+        assert!(!response_has_visible_text(&[]));
+        // Any non-empty text makes it not silent.
+        assert!(response_has_visible_text(&[ContentBlock::Text { text: "done".into() }]));
+        assert!(response_has_visible_text(&[
+            ContentBlock::Text { text: "ran it".into() },
+            tu("id1", "bash", "x"),
+        ]));
+    }
+
+    #[test]
+    fn tool_call_signature_detects_identical_repeats() {
+        let tu = |id: &str, name: &str, arg: &str| ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input: serde_json::json!({ "path": arg }),
+            parent_tool_use_id: None,
+        };
+        // Same name+input, different id and surrounding text → identical signature.
+        let a = vec![ContentBlock::Text { text: "let me read".into() }, tu("id1", "read_file", "x")];
+        let b = vec![tu("id2", "read_file", "x")];
+        assert_eq!(tool_call_signature(&a), tool_call_signature(&b));
+        // Different input → different signature.
+        let c = vec![tu("id3", "read_file", "y")];
+        assert_ne!(tool_call_signature(&a), tool_call_signature(&c));
+        // No tool calls → empty signature (never matches a real round).
+        assert_eq!(tool_call_signature(&[ContentBlock::Text { text: "hi".into() }]), "");
+    }
+
+    #[test]
     fn message_tool_results_wraps_correctly() {
         let results = vec![ToolResult {
             tool_use_id: "id1".to_string(),
             content: "output".to_string(),
+            blocks: vec![],
         }];
         let msg = Message::tool_results(results);
         assert_eq!(msg.role, "user");
         assert!(matches!(
             &msg.content[0],
-            ContentBlock::ToolResult { tool_use_id, content }
+            ContentBlock::ToolResult { tool_use_id, content, .. }
             if tool_use_id == "id1" && content == "output"
         ));
     }
@@ -1449,6 +1753,8 @@ mod tests {
             http_client: http_client.clone(),
             proxy_url: "http://unused:9999".to_string(),
             cwd: ".".to_string(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         });
         AgentLoop {
             http_client,
@@ -1468,6 +1774,7 @@ mod tests {
             mcp_dispatch: vec![],
             permission_checker: None,
             elicitation_provider: None,
+            post_tool_observer: None,
         }
     }
 
@@ -1843,8 +2150,8 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         agent.permission_checker = Some(Arc::new(DenyAllChecker));
         let content = vec![ContentBlock::ToolUse {
             id: "t1".to_string(),
-            name: "read_file".to_string(),
-            input: serde_json::json!({"path": "foo.txt"}),
+            name: "write_file".to_string(),
+            input: serde_json::json!({"path": "foo.txt", "content": "x"}),
             parent_tool_use_id: None,
         }];
         let results = agent.execute_tools(&content).await;
@@ -2327,6 +2634,64 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                 "ToolCallFinished missing for {id}: {events:?}"
             );
         }
+    }
+
+    /// Read-only tools with a permission checker must not invoke the checker
+    /// (they bypass the serial gate and run concurrently).
+    #[tokio::test]
+    async fn execute_tools_read_only_skips_permission_checker() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CheckCounter(Arc<AtomicUsize>);
+
+        impl PermissionChecker for CheckCounter {
+            fn check<'a>(
+                &'a self,
+                _tool_call_id: &'a str,
+                _tool_name: &'a str,
+                _tool_input: &'a serde_json::Value,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { true })
+            }
+        }
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut agent = make_test_agent();
+        agent.permission_checker =
+            Some(Arc::new(CheckCounter(Arc::clone(&counter))) as Arc<dyn PermissionChecker>);
+
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "r1".to_string(),
+                name: "read_file".to_string(),
+                input: serde_json::json!({"path": "missing-a.txt"}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "r2".to_string(),
+                name: "glob".to_string(),
+                input: serde_json::json!({"pattern": "*.rs"}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "g1".to_string(),
+                name: "some_tool".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "only the non-read-only tool should pass through the permission checker"
+        );
+        assert_eq!(results[0].tool_use_id, "r1");
+        assert_eq!(results[1].tool_use_id, "r2");
+        assert_eq!(results[2].tool_use_id, "g1");
     }
 
     /// Non-ToolUse content blocks are silently skipped by execute_tools.

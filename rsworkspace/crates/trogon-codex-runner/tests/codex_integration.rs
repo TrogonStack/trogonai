@@ -1682,10 +1682,38 @@ async fn load_session_returns_correct_state_after_new_session() {
 
 // ── set_session_mode integration ──────────────────────────────────────────────
 
-/// Codex has no named permission modes. `set_session_mode` must accept any
-/// mode string and return `Ok` without touching the subprocess.
+/// Restrictive modes Trogon cannot honor in the codex subprocess must be rejected.
 #[tokio::test(flavor = "current_thread")]
-async fn set_session_mode_is_accepted_for_real_session() {
+async fn set_session_mode_rejects_plan_mode() {
+    let _guard = bin_env_lock().lock().await;
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+
+            let err = agent
+                .set_session_mode(SetSessionModeRequest::new(
+                    sess.session_id.to_string(),
+                    "plan",
+                ))
+                .await
+                .unwrap_err();
+            assert!(
+                err.message.contains("plan mode"),
+                "plan mode must be refused; got: {}",
+                err.message
+            );
+        })
+        .await;
+}
+
+/// Known permission modes that Trogon can map coarsely must succeed.
+#[tokio::test(flavor = "current_thread")]
+async fn set_session_mode_accepts_default_for_real_session() {
     let _guard = bin_env_lock().lock().await;
     let local = LocalSet::new();
     local
@@ -1699,7 +1727,7 @@ async fn set_session_mode_is_accepted_for_real_session() {
             agent
                 .set_session_mode(SetSessionModeRequest::new(
                     sess.session_id.to_string(),
-                    "full-auto",
+                    "default",
                 ))
                 .await
                 .unwrap();

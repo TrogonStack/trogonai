@@ -93,20 +93,35 @@ pub fn over_threshold(messages: &[Message], token_budget: usize, threshold_pct: 
     estimate_tokens(messages) * 100 >= token_budget.saturating_mul(threshold_pct as usize)
 }
 
+/// Whether a compaction request should be sent to the compactor service.
+///
+/// Automatic compaction honors the token-budget threshold; manual `/compact` passes
+/// `force = true` to compact regardless of fill level.
+pub fn compaction_requested(
+    messages: &[Message],
+    token_budget: usize,
+    threshold_pct: u8,
+    force: bool,
+) -> bool {
+    force || over_threshold(messages, token_budget, threshold_pct)
+}
+
 /// Request compaction from `trogon-compactor` when history is over the threshold.
 ///
-/// Returns `Ok(None)` when under threshold or the compactor chose not to compact.
+/// Returns `Ok(None)` when under threshold (unless `force`) or the compactor chose not to compact.
 /// Returns `Ok(Some(messages))` when compaction succeeded.
+#[allow(clippy::too_many_arguments)]
 pub async fn maybe_compact(
     nats: &async_nats::Client,
     messages: &[Message],
     token_budget: usize,
     threshold_pct: u8,
+    force: bool,
     provider: &str,
     model: &str,
     compactor_model: Option<&str>,
 ) -> Result<Option<Vec<Message>>, CompactError> {
-    if !over_threshold(messages, token_budget, threshold_pct) {
+    if !compaction_requested(messages, token_budget, threshold_pct, force) {
         return Ok(None);
     }
 
@@ -174,5 +189,35 @@ mod tests {
     fn estimate_tokens_is_nonzero_for_messages() {
         let msgs = vec![user_msg("hello world")];
         assert!(estimate_tokens(&msgs) > 0);
+    }
+
+    #[test]
+    fn compaction_requested_honors_threshold_when_not_forced() {
+        let msgs = vec![user_msg("hello")];
+        assert!(!compaction_requested(
+            &msgs,
+            DEFAULT_TOKEN_BUDGET,
+            DEFAULT_COMPACT_THRESHOLD_PCT,
+            false,
+        ));
+        let big = "x".repeat(DEFAULT_TOKEN_BUDGET * 4);
+        let big_msgs = vec![user_msg(&big)];
+        assert!(compaction_requested(
+            &big_msgs,
+            DEFAULT_TOKEN_BUDGET,
+            DEFAULT_COMPACT_THRESHOLD_PCT,
+            false,
+        ));
+    }
+
+    #[test]
+    fn compaction_requested_bypasses_threshold_when_forced() {
+        let msgs = vec![user_msg("hello")];
+        assert!(compaction_requested(
+            &msgs,
+            DEFAULT_TOKEN_BUDGET,
+            DEFAULT_COMPACT_THRESHOLD_PCT,
+            true,
+        ));
     }
 }

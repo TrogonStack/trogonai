@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+#![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
 pub mod config;
 pub mod dreamer;
 pub mod provider;
@@ -17,5 +19,4 @@ pub use store::{MemoryClient, MemoryStore, memory_key};
 pub use types::{DreamTrigger, DreamerError, EntityMemory, MemoryFact, RawFact};
 pub use writer::{MemoryWriteHandler, MemoryWriter, WriteRequest, WriteResponse, write_memory};
 
-#[cfg(not(coverage))]
 pub use server::serve;

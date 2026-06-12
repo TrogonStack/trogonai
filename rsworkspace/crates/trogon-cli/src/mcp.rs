@@ -3,15 +3,17 @@
 use crate::fs::Fs;
 use crate::mcp_oauth::{OAuthStore, StoredToken};
 use crate::stdio_mcp_bridge::StdioMcpBridge;
-use agent_client_protocol::{HttpHeader, McpServer, McpServerHttp, McpServerSse};
+use agent_client_protocol::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub const MCP_CONFIG_PATH: &str = "~/.config/trogon/mcp.json";
 
-/// An active MCP connection: `(name, url, headers)`. Headers are empty for stdio
-/// servers (the local bridge needs no auth) and carry auth for HTTP servers.
+/// An active MCP connection reachable by the CLI-side HTTP MCP client:
+/// `(name, url, headers)`.
 pub type McpConnection = (String, String, Vec<(String, String)>);
 
 /// Transport used to reach an MCP server. Defaults to `Stdio` so existing
@@ -92,10 +94,25 @@ impl McpManager {
     }
 
     pub fn load<F: Fs>(fs: &F) -> Self {
-        let config = match fs.read_to_string(&Self::path()) {
-            Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).unwrap_or_default(),
-            _ => McpConfig::default(),
-        };
+        Self::load_for_cli(fs, None, &[], false)
+    }
+
+    /// Load MCP config for a CLI run.
+    ///
+    /// When `strict` is false (default), merges the user config
+    /// (`~/.config/trogon/mcp.json`), an optional project `.mcp.json`, and any
+    /// `--mcp-config` paths. When `strict` is true, only the CLI paths are used.
+    pub fn load_for_cli<F: Fs>(fs: &F, cwd: Option<&Path>, cli_paths: &[PathBuf], strict: bool) -> Self {
+        let mut config = McpConfig::default();
+        if !strict {
+            merge_config(&mut config, read_config_file(fs, &Self::path()));
+            if let Some(cwd) = cwd {
+                merge_config(&mut config, read_config_file(fs, &cwd.join(".mcp.json")));
+            }
+        }
+        for path in expand_mcp_config_paths(cli_paths) {
+            merge_config(&mut config, read_config_file(fs, &path));
+        }
         Self {
             config,
             active: HashMap::new(),
@@ -176,21 +193,32 @@ impl McpManager {
         for cfg in &configs {
             match cfg.transport {
                 McpTransport::Stdio => {
-                    let env: Vec<(String, String)> = cfg.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                    match StdioMcpBridge::spawn(&cfg.command, &cfg.args, &env).await {
-                        Ok(bridge) => {
-                            let url = bridge.url.clone();
-                            acp_servers.push(McpServer::Http(McpServerHttp::new(cfg.name.clone(), url.clone())));
-                            bridges.push(ActiveBridge {
-                                name: cfg.name.clone(),
-                                url,
-                                bridge: Some(bridge),
-                            });
-                        }
-                        Err(e) => {
-                            eprintln!("warning: MCP server `{}` failed to start: {e}", cfg.name)
-                        }
-                    }
+                    // Native stdio (MCP-3): hand the command to the runner, which
+                    // drives the server subprocess in-process via StdioMcpClient —
+                    // no local stdio→HTTP bridge and no extra localhost hop.
+                    let env: Vec<EnvVariable> = cfg
+                        .env
+                        .iter()
+                        .map(|(k, v)| EnvVariable::new(k.clone(), v.clone()))
+                        .collect();
+                    let timeout_meta = cfg.timeout_secs.map(|secs| {
+                        let mut m = serde_json::Map::new();
+                        m.insert(
+                            trogon_runner_tools::mcp::TIMEOUT_META_KEY.to_string(),
+                            serde_json::json!(secs),
+                        );
+                        m
+                    });
+                    let stdio = McpServerStdio::new(cfg.name.clone(), cfg.command.clone())
+                        .args(cfg.args.clone())
+                        .env(env)
+                        .meta(timeout_meta);
+                    acp_servers.push(McpServer::Stdio(stdio));
+                    bridges.push(ActiveBridge {
+                        name: cfg.name.clone(),
+                        url: format!("stdio:{}", cfg.command),
+                        bridge: None,
+                    });
                 }
                 McpTransport::Http | McpTransport::Sse => {
                     // Direct remote server: no local bridge, pass the URL (and any
@@ -245,24 +273,23 @@ impl McpManager {
         (acp_servers, bridges)
     }
 
-    /// Active MCP connections for a session as `(name, url, headers)`. Stdio
-    /// servers carry no headers (the local bridge needs no auth); HTTP servers
-    /// carry their configured headers. Used to fetch MCP prompts on demand.
+    /// Active HTTP/SSE MCP connections for a session as `(name, url, headers)`.
+    ///
+    /// Native stdio servers are intentionally excluded: the runner owns those
+    /// subprocesses directly, so the CLI cannot fetch prompts from them through
+    /// the HTTP MCP client.
     pub fn active_connections(&self, session_id: &str) -> Vec<McpConnection> {
         self.active
             .get(session_id)
             .map(|bridges| {
                 bridges
                     .iter()
-                    .map(|b| {
-                        let headers = self
-                            .config
+                    .filter_map(|b| {
+                        self.config
                             .servers
                             .iter()
                             .find(|c| c.name == b.name && c.transport.is_remote())
-                            .map(|c| c.headers.clone())
-                            .unwrap_or_default();
-                        (b.name.clone(), b.url.clone(), headers)
+                            .map(|c| (b.name.clone(), b.url.clone(), c.headers.clone()))
                     })
                     .collect()
             })
@@ -547,6 +574,40 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn read_config_file<F: Fs>(fs: &F, path: &Path) -> McpConfig {
+    match fs.read_to_string(path) {
+        Ok(raw) if !raw.trim().is_empty() => match serde_json::from_str(&raw) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("warning: {} is invalid ({e}) — ignoring", path.display());
+                McpConfig::default()
+            }
+        },
+        _ => McpConfig::default(),
+    }
+}
+
+fn merge_config(into: &mut McpConfig, from: McpConfig) {
+    for server in from.servers {
+        into.servers.retain(|s| s.name != server.name);
+        into.servers.push(server);
+    }
+}
+
+/// Expand CLI `--mcp-config` values, supporting repeatable flags and comma lists.
+pub fn expand_mcp_config_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for path in paths {
+        for part in path.to_string_lossy().split(',') {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                out.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,6 +697,103 @@ mod tests {
     fn parse_add_args_http_with_timeout() {
         let cfg = McpManager::parse_add_args("--transport http api https://api.example.com/mcp --timeout 30").unwrap();
         assert_eq!(cfg.timeout_secs, Some(30));
+    }
+
+    /// MCP-3: a stdio server config is forwarded to the runner as a native
+    /// `McpServer::Stdio` (driven in-process), not spawned as a local bridge.
+    #[tokio::test]
+    async fn stdio_config_yields_native_server_not_bridge() {
+        use crate::fs::mock::MockFs;
+        let mut env = HashMap::new();
+        env.insert("TOKEN".to_string(), "x".to_string());
+        let mut mgr = McpManager {
+            config: McpConfig {
+                servers: vec![McpServerConfig {
+                    name: "fs".to_string(),
+                    transport: McpTransport::Stdio,
+                    command: "/usr/bin/server".to_string(),
+                    args: vec!["--root".to_string(), ".".to_string()],
+                    env,
+                    url: String::new(),
+                    headers: vec![],
+                    oauth: false,
+                    timeout_secs: Some(5),
+                }],
+            },
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::default(),
+            oauth_http: reqwest::Client::new(),
+        };
+        let servers = mgr.spawn_pending(&MockFs::new()).await;
+        assert_eq!(servers.len(), 1);
+        match &servers[0] {
+            McpServer::Stdio(s) => {
+                assert_eq!(s.command.to_string_lossy(), "/usr/bin/server");
+                assert_eq!(s.args, vec!["--root".to_string(), ".".to_string()]);
+                assert_eq!(s.env.len(), 1);
+                assert_eq!(s.env[0].name, "TOKEN");
+            }
+            other => panic!("expected native Stdio server, got {other:?}"),
+        }
+        // No local bridge subprocess was spawned for the stdio server.
+        assert!(mgr.pending.iter().all(|b| b.bridge.is_none()));
+    }
+
+    #[tokio::test]
+    async fn active_connections_excludes_native_stdio_servers() {
+        use crate::fs::mock::MockFs;
+        let mut mgr = McpManager {
+            config: McpConfig {
+                servers: vec![
+                    McpServerConfig {
+                        name: "fs".to_string(),
+                        transport: McpTransport::Stdio,
+                        command: "/usr/bin/server".to_string(),
+                        args: vec![],
+                        env: HashMap::new(),
+                        url: String::new(),
+                        headers: vec![],
+                        oauth: false,
+                        timeout_secs: None,
+                    },
+                    McpServerConfig {
+                        name: "api".to_string(),
+                        transport: McpTransport::Http,
+                        command: String::new(),
+                        args: vec![],
+                        env: HashMap::new(),
+                        url: "https://api.example.com/mcp".to_string(),
+                        headers: vec![("Authorization".to_string(), "Bearer t".to_string())],
+                        oauth: false,
+                        timeout_secs: None,
+                    },
+                ],
+            },
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::default(),
+            oauth_http: reqwest::Client::new(),
+        };
+
+        let _ = mgr.spawn_pending(&MockFs::new()).await;
+        mgr.commit_pending("s1");
+
+        assert_eq!(
+            mgr.active_for_session("s1"),
+            vec![
+                ("fs".to_string(), "stdio:/usr/bin/server".to_string()),
+                ("api".to_string(), "https://api.example.com/mcp".to_string()),
+            ]
+        );
+        assert_eq!(
+            mgr.active_connections("s1"),
+            vec![(
+                "api".to_string(),
+                "https://api.example.com/mcp".to_string(),
+                vec![("Authorization".to_string(), "Bearer t".to_string())],
+            )]
+        );
     }
 
     #[test]
@@ -784,5 +942,67 @@ mod tests {
         let loaded = McpManager::load(&fs);
         assert_eq!(loaded.configured_servers().len(), 1);
         assert_eq!(loaded.configured_servers()[0].name, "test");
+    }
+
+    #[test]
+    fn expand_mcp_config_paths_splits_commas() {
+        let paths = expand_mcp_config_paths(&[
+            PathBuf::from("a.json,b.json"),
+            PathBuf::from("c.json"),
+        ]);
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("a.json"),
+                PathBuf::from("b.json"),
+                PathBuf::from("c.json"),
+            ]
+        );
+    }
+
+    #[test]
+    fn load_for_cli_strict_uses_only_cli_paths() {
+        let fs = MockFs::new();
+        fs.write(
+            &McpManager::path(),
+            br#"{"servers":[{"name":"user","command":"echo","args":[]}]}"#,
+        )
+        .unwrap();
+        let cli_path = PathBuf::from("/tmp/cli-mcp.json");
+        fs.write(
+            &cli_path,
+            br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#,
+        )
+        .unwrap();
+
+        let mgr = McpManager::load_for_cli(&fs, None, &[cli_path], true);
+        assert_eq!(mgr.configured_servers().len(), 1);
+        assert_eq!(mgr.configured_servers()[0].name, "cli");
+    }
+
+    #[test]
+    fn load_for_cli_merges_user_project_and_cli_paths() {
+        let fs = MockFs::new();
+        fs.write(
+            &McpManager::path(),
+            br#"{"servers":[{"name":"user","command":"echo","args":[]}]}"#,
+        )
+        .unwrap();
+        let project = PathBuf::from("/tmp/project");
+        fs.write(
+            &project.join(".mcp.json"),
+            br#"{"servers":[{"name":"project","command":"ls","args":[]}]}"#,
+        )
+        .unwrap();
+        let cli_path = PathBuf::from("/tmp/cli-mcp.json");
+        fs.write(
+            &cli_path,
+            br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#,
+        )
+        .unwrap();
+
+        let mgr = McpManager::load_for_cli(&fs, Some(&project), &[cli_path], false);
+        let names: Vec<_> = mgr.configured_servers().iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["user", "project", "cli"]);
     }
 }

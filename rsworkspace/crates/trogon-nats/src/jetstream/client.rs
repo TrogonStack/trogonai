@@ -18,6 +18,7 @@ pub struct NatsJetStreamClient {
     context: jetstream::Context,
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl NatsJetStreamClient {
     pub fn new(context: jetstream::Context) -> Self {
         Self { context }
@@ -28,6 +29,7 @@ impl NatsJetStreamClient {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamContext for NatsJetStreamClient {
     type Error = async_nats::jetstream::context::CreateStreamError;
     type Stream = jetstream::stream::Stream;
@@ -42,6 +44,7 @@ impl JetStreamContext for NatsJetStreamClient {
 
 pub type UpdateStreamError = async_nats::jetstream::context::UpdateStreamError;
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamStreamUpdater for NatsJetStreamClient {
     type UpdateError = UpdateStreamError;
 
@@ -56,6 +59,7 @@ impl JetStreamStreamUpdater for NatsJetStreamClient {
 pub type PublishError = async_nats::jetstream::context::PublishError;
 pub type PublishAckFuture = async_nats::jetstream::context::PublishAckFuture;
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamPublisher for NatsJetStreamClient {
     type PublishError = PublishError;
     type AckFuture = PublishAckFuture;
@@ -70,6 +74,7 @@ impl JetStreamPublisher for NatsJetStreamClient {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamPublishMessage for NatsJetStreamClient {
     type PublishError = PublishError;
     type AckFuture = PublishAckFuture;
@@ -79,6 +84,7 @@ impl JetStreamPublishMessage for NatsJetStreamClient {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamCreateKeyValue for NatsJetStreamClient {
     type Store = jetstream::kv::Store;
 
@@ -90,6 +96,7 @@ impl JetStreamCreateKeyValue for NatsJetStreamClient {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamGetKeyValue for NatsJetStreamClient {
     type Store = jetstream::kv::Store;
 
@@ -101,12 +108,14 @@ impl JetStreamGetKeyValue for NatsJetStreamClient {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JsMessageRef for jetstream::Message {
     fn message(&self) -> &async_nats::Message {
         &self.message
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JsAck for jetstream::Message {
     type Error = async_nats::Error;
 
@@ -115,6 +124,7 @@ impl JsAck for jetstream::Message {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JsAckWith for jetstream::Message {
     type Error = async_nats::Error;
 
@@ -123,6 +133,7 @@ impl JsAckWith for jetstream::Message {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JsDoubleAck for jetstream::Message {
     type Error = async_nats::Error;
 
@@ -131,6 +142,7 @@ impl JsDoubleAck for jetstream::Message {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 impl JsDoubleAckWith for jetstream::Message {
     type Error = async_nats::Error;
 
@@ -145,6 +157,7 @@ pub type GetStreamError = async_nats::jetstream::context::GetStreamError;
 pub type ConsumerError = async_nats::jetstream::stream::ConsumerError;
 pub type StreamError = async_nats::jetstream::consumer::StreamError;
 
+#[cfg_attr(coverage, coverage(off))]
 impl JetStreamGetStream for NatsJetStreamClient {
     type Error = GetStreamError;
     type Stream = jetstream::stream::Stream;

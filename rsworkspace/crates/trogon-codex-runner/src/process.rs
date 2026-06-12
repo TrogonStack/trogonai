@@ -212,11 +212,16 @@ impl CodexProcess {
 
     /// Start a turn and return a receiver for streaming `CodexEvent`s.
     /// Events are scoped to this thread — other sessions' events are not visible.
+    ///
+    /// `approval_policy` is forwarded to Codex as the coarse session boundary Trogon
+    /// controls (`on-request`, `unless-trusted`, `never`). Trogon cannot intercept
+    /// individual tool calls inside the subprocess.
     pub async fn turn_start(
         &self,
         thread_id: &str,
         user_input: &str,
         model: Option<&str>,
+        approval_policy: Option<&str>,
     ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = broadcast::channel(256);
         self.turn_senders
@@ -230,6 +235,9 @@ impl CodexProcess {
         });
         if let Some(m) = model {
             params["model"] = Value::String(m.to_string());
+        }
+        if let Some(policy) = approval_policy {
+            params["approvalPolicy"] = Value::String(policy.to_string());
         }
         if let Err(e) = self.request("turn/start", Some(params)).await {
             // Request failed — remove the sender we just inserted so it doesn't
@@ -488,8 +496,10 @@ impl CodexProcessClient for CodexProcess {
         thread_id: &str,
         user_input: &str,
         model: Option<&str>,
+        approval_policy: Option<&str>,
     ) -> Result<broadcast::Receiver<CodexEvent>, DynError> {
-        self.turn_start(thread_id, user_input, model).await
+        self.turn_start(thread_id, user_input, model, approval_policy)
+            .await
     }
 
     async fn turn_interrupt(&self, thread_id: &str) -> Result<(), DynError> {

@@ -32,7 +32,7 @@ struct RegisterRequest {
 
 // ── Public entry-point ────────────────────────────────────────────────────────
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 pub async fn serve(
     port: u16,
     registry: WebhookRegistry<async_nats::jetstream::kv::Store>,

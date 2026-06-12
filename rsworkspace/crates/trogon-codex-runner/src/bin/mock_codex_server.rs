@@ -163,11 +163,12 @@ fn main() {
                         respond_error(&mut out, &id, "schema: turn/start params.userInput must be a string");
                         continue;
                     }
-                    if let Some(model_val) = msg["params"].get("model") {
-                        if !model_val.is_null() && model_val.as_str().map(|s| s.is_empty()).unwrap_or(true) {
-                            respond_error(&mut out, &id, "schema: turn/start params.model must be a non-empty string when present");
-                            continue;
-                        }
+                    if let Some(model_val) = msg["params"].get("model")
+                        && !model_val.is_null()
+                        && model_val.as_str().map(|s| s.is_empty()).unwrap_or(true)
+                    {
+                        respond_error(&mut out, &id, "schema: turn/start params.model must be a non-empty string when present");
+                        continue;
                     }
                 }
 
@@ -307,12 +308,11 @@ fn main() {
                     );
                 }
             }
+            "turn/interrupt" if interrupt_fails => {
+                respond_error(&mut out, &id, "mock: turn/interrupt rejected");
+            }
             "turn/interrupt" => {
-                if interrupt_fails {
-                    respond_error(&mut out, &id, "mock: turn/interrupt rejected");
-                } else {
-                    respond(&mut out, &id, Value::Null);
-                }
+                respond(&mut out, &id, Value::Null);
             }
             _ => {
                 respond(&mut out, &id, Value::Null);

@@ -31,10 +31,11 @@
 //! | `LINEAR_NATS_STREAM_OP_TIMEOUT_MS` | `10000` | How long to wait for stream operations (milliseconds) |
 //! | `NATS_URL` | `localhost:4222` | NATS server URL(s) |
 
+#![cfg_attr(coverage, feature(coverage_attribute))]
+#![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
 pub mod config;
 pub mod server;
 pub mod signature;
 
 pub use config::LinearConfig;
-#[cfg(not(coverage))]
 pub use server::serve;

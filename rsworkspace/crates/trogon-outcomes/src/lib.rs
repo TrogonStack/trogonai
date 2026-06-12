@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+#![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
 pub mod config;
 pub mod evaluator;
 pub mod grader_agent;
@@ -27,5 +29,4 @@ pub use types::{
     Criterion, CriterionScore, EvaluateTrigger, EvaluationResult, OutcomesError, Rubric,
 };
 
-#[cfg(not(coverage))]
 pub use server::serve;

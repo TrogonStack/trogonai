@@ -31,7 +31,6 @@ pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use remapping_client::{IdRemap, RemappingClient};
 pub use req_id::ReqId;
 pub use session_id::AcpSessionId;
-#[cfg(not(coverage))]
 pub use trogon_nats::jetstream::NatsJetStreamClient;
 pub use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher};
 pub use trogon_nats::{NatsAuth, NatsConfig};

@@ -69,6 +69,7 @@ fn make_agent_loop() -> AgentLoop {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
     }
 }
 

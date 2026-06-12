@@ -121,7 +121,7 @@ async fn create_sub_session_returns_session_id() {
         serde_json::to_vec(&new_session_resp).unwrap().into(),
     );
 
-    let result = create_sub_session(&bridge, "/tmp", "default", None, None, None).await;
+    let result = create_sub_session(&bridge, "/tmp", "default", None, None, None, None).await;
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 
@@ -139,7 +139,7 @@ async fn create_sub_session_returns_error_on_new_session_failure() {
     // Cause the next NATS request to fail immediately.
     mock.fail_next_request();
 
-    let result = create_sub_session(&bridge, "/tmp", "default", None, None, None).await;
+    let result = create_sub_session(&bridge, "/tmp", "default", None, None, None, None).await;
     assert!(result.is_err(), "expected Err when new_session fails");
     assert!(
         result.unwrap_err().contains("new_session failed"),
@@ -162,7 +162,7 @@ async fn create_sub_session_bypass_mode_applies_set_session_mode() {
         serde_json::to_vec(&new_session_resp).unwrap().into(),
     );
 
-    let result = create_sub_session(&bridge, "/tmp", "bypassPermissions", None, None, None).await;
+    let result = create_sub_session(&bridge, "/tmp", "bypassPermissions", None, None, None, None).await;
     assert!(result.is_ok(), "expected Ok in bypassPermissions mode, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap(), session_id.to_string());
 }

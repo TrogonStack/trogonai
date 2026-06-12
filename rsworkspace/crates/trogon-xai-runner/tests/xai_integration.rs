@@ -6112,6 +6112,80 @@ async fn xai_str_replace_tool_dispatched_via_wire_format() {
     assert_fco_content(&mock, "cid-sr", |o| !o.contains("Unknown tool"), "str_replace must be dispatched");
 }
 
+/// Shared `str_replace` schema includes `replace_all`; xAI wire dispatch applies it.
+#[tokio::test]
+async fn xai_str_replace_replace_all_tool_def_and_dispatch() {
+    let str_def = trogon_tools::all_tool_defs()
+        .into_iter()
+        .find(|d| d.name == "str_replace")
+        .expect("str_replace must be in all_tool_defs");
+    assert!(
+        str_def.input_schema["properties"].get("replace_all").is_some(),
+        "str_replace schema must include replace_all"
+    );
+
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("dup.rs"), "x\nx\n").unwrap();
+    push_function_call(
+        &mock,
+        "cid-sr-all",
+        "str_replace",
+        r#"{"path":"dup.rs","old_str":"x","new_str":"y","replace_all":true}"#,
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("replace all"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let content = std::fs::read_to_string(dir.path().join("dup.rs")).unwrap();
+    assert_eq!(content, "y\ny\n");
+    assert_fco_content(&mock, "cid-sr-all", |o| !o.contains("Unknown tool"), "replace_all must be dispatched");
+}
+
+/// Shared `multi_edit` tool def and xAI wire dispatch apply edits atomically.
+#[tokio::test]
+async fn xai_multi_edit_tool_def_and_dispatch() {
+    let multi_def = trogon_tools::all_tool_defs()
+        .into_iter()
+        .find(|d| d.name == "multi_edit")
+        .expect("multi_edit must be in all_tool_defs");
+    assert!(
+        multi_def.input_schema["properties"].get("edits").is_some(),
+        "multi_edit schema must include edits"
+    );
+
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("seq.rs"), "aaa bbb\n").unwrap();
+    push_function_call(
+        &mock,
+        "cid-me",
+        "multi_edit",
+        r#"{"path":"seq.rs","edits":[{"old_str":"aaa","new_str":"AAA"},{"old_str":"bbb","new_str":"BBB"}]}"#,
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("multi edit"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let content = std::fs::read_to_string(dir.path().join("seq.rs")).unwrap();
+    assert_eq!(content, "AAA BBB\n");
+    assert_fco_content(&mock, "cid-me", |o| !o.contains("Unknown tool"), "multi_edit must be dispatched");
+}
+
 /// `git_status` dispatched via xAI wire format — result is non-empty git output.
 #[tokio::test]
 async fn xai_git_status_tool_dispatched_via_wire_format() {

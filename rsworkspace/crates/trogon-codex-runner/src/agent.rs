@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::permissions::{ModeGateAction, mode_gate_action};
 use crate::process::{CodexEvent, RealProcessSpawner};
 use crate::traits::{CodexProcessClient, ProcessSpawner, SessionNotifier, SessionNotifierFactory};
 
@@ -69,8 +70,36 @@ fn invalid_params(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InvalidParams.into(), msg.into())
 }
 
+/// Apply the coarse permission-mode gate Trogon controls at session/turn boundaries.
+fn apply_mode_gate(mode: &str, warn_at_forward: bool) -> Result<Option<&'static str>, Error> {
+    match mode_gate_action(mode) {
+        ModeGateAction::Forward {
+            approval_policy,
+            warn_unenforced,
+        } => {
+            if warn_at_forward && warn_unenforced {
+                warn!(
+                    mode,
+                    approval_policy = approval_policy.as_wire_str(),
+                    "codex: permission mode forwarded as approvalPolicy; \
+                     per-tool gating is not enforced inside the app-server subprocess"
+                );
+            }
+            Ok(Some(approval_policy.as_wire_str()))
+        }
+        ModeGateAction::Refuse { reason } => Err(invalid_params(reason)),
+    }
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
+/// Per-session cache for a Codex thread.
+///
+/// **Known limitation:** Codex owns the authoritative conversation state via
+/// `thread_id` in the `codex app-server` subprocess. This struct is an
+/// in-memory cache only — there is no NATS KV session store, so sessions are
+/// lost on runner respawn and cannot be migrated to another runner. This is
+/// intentional for the Codex integration, not a bug.
 #[derive(serde::Serialize)]
 struct CodexSession {
     thread_id: String,
@@ -133,8 +162,14 @@ impl SessionNotifier for NatsClientProxy<async_nats::Client> {
 /// ACP Agent implementation backed by a `codex app-server` subprocess.
 ///
 /// Each `CodexAgent` manages one `codex app-server` process. ACP sessions map
-/// to Codex threads (thread_id). Prompt calls run Codex turns and stream the
+/// to Codex threads (`thread_id`). Prompt calls run Codex turns and stream the
 /// resulting events back to the ACP client as `SessionNotification`s.
+///
+/// **Session portability (known limitation):** unlike the xAI and ACP runners,
+/// Codex sessions are not persisted to NATS KV. Conversation state lives in the
+/// provider-owned Codex subprocess and is cached in memory here only. Sessions
+/// are lost when the runner respawns or the subprocess crashes — this is expected
+/// behaviour, not a bug.
 ///
 /// The subprocess is spawned lazily and re-spawned automatically if it crashes.
 /// Re-spawning clears all in-memory sessions since Codex thread state is lost.
@@ -493,11 +528,16 @@ where
         &self,
         req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
+        // Permission modes are stored for ACP clients and mapped to Codex `approvalPolicy`
+        // on each `turn/start`. The app-server runs tools in-subprocess; Trogon observes
+        // tool events but cannot pre-gate individual tool calls — only this coarse boundary
+        // and explicit refusal of unenforceable modes (e.g. `plan`) are under Trogon control.
         let mode_id = req.mode_id.to_string();
         let session_id = req.session_id.to_string();
         if !is_valid_mode(&mode_id) {
-            return Err(internal_error(format!("unknown mode: {mode_id}")));
+            return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
+        apply_mode_gate(&mode_id, false)?;
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
@@ -565,7 +605,7 @@ where
             );
         }
 
-        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn) = {
+        let (thread_id, model, mode, pending_history, cwd, prepend_trogon, orig_first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -584,12 +624,15 @@ where
             (
                 s.thread_id.clone(),
                 s.model.clone().or_else(|| Some(self.default_model.clone())),
+                s.mode.clone(),
                 ph,
                 cwd,
                 prepend_trogon,
                 orig_first_turn,
             )
         };
+
+        let approval_policy = apply_mode_gate(&mode, true)?;
 
         // Keep a backup so we can restore if the turn never actually starts.
         let ph_backup = pending_history.clone();
@@ -614,6 +657,16 @@ where
             user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
+        // Codex takes no separate system prompt, so deliver the "always summarize
+        // what you did" guidance the same way as TROGON.md: prepended once on the
+        // first turn. Codex carries it through the rest of the session.
+        if orig_first_turn {
+            user_input = format!(
+                "Instructions: {}\n\n---\n\n{user_input}",
+                trogon_runner_tools::COMPLETION_GUIDANCE
+            );
+        }
+
         // HIGH-19: restore session state if the turn never actually starts.
         let proc = match self.process().await {
             Ok(p) => p,
@@ -627,7 +680,15 @@ where
                 return Err(e);
             }
         };
-        let mut event_rx = match proc.turn_start(&thread_id, &user_input, model.as_deref()).await {
+        let mut event_rx = match proc
+            .turn_start(
+                &thread_id,
+                &user_input,
+                model.as_deref(),
+                approval_policy,
+            )
+            .await
+        {
             Ok(rx) => rx,
             Err(e) => {
                 drop(proc);
@@ -646,6 +707,9 @@ where
         let mut assistant_text = String::new();
         let mut tool_call_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
         let mut tool_result_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
+        // Auto-summary guarantee: nudged the model once for a recap after a
+        // silent (tools-ran, no-text) turn, so we nudge at most once.
+        let mut auto_summary_done = false;
         let stop_reason = loop {
             let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
                 Err(_elapsed) => {
@@ -729,28 +793,62 @@ where
                     let text = std::mem::take(&mut assistant_text);
                     let tool_calls = std::mem::take(&mut tool_call_blocks);
                     let tool_results = std::mem::take(&mut tool_result_blocks);
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        if !tool_calls.is_empty() {
-                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                                role: "assistant".to_string(),
-                                text: "[tool call]".to_string(),
-                                blocks: tool_calls,
-                            });
+                    let ran_tools = !tool_calls.is_empty();
+                    let silent = text.trim().is_empty();
+                    // Will we nudge for a recap? (ran tools, no text, not yet nudged)
+                    let will_nudge = ran_tools && silent && !auto_summary_done;
+                    {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            if !tool_calls.is_empty() {
+                                s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                    role: "assistant".to_string(),
+                                    text: "[tool call]".to_string(),
+                                    blocks: tool_calls,
+                                });
+                            }
+                            if !tool_results.is_empty() {
+                                s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                    role: "user".to_string(),
+                                    text: String::new(),
+                                    blocks: tool_results,
+                                });
+                            }
+                            // Defer recording the (empty) assistant text when nudging —
+                            // the recap turn's TurnCompleted records it instead.
+                            if !will_nudge {
+                                s.history.push(
+                                    trogon_runner_tools::portable_session::PortableMessage::text_only(
+                                        "assistant", text,
+                                    ),
+                                );
+                            }
                         }
-                        if !tool_results.is_empty() {
-                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                                role: "user".to_string(),
-                                text: String::new(),
-                                blocks: tool_results,
-                            });
+                    } // drop sessions lock before re-acquiring the process
+
+                    // Auto-summary guarantee: ran tools but produced no text → the
+                    // model went silent. Re-prompt once for a brief recap (codex
+                    // takes no system prompt, so this is the only backstop) and keep
+                    // looping to stream it. Never fires on greetings / plain answers.
+                    if will_nudge {
+                        auto_summary_done = true;
+                        if let Ok(p) = self.process().await
+                            && let Ok(rx) = p
+                                .turn_start(
+                                    &thread_id,
+                                    trogon_runner_tools::AUTO_SUMMARY_NUDGE,
+                                    model.as_deref(),
+                                    approval_policy,
+                                )
+                                .await
+                        {
+                            drop(p);
+                            event_rx = rx;
+                            info!(session_id, "codex: silent after tools — requesting recap");
+                            continue;
                         }
-                        s.history.push(
-                            trogon_runner_tools::portable_session::PortableMessage::text_only(
-                                "assistant", text,
-                            ),
-                        );
                     }
+
                     break StopReason::EndTurn;
                 }
 
@@ -1052,6 +1150,7 @@ mod tests {
             _thread_id: &str,
             _user_input: &str,
             _model: Option<&str>,
+            _approval_policy: Option<&str>,
         ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
         {
             let (tx, rx) = broadcast::channel(64);
@@ -1340,13 +1439,28 @@ mod tests {
     // ── set_session_mode ──────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn set_session_mode_always_succeeds() {
+    async fn set_session_mode_default_succeeds() {
         let agent = make_agent().await;
         agent.test_insert_session("sm1", "/tmp", None).await;
         agent
             .set_session_mode(SetSessionModeRequest::new("sm1", "default"))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_plan_is_rejected() {
+        let agent = make_agent().await;
+        agent.test_insert_session("sm2", "/tmp", None).await;
+        let err = agent
+            .set_session_mode(SetSessionModeRequest::new("sm2", "plan"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.message.contains("plan mode"),
+            "expected plan refusal, got: {}",
+            err.message
+        );
     }
 
     // ── set_session_config_option ─────────────────────────────────────────────

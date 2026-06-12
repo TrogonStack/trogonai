@@ -147,6 +147,8 @@ pub(crate) trait SummarizationClient: Send + Sync {
 }
 
 impl SummarizationClient for reqwest::Client {
+    // Explicit `impl Future + Send` mirrors the trait's RPITIT `+ Send` bound.
+    #[allow(clippy::manual_async_fn)]
     fn call<'a>(
         &'a self,
         url: &'a str,
@@ -195,6 +197,8 @@ impl<C: SummarizationClient> AnthropicLlmProvider<C> {
 
 #[allow(private_bounds)]
 impl<C: SummarizationClient> crate::traits::LlmProvider for AnthropicLlmProvider<C> {
+    // Explicit `impl Future + Send` mirrors the trait's RPITIT `+ Send` bound.
+    #[allow(clippy::manual_async_fn)]
     fn generate_summary<'a>(
         &'a self,
         messages: &'a [crate::types::Message],
@@ -249,6 +253,8 @@ pub(crate) trait ChatCompletionsClient: Send + Sync {
 }
 
 impl ChatCompletionsClient for reqwest::Client {
+    // Explicit `impl Future + Send` mirrors the trait's RPITIT `+ Send` bound.
+    #[allow(clippy::manual_async_fn)]
     fn call<'a>(
         &'a self,
         url: &'a str,
@@ -293,6 +299,8 @@ impl<C: ChatCompletionsClient> OpenAICompatLlmProvider<C> {
 
 #[allow(private_bounds)]
 impl<C: ChatCompletionsClient> crate::traits::LlmProvider for OpenAICompatLlmProvider<C> {
+    // Explicit `impl Future + Send` mirrors the trait's RPITIT `+ Send` bound.
+    #[allow(clippy::manual_async_fn)]
     fn generate_summary<'a>(
         &'a self,
         messages: &'a [crate::types::Message],

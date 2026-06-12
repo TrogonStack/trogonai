@@ -110,6 +110,8 @@ async fn main() -> anyhow::Result<()> {
         proxy_url: proxy_url.clone(),
         cwd,
         http_client: http_client.clone(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let mut agent_loop = AgentLoop {
@@ -128,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
         thinking_budget: None,
         streaming_client: None,
     };

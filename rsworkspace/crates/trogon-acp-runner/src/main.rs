@@ -27,7 +27,7 @@
 //! | `PROXY_URL`            | `http://localhost:8080` | trogon-secret-proxy base URL     |
 //! | `ANTHROPIC_TOKEN`      | —                       | Proxy token for Anthropic API    |
 //! | `AGENT_MODEL`          | `claude-opus-4-6`       | Claude model ID                  |
-//! | `AGENT_MAX_ITERATIONS` | `10`                    | Max loop iterations per prompt   |
+//! | `AGENT_MAX_ITERATIONS` | `100`                    | Max loop iterations per prompt   |
 //! | `MAX_THINKING_TOKENS`  | —                       | Extended thinking token budget   |
 
 use std::sync::Arc;
@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let max_iterations: u32 = std::env::var("AGENT_MAX_ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
+        .unwrap_or(100);
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok());
@@ -98,7 +98,9 @@ async fn main() -> anyhow::Result<()> {
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+        capabilities: trogon_registry::RunnerCapability::to_strings(
+            trogon_registry::expected_runner_capabilities("claude").expect("claude capabilities"),
+        ),
         nats_subject: format!("{}.agent.>", acp_prefix),
         current_load: 0,
         metadata: serde_json::json!({
@@ -129,25 +131,23 @@ async fn main() -> anyhow::Result<()> {
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
+    let (web_search_api_key, web_search_endpoint) = trogon_tools::web_search_config_from_env();
     let tool_context = Arc::new(ToolContext {
         proxy_url: proxy_url.clone(),
         cwd,
         http_client: http_client.clone(),
+        web_search_api_key,
+        web_search_endpoint,
     });
 
     // `auto`-mode LLM safety classifier — uses the same proxy creds as the agent
     // loop, with a small/cheap model. Built before the creds move into AgentLoop.
-    let classifier_model = std::env::var("AUTO_CLASSIFIER_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
-    let safety_classifier: Arc<dyn trogon_runner_tools::SafetyClassifier> =
-        Arc::new(trogon_runner_tools::LlmSafetyClassifier::new(
-            http_client.clone(),
-            &proxy_url,
-            anthropic_base_url.as_deref(),
-            anthropic_token.clone(),
-            classifier_model,
-            vec![],
-        ));
+    let safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
+        http_client.clone(),
+        &proxy_url,
+        anthropic_base_url.as_deref(),
+        anthropic_token.clone(),
+    );
 
     let mut agent_loop = AgentLoop {
         http_client,
@@ -166,6 +166,7 @@ async fn main() -> anyhow::Result<()> {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
         thinking_budget,
     };
 

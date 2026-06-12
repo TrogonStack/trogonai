@@ -1,11 +1,17 @@
 use crate::RunnerSwitcher;
 use crate::app::{
     TurnMetrics, TurnRenderer, TurnStop, print_command_echo, print_startup_banner, print_user_line,
+    warn_if_codex_observational,
 };
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
+use crate::session_rewind::{
+    RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns,
+};
+use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
+use crate::transcript::SessionTranscriptRecorder;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -415,6 +421,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     permission_coordinator: std::sync::Arc<PermissionCoordinator>,
     stream: bool,
+    default_model: Option<String>,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
     plan: bool,
@@ -464,6 +471,28 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
             eprintln!("warning: permission client rebind failed: {e}");
         }
     }
+    if !resumed
+        && let Some(ref m) = default_model
+        && let Err(e) = session.set_model(m).await
+    {
+        eprintln!("warning: could not apply default model {m}: {e}");
+    }
+
+    // SessionStart hooks run once; any context they emit is injected into the
+    // first user prompt (mirroring Claude Code's SessionStart semantics).
+    let mut pending_start_context: Option<String> = None;
+    if !hooks_config.session_start.is_empty() {
+        let payload = serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": session.session_id(),
+            "cwd": cwd.to_string_lossy(),
+        });
+        if let trogon_runner_tools::HookOutcome::Continue { context: Some(ctx) } =
+            trogon_runner_tools::run_event_hooks(&hooks_config.session_start, None, &payload).await
+        {
+            pending_start_context = Some(ctx);
+        }
+    }
 
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
@@ -505,6 +534,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // Tracks rustyline edit mode toggled by /vim (false = emacs, true = vi).
     let mut vim_mode = false;
     print_startup_banner(session.session_id(), &prefix, &session_mode);
+    // RUN-2: codex is descoped to observational-only — warn prominently at startup.
+    warn_if_codex_observational(&prefix);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
     if let Some(helper) = rl.helper_mut() {
@@ -531,6 +562,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // Messages typed while a response was streaming. Auto-submitted in order
     // (one per turn) once the current turn finishes.
     let mut queued_prompts: VecDeque<String> = VecDeque::new();
+    let mut rewind_state = SessionRewindState::default();
+    let custom_commands = crate::commands::load_commands(&project_dir);
+    let mut spawn_tracker = SpawnTracker::default();
 
     loop {
         permission_coordinator.cancel_pending();
@@ -710,6 +744,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     session_name.as_deref(),
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
+                                spawn_tracker = SpawnTracker::default();
+                                rewind_state.reset();
                             }
                             Err(e) => eprintln!(
                                 "error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."
@@ -744,6 +780,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         session_name.as_deref(),
                                     );
                                     eprintln!("resumed session {}", session.session_id());
+                                    spawn_tracker = SpawnTracker::default();
+                                    rewind_state.reset();
                                 }
                                 Err(e) => {
                                     // MED-3: the old session's MCP bridges were shut down
@@ -862,55 +900,28 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         Err(e) => eprintln!("Error setting model: {e}"),
                                     }
                                 } else {
-                                    // B5: shut down the OLD session's MCP bridges before
-                                    // switching, otherwise their child processes are leaked
-                                    // across the runner switch (mirrors /clear and /resume).
-                                    let old_session_id = session.session_id().to_string();
-                                    mcp_manager.shutdown_session(&old_session_id).await;
-                                    session.close().await;
-                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
-                                    prefix = outcome.new_prefix.clone();
+                                    let applied = finish_cross_runner_model_switch(
+                                        &factory,
+                                        session,
+                                        &outcome,
+                                        &model_id,
+                                        &mut mcp_manager,
+                                        &cwd,
+                                        &fs,
+                                        &project_dir,
+                                        session_name.as_deref(),
+                                        skip_permissions,
+                                        client_supervisor.as_ref(),
+                                        None,
+                                    )
+                                    .await;
+                                    session = applied.session;
+                                    prefix = applied.prefix;
+                                    session_mode = applied.session_mode;
                                     session_used_tokens = 0;
                                     session_context_size = 0;
                                     compactor_model_sel = None;
-                                    // B5: the cross-runner session was created with NO
-                                    // mcp_servers, so MCP tools would be missing. Rebind MCP
-                                    // for the new session (shutdown + spawn_pending +
-                                    // commit_pending + load_session) so its tools are available.
-                                    if let Err(e) = respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await {
-                                        eprintln!("warning: could not bind MCP for new session: {e}");
-                                    }
-                                    // MED-5: the new runner starts a session with mode
-                                    // initialized from TROGON_MODE; keep the REPL's tracked
-                                    // mode in sync so /status and permission prompts match.
-                                    if skip_permissions {
-                                        if let Err(e) = session.set_mode("bypassPermissions").await {
-                                            eprintln!("warning: could not set bypassPermissions: {e}");
-                                        }
-                                        session_mode = "bypassPermissions".to_string();
-                                    } else {
-                                        session_mode =
-                                            std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
-                                    }
-                                    if let Some(ref sup) = client_supervisor
-                                        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
-                                    {
-                                        eprintln!("error rebinding permission client: {e}");
-                                    }
-                                    match session.set_model(&model_id).await {
-                                        Ok(()) => {
-                                            println!("Switched to {model_id}");
-                                            persist_session_index(
-                                                &fs,
-                                                &project_dir,
-                                                &prefix,
-                                                session.session_id(),
-                                                &model_id,
-                                                session_name.as_deref(),
-                                            );
-                                        }
-                                        Err(e) => eprintln!("Error setting model on new runner: {e}"),
-                                    }
+                                    rewind_state.reset();
                                 }
                             }
                             Err(e) => eprintln!("Error switching model: {e}"),
@@ -964,6 +975,17 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         );
                     } else if cmd == "/allowed-tools" {
                         println!("{}", allowed_tools_for_mode(&session_mode));
+                    } else if cmd == "/checkpoint" {
+                        match handle_checkpoint_command(&session, &mut rewind_state, arg).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/rewind" {
+                        match handle_rewind_command(&session, &mut rewind_state, arg).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(RewindError::ListRequested) => println!("{}", rewind_state.list_checkpoints()),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
                     } else if cmd == "/review" {
                         // Drive the model to review via its shell tools; runs like a
                         // normal prompt on the next loop turn.
@@ -971,6 +993,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/pr-comments" {
                         queued_prompts.push_back(pr_comments_prompt(arg));
                     } else if cmd == "/compact" {
+                        if !hooks_config.pre_compact.is_empty() {
+                            let payload = serde_json::json!({
+                                "hook_event_name": "PreCompact",
+                                "trigger": "manual",
+                                "session_id": session.session_id(),
+                            });
+                            let _ = trogon_runner_tools::run_event_hooks(
+                                &hooks_config.pre_compact,
+                                None,
+                                &payload,
+                            )
+                            .await;
+                        }
                         match session.compact().await {
                             Ok(CompactResult {
                                 compacted: true,
@@ -1019,12 +1054,32 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             } else {
                                 resolve_model_alias(cm_arg)
                             };
-                            match do_compact_model(&session, &resolved).await {
-                                Ok(msg) => {
-                                    println!("{msg}");
-                                    compactor_model_sel = if resolved == "default" { None } else { Some(resolved) };
+                            let proceed = if resolved == "default" {
+                                true
+                            } else {
+                                match runner_advertises_model(&registry, &prefix, &resolved).await {
+                                    Ok(true) => true,
+                                    Ok(false) => {
+                                        eprintln!(
+                                            "error: unknown compaction model '{resolved}' — run /compact-model with no args to list valid ids"
+                                        );
+                                        false
+                                    }
+                                    Err(e) => {
+                                        eprintln!("error: {e}");
+                                        false
+                                    }
                                 }
-                                Err(e) => eprintln!("error: {e}"),
+                            };
+                            if proceed {
+                                match do_compact_model(&session, &resolved).await {
+                                    Ok(msg) => {
+                                        println!("{msg}");
+                                        compactor_model_sel =
+                                            if resolved == "default" { None } else { Some(resolved) };
+                                    }
+                                    Err(e) => eprintln!("error: {e}"),
+                                }
                             }
                         }
                     } else if cmd == "/mcp" {
@@ -1034,10 +1089,25 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/agents" {
                         handle_agents_command(arg, &cwd);
                     } else if cmd == "/tasks" {
-                        // Subagents spawned via the spawn_agent tool run synchronously
-                        // (inline, in an isolated worktree) and return their result as
-                        // the tool output — there is no background task queue to list.
-                        println!("no background tasks — spawned subagents run inline and return immediately");
+                        match session.list_sessions().await {
+                            Ok(list) => {
+                                let text = spawn_tracker.format_tasks(
+                                    &prefix,
+                                    session.session_id(),
+                                    &list,
+                                );
+                                println!("{text}");
+                            }
+                            Err(e) => {
+                                eprintln!("error listing spawns: {e}");
+                                let text = spawn_tracker.format_tasks(
+                                    &prefix,
+                                    session.session_id(),
+                                    &[],
+                                );
+                                println!("{text}");
+                            }
+                        }
                     } else if cmd == "/init" {
                         let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -1106,6 +1176,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 }
                             }
                         }
+                    } else if let Some(dispatch) = custom_commands.dispatch(cmd, arg) {
+                        if dispatch.model.is_some() || !dispatch.allowed_tools.is_empty() {
+                            eprintln!(
+                                "note: per-command model/allowed-tools from {} are not applied yet",
+                                cmd
+                            );
+                        }
+                        queued_prompts.push_back(dispatch.prompt);
                     } else {
                         println!(
                             "{}",
@@ -1117,6 +1195,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 &session.current_model(),
                                 &cwd,
                                 &fs,
+                                Some(&custom_commands),
                             )
                         );
                     }
@@ -1152,6 +1231,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         trogon_runner_tools::HookOutcome::Continue { context: None } => {}
                     }
                 }
+                // Inject any SessionStart context into the first prompt, once.
+                if let Some(ctx) = pending_start_context.take() {
+                    expanded.push_str("\n\n");
+                    expanded.push_str(&ctx);
+                }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
                 let prompt_result = match session.prompt(&expanded).await {
                     Err(e) if e.to_string().contains("not found") => {
@@ -1182,18 +1266,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         };
 
                         // Capture input typed during this turn: plain lines are queued
-                        // and auto-submitted when the turn ends; Ctrl+G starts a side
-                        // question answered in a scratch session. The reader restores
-                        // the terminal when it drops at the end of this block.
+                        // and auto-submitted when the turn ends; Ctrl+G steers the
+                        // live turn (published to the runner's steer subject). The
+                        // reader restores the terminal when it drops at end of block.
                         let (_input_reader, mut input_rx) = match StreamInputReader::start() {
                             Some((r, rx)) => (Some(r), Some(rx)),
                             None => (None, None),
                         };
                         // Normal queued messages (typed + Enter), submitted in order.
                         let mut queued: Vec<String> = Vec::new();
-                        // Ctrl+G messages — jump to the front, submitted before `queued`.
+                        // Ctrl+G fallback for runners that don't yet subscribe to steer:
+                        // jump to the front of the queue (submitted before `queued`).
                         let mut front_queued: Vec<String> = Vec::new();
                         let mut interrupted = false;
+                        // Drives the live `Thinking… (Ns)` status line between events.
+                        let mut status_ticker =
+                            tokio::time::interval(std::time::Duration::from_millis(500));
 
                         loop {
                             tokio::select! {
@@ -1215,11 +1303,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             queued.push(msg);
                                         }
                                         Some(StreamInputEvent::Priority(q)) => {
-                                            // Ctrl+G: jump to the front of the queue —
-                                            // sent first once the current turn finishes.
                                             reset_display();
-                                            eprintln!("\x1b[2m⏳ queued (next): {q}\x1b[0m");
-                                            front_queued.push(q);
+                                            // Steer the IN-FLIGHT turn on runners that subscribe to
+                                            // the steer subject (currently the acp/Claude runner):
+                                            // the model addresses it on its next step. Other runners
+                                            // don't subscribe yet, so fall back to front-of-queue so
+                                            // the side question is never lost.
+                                            if crate::app::runner_label(&prefix) == "claude" {
+                                                eprintln!("\x1b[2m↪ steering: {q}\x1b[0m");
+                                                session.steer(q).await;
+                                            } else {
+                                                eprintln!("\x1b[2m⏳ queued (next): {q}\x1b[0m");
+                                                front_queued.push(q);
+                                            }
                                         }
                                         // Reader stopped — stop polling it to avoid spinning.
                                         None => { input_rx = None; }
@@ -1229,6 +1325,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     match event {
                                         None => break,
                                         Some(ev) => {
+                                            match &ev {
+                                                StreamEvent::ToolCall(name) => {
+                                                    spawn_tracker.on_tool_call(name);
+                                                }
+                                                StreamEvent::ToolFinished { name, .. } => {
+                                                    spawn_tracker.on_tool_finished(name);
+                                                }
+                                                _ => {}
+                                            }
                                             if let Some(sync) = renderer.handle(ev, &mut metrics)
                                                 && sync_cwd_from_tool(
                                                     &sync.tool_name,
@@ -1247,12 +1352,29 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         }
                                     }
                                 }
+                                // Animate the `Thinking… (Ns)` / tool status line
+                                // while waiting on the model (lowest priority).
+                                _ = status_ticker.tick() => {
+                                    renderer.tick();
+                                }
                             }
+                        }
+
+                        let stop = renderer.take_stop();
+                        if let Some(recorder) =
+                            SessionTranscriptRecorder::for_session(&fs, session.session_id())
+                        {
+                            recorder.record_turn(
+                                &line,
+                                renderer.assistant_text(),
+                                stop.as_ref(),
+                                interrupted,
+                            );
                         }
 
                         // Persist on a clean turn end (matches programming-gaps'
                         // in-arm persistence — skips cancelled / maxTurnRequests).
-                        if let Some(TurnStop::Done { reason }) = renderer.take_stop()
+                        if let Some(TurnStop::Done { reason }) = stop
                             && reason != "cancelled"
                             && reason != "maxTurnRequests"
                         {
@@ -1268,10 +1390,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             if let Some(helper) = rl.helper_mut() {
                                 helper.cwd = cwd.clone();
                             }
+                            rewind_state.on_turn_complete();
                         }
 
                         // Auto-submit messages queued during this turn: Ctrl+G
-                        // (front_queued) messages go first, then the rest in order.
+                        // fallback (front_queued) first, then the rest in order.
                         // If the user interrupted (Ctrl+C), discard the queue since
                         // they're likely changing direction. `_input_reader` drops at
                         // the end of this block, restoring the terminal before readline.
@@ -1375,6 +1498,12 @@ async fn fetch_mcp_prompt(
 ) -> Result<String, String> {
     let conns = mcp.active_connections(session_id);
     let Some((_, url, headers)) = conns.into_iter().find(|(n, _, _)| n == &inv.server) else {
+        if mcp.active_for_session(session_id).iter().any(|(n, _)| n == &inv.server) {
+            return Err(format!(
+                "MCP server `{}` is native stdio; CLI prompt commands are only available for HTTP/SSE MCP servers",
+                inv.server
+            ));
+        }
         return Err(format!("no active MCP server named `{}` (see /mcp list)", inv.server));
     };
     let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
@@ -1435,9 +1564,9 @@ async fn handle_mcp_command<F: Fs, S: Session>(
             }
             let active = mcp.active_for_session(session.session_id());
             if active.is_empty() {
-                println!("active bridges: (none)");
+                println!("active MCP servers: (none)");
             } else {
-                println!("active bridges:");
+                println!("active MCP servers:");
                 for (name, url) in active {
                     println!("  {name} → {url}");
                 }
@@ -1498,7 +1627,11 @@ async fn handle_mcp_command<F: Fs, S: Session>(
         "prompts" => {
             let conns = mcp.active_connections(session.session_id());
             if conns.is_empty() {
-                println!("no active MCP servers");
+                if mcp.active_for_session(session.session_id()).is_empty() {
+                    println!("no active MCP servers");
+                } else {
+                    println!("no active HTTP/SSE MCP servers with CLI-readable prompts");
+                }
                 return;
             }
             println!("available MCP prompts (call as /mcp__<server>__<prompt> [k=v...]):");
@@ -1710,21 +1843,141 @@ pub(crate) struct ModelSwitchOutcome {
     pub new_session_id: String,
 }
 
+/// Records cross-runner switch phases for unit tests (ordering assertions).
+#[derive(Debug, Default)]
+pub(crate) struct SwitchJournal {
+    steps: Vec<&'static str>,
+}
+
+impl SwitchJournal {
+    fn record(&mut self, step: &'static str) {
+        self.steps.push(step);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn steps(&self) -> &[&'static str] {
+        &self.steps
+    }
+}
+
+pub(crate) struct CrossRunnerSwitchApplied<S> {
+    pub session: S,
+    pub prefix: String,
+    pub session_mode: String,
+}
+
+/// Complete a cross-runner `/model` switch: tear down the old session's MCP
+/// bridges, attach the migrated session, bind MCP tools, then sync mode and
+/// model. MCP must be ready before this returns so the REPL prompt cannot accept
+/// user input while tools are still missing.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn finish_cross_runner_model_switch<SF, S, F>(
+    factory: &SF,
+    session: S,
+    outcome: &ModelSwitchOutcome,
+    model_id: &str,
+    mcp: &mut McpManager,
+    cwd: &Path,
+    fs: &F,
+    project_dir: &Path,
+    session_name: Option<&str>,
+    skip_permissions: bool,
+    client_supervisor: Option<&Rc<AcpClientSupervisor>>,
+    mut journal: Option<&mut SwitchJournal>,
+) -> CrossRunnerSwitchApplied<S>
+where
+    SF: SessionFactory<Sess = S>,
+    S: Session,
+    F: Fs,
+{
+    let record = |journal: &mut Option<&mut SwitchJournal>, step: &'static str| {
+        if let Some(j) = journal.as_mut() {
+            j.record(step);
+        }
+    };
+
+    // B5: shut down the OLD session's MCP bridges before switching, otherwise
+    // their child processes are leaked across the runner switch.
+    let old_session_id = session.session_id().to_string();
+    mcp.shutdown_session(&old_session_id).await;
+    session.close().await;
+
+    // B5: the cross-runner session was created with NO mcp_servers. Bind MCP for
+    // the new session before any post-switch work or REPL prompt unblock.
+    let session = match activate_session(
+        factory,
+        mcp,
+        &outcome.new_prefix,
+        &outcome.new_session_id,
+        cwd,
+        fs,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: could not bind MCP for new session: {e}");
+            factory.attach_session(&outcome.new_prefix, outcome.new_session_id.clone())
+        }
+    };
+    record(&mut journal, "mcp_bound");
+
+    // MED-5: the new runner starts a session with mode initialized from
+    // TROGON_MODE; keep the REPL's tracked mode in sync.
+    let session_mode = if skip_permissions {
+        if let Err(e) = session.set_mode("bypassPermissions").await {
+            eprintln!("warning: could not set bypassPermissions: {e}");
+        }
+        "bypassPermissions".to_string()
+    } else {
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
+    };
+
+    if let Some(sup) = client_supervisor
+        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
+    {
+        eprintln!("error rebinding permission client: {e}");
+    }
+
+    match session.set_model(model_id).await {
+        Ok(()) => {
+            println!("Switched to {model_id}");
+            persist_session_index(
+                fs,
+                project_dir,
+                &outcome.new_prefix,
+                session.session_id(),
+                model_id,
+                session_name,
+            );
+        }
+        Err(e) => eprintln!("Error setting model on new runner: {e}"),
+    }
+
+    record(&mut journal, "prompt_unblocked");
+
+    CrossRunnerSwitchApplied {
+        session,
+        prefix: outcome.new_prefix.clone(),
+        session_mode,
+    }
+}
+
 pub fn resolve_model_alias(input: &str) -> String {
     match input {
         "haiku" => "claude-haiku-4-5-20251001".into(),
         "sonnet" => "claude-sonnet-4-6".into(),
-        "opus" => "claude-opus-4-7".into(),
+        "opus" => "claude-opus-4-6".into(),
         "grok" => "grok-3".into(),
         "grok-mini" => "grok-3-mini".into(),
         "openrouter" => {
-            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4".into())
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".into())
         }
         // Short aliases for the OpenRouter models. These must match the IDs the
         // openrouter runner registers (OPENROUTER_MODELS); update both together.
-        "op-claude" => "anthropic/claude-sonnet-4".into(),
+        "op-claude" => "anthropic/claude-sonnet-4-6".into(),
         "op-gpt" => "openai/gpt-4o".into(),
-        "op-gemini" => "google/gemini-2.5-pro".into(),
+        "op-gemini" => "google/gemini-pro-1.5".into(),
         "codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
         "o3" => "o3".into(),
         "gpt-4o" => "gpt-4o".into(),
@@ -1771,6 +2024,50 @@ pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Resu
     } else {
         Ok(format!("compaction model set to: {value}"))
     }
+}
+
+// ── checkpoint / rewind ───────────────────────────────────────────────────────
+
+async fn handle_checkpoint_command<S: Session>(
+    session: &S,
+    rewind_state: &mut SessionRewindState,
+    arg: &str,
+) -> anyhow::Result<String> {
+    let export = session.export_history().await?;
+    let name = arg.trim();
+    let name = if name.is_empty() { None } else { Some(name) };
+    Ok(rewind_state.record_checkpoint(name, export))
+}
+
+async fn handle_rewind_command<S: Session>(
+    session: &S,
+    rewind_state: &mut SessionRewindState,
+    arg: &str,
+) -> Result<String, RewindError> {
+    let resolution = rewind_state.resolve_rewind(arg)?;
+    let (messages_json, target_turn) = match resolution {
+        RewindResolution::Snapshot {
+            messages_json,
+            target_turn,
+        } => (messages_json, target_turn),
+        RewindResolution::TruncateToTurns { target_turn } => {
+            let export = session
+                .export_history()
+                .await
+                .map_err(|e| RewindError::ExportParse(e.to_string()))?;
+            let truncated = truncate_export_to_turns(&export, target_turn)?;
+            (truncated, target_turn)
+        }
+    };
+
+    session
+        .import_history(&messages_json)
+        .await
+        .map_err(|e| RewindError::ExportParse(e.to_string()))?;
+    rewind_state.after_rewind(target_turn);
+    Ok(format!(
+        "rewound to turn {target_turn} — conversation continues from that point"
+    ))
 }
 
 // ── new slash-command helpers ───────────────────────────────────────────────────
@@ -1843,6 +2140,7 @@ fn bug_report_text() -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
@@ -1851,17 +2149,19 @@ pub fn handle_slash_command<F: Fs>(
     session_model: &str,
     _cwd: &Path,
     fs: &F,
+    custom_commands: Option<&crate::commands::CustomCommandRegistry>,
 ) -> String {
     match cmd {
         "/help" => {
             let m = "\x1b[35m";
             let r = "\x1b[0m";
-            format!("\
+            let mut help = format!("\
 Commands:
   {m}/help{r}               show this help
   {m}/doctor{r}             run health checks (same as `trogon doctor`)
   {m}/status{r}             prefix, model, tokens, registered runners
   {m}/cost{r}               show token usage for this session
+  {m}/context{r}            show context-window usage for this session
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
@@ -1871,6 +2171,8 @@ Commands:
   {m}/mcp__<server>__<prompt>{r}  run an MCP prompt as a command (see {m}/mcp prompts{r})
   {m}/compact{r}            force context compaction now
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
+  {m}/checkpoint{r} [name]  save conversation state at the current turn
+  {m}/rewind{r} [name|N]    restore to a checkpoint or back N turns  |  {m}/rewind{r} lists checkpoints
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
@@ -1892,14 +2194,18 @@ Commands:
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
-Ctrl+D    quit")
+Ctrl+D    quit");
+            if let Some(registry) = custom_commands {
+                help.push_str(&crate::commands::format_custom_commands_help(registry));
+            }
+            help
         }
 
         "/cost" => {
             if context_size == 0 {
                 "no usage data yet — send a message first".to_string()
             } else {
-                let pct = used_tokens * 100 / context_size;
+                let pct = (used_tokens * 100).checked_div(context_size).unwrap_or(0);
                 let cost = estimate_cost(used_tokens, session_model);
                 format!(
                     "context: {}/{} tokens ({}%)  |  ~${cost}",
@@ -1909,6 +2215,8 @@ Ctrl+D    quit")
                 )
             }
         }
+
+        "/context" => render_context_usage(used_tokens, context_size),
 
         "/config" => handle_config_cmd(arg, fs),
 
@@ -1957,8 +2265,9 @@ Ctrl+D    quit")
         }
 
         "/tasks" => {
-            "The CLI does not track background tasks — prompts run inline (Ctrl+C to interrupt). \
-             Sub-agents the model spawns run on the runner in isolated worktrees; see /agents."
+            "Lists live sub-agent spawns for the current session: child NATS sub-sessions \
+             (via the runner's session list) plus any in-flight spawn_agent tool calls. \
+             Read-only — use /agents to inspect subagent definitions."
                 .to_string()
         }
 
@@ -1970,10 +2279,7 @@ Ctrl+D    quit")
         }
 
         "/rewind" | "/checkpoint" => {
-            "Message-level rewind/checkpointing isn't supported yet. To revert state today: \
-             /clear starts a fresh session, /resume <id> reattaches a prior one, and switching \
-             models with /model opens a new session. (Code changes are reverted with git.)"
-                .to_string()
+            "use /checkpoint and /rewind in the REPL — they need the live session".to_string()
         }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
@@ -2187,6 +2493,32 @@ pub(crate) async fn format_compactor_models<RS: RegistryStore>(
     Ok(out.trim_end().to_string())
 }
 
+pub(crate) async fn runner_advertises_model<RS: RegistryStore>(
+    registry: &Registry<RS>,
+    current_prefix: &str,
+    model_id: &str,
+) -> Result<bool, String> {
+    let all = registry.list_all().await.map_err(|e| e.to_string())?;
+    for cap in all {
+        let cap_prefix = cap
+            .metadata
+            .get("acp_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&cap.agent_type);
+        if cap_prefix != current_prefix {
+            continue;
+        }
+        if let Some(arr) = cap.metadata.get("models").and_then(|v| v.as_array()) {
+            for id in arr.iter().filter_map(|m| m.as_str()) {
+                if id == model_id {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) async fn format_model_catalog<RS: RegistryStore>(
     registry: &Registry<RS>,
     current_prefix: &str,
@@ -2264,7 +2596,7 @@ pub(crate) async fn format_status<RS: RegistryStore>(
             used = fmt_tokens(used_tokens)
         )
     } else {
-        let pct = used_tokens * 100 / context_size;
+        let pct = (used_tokens * 100).checked_div(context_size).unwrap_or(0);
         format!(
             "{used}/{ctx} tokens ({pct}%)",
             used = fmt_tokens(used_tokens),
@@ -2492,6 +2824,22 @@ fn estimate_cost(tokens: u64, model: &str) -> String {
 }
 
 // ── token formatting ──────────────────────────────────────────────────────────
+
+fn render_context_usage(used_tokens: u64, context_size: u64) -> String {
+    if context_size == 0 {
+        "no context usage yet — send a message first".to_string()
+    } else {
+        let pct = (used_tokens * 100).checked_div(context_size).unwrap_or(0);
+        let remaining = context_size.saturating_sub(used_tokens);
+        format!(
+            "context: {} / {} tokens ({}%) · {} remaining",
+            fmt_tokens(used_tokens),
+            fmt_tokens(context_size),
+            pct,
+            fmt_tokens(remaining),
+        )
+    }
+}
 
 fn fmt_tokens(n: u64) -> String {
     let s = n.to_string();
@@ -2876,9 +3224,10 @@ mod tests {
     #[test]
     fn slash_help_lists_all_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
+        assert!(out.contains("/context"));
         assert!(out.contains("/clear"));
         assert!(out.contains("/sessions"));
         assert!(out.contains("/resume"));
@@ -2892,9 +3241,49 @@ mod tests {
     }
 
     #[test]
+    fn slash_help_lists_custom_commands_when_provided() {
+        let fs = MockFs::new();
+        let registry = crate::commands::CustomCommandRegistry::new([crate::commands::CustomCommand {
+            name: "ship".into(),
+            description: "Ship it".into(),
+            body: String::new(),
+            model: None,
+            allowed_tools: Vec::new(),
+            source: PathBuf::from("/x.md"),
+        }]);
+        let out = handle_slash_command(
+            "/help",
+            "",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+            Some(&registry),
+        );
+        assert!(out.contains("/ship"));
+        assert!(out.contains("Ship it"));
+    }
+
+    #[test]
+    fn custom_command_dispatch_beats_unknown_fallback() {
+        let registry = crate::commands::CustomCommandRegistry::new([crate::commands::CustomCommand {
+            name: "echo".into(),
+            description: String::new(),
+            body: "Say: $ARGUMENTS".into(),
+            model: None,
+            allowed_tools: Vec::new(),
+            source: PathBuf::from("/x.md"),
+        }]);
+        assert!(registry.dispatch("/echo", "hi").is_some());
+        let unknown = handle_slash_command("/echo-not-real", "", 0, 0, "m", Path::new("/tmp"), &MockFs::new(), None);
+        assert!(unknown.contains("unknown command"));
+    }
+
+    #[test]
     fn slash_cost_no_data_yet() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/cost", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("no usage data"), "got: {out}");
     }
 
@@ -2909,11 +3298,39 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         assert!(out.contains("25%"), "got: {out}");
         assert!(out.contains("50,000"), "got: {out}");
         assert!(out.contains("200,000"), "got: {out}");
         assert!(out.contains("~$"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_context_no_data_yet() {
+        let out = render_context_usage(0, 0);
+        assert!(out.contains("no context usage yet"), "got: {out}");
+        assert!(out.contains("send a message first"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_context_shows_usage_percentage_and_remaining() {
+        let out = render_context_usage(12_345, 200_000);
+        assert_eq!(
+            out,
+            "context: 12,345 / 200,000 tokens (6%) · 187,655 remaining"
+        );
+        let via_cmd = handle_slash_command(
+            "/context",
+            "",
+            12_345,
+            200_000,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &MockFs::new(),
+            None,
+        );
+        assert_eq!(via_cmd, out);
     }
 
     // ── blended_rate / estimate_cost ──────────────────────────────────────────
@@ -3043,7 +3460,7 @@ mod tests {
     fn informational_commands_are_recognised_not_unknown() {
         let fs = MockFs::new();
         for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/release-notes", "/bug"] {
-            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
             assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
             assert!(!out.is_empty());
         }
@@ -3052,8 +3469,17 @@ mod tests {
     #[test]
     fn help_lists_new_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
-        for c in ["/plan", "/allowed-tools", "/vim", "/review", "/pr-comments", "/bug"] {
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        for c in [
+            "/plan",
+            "/allowed-tools",
+            "/vim",
+            "/review",
+            "/pr-comments",
+            "/bug",
+            "/checkpoint",
+            "/rewind",
+        ] {
             assert!(out.contains(c), "/help must mention {c}");
         }
     }
@@ -3108,14 +3534,14 @@ mod tests {
     #[test]
     fn slash_unknown_suggests_help() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/nope", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/nope", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("unknown command") && out.contains("/help"), "got: {out}");
     }
 
     #[test]
     fn slash_model_without_arg_shows_registry_hint() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/model", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/model", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("registry listing"), "got: {out}");
     }
 
@@ -3130,6 +3556,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         assert!(out.contains("cost estimates updated"), "got: {out}");
@@ -3146,6 +3573,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         let cost_out = handle_slash_command(
             "/cost",
@@ -3155,6 +3583,7 @@ mod tests {
             "claude-haiku-4-5",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
         assert!(cost_out.contains("1.60") || cost_out.contains("1.6"), "got: {cost_out}");
@@ -3171,6 +3600,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
         );
         assert!(out.contains("100%"), "got: {out}");
     }
@@ -3178,7 +3608,7 @@ mod tests {
     #[test]
     fn slash_cost_rounds_down() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 1, 3, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        let out = handle_slash_command("/cost", "", 1, 3, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
         assert!(out.contains("33%"), "got: {out}");
     }
 
@@ -3398,7 +3828,7 @@ mod tests {
     #[test]
     fn resolve_model_alias_claude_shortcuts() {
         assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-6");
-        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-7");
+        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
         assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5-20251001");
     }
 
@@ -3414,7 +3844,7 @@ mod tests {
             std::env::remove_var("OPENROUTER_DEFAULT_MODEL");
             std::env::remove_var("CODEX_DEFAULT_MODEL");
         }
-        assert_eq!(resolve_model_alias("openrouter"), "anthropic/claude-sonnet-4");
+        assert_eq!(resolve_model_alias("openrouter"), "anthropic/claude-sonnet-4-6");
         assert_eq!(resolve_model_alias("codex"), "o4-mini");
     }
 
@@ -3437,6 +3867,49 @@ mod tests {
         assert_eq!(resolve_model_alias("o3"), "o3");
         assert_eq!(resolve_model_alias("gpt-4o"), "gpt-4o");
         assert_eq!(resolve_model_alias("custom/model-id"), "custom/model-id");
+    }
+
+    #[test]
+    fn resolve_model_alias_targets_registered_ids() {
+        const ACP_IDS: &[&str] =
+            &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
+        const OR_IDS: &[&str] =
+            &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
+
+        for alias in ["haiku", "sonnet", "opus"] {
+            let resolved = resolve_model_alias(alias);
+            assert!(ACP_IDS.contains(&resolved.as_str()), "{alias} -> {resolved}");
+        }
+        for alias in ["op-claude", "op-gpt", "op-gemini", "openrouter"] {
+            let resolved = resolve_model_alias(alias);
+            assert!(OR_IDS.contains(&resolved.as_str()), "{alias} -> {resolved}");
+        }
+    }
+
+    #[tokio::test]
+    async fn runner_advertises_model_checks_registry() {
+        use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
+
+        let registry = Registry::new(MockRegistryStore::new());
+        let mut cap = AgentCapability::new("runner", ["chat"], "agents.runner.>");
+        cap.metadata = serde_json::json!({
+            "acp_prefix": "acp.claude",
+            "models": ["claude-haiku-4-5-20251001"]
+        });
+        registry.register(&cap).await.unwrap();
+
+        assert_eq!(
+            runner_advertises_model(&registry, "acp.claude", "claude-haiku-4-5-20251001")
+                .await
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            runner_advertises_model(&registry, "acp.claude", "bogus-model")
+                .await
+                .unwrap(),
+            false
+        );
     }
 
     #[test]
@@ -3608,6 +4081,55 @@ mod tests {
     // ── /model cross-runner: loop wiring ─────────────────────────────────────
 
     #[tokio::test]
+    async fn cross_runner_switch_binds_mcp_before_prompt_unblocked() {
+        use crate::session::mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+
+        let old = Arc::new(MockSession::new("old-sess"));
+        let factory = MockSessionFactory::new("new-sess");
+        let fs = MockFs::new();
+        let mut mcp = McpManager::load(&fs);
+        let mut journal = SwitchJournal::default();
+        let outcome = ModelSwitchOutcome {
+            same_runner: false,
+            new_prefix: "acp.xai".into(),
+            new_session_id: "new-sess".into(),
+        };
+
+        let applied = finish_cross_runner_model_switch(
+            &factory,
+            old.clone(),
+            &outcome,
+            "grok-3",
+            &mut mcp,
+            Path::new("/ws"),
+            &fs,
+            Path::new("/ws"),
+            None,
+            false,
+            None,
+            Some(&mut journal),
+        )
+        .await;
+
+        assert_eq!(old.close_count(), 1);
+        assert_eq!(applied.session.session_id(), "new-sess");
+        assert_eq!(applied.prefix, "acp.xai");
+        assert_eq!(applied.session.load_session_count(), 1);
+
+        let steps = journal.steps();
+        let mcp_idx = steps.iter().position(|&s| s == "mcp_bound").expect("mcp_bound step");
+        let prompt_idx = steps
+            .iter()
+            .position(|&s| s == "prompt_unblocked")
+            .expect("prompt_unblocked step");
+        assert!(
+            mcp_idx < prompt_idx,
+            "MCP must be bound before the prompt unblocks: {steps:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn model_cross_runner_attaches_new_session_and_resets_counters() {
         use crate::session::mock::MockSessionFactory;
 
@@ -3640,5 +4162,91 @@ mod tests {
         assert!(outcome.same_runner);
         session.set_model("claude-opus-4-7").await.unwrap();
         assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
+    }
+
+    // ── /checkpoint and /rewind ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn checkpoint_command_exports_and_records_turn() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        session.set_exported_history(r#"[{"role":"user","text":"hello"}]"#);
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+
+        let msg = handle_checkpoint_command(&session, &mut rewind_state, "save-point")
+            .await
+            .unwrap();
+        assert!(msg.contains("save-point"));
+        assert_eq!(rewind_state.checkpoints().len(), 1);
+        assert_eq!(rewind_state.checkpoints()[0].turn_index, 1);
+    }
+
+    #[tokio::test]
+    async fn rewind_to_checkpoint_imports_snapshot_and_truncates_state() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        let snapshot = r#"[{"role":"user","text":"first"}]"#;
+        session.set_exported_history(snapshot);
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+        rewind_state.record_checkpoint(Some("t1"), snapshot.to_string());
+        rewind_state.on_turn_complete();
+        rewind_state.on_turn_complete();
+
+        let msg = handle_rewind_command(&session, &mut rewind_state, "t1")
+            .await
+            .unwrap();
+        assert!(msg.contains("turn 1"));
+        assert_eq!(session.imported_history(), vec![snapshot]);
+        assert_eq!(rewind_state.turn_count(), 1);
+        assert_eq!(rewind_state.checkpoints().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rewind_by_n_truncates_export_when_no_checkpoint() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        session.set_exported_history(
+            r#"[
+                {"role":"user","text":"one"},
+                {"role":"assistant","text":"a1"},
+                {"role":"user","text":"two"},
+                {"role":"assistant","text":"a2"}
+            ]"#,
+        );
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+        rewind_state.on_turn_complete();
+
+        let msg = handle_rewind_command(&session, &mut rewind_state, "1")
+            .await
+            .unwrap();
+        assert!(msg.contains("turn 1"));
+        let imported = session.imported_history();
+        assert_eq!(imported.len(), 1);
+        assert!(imported[0].contains(r#""text":"one""#));
+        assert!(!imported[0].contains(r#""text":"two""#));
+        assert_eq!(rewind_state.turn_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn rewind_without_arg_lists_checkpoints() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        let mut rewind_state = SessionRewindState::default();
+        rewind_state.on_turn_complete();
+        rewind_state.record_checkpoint(Some("alpha"), "[]".to_string());
+
+        let err = handle_rewind_command(&session, &mut rewind_state, "")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RewindError::ListRequested));
+        let listed = rewind_state.list_checkpoints();
+        assert!(listed.contains("alpha"));
     }
 }

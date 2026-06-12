@@ -1642,10 +1642,11 @@ async fn prompt_with_text_block_populates_user_message() {
 }
 
 /// When `ToolCallFinished` arrives for an ID that was never seen in
-/// `ToolCallStarted`, the `tool_name_cache` lookup returns `None` and the
-/// update is returned without meta (the `else update` branch, line 260).
+/// `ToolCallStarted`, the `tool_name_cache` lookup returns `None`, so the
+/// converter cannot build a meaningful update (it has no tool name/input). It
+/// logs a warning and skips the update entirely (`return (vec![], None)`).
 #[tokio::test]
-async fn tool_call_finished_without_prior_started_omits_meta() {
+async fn tool_call_finished_without_prior_started_is_skipped() {
     let (_container, port) = start_nats().await;
     let nats = nats_client(port).await;
     let (bridge, mut rx) = make_bridge_with_rx(nats.clone(), "acp").await;
@@ -1682,8 +1683,8 @@ async fn tool_call_finished_without_prior_started_omits_meta() {
         }
     });
     assert!(
-        update.is_some(),
-        "expected ToolCallUpdate for unknown id, got: {updates:?}"
+        update.is_none(),
+        "ToolCallFinished for an unknown id must be skipped (no update), got: {updates:?}"
     );
 }
 

@@ -14,6 +14,13 @@ pub enum OutputFormat {
 #[derive(Clone, Copy, Default)]
 pub struct PrintOptions {
     pub print_tools: bool,
+    /// When false, emit plain text instead of ANSI-rendered markdown.
+    pub use_ansi: bool,
+}
+
+/// Whether `--print` text mode should apply ANSI markdown rendering.
+pub fn should_use_ansi(force_plain: bool, stdout_is_tty: bool) -> bool {
+    !force_plain && stdout_is_tty
 }
 
 /// Exit code for `--print` mode (mirrors shell conventions in the plan).
@@ -24,12 +31,16 @@ pub enum PrintExitCode {
     MaxTurns = 2,
 }
 
+/// Default `stop_reason` when the event stream ends without `StreamEvent::Done`.
+const INCOMPLETE_STOP_REASON: &str = "incomplete";
+
 impl PrintExitCode {
     pub fn from_stop_reason(reason: &str) -> Self {
         match reason {
             "maxTurnRequests" => Self::MaxTurns,
-            "error" | "cancelled" => Self::Error,
-            _ => Self::Success,
+            "error" | "cancelled" | INCOMPLETE_STOP_REASON => Self::Error,
+            "end_turn" | "max_tokens" | "stop_sequence" => Self::Success,
+            _ => Self::Error,
         }
     }
 }
@@ -82,7 +93,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
         // a final `result` line. Unlike text/json this is always complete (tool
         // events are not gated on `--print-tools`).
         let mut text = String::new();
-        let mut stop_reason = String::from("end_turn");
+        let mut stop_reason = String::from(INCOMPLETE_STOP_REASON);
 
         while let Some(event) = rx.recv().await {
             match event {
@@ -98,7 +109,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
                         serde_json::json!({ "type": "result", "stop_reason": "error", "text": text })
                     );
                     let _ = stdout.flush();
-                    session.close().await;
                     return PrintExitCode::Error;
                 }
                 other => {
@@ -118,13 +128,12 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
             serde_json::json!({ "type": "result", "stop_reason": stop_reason, "text": text })
         );
         let _ = stdout.flush();
-        session.close().await;
         return PrintExitCode::from_stop_reason(&stop_reason);
     }
 
     if format == OutputFormat::Json {
         let mut text = String::new();
-        let mut stop_reason = String::from("end_turn");
+        let mut stop_reason = String::from(INCOMPLETE_STOP_REASON);
 
         while let Some(event) = rx.recv().await {
             match event {
@@ -148,7 +157,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
                     break;
                 }
                 StreamEvent::Error(msg) => {
-                    session.close().await;
                     eprintln!("error: {msg}");
                     return PrintExitCode::Error;
                 }
@@ -158,12 +166,11 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
 
         let out = serde_json::json!({"text": text, "stop_reason": stop_reason});
         let _ = writeln!(stdout, "{out}");
-        session.close().await;
         return PrintExitCode::from_stop_reason(&stop_reason);
     }
 
     let mut text = String::new();
-    let mut stop_reason = String::from("end_turn");
+    let mut stop_reason = String::from(INCOMPLETE_STOP_REASON);
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -187,7 +194,6 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
                 break;
             }
             StreamEvent::Error(msg) => {
-                session.close().await;
                 eprintln!("error: {msg}");
                 return PrintExitCode::Error;
             }
@@ -199,13 +205,16 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, opt
         }
     }
 
-    let rendered = crate::markdown::render(&text);
+    let rendered = if options.use_ansi {
+        crate::markdown::render(&text)
+    } else {
+        crate::markdown::render_plain(&text)
+    };
     print!("{rendered}");
     if !rendered.ends_with('\n') {
         println!();
     }
     let _ = stdout.flush();
-    session.close().await;
     PrintExitCode::from_stop_reason(&stop_reason)
 }
 
@@ -231,17 +240,29 @@ pub async fn spawn_auto_deny_permissions(
     nats: async_nats::Client,
     prefix: &str,
     session_id: &str,
-) -> tokio::task::JoinHandle<()> {
+) -> Option<tokio::task::JoinHandle<()>> {
+    let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
+    let sub = nats.subscribe(subject).await;
+    spawn_auto_deny_permissions_inner(nats, sub).await.ok()
+}
+
+async fn spawn_auto_deny_permissions_inner<E: std::fmt::Display>(
+    nats: async_nats::Client,
+    sub: Result<async_nats::Subscriber, E>,
+) -> Result<tokio::task::JoinHandle<()>, E> {
     use agent_client_protocol::{RequestPermissionOutcome, RequestPermissionResponse};
     use futures::StreamExt as _;
 
-    let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
-    let sub = nats.subscribe(subject).await;
-    tokio::spawn(async move {
-        let mut sub = match sub {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+    let mut sub = match sub {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "error: could not subscribe to permission requests: {e} — approval-gated tools will be denied"
+            );
+            return Err(e);
+        }
+    };
+    Ok(tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
             let Some(reply) = msg.reply else { continue };
             // Best-effort: name the tool being denied so `--print` output explains
@@ -267,7 +288,7 @@ pub async fn spawn_auto_deny_permissions(
                 let _ = nats.publish(reply, payload.into()).await;
             }
         }
-    })
+    }))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -331,6 +352,22 @@ mod tests {
         assert_eq!(
             run(session, "test", OutputFormat::Json, PrintOptions::default()).await,
             PrintExitCode::Error
+        );
+    }
+
+    #[test]
+    fn from_stop_reason_incomplete_maps_to_error() {
+        assert_eq!(
+            PrintExitCode::from_stop_reason(INCOMPLETE_STOP_REASON),
+            PrintExitCode::Error
+        );
+    }
+
+    #[test]
+    fn from_stop_reason_end_turn_maps_to_success() {
+        assert_eq!(
+            PrintExitCode::from_stop_reason("end_turn"),
+            PrintExitCode::Success
         );
     }
 
@@ -426,8 +463,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn should_use_ansi_respects_tty_and_plain_flag() {
+        assert!(should_use_ansi(false, true));
+        assert!(!should_use_ansi(true, true));
+        assert!(!should_use_ansi(false, false));
+        assert!(!should_use_ansi(true, false));
+    }
+
     #[tokio::test]
-    async fn text_mode_closes_session_on_completion() {
+    async fn text_mode_plain_output_has_no_ansi_escapes() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![
+            StreamEvent::Text("hello **world**\n".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let options = PrintOptions {
+            print_tools: false,
+            use_ansi: false,
+        };
+        assert_eq!(
+            run(session, "test", OutputFormat::Text, options).await,
+            PrintExitCode::Success
+        );
+    }
+
+    #[tokio::test]
+    async fn text_mode_does_not_close_session() {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
@@ -438,26 +500,11 @@ mod tests {
             PrintOptions::default(),
         )
         .await;
-        assert_eq!(session.close_count(), 1);
+        assert_eq!(session.close_count(), 0);
     }
 
     #[tokio::test]
-    async fn text_mode_closes_session_on_error_stop_reason() {
-        use std::sync::Arc;
-        let session = Arc::new(MockSession::new("s"));
-        session.queue_turn(vec![StreamEvent::Done("error".into())]);
-        run(
-            Arc::clone(&session),
-            "test",
-            OutputFormat::Text,
-            PrintOptions::default(),
-        )
-        .await;
-        assert_eq!(session.close_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn json_mode_closes_session_on_completion() {
+    async fn json_mode_does_not_close_session() {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![
@@ -471,6 +518,30 @@ mod tests {
             PrintOptions::default(),
         )
         .await;
-        assert_eq!(session.close_count(), 1);
+        assert_eq!(session.close_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn auto_deny_subscribe_failure_returns_err() {
+        use std::io;
+        use testcontainers_modules::nats::Nats;
+        use testcontainers_modules::testcontainers::runners::AsyncRunner;
+
+        let container = Nats::default()
+            .start()
+            .await
+            .expect("NATS container failed — is Docker running?");
+        let port = container.get_host_port_ipv4(4222).await.unwrap();
+        let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+            .await
+            .expect("connect to NATS");
+
+        let injected = io::Error::other("injected subscribe failure");
+        let result = super::spawn_auto_deny_permissions_inner(nats, Err(injected)).await;
+
+        assert!(
+            result.is_err(),
+            "subscribe failure must return Err instead of silently spawning a no-op responder"
+        );
     }
 }

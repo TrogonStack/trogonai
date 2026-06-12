@@ -6,7 +6,7 @@ use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_xai_runner::{
-    AgentLoader, NatsSessionNotifier, NatsSessionStore, SkillLoader, XaiAgent,
+    AgentLoader, NatsSessionNotifier, SkillLoader, XaiAgent, open_default_session_store,
 };
 
 #[tokio::main]
@@ -86,7 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .collect();
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+        capabilities: trogon_registry::RunnerCapability::to_strings(
+            trogon_registry::expected_runner_capabilities("xai").expect("xai capabilities"),
+        ),
         nats_subject: format!("{}.agent.>", prefix),
         current_load: 0,
         metadata: serde_json::json!({ "acp_prefix": &prefix, "models": model_ids }),
@@ -106,19 +108,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    let spawn_api_key = api_key.clone();
-    let spawn_model = default_model.clone();
-    let spawn_prefix = prefix.clone();
-
     let nats_config = acp_nats::NatsConfig { servers: vec![nats_url.clone()], auth: acp_nats::NatsAuth::None };
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
+    let proxy_url =
+        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
+    let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
+    let classifier_http = reqwest::Client::new();
+    let safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
+        classifier_http,
+        &proxy_url,
+        anthropic_base_url.as_deref(),
+        anthropic_token,
+    );
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
         .with_execution_backend(nats.clone(), registry_for_agent)
         .with_compactor(nats.clone())
         .with_permissions(nats.clone(), acp_prefix.clone())
-        .with_runner_config(runner_config);
+        .with_runner_config(runner_config)
+        .with_safety_classifier(safety_classifier);
 
     // If AGENT_ID is set, attach console skill loaders so skills defined in
     // trogon-console are injected into every new session's system prompt.
@@ -138,29 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        match NatsSessionStore::open(&js, session_ttl_secs).await {
-            Ok(store) => {
-                info!("xai: session persistence enabled");
-                agent = agent.with_session_store(Arc::new(store));
-            }
-            Err(e) => {
-                warn!(error = %e, "xai: failed to open SESSIONS KV bucket — session persistence disabled");
-            }
-        }
-    }
-
-    {
-        use trogon_xai_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
-        let base_url = std::env::var("XAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-        tokio::spawn(run_spawn_subscriber(
-            nats.clone(),
-            spawn_prefix,
-            spawn_api_key,
-            spawn_model,
-            base_url,
-            Arc::new(ReqwestSpawnClient),
-        ));
+        agent = agent.with_default_session_store(
+            open_default_session_store(&js, session_ttl_secs).await,
+        );
     }
 
     let local = tokio::task::LocalSet::new();

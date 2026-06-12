@@ -35,7 +35,7 @@ struct CreateRubricRequest {
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 pub async fn serve(
     port: u16,
     rubric_store: async_nats::jetstream::kv::Store,

@@ -50,7 +50,7 @@ struct AppState<J, R> {
 /// - `GET  /health`  — liveness probe
 /// - `GET  /incidents` — list all stored incidents
 /// - `GET  /incidents/:id` — get a single stored incident
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, coverage(off))]
 pub async fn serve(
     config: IncidentioConfig,
     nats: async_nats::Client,

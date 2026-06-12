@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -11,7 +13,8 @@ pub mod types;
 pub mod web;
 
 pub use types::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
+    ToolOutput, ToolResult,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +33,55 @@ pub struct ToolContext {
     pub cwd: String,
     /// Reusable HTTP client for web tools.
     pub http_client: reqwest::Client,
+    /// API key for the portable `web_search` backend (Serper by default).
+    /// Falls back to `WEB_SEARCH_API_KEY` or `SERPER_API_KEY` when unset.
+    pub web_search_api_key: Option<String>,
+    /// Override for the search API endpoint (default: Serper `https://google.serper.dev/search`).
+    /// Falls back to `WEB_SEARCH_ENDPOINT` when unset.
+    pub web_search_endpoint: Option<String>,
+}
+
+/// Load portable web-search credentials from the environment.
+pub fn web_search_config_from_env() -> (Option<String>, Option<String>) {
+    let api_key = std::env::var("WEB_SEARCH_API_KEY")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("SERPER_API_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        });
+    let endpoint = std::env::var("WEB_SEARCH_ENDPOINT")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    (api_key, endpoint)
+}
+
+impl ToolContext {
+    pub fn new(
+        proxy_url: impl Into<String>,
+        cwd: impl Into<String>,
+        http_client: reqwest::Client,
+    ) -> Self {
+        let (web_search_api_key, web_search_endpoint) = web_search_config_from_env();
+        Self {
+            proxy_url: proxy_url.into(),
+            cwd: cwd.into(),
+            http_client,
+            web_search_api_key,
+            web_search_endpoint,
+        }
+    }
+
+    pub fn with_cwd(&self, cwd: impl Into<String>) -> Self {
+        Self {
+            proxy_url: self.proxy_url.clone(),
+            cwd: cwd.into(),
+            http_client: self.http_client.clone(),
+            web_search_api_key: self.web_search_api_key.clone(),
+            web_search_endpoint: self.web_search_endpoint.clone(),
+        }
+    }
 }
 
 pub fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
@@ -116,15 +168,40 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             "str_replace",
-            "Replace an exact string in a file. The old_str must appear exactly once — if it appears 0 or more than once, the edit is rejected. Returns a diff of the changes.",
+            "Replace an exact string in a file. By default old_str must appear exactly once — if it appears 0 or more than once, the edit is rejected unless replace_all is true. Returns a diff of the changes.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path":    { "type": "string", "description": "Path to the file, relative to the working directory" },
-                    "old_str": { "type": "string", "description": "Exact string to replace — must appear exactly once in the file" },
-                    "new_str": { "type": "string", "description": "String to replace it with" }
+                    "path":         { "type": "string",  "description": "Path to the file, relative to the working directory" },
+                    "old_str":      { "type": "string",  "description": "Exact string to replace — must appear exactly once unless replace_all is true" },
+                    "new_str":      { "type": "string",  "description": "String to replace it with" },
+                    "replace_all":  { "type": "boolean", "description": "If true, replace every occurrence of old_str (default: false)" }
                 },
                 "required": ["path", "old_str", "new_str"]
+            }),
+        ),
+        tool_def(
+            "multi_edit",
+            "Apply multiple string replacements to the same file in one call. Edits are applied sequentially to the result of the previous edit. If any edit fails, the whole batch fails atomically and the file is left unchanged. Returns a diff of the changes.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path":  { "type": "string", "description": "Path to the file, relative to the working directory" },
+                    "edits": {
+                        "type": "array",
+                        "description": "Edits to apply in order",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_str":     { "type": "string",  "description": "Exact string to replace" },
+                                "new_str":     { "type": "string",  "description": "String to replace it with" },
+                                "replace_all": { "type": "boolean", "description": "If true, replace every occurrence of old_str in the current content (default: false)" }
+                            },
+                            "required": ["old_str", "new_str"]
+                        }
+                    }
+                },
+                "required": ["path", "edits"]
             }),
         ),
         tool_def(
@@ -212,26 +289,40 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
-            "notebook_edit",
-            "Edit a cell in a Jupyter notebook (.ipynb file) by index.",
+            "web_search",
+            "Search the public web for up-to-date information. Returns a list of results with title, URL, and snippet. Requires WEB_SEARCH_API_KEY (Serper) to be configured on the runner.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path":       { "type": "string",  "description": "Path to the .ipynb file, relative to the working directory" },
-                    "cell_index": { "type": "integer", "description": "Zero-based index of the cell to edit" },
-                    "content":    { "type": "string",  "description": "New content for the cell" },
-                    "cell_type":  { "type": "string",  "description": "Cell type: 'code' or 'markdown' (optional, keeps existing type if omitted)" }
+                    "query": { "type": "string", "description": "Search query" },
+                    "num_results": { "type": "integer", "description": "Maximum number of results to return (default: 10, max: 20)" }
                 },
-                "required": ["path", "cell_index", "content"]
+                "required": ["query"]
+            }),
+        ),
+        tool_def(
+            "notebook_edit",
+            "Edit, insert, or delete a cell in a Jupyter notebook (.ipynb file) by index.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path":        { "type": "string",  "description": "Path to the .ipynb file, relative to the working directory" },
+                    "cell_index":  { "type": "integer", "description": "Zero-based index of the target cell (for insert, the new cell is inserted before this index; use len(cells) to append)" },
+                    "content":     { "type": "string",  "description": "Cell source content (required for replace and insert, omitted for delete)" },
+                    "cell_type":   { "type": "string",  "description": "Cell type: 'code' or 'markdown' (required for insert; optional for replace, keeps existing type if omitted)" },
+                    "edit_mode":   { "type": "string",  "description": "Operation mode: 'replace' (default), 'insert' (add a new cell before cell_index), or 'delete'" },
+                    "is_new_cell": { "type": "boolean", "description": "If true, insert a new cell before cell_index (equivalent to edit_mode: 'insert')" }
+                },
+                "required": ["path", "cell_index"]
             }),
         ),
         tool_def(
             "search_files",
-            "Search for a literal string pattern across files in the working directory. Respects .gitignore. Returns matching lines with file:line format, truncated at 100 matches.",
+            "Search for a regular expression pattern across files in the working directory. Respects .gitignore. Returns matching lines with file:line format, truncated at 100 matches.",
             json!({
                 "type": "object",
                 "properties": {
-                    "pattern":          { "type": "string",  "description": "Literal string to search for" },
+                    "pattern":          { "type": "string",  "description": "Regular expression pattern (Rust regex syntax)" },
                     "path":             { "type": "string",  "description": "Directory to search in, relative to working directory (default: '.')" },
                     "case_insensitive": { "type": "boolean", "description": "If true, search is case-insensitive (default: false)" }
                 },
@@ -240,15 +331,27 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             "todo_write",
-            "Create or update a todo item. Status must be 'pending', 'in_progress', or 'completed'.",
+            "Create or update todo item(s). Pass id/content/status for a single upsert, or todos[] to replace the full session list in one call. Status must be 'pending', 'in_progress', or 'completed'.",
             json!({
                 "type": "object",
                 "properties": {
-                    "id":      { "type": "string", "description": "Unique identifier for the todo" },
-                    "content": { "type": "string", "description": "Description of the task" },
-                    "status":  { "type": "string", "description": "One of: pending, in_progress, completed" }
-                },
-                "required": ["id", "content", "status"]
+                    "id":      { "type": "string", "description": "Unique identifier for the todo (single-item write)" },
+                    "content": { "type": "string", "description": "Description of the task (single-item write)" },
+                    "status":  { "type": "string", "description": "One of: pending, in_progress, completed (single-item write)" },
+                    "todos": {
+                        "type": "array",
+                        "description": "Batch write: replaces the session todo list with these items",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id":      { "type": "string", "description": "Unique identifier for the todo" },
+                                "content": { "type": "string", "description": "Description of the task" },
+                                "status":  { "type": "string", "description": "One of: pending, in_progress, completed" }
+                            },
+                            "required": ["id", "content", "status"]
+                        }
+                    }
+                }
             }),
         ),
         tool_def(
@@ -302,38 +405,43 @@ pub fn exit_plan_mode_tool_def() -> ToolDef {
     )
 }
 
-pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> String {
+pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> ToolOutput {
     match name {
         "read_file"        => fs::read_file(ctx, input).await,
-        "write_file"       => fs::write_file(ctx, input).await,
-        "delete_file"      => fs::delete_file(ctx, input).await,
-        "list_dir"         => fs::list_dir(ctx, input).await,
-        "glob"             => fs::glob_files(ctx, input).await,
-        "str_replace"      => editor::str_replace(ctx, input).await,
-        "git_status"       => git::status(ctx, input).await,
-        "git_diff"         => git::diff(ctx, input).await,
-        "git_log"          => git::log(ctx, input).await,
-        "git_commit"       => git::commit(ctx, input).await,
-        "git_create_branch" => git::create_branch(ctx, input).await,
-        "git_push"         => git::push(ctx, input).await,
-        "gh"               => github::gh(ctx, input).await,
-        "fetch_url"        => web::fetch_url(ctx, input).await,
-        "notebook_edit"    => fs::notebook_edit(ctx, input).await,
-        "search_files"     => search::search_files(ctx, input).await,
-        "todo_write"       => todo::todo_write(ctx, input).await,
-        "todo_read"        => todo::todo_read(ctx, input).await,
+        "write_file"       => ToolOutput::Text(fs::write_file(ctx, input).await),
+        "delete_file"      => ToolOutput::Text(fs::delete_file(ctx, input).await),
+        "list_dir"         => ToolOutput::Text(fs::list_dir(ctx, input).await),
+        "glob"             => ToolOutput::Text(fs::glob_files(ctx, input).await),
+        "str_replace"      => ToolOutput::Text(editor::str_replace(ctx, input).await),
+        "multi_edit"       => ToolOutput::Text(editor::multi_edit(ctx, input).await),
+        "git_status"       => ToolOutput::Text(git::status(ctx, input).await),
+        "git_diff"         => ToolOutput::Text(git::diff(ctx, input).await),
+        "git_log"          => ToolOutput::Text(git::log(ctx, input).await),
+        "git_commit"       => ToolOutput::Text(git::commit(ctx, input).await),
+        "git_create_branch" => ToolOutput::Text(git::create_branch(ctx, input).await),
+        "git_push"         => ToolOutput::Text(git::push(ctx, input).await),
+        "gh"               => ToolOutput::Text(github::gh(ctx, input).await),
+        "fetch_url"        => ToolOutput::Text(web::fetch_url(ctx, input).await),
+        "web_search"       => ToolOutput::Text(web::web_search(ctx, input).await),
+        "notebook_edit"    => ToolOutput::Text(fs::notebook_edit(ctx, input).await),
+        "search_files"     => ToolOutput::Text(search::search_files(ctx, input).await),
+        "todo_write"       => ToolOutput::Text(todo::todo_write(ctx, input).await),
+        "todo_read"        => ToolOutput::Text(todo::todo_read(ctx, input).await),
         // Reached only when the user approved leaving plan mode (a denial / "keep
         // planning" never dispatches). The actual mode switch is applied by the
         // runner from the exit-plan dialog selection.
-        "ExitPlanMode"     => "Plan approved by the user. Plan mode is now exited; proceed with the approved plan.".to_string(),
+        "ExitPlanMode" => ToolOutput::Text(
+            "Plan approved by the user. Plan mode is now exited; proceed with the approved plan."
+                .to_string(),
+        ),
         "change_directory" => {
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            match fs::resolve_directory_target(&ctx.cwd, path) {
+            ToolOutput::Text(match fs::resolve_directory_target(&ctx.cwd, path) {
                 Ok(resolved) => format!("Working directory is now {}", resolved.display()),
                 Err(e) => e,
-            }
+            })
         }
-        _ => format!("Unknown tool: {name}"),
+        _ => ToolOutput::Text(format!("Unknown tool: {name}")),
     }
 }
 
@@ -341,6 +449,10 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn out_text(output: ToolOutput) -> String {
+        output.display_text()
+    }
 
     fn test_ctx() -> ToolContext {
         ToolContext {
@@ -350,6 +462,8 @@ mod tests {
                 .to_string_lossy()
                 .to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }
     }
 
@@ -397,10 +511,73 @@ mod tests {
         assert!(names.contains(&"todo_read"), "missing todo_read, got: {names:?}");
     }
 
+    #[test]
+    fn all_tool_defs_contains_web_search() {
+        let defs = all_tool_defs();
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"web_search"), "missing web_search, got: {names:?}");
+    }
+
+    #[test]
+    fn all_tool_defs_str_replace_has_replace_all_param() {
+        let def = all_tool_defs()
+            .into_iter()
+            .find(|d| d.name == "str_replace")
+            .expect("str_replace must be in all_tool_defs");
+        assert!(
+            def.input_schema["properties"].get("replace_all").is_some(),
+            "str_replace schema must include replace_all"
+        );
+    }
+
+    #[test]
+    fn all_tool_defs_contains_multi_edit() {
+        let def = all_tool_defs()
+            .into_iter()
+            .find(|d| d.name == "multi_edit")
+            .expect("multi_edit must be in all_tool_defs");
+        assert!(
+            def.input_schema["properties"].get("edits").is_some(),
+            "multi_edit schema must include edits array"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_web_search_missing_config_returns_error() {
+        let ctx = test_ctx();
+        let result = out_text(dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await);
+        assert!(result.contains("not configured"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_web_search_to_web() {
+        use httpmock::prelude::*;
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/search");
+            then.status(200).json_body(json!({
+                "organic": [{
+                    "title": "Dispatch Test",
+                    "link": "https://example.com/dispatch",
+                    "snippet": "via dispatch_tool"
+                }]
+            }));
+        });
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: Some("test-key".to_string()),
+            web_search_endpoint: Some(server.url("/search")),
+        };
+        let result = out_text(dispatch_tool(&ctx, "web_search", &json!({"query": "test"})).await);
+        assert!(result.contains("Dispatch Test"), "got: {result}");
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "nonexistent_tool", &json!({})).await);
         assert!(result.contains("Unknown tool"));
     }
 
@@ -413,8 +590,10 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "read_file", &json!({"path": "hi.txt"})).await;
+        let result = out_text(dispatch_tool(&ctx, "read_file", &json!({"path": "hi.txt"})).await);
         assert!(result.contains("hello"), "got: {result}");
     }
 
@@ -426,8 +605,12 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await;
+        let result = out_text(
+            dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await,
+        );
         assert_eq!(result, "OK");
         let content = tokio::fs::read_to_string(dir.path().join("out.txt")).await.unwrap();
         assert_eq!(content, "data");
@@ -442,8 +625,10 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "list_dir", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "list_dir", &json!({})).await);
         assert!(result.contains("a.rs"), "got: {result}");
     }
 
@@ -456,8 +641,10 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "glob", &json!({"pattern": "*.rs"})).await;
+        let result = out_text(dispatch_tool(&ctx, "glob", &json!({"pattern": "*.rs"})).await);
         assert!(result.contains("foo.rs"), "got: {result}");
     }
 
@@ -470,38 +657,103 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "str_replace", &json!({"path": "f.txt", "old_str": "aaa", "new_str": "zzz"})).await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "str_replace",
+                &json!({"path": "f.txt", "old_str": "aaa", "new_str": "zzz"}),
+            )
+            .await,
+        );
         assert!(!result.starts_with("Error"), "got: {result}");
         let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
         assert!(content.contains("zzz"));
     }
 
     #[tokio::test]
+    async fn dispatch_str_replace_replace_all_via_dispatch_tool() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.txt"), "x\nx\n").await.unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
+        };
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "str_replace",
+                &json!({"path": "f.txt", "old_str": "x", "new_str": "y", "replace_all": true}),
+            )
+            .await,
+        );
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
+        assert_eq!(content, "y\ny\n");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_multi_edit_to_editor() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.txt"), "one two\n").await.unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
+        };
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "multi_edit",
+                &json!({
+                    "path": "f.txt",
+                    "edits": [
+                        {"old_str": "one", "new_str": "1"},
+                        {"old_str": "two", "new_str": "2"}
+                    ]
+                }),
+            )
+            .await,
+        );
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
+        assert_eq!(content, "1 2\n");
+    }
+
+    #[tokio::test]
     async fn dispatch_routes_git_status_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_status", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_status", &json!({})).await);
         assert!(!result.starts_with("Error running git"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_routes_git_diff_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_diff", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_diff", &json!({})).await);
         assert!(!result.starts_with("Error running git"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_routes_git_log_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_log", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_log", &json!({})).await);
         assert!(!result.starts_with("Error running git"), "got: {result}");
     }
 
     #[tokio::test]
     async fn dispatch_routes_git_commit_to_git() {
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "git_commit", &json!({"message": "test"})).await;
+        let result = out_text(dispatch_tool(&ctx, "git_commit", &json!({"message": "test"})).await);
         assert!(!result.contains("Unknown tool"), "got: {result}");
     }
 
@@ -517,8 +769,12 @@ mod tests {
             proxy_url: String::new(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await;
+        let result = out_text(
+            dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await,
+        );
         assert!(result.contains("dispatched"), "got: {result}");
     }
 
@@ -528,7 +784,7 @@ mod tests {
         // asserts only that the name routes to the github module — not "Unknown
         // tool". Argv parsing is covered by github.rs's own tests.
         let ctx = test_ctx();
-        let result = dispatch_tool(&ctx, "gh", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "gh", &json!({})).await);
         assert!(!result.contains("Unknown tool"), "gh not routed: {result}");
         assert!(result.starts_with("Error:"), "expected parse error, got: {result}");
     }
@@ -546,8 +802,17 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "notebook_edit", &json!({"path": "nb.ipynb", "cell_index": 0, "content": "new"})).await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "notebook_edit",
+                &json!({"path": "nb.ipynb", "cell_index": 0, "content": "new"}),
+            )
+            .await,
+        );
         assert_eq!(result, "OK");
     }
 
@@ -559,13 +824,17 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(
-            &ctx,
-            "todo_write",
-            &json!({"id": "t1", "content": "do stuff", "status": "pending"}),
-        )
-        .await;
+        let result = out_text(
+            dispatch_tool(
+                &ctx,
+                "todo_write",
+                &json!({"id": "t1", "content": "do stuff", "status": "pending"}),
+            )
+            .await,
+        );
         assert_eq!(result, "OK");
     }
 
@@ -577,6 +846,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         dispatch_tool(
             &ctx,
@@ -584,7 +855,7 @@ mod tests {
             &json!({"id": "t1", "content": "pending task", "status": "pending"}),
         )
         .await;
-        let result = dispatch_tool(&ctx, "todo_read", &json!({})).await;
+        let result = out_text(dispatch_tool(&ctx, "todo_read", &json!({})).await);
         assert!(result.contains("t1"), "got: {result}");
     }
 
@@ -598,8 +869,10 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
-        let result = dispatch_tool(&ctx, "search_files", &json!({"pattern": "needle"})).await;
+        let result = out_text(dispatch_tool(&ctx, "search_files", &json!({"pattern": "needle"})).await);
         assert!(result.contains("foo.rs"), "got: {result}");
     }
 }
