@@ -18,6 +18,48 @@ The conversation history may have been produced by a different AI model. Ignore 
 statements in the history about being a specific named model or assistant (for example \
 \"I'm Claude\"); do not adopt or continue that persona. Simply continue helping the user as yourself.";
 
+/// Provider-specific session keys that `session/export` does not carry across runners.
+const NON_TRANSFERABLE_PROVIDER_KEYS: &[&str] =
+    &["thread_id", "last_response_id", "previous_response_id"];
+
+/// Returns `true` when `json` (export payload and/or `session/get_state` body) contains a
+/// non-empty provider-opaque identifier that cannot be imported into another runner.
+pub fn should_warn_on_non_transferable_context(json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return false;
+    };
+    json_value_has_non_transferable_provider_context(&value)
+}
+
+fn json_value_has_non_transferable_provider_context(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in NON_TRANSFERABLE_PROVIDER_KEYS {
+                if let Some(v) = map.get(*key)
+                    && non_empty_string(v)
+                {
+                    return true;
+                }
+            }
+            map.values().any(json_value_has_non_transferable_provider_context)
+        }
+        serde_json::Value::Array(items) => items.iter().any(json_value_has_non_transferable_provider_context),
+        _ => false,
+    }
+}
+
+fn non_empty_string(value: &serde_json::Value) -> bool {
+    value.as_str().is_some_and(|s| !s.is_empty())
+}
+
+fn emit_non_transferable_context_warning(model_id: &str) {
+    eprintln!(
+        "warning: switching to {model_id} — provider-specific context \
+         (previous_response_id/thread_id) is not transferable; the new runner starts from \
+         the portable message history only"
+    );
+}
+
 /// Build the `_meta` for the target runner's `new_session` so the imported
 /// history doesn't make it impersonate the source model. Both the Claude runner
 /// and the xAI/OpenRouter runners honor `_meta.systemPrompt`.
@@ -115,6 +157,31 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 .map_err(|e| e.to_string())?
                 .0
         };
+
+        // 3b. Best-effort: read source session state. Export carries portable
+        // messages only — provider-opaque ids (Codex thread_id, xAI last_response_id)
+        // are omitted, so warn when they are present on the source runner.
+        let get_state_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": current_session_id }).to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+        let source_state_json = {
+            let (bridge, _) = self.bridges.get(current_prefix).unwrap();
+            match bridge
+                .ext_method(ExtRequest::new("session/get_state", get_state_params.into()))
+                .await
+            {
+                Ok(resp) => Some(resp.0.get().to_string()),
+                Err(_) => None,
+            }
+        };
+        if should_warn_on_non_transferable_context(messages_json.get())
+            || source_state_json
+                .as_deref()
+                .is_some_and(should_warn_on_non_transferable_context)
+        {
+            emit_non_transferable_context_warning(model_id);
+        }
 
         // 4. Open new session on target runner (same workspace path). Inject a
         // neutral system prompt so imported history from the source model doesn't
@@ -240,6 +307,42 @@ pub mod mock {
 mod tests {
     use super::*;
     use acp_nats::AcpPrefix;
+
+    #[test]
+    fn should_warn_when_export_embeds_thread_id() {
+        let export = r#"{"messages":[{"role":"user","text":"hi"}],"thread_id":"t-abc"}"#;
+        assert!(should_warn_on_non_transferable_context(export));
+    }
+
+    #[test]
+    fn should_warn_when_session_state_has_last_response_id() {
+        let state = r#"{"cwd":"/ws","last_response_id":"resp-123","history":[]}"#;
+        assert!(should_warn_on_non_transferable_context(state));
+    }
+
+    #[test]
+    fn should_warn_when_session_state_has_previous_response_id() {
+        let state = r#"{"previous_response_id":"resp-456"}"#;
+        assert!(should_warn_on_non_transferable_context(state));
+    }
+
+    #[test]
+    fn should_not_warn_for_portable_message_array_only() {
+        let export = r#"[{"role":"user","text":"hello"},{"role":"assistant","text":"hi"}]"#;
+        assert!(!should_warn_on_non_transferable_context(export));
+    }
+
+    #[test]
+    fn should_not_warn_when_provider_keys_are_empty_or_null() {
+        assert!(!should_warn_on_non_transferable_context(
+            r#"{"thread_id":"","last_response_id":null}"#
+        ));
+    }
+
+    #[test]
+    fn should_not_warn_for_invalid_json() {
+        assert!(!should_warn_on_non_transferable_context("not-json"));
+    }
 
     #[test]
     fn import_session_meta_carries_identity_reset_prompt() {

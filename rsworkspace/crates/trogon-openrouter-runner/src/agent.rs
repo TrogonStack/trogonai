@@ -124,6 +124,7 @@ const VALID_MODES: &[&str] = &[
     "default",
     "acceptEdits",
     "plan",
+    "auto",
     "dontAsk",
     "bypassPermissions",
 ];
@@ -270,6 +271,13 @@ struct OpenRouterSession {
     /// Nesting depth of this session within a spawn_agent chain. 0 = top-level.
     #[serde(default)]
     spawn_depth: u32,
+    /// Restrictive subagent tool allowlist (empty = no restriction).
+    #[serde(default)]
+    tool_allowlist: Vec<String>,
+    /// Extra environment variables applied to the session's bash terminal, from
+    /// settings.json `env` (received via `_meta.env` at session creation). CFG-2.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    env: std::collections::HashMap<String, String>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -313,6 +321,8 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     /// NATS/ACP config used to create a `Bridge` for sub-sessions when `spawn_agent` is invoked.
     /// Set via [`OpenRouterAgent::with_runner_config`]. `None` disables spawn_agent.
     runner_config: Option<acp_nats::Config>,
+    /// `auto`-mode LLM safety classifier for side-effecting tool calls.
+    classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
     /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
@@ -440,6 +450,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             permission_nats: None,
             permission_prefix: None,
             runner_config: None,
+            classifier: None,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -479,6 +490,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
             runner_config: self.runner_config,
+            classifier: self.classifier,
             session_locks: self.session_locks,
         }
     }
@@ -563,6 +575,15 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     /// Without this, `spawn_agent` returns an error.
     pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
         self.runner_config = Some(config);
+        self
+    }
+
+    /// Set the `auto`-mode LLM safety classifier.
+    pub fn with_safety_classifier(
+        mut self,
+        classifier: Arc<dyn trogon_runner_tools::SafetyClassifier>,
+    ) -> Self {
+        self.classifier = Some(classifier);
         self
     }
 
@@ -725,6 +746,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
                 SessionMode::new("default", "Default"),
                 SessionMode::new("acceptEdits", "Accept Edits"),
                 SessionMode::new("plan", "Plan"),
+                SessionMode::new("auto", "Auto"),
                 SessionMode::new("dontAsk", "Don't Ask"),
                 SessionMode::new("bypassPermissions", "Bypass Permissions"),
             ],
@@ -790,6 +812,7 @@ fn openrouter_history_to_wire(history: &[Message]) -> Vec<WireMessage> {
                     content: vec![WireContentBlock::ToolResult {
                         tool_use_id: m.tool_call_id.clone().unwrap_or_default(),
                         content: m.content.clone(),
+                        blocks: vec![],
                     }],
                 }
             } else if let Some(calls) = &m.tool_calls {
@@ -843,6 +866,7 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
                 WireContentBlock::ToolResult {
                     tool_use_id,
                     content,
+                    ..
                 } => Some(Message::tool_result(tool_use_id, content)),
                 _ => None,
             })
@@ -865,6 +889,7 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
             WireContentBlock::ToolResult {
                 tool_use_id,
                 content,
+                ..
             } => {
                 // MED-19: don't early-return here — that discarded any text and
                 // tool_calls accumulated before this block in a mixed-content
@@ -908,7 +933,7 @@ async fn compact_or_trim_openrouter_history(
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = openrouter_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", model, compactor_model).await {
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, false, "openrouter", model, compactor_model).await {
             *history = openrouter_history_from_wire(compacted);
             return;
         }
@@ -1077,6 +1102,24 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: session_model_override,
+                tool_allowlist: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("toolAllowlist"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default(),
+                env: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("env"))
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
@@ -1099,7 +1142,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 session_mode,
                 permission_rules,
                 audit_log: Vec::new(),
-                permission_rules_text: None,
+                permission_rules_text: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("permissionRules"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
                 spawn_depth: 0,
             },
         );
@@ -1196,11 +1244,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterSession {
                         cwd,
                         model,
+                        env: std::collections::HashMap::new(),
                         compactor_model,
                         api_key,
                         history,
                         system_prompt,
                         enabled_tools: enabled_tools.clone(),
+                        tool_allowlist: Vec::new(),
                         created_at: Instant::now(),
                         last_used_at: Instant::now(),
                         created_at_iso,
@@ -1314,6 +1364,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: inherited_model.clone(),
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,
@@ -1376,21 +1428,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             store.save(&snapshot).await;
         }
         // Release persistent bash terminal if one was created for this session.
-        if let Some(s) = sessions.get(&session_id) {
-            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+        if let Some(s) = sessions.get(&session_id)
+            && let (Some(tid), Some(wasm_prefix), Some(nats)) = (
                 s.terminal_id.clone(),
                 s.terminal_wasm_prefix.clone(),
                 &self.execution_nats,
+            )
+        {
+            let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+            if let Ok(payload) = serde_json::to_vec(
+                &agent_client_protocol::ReleaseTerminalRequest::new(
+                    session_id.clone(),
+                    tid,
+                ),
             ) {
-                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-                if let Ok(payload) = serde_json::to_vec(
-                    &agent_client_protocol::ReleaseTerminalRequest::new(
-                        session_id.clone(),
-                        tid,
-                    ),
-                ) {
-                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
-                }
+                let _ = nats.request(format!("{base}.release"), payload.into()).await;
             }
         }
         sessions.remove(&session_id);
@@ -1631,6 +1683,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             mut messages,
             session_system_prompt,
             enabled_tools,
+            tool_allowlist,
             mut cwd,
             mut terminal_id,
             session_mode,
@@ -1638,6 +1691,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             session_mcp_servers,
             _permission_rules,
             permission_rules_text,
+            session_env,
         ) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
@@ -1652,6 +1706,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.history.clone(),
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
+                s.tool_allowlist.clone(),
                 s.cwd.clone(),
                 s.terminal_id.clone(),
                 s.mode.clone(),
@@ -1659,16 +1714,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.mcp_servers.clone(),
                 s.permission_rules.clone(),
                 s.permission_rules_text.clone(),
+                s.env.clone(),
             )
         };
+        let offered_tools =
+            trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer, drained into session_audit after the turn.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
 
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
             let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
+            let completion_guidance = trogon_runner_tools::COMPLETION_GUIDANCE;
             let header = format!(
-                "Current working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
+                "Current working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}\n\n{completion_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
@@ -1707,7 +1766,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         let mut tool_defs: Vec<ToolDef> = trogon_tools::all_tool_defs()
             .into_iter()
-            .filter(|d| enabled_tools.contains(&d.name))
+            .filter(|d| offered_tools.contains(&d.name))
             .map(|d| ToolDef {
                 name: d.name,
                 description: d.description,
@@ -1715,7 +1774,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             })
             .collect();
 
-        if wasm_prefix.is_some() {
+        if wasm_prefix.is_some() && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "bash") {
             tool_defs.push(ToolDef {
                 name: "bash".to_string(),
                 description: "Run a shell command in the session sandbox and return its output.".to_string(),
@@ -1734,7 +1793,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         // Advertise spawn_agent when a runner_config is set (delegate a subtask to an
         // isolated sub-agent running a full tool-use loop in its own git worktree).
-        if self.runner_config.is_some() {
+        if self.runner_config.is_some()
+            && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "spawn_agent")
+        {
             tool_defs.push(ToolDef {
                 name: "spawn_agent".to_string(),
                 description: "Spawn a specialised sub-agent and return its output. The \
@@ -1745,16 +1806,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Name of a custom sub-agent defined in .claude/agents/. Its tools allowlist and instructions are enforced. Omit for a generic sub-agent."
+                        },
                         "capability": {
                             "type": "string",
-                            "description": "Agent capability to use, e.g. 'explore' or 'plan'"
+                            "description": "Generic capability when no named agent is given, e.g. 'explore' or 'plan'"
                         },
                         "prompt": {
                             "type": "string",
                             "description": "The task or question to send to the sub-agent"
                         }
                     },
-                    "required": ["capability", "prompt"]
+                    "required": ["prompt"]
                 }),
             });
         }
@@ -1806,7 +1871,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = openrouter_history_to_wire(&messages);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", &resolved_model, compactor_model.as_deref()).await {
+            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, false, "openrouter", &resolved_model, compactor_model.as_deref()).await {
                 messages = openrouter_history_from_wire(compacted);
                 // Intentionally not writing back to s.history here: the post-turn path
                 // assigns the full messages (including new response) to s.history and
@@ -1844,6 +1909,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let mut prompt_output_total: u64 = 0;
         let mut prompt_cache_read_total: u64 = 0;
         let mut prompt_cache_creation_total: u64 = 0;
+        // Auto-summary guarantee: nudged the model once for a recap after a
+        // silent (tools-ran, no-text) turn, so we nudge at most once.
+        let mut auto_summary_done = false;
 
         let stop_reason = 'outer: loop {
             assistant_text.clear();
@@ -1944,6 +2012,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         // trailing [DONE]).
                         if finished {
                             drop(stream);
+                            // Auto-summary guarantee: ran tools but produced no
+                            // text → nudge once for a recap, then loop again.
+                            if tool_rounds > 0
+                                && assistant_text.trim().is_empty()
+                                && !auto_summary_done
+                            {
+                                auto_summary_done = true;
+                                let nudge =
+                                    Message::user(trogon_runner_tools::AUTO_SUMMARY_NUDGE);
+                                messages.push(nudge.clone());
+                                wire_messages.push(nudge);
+                                info!(session_id, "openrouter: silent after tools — requesting recap");
+                                continue 'outer;
+                            }
                             break 'outer StopReason::EndTurn;
                         }
                     }
@@ -1958,6 +2040,18 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterEvent::Finished { .. } => {}
                     OpenRouterEvent::Done => {
                         drop(stream);
+                        // Auto-summary guarantee (see above): silent after tools → recap.
+                        if tool_rounds > 0
+                            && assistant_text.trim().is_empty()
+                            && !auto_summary_done
+                        {
+                            auto_summary_done = true;
+                            let nudge = Message::user(trogon_runner_tools::AUTO_SUMMARY_NUDGE);
+                            messages.push(nudge.clone());
+                            wire_messages.push(nudge);
+                            info!(session_id, "openrouter: silent after tools — requesting recap");
+                            continue 'outer;
+                        }
                         break 'outer StopReason::EndTurn;
                     }
                     OpenRouterEvent::Error { message } => {
@@ -1986,11 +2080,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             messages.push(tool_calls_msg.clone());
             wire_messages.push(tool_calls_msg);
 
-            let ctx = trogon_tools::ToolContext {
-                proxy_url: String::new(),
-                cwd: cwd.clone(),
-                http_client: self.tool_http_client.clone(),
-            };
+            let ctx = trogon_tools::ToolContext::new(
+                String::new(),
+                cwd.clone(),
+                self.tool_http_client.clone(),
+            );
 
             for call in &assembled_calls {
                 let kind = if call.name == "bash" { ToolKind::Execute } else { ToolKind::Other };
@@ -2038,6 +2132,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         rules.merge(PermissionRules::parse(extra));
                     }
                     let allowed_tools = self.permission_store.allowed_tools(&session_id);
+                    let extras = trogon_runner_tools::PermissionExtras {
+                        classifier: self.classifier.clone(),
+                        ..Default::default()
+                    };
                     check_tool_permission(
                         &session_mode,
                         &session_id,
@@ -2049,6 +2147,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         &call.name,
                         &tool_input,
                         audit_buf.clone(),
+                        extras,
                     )
                     .await
                 };
@@ -2099,15 +2198,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         }
                     } else if let Some(nats) = &self.execution_nats {
                         let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                        let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &call.arguments).await;
+                        let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &session_env, &call.arguments).await;
                         // Persist terminal_id back to session if it was just created
                         if terminal_id.is_some() {
                             let mut sessions = self.sessions.lock().await;
-                            if let Some(s) = sessions.get_mut(&session_id) {
-                                if s.terminal_id.is_none() {
-                                    s.terminal_id = terminal_id.clone();
-                                    s.terminal_wasm_prefix = Some(wasm.to_string());
-                                }
+                            if let Some(s) = sessions.get_mut(&session_id)
+                                && s.terminal_id.is_none()
+                            {
+                                s.terminal_id = terminal_id.clone();
+                                s.terminal_wasm_prefix = Some(wasm.to_string());
                             }
                         }
                         result
@@ -2119,15 +2218,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                         format!("fetch_url: URL blocked by egress policy: {url}")
                     } else {
-                        trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
+                        trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await.display_text()
                     }
                 } else if call.name == "spawn_agent" {
                     let task = tool_input["prompt"].as_str().unwrap_or("").to_string();
-                    let (parent_cwd, depth, parent_mode) = {
+                    let (parent_cwd, depth, parent_mode, parent_allowed_tools) = {
                         let sessions = self.sessions.lock().await;
                         match sessions.get(&session_id) {
-                            Some(s) => (s.cwd.clone(), s.spawn_depth, s.mode.clone()),
-                            None => (cwd.clone(), 0, default_session_mode()),
+                            Some(s) => (
+                                s.cwd.clone(),
+                                s.spawn_depth,
+                                s.mode.clone(),
+                                self.permission_store.allowed_tools(&session_id),
+                            ),
+                            None => (cwd.clone(), 0, default_session_mode(), vec![]),
                         }
                     };
                     // Optional named custom subagent (.claude/agents/) → its system
@@ -2164,6 +2268,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             runner_cfg,
                             notif_tx,
                         );
+                        let spawn_ctx = trogon_runner_tools::spawn_session::SubSessionSpawnContext {
+                            tool_allowlist: subagent
+                                .as_ref()
+                                .map(|d| d.tools.clone())
+                                .unwrap_or_default(),
+                            allowed_tools: parent_allowed_tools,
+                            additional_read_dirs: Vec::new(),
+                            additional_roots: Vec::new(),
+                        };
                         match trogon_runner_tools::spawn_session::create_sub_session(
                             &bridge,
                             &sub_cwd,
@@ -2171,6 +2284,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             None,
                             subagent.as_ref().map(|d| d.system_prompt.as_str()),
                             subagent.as_ref().and_then(|d| d.model.as_deref()),
+                            Some(&spawn_ctx),
                         )
                         .await
                         {
@@ -2257,7 +2371,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         Err(e) => format!("MCP tool error: {e}"),
                     }
                 } else {
-                    trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
+                    trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await.display_text()
                 };
 
                 let update_status = if allowed { ToolCallStatus::Completed } else { ToolCallStatus::Failed };
@@ -2488,6 +2602,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     &wire,
                     token_budget,
                     threshold_pct,
+                    true,
                     "openrouter",
                     &resolved_model,
                     compactor_model.as_deref(),
@@ -2534,6 +2649,7 @@ async fn execute_bash_stateful(
     session_id: &str,
     terminal_id: &mut Option<String>,
     cwd: &str,
+    env: &std::collections::HashMap<String, String>,
     arguments: &str,
 ) -> String {
     use agent_client_protocol::{
@@ -2557,8 +2673,14 @@ async fn execute_bash_stateful(
     let tid: String = if let Some(ref id) = *terminal_id {
         id.clone()
     } else {
+        let mut env_vars: Vec<agent_client_protocol::EnvVariable> = env
+            .iter()
+            .map(|(k, v)| agent_client_protocol::EnvVariable::new(k.clone(), v.clone()))
+            .collect();
+        env_vars.sort_by(|a, b| a.name.cmp(&b.name));
         let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
-            .cwd(std::path::PathBuf::from(cwd));
+            .cwd(std::path::PathBuf::from(cwd))
+            .env(env_vars);
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
@@ -2578,7 +2700,8 @@ async fn execute_bash_stateful(
 
     let nats = nats.clone();
     let session_id = session_id.to_string();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(trogon_runner_tools::wasm_bash_tool::DEFAULT_BASH_TIMEOUT_SECS);
 
     // 2. Snapshot baseline output length
     let baseline_len = {
@@ -2684,6 +2807,8 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
         mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
     ) {
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
+            tool_allowlist: Vec::new(),
+            env: std::collections::HashMap::new(),
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
@@ -2945,6 +3070,8 @@ mod tests {
 
     fn make_session() -> OpenRouterSession {
         OpenRouterSession {
+            tool_allowlist: Vec::new(),
+            env: std::collections::HashMap::new(),
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
@@ -2981,7 +3108,14 @@ mod tests {
         let agent = make_agent();
         let state = agent.session_mode_state("default");
         assert_eq!(state.current_mode_id.0.as_ref(), "default");
-        assert_eq!(state.available_modes.len(), 5);
+        assert_eq!(state.available_modes.len(), 6);
+        assert!(
+            state
+                .available_modes
+                .iter()
+                .any(|m| m.id.0.as_ref() == "auto"),
+            "auto mode must be advertised"
+        );
     }
 
     #[test]
@@ -6807,6 +6941,72 @@ mod tests {
             assert_eq!(audit[0].outcome, AuditOutcome::Denied,
                 "deny rule from permission_rules_text must block the tool");
         }).await;
+    }
+
+    struct MockAutoClassifier(trogon_runner_tools::ClassifierVerdict);
+    impl trogon_runner_tools::SafetyClassifier for MockAutoClassifier {
+        fn classify<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = trogon_runner_tools::ClassifierVerdict> + Send + 'a>,
+        > {
+            let v = self.0;
+            Box::pin(async move { v })
+        }
+    }
+
+    /// PERM-1: `auto` mode must route side-effecting tools through the wired classifier.
+    #[tokio::test]
+    async fn prompt_auto_mode_uses_safety_classifier() {
+        let (perm_tx, _perm_rx) =
+            tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(None))
+            .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new())
+            .with_safety_classifier(Arc::new(MockAutoClassifier(
+                trogon_runner_tools::ClassifierVerdict::Deny,
+            )));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady {
+                calls: vec![crate::client::AssembledToolCall {
+                    id: "cid-auto".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: r#"{"path":"a.rs","content":"x"}"#.to_string(),
+                }],
+            },
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            agent
+                .set_session_mode(SetSessionModeRequest::new(sid.clone(), "auto"))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("write")]))
+                .await
+                .unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(
+                audit[0].outcome,
+                AuditOutcome::Denied,
+                "auto mode must deny side-effecting tools when the classifier returns Deny"
+            );
+        })
+        .await;
     }
 
     // ── spawn_agent interceptor ───────────────────────────────────────────────

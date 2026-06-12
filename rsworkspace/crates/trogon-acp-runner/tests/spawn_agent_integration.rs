@@ -55,7 +55,7 @@ async fn spawn_agent_tool_returns_responder_output() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({"capability": "explore", "prompt": "find all rust files"}),
+            &serde_json::json!({"prompt": "find all rust files"}),
         )
         .await
         .unwrap();
@@ -67,7 +67,7 @@ async fn spawn_agent_tool_returns_responder_output() {
 }
 
 #[tokio::test]
-async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
+async fn spawn_agent_tool_forwards_agent_and_prompt_in_payload() {
     let (_c, nats) = start_nats().await;
     let prefix = "trogon.test2";
 
@@ -78,7 +78,6 @@ async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
             .await
             .unwrap();
         if let Some(msg) = sub.next().await {
-            // Parse the payload and echo it back so the test can inspect it.
             let body: serde_json::Value =
                 serde_json::from_slice(&msg.payload).unwrap_or_default();
             let echo = serde_json::to_string(&body).unwrap();
@@ -94,19 +93,19 @@ async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({"capability": "plan", "prompt": "design the auth module"}),
+            &serde_json::json!({"agent": "planner", "prompt": "design the auth module"}),
         )
         .await
         .unwrap();
 
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-    assert_eq!(parsed["capability"].as_str(), Some("plan"));
+    assert_eq!(parsed["agent"].as_str(), Some("planner"));
     assert_eq!(parsed["prompt"].as_str(), Some("design the auth module"));
+    assert!(parsed.get("capability").is_none());
 }
 
 #[tokio::test]
 async fn spawn_agent_tool_includes_session_id_in_payload() {
-    // The updated SpawnAgentTool must send 3 fields: capability, prompt, session_id.
     let (_c, nats) = start_nats().await;
     let prefix = "trogon.test3";
     let session_id = "sess-abc-123";
@@ -114,7 +113,7 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
     let nats_clone = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_clone
-            .subscribe(format!("{prefix}.agent.spawn"))
+            .subscribe(format!("{prefix}.spawn"))
             .await
             .unwrap();
         if let Some(msg) = sub.next().await {
@@ -133,25 +132,31 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({"capability": "explore", "prompt": "list rust files"}),
+            &serde_json::json!({"prompt": "list rust files"}),
         )
         .await
         .unwrap();
 
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
 
-    // Verify all three fields are present.
-    assert_eq!(parsed["capability"].as_str(), Some("explore"));
     assert_eq!(parsed["prompt"].as_str(), Some("list rust files"));
     assert_eq!(
         parsed["session_id"].as_str(),
         Some(session_id),
         "payload must include session_id so the spawn handler can load the parent session"
     );
+    assert_eq!(
+        parsed["agent"].as_str(),
+        Some(""),
+        "payload must include the agent selector (empty when unspecified)"
+    );
+    assert!(parsed.get("capability").is_none());
 
-    // Verify exactly 3 fields — no extras, no missing.
     let field_count = parsed.as_object().map(|o| o.len()).unwrap_or(0);
-    assert_eq!(field_count, 3, "payload must have exactly 3 fields: capability, prompt, session_id");
+    assert_eq!(
+        field_count, 3,
+        "payload must have exactly 3 fields: agent, prompt, session_id"
+    );
 }
 
 #[tokio::test]
@@ -159,13 +164,11 @@ async fn spawn_agent_tool_times_out_when_no_responder() {
     let (_c, nats) = start_nats().await;
     let prefix = "trogon.noresponder";
 
-    // SpawnAgentTool has a 120 s timeout — too long for a test.
-    // We verify it returns Err when NATS has no subscriber (no-responder error).
     let tool = SpawnAgentTool::new(nats, prefix, "");
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({"capability": "explore", "prompt": "anything"}),
+            &serde_json::json!({"prompt": "anything"}),
         )
         .await;
 

@@ -67,6 +67,8 @@ pub struct SessionSummary {
     pub cwd: String,
     pub title: Option<String>,
     pub updated_at: Option<String>,
+    /// Parent session when this row is a forked or spawned sub-session.
+    pub parent_session_id: Option<String>,
 }
 
 // ── Session trait ─────────────────────────────────────────────────────────────
@@ -84,6 +86,14 @@ pub trait Session: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_;
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
+
+    /// Inject a steering message into the in-flight turn (Ctrl+G priority input).
+    /// Published to `{prefix}.session.{id}.agent.steer`; the runner drains it into
+    /// the live tool-use loop so the model addresses it on its next step. Default
+    /// no-op (mocks / runners without steer support).
+    fn steer(&self, _text: String) -> impl std::future::Future<Output = ()> + Send + '_ {
+        async {}
+    }
 
     fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
@@ -113,6 +123,15 @@ pub trait Session: Send + Sync + 'static {
         value: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
+    /// Export portable session history (`session/export` ext method).
+    fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_;
+
+    /// Replace session history (`session/import` ext method).
+    fn import_history(
+        &self,
+        messages_json: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
 
@@ -138,6 +157,8 @@ pub struct SessionInit {
     /// Tool-event hooks (PreToolUse/PostToolUse) for the runner to run around tool
     /// dispatch. Sent as `_meta.toolHooks`.
     pub tool_hooks: Option<trogon_runner_tools::HooksConfig>,
+    /// Extra environment variables for the session's bash terminal (settings.json `env`).
+    pub env: std::collections::HashMap<String, String>,
 }
 
 impl SessionInit {
@@ -170,6 +191,14 @@ impl SessionInit {
             && let Ok(v) = serde_json::to_value(hooks)
         {
             meta.insert("toolHooks".into(), v);
+        }
+        if !self.env.is_empty() {
+            let map: serde_json::Map<String, Value> = self
+                .env
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                .collect();
+            meta.insert("env".into(), Value::Object(map));
         }
         if meta.is_empty() { None } else { Some(meta) }
     }
@@ -537,6 +566,15 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
+    fn steer(&self, text: String) -> impl std::future::Future<Output = ()> + Send + '_ {
+        // The runner's `subscribe_steer` takes the raw payload as the steer text
+        // (no JSON envelope), so publish the message verbatim.
+        let subject = format!("{}.session.{}.agent.steer", self.prefix, self.session_id);
+        async move {
+            let _ = self.nats.publish_bytes(subject, text.into_bytes().into()).await;
+        }
+    }
+
     fn set_model(&self, model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let model_id = model_id.to_string();
         let prefix = self.prefix.clone();
@@ -674,6 +712,38 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
+    fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_ {
+        let prefix = self.prefix.clone();
+        let session_id = self.session_id.clone();
+        let nats = &self.nats;
+        async move {
+            let params = json!({ "sessionId": session_id });
+            let val = ext_method(nats, &prefix, "session/export", params).await?;
+            if val.is_null() {
+                return Err(anyhow::anyhow!("session/export returned null"));
+            }
+            serde_json::to_string(&val).map_err(|e| anyhow::anyhow!("invalid session/export body: {e}"))
+        }
+    }
+
+    fn import_history(
+        &self,
+        messages_json: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        let prefix = self.prefix.clone();
+        let session_id = self.session_id.clone();
+        let nats = &self.nats;
+        let messages_json = messages_json.to_string();
+        async move {
+            let params = serde_json::from_str::<Value>(&format!(
+                r#"{{"sessionId":"{session_id}","messages":{messages_json}}}"#
+            ))
+            .map_err(|e| anyhow::anyhow!("invalid session/import params: {e}"))?;
+            ext_method(nats, &prefix, "session/import", params).await?;
+            Ok(())
+        }
+    }
+
     fn load_session(
         &self,
         session_id: &str,
@@ -750,11 +820,20 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             Ok(resp
                 .sessions
                 .into_iter()
-                .map(|info| SessionSummary {
-                    session_id: info.session_id.to_string(),
-                    cwd: info.cwd.to_string_lossy().into_owned(),
-                    title: info.title,
-                    updated_at: info.updated_at,
+                .map(|info| {
+                    let parent_session_id = info
+                        .meta
+                        .as_ref()
+                        .and_then(|m| m.get("parentSessionId"))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    SessionSummary {
+                        session_id: info.session_id.to_string(),
+                        cwd: info.cwd.to_string_lossy().into_owned(),
+                        title: info.title,
+                        updated_at: info.updated_at,
+                        parent_session_id,
+                    }
                 })
                 .collect())
         }
@@ -932,6 +1011,9 @@ pub mod mock {
         /// Last prompt text passed to `prompt()`. Used in tests to verify the
         /// content of prompts sent to the session (e.g., language detection in /init).
         pub last_prompt_text: Mutex<Option<String>>,
+        exported_history: Mutex<String>,
+        imported_history: Mutex<Vec<String>>,
+        load_session_count: Mutex<u32>,
     }
 
     impl MockSession {
@@ -947,7 +1029,18 @@ pub mod mock {
                 compact_error: Mutex::new(None),
                 last_cwd: Mutex::new(None),
                 last_prompt_text: Mutex::new(None),
+                exported_history: Mutex::new("[]".to_string()),
+                imported_history: Mutex::new(Vec::new()),
+                load_session_count: Mutex::new(0),
             }
+        }
+
+        pub fn set_exported_history(&self, json: impl Into<String>) {
+            *self.exported_history.lock().unwrap() = json.into();
+        }
+
+        pub fn imported_history(&self) -> Vec<String> {
+            self.imported_history.lock().unwrap().clone()
         }
 
         pub fn last_prompt(&self) -> Option<String> {
@@ -984,6 +1077,10 @@ pub mod mock {
 
         pub fn last_cwd(&self) -> Option<PathBuf> {
             self.last_cwd.lock().unwrap().clone()
+        }
+
+        pub fn load_session_count(&self) -> u32 {
+            *self.load_session_count.lock().unwrap()
         }
     }
 
@@ -1058,6 +1155,7 @@ pub mod mock {
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             let cwd = cwd.to_path_buf();
             async move {
+                *self.load_session_count.lock().unwrap() += 1;
                 *self.last_cwd.lock().unwrap() = Some(cwd);
                 Ok(())
             }
@@ -1090,6 +1188,19 @@ pub mod mock {
             _config_id: &str,
             _value: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            async move { Ok(()) }
+        }
+
+        fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_ {
+            let exported = self.exported_history.lock().unwrap().clone();
+            async move { Ok(exported) }
+        }
+
+        fn import_history(
+            &self,
+            messages_json: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            self.imported_history.lock().unwrap().push(messages_json.to_string());
             async move { Ok(()) }
         }
 
@@ -1159,6 +1270,17 @@ pub mod mock {
             value: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             (**self).set_session_config_option(config_id, value)
+        }
+
+        fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_ {
+            (**self).export_history()
+        }
+
+        fn import_history(
+            &self,
+            messages_json: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            (**self).import_history(messages_json)
         }
 
         fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
@@ -1824,5 +1946,17 @@ mod session_init_tests {
         let meta = init.to_meta().expect("meta present");
         assert_eq!(meta.get("systemPromptOverride").and_then(|v| v.as_str()), Some("base"));
         assert_eq!(meta.get("systemPrompt").and_then(|v| v.as_str()), Some("extra"));
+    }
+
+    #[test]
+    fn env_maps_to_meta_object() {
+        use std::collections::HashMap;
+        let init = SessionInit {
+            env: HashMap::from([("FOO".into(), "bar".into())]),
+            ..Default::default()
+        };
+        let meta = init.to_meta().expect("meta present");
+        let env_obj = meta.get("env").and_then(|v| v.as_object()).expect("env object");
+        assert_eq!(env_obj.get("FOO").and_then(|v| v.as_str()), Some("bar"));
     }
 }

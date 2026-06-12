@@ -65,6 +65,25 @@ fn not_found(msg: impl Into<String>) -> Error {
 /// the Responses API `tools` array; the label is shown in the ACP UI.
 const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_search", "X Search")];
 
+/// Whether `name` is an xAI server-side tool (handled via [`AVAILABLE_TOOLS`]).
+fn is_xai_server_tool(name: &str) -> bool {
+    AVAILABLE_TOOLS.iter().any(|(id, _)| *id == name)
+}
+
+/// Default `enabled_tools` for a fresh or legacy (pre-fix, `tools: []`) xAI
+/// session: every portable trogon tool, **minus** the xAI server-side tools in
+/// [`AVAILABLE_TOOLS`] (`web_search`, `x_search`). Those default off and are
+/// toggled per session via the config UI. Without this filter the portable
+/// `web_search` that `trogon-tools` now ships (acp/openrouter feature) would
+/// silently enable xAI's native web search by default and collide with it.
+fn default_enabled_tools() -> Vec<String> {
+    trogon_tools::all_tool_defs()
+        .into_iter()
+        .map(|d| d.name)
+        .filter(|name| !is_xai_server_tool(name.as_str()))
+        .collect()
+}
+
 /// Maximum number of sessions held in memory simultaneously.
 ///
 /// When a new session would exceed this limit, the oldest session (by
@@ -76,6 +95,7 @@ const VALID_MODES: &[&str] = &[
     "default",
     "acceptEdits",
     "plan",
+    "auto",
     "dontAsk",
     "bypassPermissions",
 ];
@@ -193,6 +213,13 @@ struct XaiSession {
     /// Incremented on each sub-agent session so recursion can be bounded.
     #[serde(default)]
     spawn_depth: u32,
+    /// Restrictive subagent tool allowlist (empty = no restriction).
+    #[serde(default)]
+    tool_allowlist: Vec<String>,
+    /// Extra environment variables applied to the session's bash terminal, from
+    /// settings.json `env` (received via `_meta.env` at session creation). CFG-2.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    env: std::collections::HashMap<String, String>,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -213,10 +240,15 @@ fn default_session_mode() -> String {
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
 ///
-/// Each `XaiAgent` manages multiple in-memory sessions. Because xAI exposes a
-/// stateless HTTP endpoint, the runner maintains conversation history locally
-/// and builds the full input on each turn (or uses `previous_response_id` as a
-/// shortcut when the server still holds the prior response in its cache).
+/// Each `XaiAgent` manages multiple sessions in an in-memory map. Because xAI
+/// exposes a stateless HTTP endpoint, the runner maintains conversation history
+/// locally and builds the full input on each turn (or uses `previous_response_id`
+/// as a shortcut when the server still holds the prior response in its cache).
+///
+/// When NATS JetStream KV is available, the production binary default-enables
+/// the `SESSIONS` bucket via [`open_default_session_store`](crate::open_default_session_store)
+/// so snapshots persist across runner respawn. When KV is unavailable the agent
+/// falls back to in-memory-only sessions (unit tests use this path by default).
 ///
 /// This mirrors the structure of `trogon-codex-runner` but replaces the
 /// subprocess (`codex app-server`) with an HTTP client — making the core logic
@@ -295,6 +327,8 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     /// NATS/ACP config for this runner (prefix + NATS URL). Used by the
     /// spawn_agent interceptor to build a Bridge for sub-agent sessions.
     runner_config: Option<acp_nats::Config>,
+    /// `auto`-mode LLM safety classifier for side-effecting tool calls.
+    classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
     /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
@@ -489,6 +523,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             permission_nats: None,
             permission_prefix: None,
             runner_config: None,
+            classifier: None,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -538,6 +573,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
             runner_config: self.runner_config,
+            classifier: self.classifier,
             session_locks: self.session_locks,
         }
     }
@@ -581,6 +617,24 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self
     }
 
+    /// Attach the default session store selected at startup.
+    ///
+    /// When [`DefaultSessionStore::Persistent`] is passed (KV open succeeded),
+    /// snapshots are written to NATS KV. When [`DefaultSessionStore::InMemory`]
+    /// is passed, the agent keeps sessions in its in-memory map only.
+    pub fn with_default_session_store(
+        mut self,
+        selection: crate::session_store::DefaultSessionStore,
+    ) -> Self {
+        match selection {
+            crate::session_store::DefaultSessionStore::Persistent(store) => {
+                self.session_store = Some(store);
+            }
+            crate::session_store::DefaultSessionStore::InMemory => {}
+        }
+        self
+    }
+
     /// Enable the `bash` tool by connecting to a `trogon-wasm-runtime` execution backend.
     ///
     /// On each prompt the runner discovers the execution backend from the registry.
@@ -617,6 +671,15 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     /// Bridge for sub-agent sessions. Without this, `spawn_agent` returns an error.
     pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
         self.runner_config = Some(config);
+        self
+    }
+
+    /// Set the `auto`-mode LLM safety classifier.
+    pub fn with_safety_classifier(
+        mut self,
+        classifier: Arc<dyn trogon_runner_tools::SafetyClassifier>,
+    ) -> Self {
+        self.classifier = Some(classifier);
         self
     }
 
@@ -677,10 +740,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             return false;
         };
         let enabled_tools = if snap.tools.is_empty() {
-            trogon_tools::all_tool_defs()
-                .into_iter()
-                .map(|d| d.name.to_string())
-                .collect()
+            default_enabled_tools()
         } else {
             snap.tools.clone()
         };
@@ -709,6 +769,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd,
                 model: snap.model.clone(),
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 compactor_model: snap.compactor_model.clone(),
                 api_key: self.global_api_key.clone(),
                 history,
@@ -814,6 +876,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 SessionMode::new("default", "Default"),
                 SessionMode::new("acceptEdits", "Accept Edits"),
                 SessionMode::new("plan", "Plan"),
+                SessionMode::new("auto", "Auto"),
                 SessionMode::new("dontAsk", "Don't Ask"),
                 SessionMode::new("bypassPermissions", "Bypass Permissions"),
             ],
@@ -1076,14 +1139,29 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: session_model_override,
+                tool_allowlist: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("toolAllowlist"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default(),
+                env: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("env"))
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 compactor_model: None,
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
-                enabled_tools: trogon_tools::all_tool_defs()
-                    .into_iter()
-                    .map(|d| d.name)
-                    .collect(),
+                enabled_tools: default_enabled_tools(),
                 system_prompt,
                 created_at: Instant::now(),
                 last_used_at: Instant::now(),
@@ -1101,7 +1179,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 session_mode,
                 permission_rules,
                 audit_log: Vec::new(),
-                permission_rules_text: None,
+                permission_rules_text: req
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("permissionRules"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
                 spawn_depth: 0,
             },
         );
@@ -1235,6 +1318,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: inherited_model.clone(),
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,
@@ -1300,19 +1385,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             store.save(&snapshot).await;
         }
         // Release persistent bash terminal if one was created for this session.
-        if let Some(s) = sessions.get(&session_id) {
-            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+        if let Some(s) = sessions.get(&session_id)
+            && let (Some(tid), Some(wasm_prefix), Some(nats)) = (
                 s.terminal_id.clone(),
                 s.terminal_wasm_prefix.clone(),
                 &self.execution_nats,
-            ) {
-                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-                if let Ok(payload) = serde_json::to_vec(&agent_client_protocol::ReleaseTerminalRequest::new(
-                    session_id.clone(),
-                    tid,
-                )) {
-                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
-                }
+            )
+        {
+            let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+            if let Ok(payload) = serde_json::to_vec(&agent_client_protocol::ReleaseTerminalRequest::new(
+                session_id.clone(),
+                tid,
+            )) {
+                let _ = nats.request(format!("{base}.release"), payload.into()).await;
             }
         }
         sessions.remove(&session_id);
@@ -1545,12 +1630,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             mut history,
             last_response_id,
             enabled_tools,
+            tool_allowlist,
             session_system_prompt,
             mut cwd,
             session_mode,
             session_tool_policies,
             session_mcp_servers,
             mut terminal_id,
+            session_env,
         ) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
@@ -1566,14 +1653,18 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.history.clone(),
                 s.last_response_id.clone(),
                 s.enabled_tools.clone(),
+                s.tool_allowlist.clone(),
                 s.system_prompt.clone(),
                 s.cwd.clone(),
                 s.mode.clone(),
                 s.tool_policies.clone(),
                 s.mcp_servers.clone(),
                 s.terminal_id.clone(),
+                s.env.clone(),
             )
         };
+        let offered_tools =
+            trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer shared across this turn's permission
         // checks; drained into session_audit once the turn finishes.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1597,6 +1688,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 &wire,
                 token_budget,
                 threshold_pct,
+                false,
                 "xai",
                 &resolved_model,
                 compactor_model.as_deref(),
@@ -1616,8 +1708,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
             let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
+            let completion_guidance = trogon_runner_tools::COMPLETION_GUIDANCE;
             let header = format!(
-                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
+                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}\n\n{completion_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
@@ -1708,12 +1801,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // Build the tools list: server-side enabled tools + optional bash function.
         // Only AVAILABLE_TOOLS entries become ServerSide specs; trogon-tools in
         // enabled_tools are added later as Function specs via all_tool_defs().
-        let mut call_tools: Vec<ToolSpec> = enabled_tools
+        let mut call_tools: Vec<ToolSpec> = offered_tools
             .iter()
             .filter(|t| AVAILABLE_TOOLS.iter().any(|(id, _)| *id == t.as_str()))
             .map(|t| ToolSpec::ServerSide(t.clone()))
             .collect();
-        if wasm_prefix.is_some() {
+        if wasm_prefix.is_some()
+            && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "bash")
+        {
             call_tools.push(ToolSpec::Function {
                 name: "bash".to_string(),
                 description: "Run a shell command in the session sandbox and return its output."
@@ -1732,7 +1827,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         for def in trogon_tools::all_tool_defs() {
-            if enabled_tools.iter().any(|t| t == &def.name) {
+            // Skip xAI server-side tools (web_search/x_search): they're emitted as
+            // ServerSide specs above. trogon-tools now ships a portable `web_search`
+            // for other runners; on xAI it must not also be sent as a Function spec,
+            // or the Responses API receives a duplicate tool name.
+            if is_xai_server_tool(&def.name) {
+                continue;
+            }
+            if offered_tools.iter().any(|t| t == &def.name) {
                 call_tools.push(ToolSpec::Function {
                     name: def.name,
                     description: def.description,
@@ -1743,7 +1845,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // Advertise the spawn_agent tool when a runner_config is set (enables the
         // model to delegate a subtask to an isolated sub-agent in a worktree).
-        if self.runner_config.is_some() {
+        if self.runner_config.is_some()
+            && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "spawn_agent")
+        {
             call_tools.push(ToolSpec::Function {
                 name: "spawn_agent".to_string(),
                 description: "Spawn a specialised sub-agent and return its output. The \
@@ -1754,16 +1858,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Name of a custom sub-agent defined in .claude/agents/. Its tools allowlist and instructions are enforced. Omit for a generic sub-agent."
+                        },
                         "capability": {
                             "type": "string",
-                            "description": "Agent capability to use, e.g. 'explore' or 'plan'"
+                            "description": "Generic capability when no named agent is given, e.g. 'explore' or 'plan'"
                         },
                         "prompt": {
                             "type": "string",
                             "description": "The task or question to send to the sub-agent"
                         }
                     },
-                    "required": ["capability", "prompt"]
+                    "required": ["prompt"]
                 }),
             });
         }
@@ -1826,6 +1934,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // Set when the outer loop is executing a continuation request (Incomplete
         // response). Disables the stale-ID retry for that iteration.
         let mut continuation_in_progress = false;
+        // Auto-summary guarantee: set once we have nudged the model for a recap
+        // after a silent (tools-ran, no-text) turn, so we nudge at most once.
+        let mut auto_summary_done = false;
         // Counts client-driven continuation requests for Incomplete responses.
         let mut continuations: u32 = 0;
         const MAX_CONTINUATIONS: u32 = 5;
@@ -2158,6 +2269,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             rules.merge(PermissionRules::parse(extra));
                         }
                         let allowed_tools = self.permission_store.allowed_tools(&session_id);
+                        let extras = trogon_runner_tools::PermissionExtras {
+                            classifier: self.classifier.clone(),
+                            ..Default::default()
+                        };
                         check_tool_permission(
                             &session_mode,
                             &session_id,
@@ -2169,6 +2284,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             &name,
                             &tool_input,
                             audit_buf.clone(),
+                            extras,
                         )
                         .await
                     };
@@ -2225,15 +2341,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 }
                             } else if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                                let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &arguments).await;
+                                let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &session_env, &arguments).await;
                                 // Persist terminal_id back to session if it was just created
                                 if terminal_id.is_some() {
                                     let mut sessions = self.sessions.lock().await;
-                                    if let Some(s) = sessions.get_mut(&session_id) {
-                                        if s.terminal_id.is_none() {
-                                            s.terminal_id = terminal_id.clone();
-                                            s.terminal_wasm_prefix = Some(wasm.to_string());
-                                        }
+                                    if let Some(s) = sessions.get_mut(&session_id)
+                                        && s.terminal_id.is_none()
+                                    {
+                                        s.terminal_id = terminal_id.clone();
+                                        s.terminal_wasm_prefix = Some(wasm.to_string());
                                     }
                                 }
                                 result
@@ -2246,7 +2362,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 .unwrap_or(serde_json::Value::Null);
                             let task = input["prompt"].as_str().unwrap_or("").to_string();
                             // Read parent context; lock released before any await.
-                            let (parent_cwd, depth, parent_mode, perm_text) = {
+                            let (parent_cwd, depth, parent_mode, perm_text, parent_allowed_tools) = {
                                 let sessions = self.sessions.lock().await;
                                 match sessions.get(&session_id) {
                                     Some(s) => (
@@ -2254,8 +2370,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                         s.spawn_depth,
                                         s.session_mode.clone(),
                                         s.permission_rules_text.clone(),
+                                        self.permission_store.allowed_tools(&session_id),
                                     ),
-                                    None => (cwd.clone(), 0, "default".to_string(), None),
+                                    None => (cwd.clone(), 0, "default".to_string(), None, vec![]),
                                 }
                             };
                             // Optional named custom subagent (.claude/agents/) → its
@@ -2299,6 +2416,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                     notif_tx,
                                 );
 
+                                let spawn_ctx = trogon_runner_tools::spawn_session::SubSessionSpawnContext {
+                                    tool_allowlist: subagent
+                                        .as_ref()
+                                        .map(|d| d.tools.clone())
+                                        .unwrap_or_default(),
+                                    allowed_tools: parent_allowed_tools,
+                                    additional_read_dirs: Vec::new(),
+                                    additional_roots: Vec::new(),
+                                };
                                 match trogon_runner_tools::spawn_session::create_sub_session(
                                     &bridge,
                                     &sub_cwd,
@@ -2306,6 +2432,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                     perm_text.as_deref(),
                                     subagent.as_ref().map(|d| d.system_prompt.as_str()),
                                     subagent.as_ref().and_then(|d| d.model.as_deref()),
+                                    Some(&spawn_ctx),
                                 )
                                 .await
                                 {
@@ -2408,20 +2535,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                                     format!("fetch_url: URL blocked by egress policy: {url}")
                                 } else {
-                                    let ctx = trogon_tools::ToolContext {
-                                        proxy_url: String::new(),
-                                        cwd: cwd.clone(),
-                                        http_client: self.tool_http_client.clone(),
-                                    };
-                                    trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
+                                    let ctx = trogon_tools::ToolContext::new(
+                                        String::new(),
+                                        cwd.clone(),
+                                        self.tool_http_client.clone(),
+                                    );
+                                    trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await.display_text()
                                 }
                             } else {
-                                let ctx = trogon_tools::ToolContext {
-                                    proxy_url: String::new(),
-                                    cwd: cwd.clone(),
-                                    http_client: self.tool_http_client.clone(),
-                                };
-                                trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
+                                let ctx = trogon_tools::ToolContext::new(
+                                    String::new(),
+                                    cwd.clone(),
+                                    self.tool_http_client.clone(),
+                                );
+                                trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await.display_text()
                             }
                         }
                     }
@@ -2454,6 +2581,24 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 // if it were, a retry would replay history without the
                 // function_call_output items — producing a wrong response.
                 continuation_in_progress = true;
+                continue 'outer;
+            }
+
+            // Auto-summary guarantee: the turn is complete, but if it ran tools
+            // and produced no text the model went silent — nudge it once for a
+            // brief recap (reuse the outer loop's stateful continuation path).
+            if tool_rounds > 0
+                && assistant_text.trim().is_empty()
+                && !auto_summary_done
+                && let Some(resp_id) = current_response_id.clone()
+            {
+                auto_summary_done = true;
+                current_prev_response_id = Some(resp_id);
+                current_input =
+                    vec![InputItem::user(trogon_runner_tools::AUTO_SUMMARY_NUDGE.to_string())];
+                current_response_id = None;
+                continuation_in_progress = true;
+                info!(session_id, "xai: turn ended silently after tools — requesting recap");
                 continue 'outer;
             }
 
@@ -2577,43 +2722,43 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // xAI is stateful: when compaction fires we clear `last_response_id` so
         // the next turn re-sends the full compacted history (otherwise the server
         // keeps the old context and the summary never takes effect).
-        if !canceled {
-            if let Some(nats) = self.compactor_nats.clone() {
-                let snapshot = {
-                    let sessions = self.sessions.lock().await;
-                    sessions.get(&session_id).map(|s| {
-                        (
-                            s.history.clone(),
-                            s.model.clone().unwrap_or_else(|| self.default_model.clone()),
-                            s.compactor_model.clone(),
-                        )
-                    })
-                };
-                if let Some((history, model, compactor_model)) = snapshot {
-                    let context_window = context_window_tokens(&model);
-                    if crate::compaction::should_compact(&history, context_window) {
-                        let (new_history, compacted) = crate::compaction::compact(
-                            &nats,
-                            history,
-                            &model,
-                            compactor_model.as_deref(),
-                            context_window,
-                        )
-                        .await;
-                        if compacted {
-                            let mut sessions = self.sessions.lock().await;
-                            if let Some(s) = sessions.get_mut(&session_id) {
-                                s.history = new_history;
-                                s.last_response_id = None;
-                            }
-                            if let (Some(store), Some(s)) =
-                                (&self.session_store, sessions.get(&session_id))
-                            {
-                                let snap = self.build_snapshot(&session_id, s);
-                                store.save(&snap).await;
-                            }
-                            info!(session_id, "xai: context compacted post-turn");
+        if !canceled
+            && let Some(nats) = self.compactor_nats.clone()
+        {
+            let snapshot = {
+                let sessions = self.sessions.lock().await;
+                sessions.get(&session_id).map(|s| {
+                    (
+                        s.history.clone(),
+                        s.model.clone().unwrap_or_else(|| self.default_model.clone()),
+                        s.compactor_model.clone(),
+                    )
+                })
+            };
+            if let Some((history, model, compactor_model)) = snapshot {
+                let context_window = context_window_tokens(&model);
+                if crate::compaction::should_compact(&history, context_window) {
+                    let (new_history, compacted) = crate::compaction::compact(
+                        &nats,
+                        history,
+                        &model,
+                        compactor_model.as_deref(),
+                        context_window,
+                    )
+                    .await;
+                    if compacted {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            s.history = new_history;
+                            s.last_response_id = None;
                         }
+                        if let (Some(store), Some(s)) =
+                            (&self.session_store, sessions.get(&session_id))
+                        {
+                            let snap = self.build_snapshot(&session_id, s);
+                            store.save(&snap).await;
+                        }
+                        info!(session_id, "xai: context compacted post-turn");
                     }
                 }
             }
@@ -2757,6 +2902,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 &wire,
                 token_budget,
                 threshold_pct,
+                true,
                 "xai",
                 &resolved_model,
                 compactor_model.as_deref(),
@@ -2875,7 +3021,7 @@ async fn compact_or_trim_xai_history(
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
         if let Ok(Some(compacted)) =
-            maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", model, compactor_model)
+            maybe_compact(nats, &wire, token_budget, threshold_pct, false, "xai", model, compactor_model)
                 .await
         {
             *history = xai_history_from_wire(compacted);
@@ -2943,6 +3089,7 @@ async fn execute_bash_stateful(
     session_id: &str,
     terminal_id: &mut Option<String>,
     cwd: &str,
+    env: &std::collections::HashMap<String, String>,
     arguments: &str,
 ) -> String {
     use agent_client_protocol::{
@@ -2966,8 +3113,14 @@ async fn execute_bash_stateful(
     let tid: String = if let Some(id) = terminal_id.as_deref() {
         id.to_string()
     } else {
+        let mut env_vars: Vec<agent_client_protocol::EnvVariable> = env
+            .iter()
+            .map(|(k, v)| agent_client_protocol::EnvVariable::new(k.clone(), v.clone()))
+            .collect();
+        env_vars.sort_by(|a, b| a.name.cmp(&b.name));
         let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
-            .cwd(std::path::PathBuf::from(cwd));
+            .cwd(std::path::PathBuf::from(cwd))
+            .env(env_vars);
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
@@ -2987,7 +3140,8 @@ async fn execute_bash_stateful(
 
     let nats = nats.clone();
     let session_id_owned = session_id.to_string();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(trogon_runner_tools::wasm_bash_tool::DEFAULT_BASH_TIMEOUT_SECS);
 
     // 2. Snapshot baseline output length
     let baseline_len = {
@@ -3090,6 +3244,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
@@ -3124,6 +3280,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3211,6 +3369,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
@@ -3245,6 +3405,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3279,6 +3441,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.sessions.lock().await.insert(
             id.to_string(),
             XaiSession {
+                tool_allowlist: Vec::new(),
+                env: std::collections::HashMap::new(),
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
@@ -3364,6 +3528,10 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
 
     pub fn test_max_turns(&self) -> Option<u32> {
         self.max_turns
+    }
+
+    pub fn test_session_persistence_enabled(&self) -> bool {
+        self.session_store.is_some()
     }
 
     pub async fn test_session_enabled_tools(&self, id: &str) -> Vec<String> {
@@ -3743,15 +3911,20 @@ mod tests {
             .expect("must succeed");
 
         let tools = agent.test_session_enabled_tools("sess-old").await;
+        // Restoring a pre-fix snapshot enables every portable trogon tool EXCEPT the
+        // xAI server-side tools (web_search/x_search), which default off. `web_search`
+        // is now in `all_tool_defs()` (portable acp/openrouter tool), so it must be
+        // filtered out of the xAI default — hence `default_enabled_tools()`.
         let expected: Vec<String> = trogon_tools::all_tool_defs()
             .into_iter()
             .map(|d| d.name.to_string())
+            .filter(|n| n != "web_search" && n != "x_search")
             .collect();
         assert_eq!(
             tools, expected,
             "pre-fix snapshot (tools:[]) must restore all trogon tools, not xAI tools"
         );
-        // xAI tools must NOT be present — they default to off.
+        // xAI server-side tools must NOT be present — they default to off.
         assert!(
             !tools.iter().any(|t| t == "web_search" || t == "x_search"),
             "web_search and x_search must be off when restoring a pre-fix snapshot"
@@ -6962,6 +7135,23 @@ mod tests {
 
     // ── with_session_store ────────────────────────────────────────────────────
 
+    #[test]
+    fn with_default_session_store_selects_kv_when_available() {
+        use crate::session_store::{DefaultSessionStore, SessionStoring, mock::MockSessionStore};
+
+        let store = Arc::new(MockSessionStore::new()) as Arc<dyn SessionStoring>;
+        let agent = make_agent().with_default_session_store(DefaultSessionStore::Persistent(store));
+        assert!(agent.test_session_persistence_enabled());
+    }
+
+    #[test]
+    fn with_default_session_store_falls_back_to_in_memory() {
+        use crate::session_store::DefaultSessionStore;
+
+        let agent = make_agent().with_default_session_store(DefaultSessionStore::InMemory);
+        assert!(!agent.test_session_persistence_enabled());
+    }
+
     fn make_agent_with_store() -> (TestAgent, Arc<crate::session_store::mock::MockSessionStore>) {
         use crate::session_store::mock::MockSessionStore;
         use crate::session_store::SessionStoring;
@@ -8687,6 +8877,69 @@ mod tests {
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].outcome, AuditOutcome::Denied,
             "deny rule from permission_rules_text must block the tool");
+    }
+
+    struct MockAutoClassifier(trogon_runner_tools::ClassifierVerdict);
+    impl trogon_runner_tools::SafetyClassifier for MockAutoClassifier {
+        fn classify<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = trogon_runner_tools::ClassifierVerdict> + Send + 'a>,
+        > {
+            let v = self.0;
+            Box::pin(async move { v })
+        }
+    }
+
+    /// PERM-1: `auto` mode must route side-effecting tools through the wired classifier.
+    #[tokio::test]
+    async fn prompt_auto_mode_uses_safety_classifier() {
+        let (perm_tx, _perm_rx) =
+            tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+        let agent = make_agent()
+            .with_md_loader(MockTrogonMdLoader(None))
+            .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new())
+            .with_safety_classifier(Arc::new(MockAutoClassifier(
+                trogon_runner_tools::ClassifierVerdict::Deny,
+            )));
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+        agent
+            .set_session_mode(SetSessionModeRequest::new(sid.clone(), "auto"))
+            .await
+            .unwrap();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId {
+                id: "r-auto".to_string(),
+            },
+            XaiEvent::FunctionCall {
+                call_id: "cid-auto".to_string(),
+                name: "write_file".to_string(),
+                arguments: r#"{"path":"a.rs","content":"x"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("write")]))
+            .await
+            .unwrap();
+
+        let audit = agent.test_session_audit_log(&sid).await;
+        assert_eq!(audit.len(), 1);
+        assert_eq!(
+            audit[0].outcome,
+            AuditOutcome::Denied,
+            "auto mode must deny side-effecting tools when the classifier returns Deny"
+        );
     }
 
     // ── spawn_agent interceptor ───────────────────────────────────────────────

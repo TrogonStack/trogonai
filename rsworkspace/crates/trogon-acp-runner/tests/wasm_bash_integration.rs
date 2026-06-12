@@ -45,6 +45,29 @@ async fn connect(port: u16) -> (async_nats::Client, jetstream::Context) {
     (nats, js)
 }
 
+/// Reconstructs the per-invocation `__START_<nonce>__` marker and bare `<nonce>`
+/// from a `terminal.write_stdin` payload. The bash tool brackets each command as
+/// `echo "__START_<nonce>__"; eval <cmd>; echo "__EXIT_<nonce>_$?__"`, so a real
+/// terminal echoes both markers back — these mocks must do the same or the tool's
+/// marker-scoped output extraction never matches. (HIGH-21: the tool no longer
+/// reads a baseline before writing, so there is no baseline output request.)
+fn markers_from_written_command(payload: &[u8]) -> (String, String) {
+    let req: serde_json::Value =
+        serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
+    let bytes: Vec<u8> = req["data"]
+        .as_array()
+        .expect("write_stdin payload must carry `data` bytes")
+        .iter()
+        .map(|v| v.as_u64().expect("data byte") as u8)
+        .collect();
+    let cmd = String::from_utf8(bytes).expect("written command must be UTF-8");
+    let start = cmd.find("__START_").expect("command must contain a start marker");
+    let after = &cmd[start + "__START_".len()..];
+    let end = after.find("__").expect("start marker must terminate with __");
+    let nonce = after[..end].to_string();
+    (format!("__START_{nonce}__"), nonce)
+}
+
 // ── WasmRuntimeBashTool::call_tool round-trip ────────────────────────────────
 
 /// Spawns mock responders for the four terminal NATS subjects and verifies
@@ -79,24 +102,19 @@ async fn wasm_bash_tool_call_tool_completes_round_trip() {
             nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
-        // 2. terminal.output — baseline (empty, no prior output)
-        if let Some(msg) = output_sub.next().await {
-            let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
-            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
-        }
-
-        // 3. ext.terminal.write_stdin — ACK the command write
+        // 2. ext.terminal.write_stdin — capture markers + ACK (no baseline read)
+        let mut markers = None;
         if let Some(msg) = write_sub.next().await {
+            markers = Some(markers_from_written_command(&msg.payload));
             let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
             nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
+        let (start_marker, nonce) = markers.expect("write_stdin must arrive before output poll");
 
-        // 4. terminal.output — poll response with demarcation marker
+        // 3. terminal.output — poll response with the start + nonce'd exit markers
         if let Some(msg) = output_sub.next().await {
-            let payload = serde_json::to_vec(
-                &serde_json::json!({"output": "echo hello\nhello\n__EXIT_0__\n"}),
-            )
-            .unwrap();
+            let full = format!("{start_marker}\necho hello\nhello\n__EXIT_{nonce}_0__\n");
+            let payload = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
             nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
     });
@@ -460,21 +478,18 @@ async fn wasm_bash_tool_reuses_terminal_across_calls() {
                 .unwrap();
         }
 
-        // Two full interaction sequences (baseline + write + poll), one per call.
+        // Two interaction sequences (write + poll), one per call. No baseline read.
         for _ in 0..2u8 {
-            if let Some(msg) = output_sub.next().await {
-                let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
-                nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
-            }
+            let mut markers = None;
             if let Some(msg) = write_sub.next().await {
+                markers = Some(markers_from_written_command(&msg.payload));
                 let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
                 nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
             }
+            let (start_marker, nonce) = markers.expect("write_stdin must arrive before output poll");
             if let Some(msg) = output_sub.next().await {
-                let payload = serde_json::to_vec(
-                    &serde_json::json!({"output": "hello\n__EXIT_0__\n"}),
-                )
-                .unwrap();
+                let full = format!("{start_marker}\nhello\n__EXIT_{nonce}_0__\n");
+                let payload = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
                 nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
             }
         }
@@ -545,19 +560,16 @@ async fn wasm_bash_tool_passes_sandbox_dir_as_cwd_in_create_request() {
                 .await
                 .unwrap();
         }
-        if let Some(msg) = output_sub.next().await {
-            let p = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
-            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
-        }
+        let mut markers = None;
         if let Some(msg) = write_sub.next().await {
+            markers = Some(markers_from_written_command(&msg.payload));
             let p = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
             nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
+        let (start_marker, nonce) = markers.expect("write_stdin must arrive before output poll");
         if let Some(msg) = output_sub.next().await {
-            let p = serde_json::to_vec(
-                &serde_json::json!({"output": "result\n__EXIT_0__\n"}),
-            )
-            .unwrap();
+            let full = format!("{start_marker}\nresult\n__EXIT_{nonce}_0__\n");
+            let p = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
             nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
     });
@@ -615,21 +627,18 @@ async fn wasm_bash_tool_timeout_returns_error_with_partial_output() {
                 .await
                 .unwrap();
         }
-        if let Some(msg) = output_sub.next().await {
-            // baseline — empty
-            let p = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
-            nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
-        }
+        let mut markers = None;
         if let Some(msg) = write_sub.next().await {
+            markers = Some(markers_from_written_command(&msg.payload));
             let p = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
             nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
-        // Every poll returns partial output with no exit marker.
+        let (start_marker, _nonce) = markers.expect("write_stdin must arrive before output poll");
+        // Every poll returns the start marker + partial output but NO exit marker,
+        // so the tool's poll loop never completes and times out with the partial.
         while let Some(msg) = output_sub.next().await {
-            let p = serde_json::to_vec(
-                &serde_json::json!({"output": "partial line 1\npartial line 2\n"}),
-            )
-            .unwrap();
+            let full = format!("{start_marker}\npartial line 1\npartial line 2\n");
+            let p = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
             nats_srv.publish(msg.reply.unwrap(), p.into()).await.unwrap();
         }
     });

@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+#![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
 pub mod caller;
 pub mod config;
 pub mod engine;
@@ -10,5 +12,4 @@ pub use engine::OrchestratorEngine;
 pub use provider::{AnthropicOrchestratorProvider, OrchestratorAuthStyle, OrchestratorLlmConfig, OrchestratorProvider};
 pub use types::{OrchestrationResult, OrchestratorError, SubTask, SubTaskResult, TaskPlan};
 
-#[cfg(not(coverage))]
 pub use server::serve;

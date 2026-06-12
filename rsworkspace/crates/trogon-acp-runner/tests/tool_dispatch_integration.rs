@@ -9,7 +9,7 @@
 //!   cargo test -p trogon-acp-runner --test tool_dispatch_integration
 
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
@@ -27,6 +27,7 @@ use trogon_acp_runner::{
 };
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
+use trogon_tools;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,11 +57,11 @@ fn make_agent(base_url: &str, cwd: &str) -> AgentLoop {
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
-        tool_context: Arc::new(ToolContext {
-            proxy_url: "http://127.0.0.1:1".to_string(),
-            cwd: cwd.to_string(),
-            http_client: reqwest::Client::new(),
-        }),
+        tool_context: Arc::new(ToolContext::new(
+            "http://127.0.0.1:1",
+            cwd,
+            reqwest::Client::new(),
+        )),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -68,6 +69,7 @@ fn make_agent(base_url: &str, cwd: &str) -> AgentLoop {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        post_tool_observer: None,
     }
 }
 
@@ -779,6 +781,133 @@ async fn acp_str_replace_tool_dispatched_via_wire_format() {
     );
 }
 
+/// Shared `str_replace` schema includes `replace_all`; ACP wire dispatch applies it.
+#[tokio::test]
+async fn acp_str_replace_replace_all_tool_def_and_dispatch() {
+    let str_def = trogon_tools::all_tool_defs()
+        .into_iter()
+        .find(|d| d.name == "str_replace")
+        .expect("str_replace must be in all_tool_defs");
+    assert!(
+        str_def.input_schema["properties"].get("replace_all").is_some(),
+        "str_replace schema must include replace_all"
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("dup.txt"), "x\nx\nx\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-strreplace-all";
+    let session_id = "sess-acp-strreplace-all-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("replaced all"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_strreplace_all_001",
+                "str_replace",
+                serde_json::json!({
+                    "path": "dup.txt",
+                    "old_str": "x",
+                    "new_str": "y",
+                    "replace_all": true
+                }),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "replace all", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after replace_all dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1);
+    let on_disk = std::fs::read_to_string(dir.path().join("dup.txt")).unwrap();
+    assert_eq!(on_disk, "y\ny\ny\n");
+}
+
+/// Shared `multi_edit` tool def and ACP wire dispatch apply edits atomically.
+#[tokio::test]
+async fn acp_multi_edit_tool_def_and_dispatch() {
+    let multi_def = trogon_tools::all_tool_defs()
+        .into_iter()
+        .find(|d| d.name == "multi_edit")
+        .expect("multi_edit must be in all_tool_defs");
+    assert!(
+        multi_def.input_schema["properties"].get("edits").is_some(),
+        "multi_edit schema must include edits"
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("seq.txt"), "aaa bbb\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-multiedit";
+    let session_id = "sess-acp-multiedit-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("multi edited"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_multiedit_001",
+                "multi_edit",
+                serde_json::json!({
+                    "path": "seq.txt",
+                    "edits": [
+                        {"old_str": "aaa", "new_str": "AAA"},
+                        {"old_str": "bbb", "new_str": "BBB"}
+                    ]
+                }),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "multi edit", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after multi_edit dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1);
+    let on_disk = std::fs::read_to_string(dir.path().join("seq.txt")).unwrap();
+    assert_eq!(on_disk, "AAA BBB\n");
+}
+
 // ── glob → ACP wire ───────────────────────────────────────────────────────────
 
 /// `glob` dispatched via ACP wire format — matching filenames appear in the
@@ -865,7 +994,10 @@ async fn acp_fetch_url_tool_dispatched_via_wire_format() {
         when.method(POST)
             .path("/messages")
             .body_contains("tool_result")
-            .body_contains("acp-fetch-sentinel");
+            // The fetch_url SSRF guard rejects loopback with this message; the
+            // tool_result carrying it proves the tool was dispatched and its
+            // result flowed back to the model.
+            .body_contains("not permitted");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("fetched"));
@@ -913,7 +1045,7 @@ async fn acp_fetch_url_tool_dispatched_via_wire_format() {
 /// from actual API responses.
 #[tokio::test]
 async fn acp_tool_use_cycle_exported_as_portable_blocks_via_wire() {
-    use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+    use trogon_runner_tools::portable_session::{PortableBlock, PortableExportV2};
 
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("sentinel.txt"), "sentinel-export-content-xyz\n").unwrap();
@@ -980,9 +1112,14 @@ async fn acp_tool_use_cycle_exported_as_portable_blocks_via_wire() {
             .expect("timed out waiting for session/export response")
             .expect("no session/export response");
 
-            let messages: Vec<PortableMessage> =
-                serde_json::from_slice(&export_msg.payload)
-                    .expect("response must be a PortableMessage array");
+            // The ext_method reply wraps the payload as {"result": <export>}. A
+            // tool_use cycle has structured blocks, so the export is the versioned
+            // V2 format (a `{version, messages}` object, not a flat array).
+            let envelope: serde_json::Value = serde_json::from_slice(&export_msg.payload)
+                .expect("response must be JSON");
+            let export: PortableExportV2 = serde_json::from_value(envelope["result"].clone())
+                .expect("result must be a V2 portable export object");
+            let messages = export.messages;
 
             assert!(
                 !messages.is_empty(),
@@ -1110,5 +1247,150 @@ async fn new_session_cwd_overrides_agent_initial_cwd_for_file_tool_dispatch() {
         second_mock.hits(),
         1,
         "second mock (tool_result with sentinel) must be hit — cwd was propagated correctly"
+    );
+}
+
+// ── web_search → ACP wire ─────────────────────────────────────────────────────
+
+static ACP_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+fn acp_env_lock() -> &'static Mutex<()> {
+    ACP_ENV_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Portable `web_search` is registered in trogon-tools and dispatched via ACP wire.
+#[tokio::test]
+async fn acp_web_search_tool_def_present_and_dispatch_works() {
+    use httpmock::prelude::*;
+
+    let _guard = acp_env_lock().lock().unwrap();
+    let search_server = MockServer::start();
+    search_server.mock(|when, then| {
+        when.method(POST).path("/search");
+        then.status(200).json_body(serde_json::json!({
+            "organic": [{
+                "title": "ACP Search Hit",
+                "link": "https://example.com/acp-hit",
+                "snippet": "acp web search result"
+            }]
+        }));
+    });
+    unsafe {
+        std::env::set_var("WEB_SEARCH_API_KEY", "test-key");
+        std::env::set_var("WEB_SEARCH_ENDPOINT", search_server.url("/search"));
+    }
+
+    assert!(
+        trogon_tools::all_tool_defs()
+            .iter()
+            .any(|d| d.name == "web_search"),
+        "web_search must be in all_tool_defs"
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-websearch";
+    let session_id = "sess-acp-websearch-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let api_server = MockServer::start();
+    let second_mock = api_server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("ACP Search Hit");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("searched"));
+    });
+    api_server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_websearch_001",
+                "web_search",
+                serde_json::json!({"query": "trogon portable search"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&api_server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "search the web", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after web_search dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result with web_search output must appear in second Anthropic API call"
+    );
+
+    unsafe {
+        std::env::remove_var("WEB_SEARCH_API_KEY");
+        std::env::remove_var("WEB_SEARCH_ENDPOINT");
+    }
+}
+
+/// Missing search credentials must return a clear error through ACP dispatch.
+#[tokio::test]
+async fn acp_web_search_missing_config_returns_clear_error() {
+    let _guard = acp_env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("WEB_SEARCH_API_KEY");
+        std::env::remove_var("SERPER_API_KEY");
+        std::env::remove_var("WEB_SEARCH_ENDPOINT");
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-websearch-missing";
+    let session_id = "sess-acp-websearch-missing";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let api_server = MockServer::start();
+    let second_mock = api_server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("not configured");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("missing"));
+    });
+    api_server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_websearch_missing",
+                "web_search",
+                serde_json::json!({"query": "anything"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&api_server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "search", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after missing-config web_search; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "missing-config error must flow back as tool_result"
     );
 }

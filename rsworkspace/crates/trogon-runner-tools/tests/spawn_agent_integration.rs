@@ -65,7 +65,6 @@ async fn call_tool_delivers_request_and_returns_reply() {
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
 
-    // Spawn a mock registry that echoes capability+prompt back.
     let mut sub = registry_client
         .subscribe("trogon.spawn")
         .await
@@ -76,8 +75,8 @@ async fn call_tool_delivers_request_and_returns_reply() {
             let payload: serde_json::Value =
                 serde_json::from_slice(&msg.payload).unwrap_or_default();
             let response = format!(
-                "ran {} with: {}",
-                payload["capability"].as_str().unwrap_or(""),
+                "ran agent={} with: {}",
+                payload["agent"].as_str().unwrap_or(""),
                 payload["prompt"].as_str().unwrap_or("")
             );
             if let Some(reply) = msg.reply {
@@ -93,13 +92,13 @@ async fn call_tool_delivers_request_and_returns_reply() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "explore", "prompt": "find all Rust files" }),
+            &serde_json::json!({ "agent": "explore", "prompt": "find all Rust files" }),
         )
         .await;
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     let body = result.unwrap();
-    assert!(body.contains("explore"), "body should contain capability");
+    assert!(body.contains("explore"), "body should contain agent name");
     assert!(body.contains("find all Rust files"), "body should contain prompt");
 }
 
@@ -133,7 +132,7 @@ async fn call_tool_uses_correct_subject_prefix() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "plan", "prompt": "design auth flow" }),
+            &serde_json::json!({ "prompt": "design auth flow" }),
         )
         .await;
 
@@ -141,9 +140,9 @@ async fn call_tool_uses_correct_subject_prefix() {
     assert_eq!(result.unwrap(), "ack");
 }
 
-/// The JSON sent to the registry contains exactly `capability` and `prompt` fields.
+/// The JSON sent to the spawn handler contains `agent`, `prompt`, and `session_id`.
 #[tokio::test]
-async fn call_tool_sends_capability_and_prompt_in_payload() {
+async fn call_tool_sends_agent_and_prompt_in_payload() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
@@ -158,14 +157,10 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
             let v: serde_json::Value =
                 serde_json::from_slice(&msg.payload).expect("payload must be JSON");
 
-            assert_eq!(v["capability"].as_str().unwrap(), "explore");
+            assert_eq!(v["agent"].as_str().unwrap(), "reviewer");
             assert_eq!(v["prompt"].as_str().unwrap(), "list files");
-
-            // session_id is forwarded so the spawned agent knows its parent
-            // session (added in feat(spawn-agent): isolated worktree sub-agents).
             assert_eq!(v["session_id"].as_str().unwrap(), "");
-
-            // no unexpected fields beyond capability, prompt, session_id
+            assert!(v.get("capability").is_none(), "capability must not be sent");
             assert!(v.as_object().map(|o| o.len() == 3).unwrap_or(false));
 
             if let Some(reply) = msg.reply {
@@ -178,7 +173,7 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "explore", "prompt": "list files" }),
+            &serde_json::json!({ "agent": "reviewer", "prompt": "list files" }),
         )
         .await;
 
@@ -187,11 +182,23 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
 
 // ── call_tool — missing arguments ─────────────────────────────────────────────
 
-/// `call_tool` returns an error when `capability` is absent from arguments.
+/// `call_tool` succeeds with only `prompt` when `agent` is omitted.
 #[tokio::test]
-async fn call_tool_errors_on_missing_capability() {
+async fn call_tool_accepts_prompt_without_agent() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
+    let registry_client = nats_client(port).await;
+
+    let mut sub = registry_client.subscribe("trogon.spawn").await.unwrap();
+    tokio::spawn(async move {
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            registry_client.publish(reply, "ok".into()).await.unwrap();
+        }
+    });
+
+    tokio::task::yield_now().await;
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
@@ -201,11 +208,7 @@ async fn call_tool_errors_on_missing_capability() {
         )
         .await;
 
-    assert!(result.is_err());
-    assert!(
-        result.unwrap_err().contains("capability"),
-        "error should mention 'capability'"
-    );
+    assert!(result.is_ok(), "prompt alone must be sufficient");
 }
 
 /// `call_tool` returns an error when `prompt` is absent from arguments.
@@ -218,7 +221,7 @@ async fn call_tool_errors_on_missing_prompt() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "explore" }),
+            &serde_json::json!({ "agent": "explore" }),
         )
         .await;
 
@@ -263,24 +266,22 @@ async fn call_tool_returns_error_when_no_subscriber_responds() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "plan", "prompt": "anything" }),
+            &serde_json::json!({ "prompt": "anything" }),
         )
         .await;
 
     assert!(result.is_err(), "expected error with no subscriber");
 }
 
-/// The timeout error message mentions the timeout duration in seconds.
-///
-/// We verify the format string indirectly by confirming the SpawnAgentTool
-/// tool_def description mentions the expected timeout behavior via a unit-level
-/// check on the constant (120 s).
+/// `tool_def` describes spawning a sub-agent in an isolated worktree (not the
+/// old registry-based wording).
 #[test]
-fn spawn_timeout_is_120_seconds() {
-    // If this fails the format string in call_tool must be updated too.
+fn tool_def_describes_isolated_sub_agent_spawn() {
     let def = SpawnAgentTool::tool_def();
-    // The description should reference the registry resolving the agent.
-    assert!(def.description.contains("registry"), "description must reference the registry");
+    assert!(
+        def.description.contains("sub-agent") && def.description.contains("isolated worktree"),
+        "description must reference sub-agent spawning in an isolated worktree"
+    );
 }
 
 // ── call_tool — response passthrough ─────────────────────────────────────────
@@ -312,7 +313,7 @@ async fn call_tool_returns_registry_reply_verbatim() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "explore", "prompt": "count files" }),
+            &serde_json::json!({ "prompt": "count files" }),
         )
         .await;
 
@@ -344,7 +345,7 @@ async fn call_tool_handles_multiline_registry_reply() {
     let result = tool
         .call_tool(
             "spawn_agent",
-            &serde_json::json!({ "capability": "plan", "prompt": "outline a plan" }),
+            &serde_json::json!({ "prompt": "outline a plan" }),
         )
         .await;
 
@@ -366,7 +367,7 @@ async fn call_tool_handles_concurrent_requests() {
         while let Some(msg) = sub.next().await {
             let v: serde_json::Value =
                 serde_json::from_slice(&msg.payload).unwrap_or_default();
-            let reply_body = format!("done:{}", v["capability"].as_str().unwrap_or("?"));
+            let reply_body = format!("done:{}", v["prompt"].as_str().unwrap_or("?"));
             if let Some(reply) = msg.reply {
                 registry_client
                     .publish(reply, reply_body.into())
@@ -376,17 +377,17 @@ async fn call_tool_handles_concurrent_requests() {
         }
     });
 
-    let capabilities = ["explore", "plan", "review"];
+    let prompts = ["explore task", "plan task", "review task"];
     let mut handles = vec![];
 
-    for cap in capabilities {
+    for prompt in prompts {
         let client = nats_client(port).await;
-        let cap = cap.to_string();
+        let prompt = prompt.to_string();
         handles.push(tokio::spawn(async move {
             let tool = SpawnAgentTool::new(client, "cc", "");
             tool.call_tool(
                 "spawn_agent",
-                &serde_json::json!({ "capability": cap, "prompt": "do it" }),
+                &serde_json::json!({ "prompt": prompt }),
             )
             .await
         }));

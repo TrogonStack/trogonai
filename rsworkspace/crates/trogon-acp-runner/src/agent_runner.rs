@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
-use trogon_agent_core::agent_loop::{AgentError, AgentEvent, ElicitationProvider, Message, PermissionChecker};
+use trogon_agent_core::agent_loop::{
+    AgentError, AgentEvent, ElicitationProvider, Message, PermissionChecker, PostToolObserver,
+};
 use trogon_agent_core::tools::ToolDef;
 
 use crate::agent::GatewayConfig;
@@ -36,6 +38,10 @@ pub trait AgentRunner: Clone {
     /// Install an elicitation provider for the built-in `ask_user` tool.
     fn set_elicitation_provider(&mut self, provider: Arc<dyn ElicitationProvider>);
 
+    /// Install a post-tool observer (PostToolUse hooks) that may append a
+    /// blocking objection to a tool result the model sees.
+    fn set_post_tool_observer(&mut self, observer: Arc<dyn PostToolObserver>);
+
     /// Override proxy / token / extra-headers from a `GatewayConfig`.
     fn apply_gateway(&mut self, config: &GatewayConfig);
 
@@ -68,11 +74,7 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
     }
 
     fn set_cwd(&mut self, cwd: String) {
-        self.tool_context = Arc::new(trogon_tools::ToolContext {
-            proxy_url: self.tool_context.proxy_url.clone(),
-            cwd,
-            http_client: self.tool_context.http_client.clone(),
-        });
+        self.tool_context = Arc::new(self.tool_context.with_cwd(cwd));
     }
 
     fn add_mcp_tools(
@@ -90,6 +92,10 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
 
     fn set_elicitation_provider(&mut self, provider: Arc<dyn ElicitationProvider>) {
         self.elicitation_provider = Some(provider);
+    }
+
+    fn set_post_tool_observer(&mut self, observer: Arc<dyn PostToolObserver>) {
+        self.post_tool_observer = Some(observer);
     }
 
     fn apply_gateway(&mut self, config: &GatewayConfig) {
@@ -137,11 +143,7 @@ mod tests {
             model: "claude-opus-4-6".to_string(),
             max_iterations: 10,
             thinking_budget: None,
-            tool_context: Arc::new(ToolContext {
-                proxy_url: String::new(),
-                cwd: String::new(),
-                http_client: reqwest::Client::new(),
-            }),
+            tool_context: Arc::new(ToolContext::new(String::new(), String::new(), reqwest::Client::new())),
             memory_owner: None,
             memory_repo: None,
             memory_path: None,
@@ -149,6 +151,7 @@ mod tests {
             mcp_dispatch: vec![],
             permission_checker: None,
             elicitation_provider: None,
+            post_tool_observer: None,
         }
     }
 
@@ -266,6 +269,8 @@ pub mod mock {
         invoke_checker_for_tool: Arc<Mutex<Option<(String, serde_json::Value)>>>,
         /// The last `system_prompt` argument passed to `run_chat_streaming`.
         captured_system_prompt: Arc<Mutex<Option<String>>>,
+        /// Tool names from the last `run_chat_streaming` call.
+        captured_chat_tools: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockAgentRunner {
@@ -284,6 +289,7 @@ pub mod mock {
                 captured_permission_checker: Arc::new(Mutex::new(None)),
                 invoke_checker_for_tool: Arc::new(Mutex::new(None)),
                 captured_system_prompt: Arc::new(Mutex::new(None)),
+                captured_chat_tools: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -349,6 +355,11 @@ pub mod mock {
         pub fn captured_system_prompt(&self) -> Option<String> {
             self.captured_system_prompt.lock().unwrap().clone()
         }
+
+        /// Return tool names passed to the last `run_chat_streaming` call.
+        pub fn captured_chat_tools(&self) -> Vec<String> {
+            self.captured_chat_tools.lock().unwrap().clone()
+        }
     }
 
     #[async_trait::async_trait(?Send)]
@@ -383,16 +394,20 @@ pub mod mock {
             *self.elicitation_provider_set.lock().unwrap() = true;
         }
 
+        fn set_post_tool_observer(&mut self, _observer: Arc<dyn PostToolObserver>) {}
+
         fn apply_gateway(&mut self, _config: &GatewayConfig) {}
 
         async fn run_chat_streaming(
             &self,
             messages: Vec<Message>,
-            _tools: &[ToolDef],
+            tools: &[ToolDef],
             system_prompt: Option<&str>,
             event_tx: mpsc::Sender<AgentEvent>,
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
+            *self.captured_chat_tools.lock().unwrap() =
+                tools.iter().map(|d| d.name.clone()).collect();
             // If configured, invoke the captured permission checker with a fake tool
             // call to exercise the audit recording path. Clone out of the mutexes and
             // drop the guards before the await so neither is held across it.

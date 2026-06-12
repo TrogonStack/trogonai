@@ -14,6 +14,7 @@ use trogon_tools::PermissionChecker;
 use crate::permission_rules::{
     extract_path_from_input, is_always_allowed, normalize_tool_name, PermissionRules, RuleDecision,
 };
+use crate::scope::Scope;
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
 /// A single permission check request sent from the Runner to the ACP connection handler.
@@ -301,12 +302,12 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
     "gh",
 ];
 
-fn is_read_only_tool(tool_name: &str) -> bool {
+pub(crate) fn is_read_only_tool(tool_name: &str) -> bool {
     READ_ONLY_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
 /// Bash commands that only read or inspect the filesystem (no writes, no exec).
-fn is_read_only_bash_command(tool_input: &Value) -> bool {
+pub(crate) fn is_read_only_bash_command(tool_input: &Value) -> bool {
     let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) else {
         return false;
     };
@@ -345,7 +346,7 @@ fn is_read_only_bash_command(tool_input: &Value) -> bool {
     )
 }
 
-fn is_edit_tool(tool_name: &str) -> bool {
+pub(crate) fn is_edit_tool(tool_name: &str) -> bool {
     ACCEPT_EDITS_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
@@ -382,7 +383,7 @@ fn is_protected_path(path: &str) -> bool {
 
 /// True when a tool call targets a protected path: an explicit path argument, or
 /// a (read-only) bash command that references one (e.g. `cat .env`).
-fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
+pub(crate) fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
     if extract_path_from_input(tool_input)
         .map(is_protected_path)
         .unwrap_or(false)
@@ -401,7 +402,7 @@ fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
 
 /// Lexically resolve `p` (relative to `base`) to a normalized absolute path,
 /// collapsing `.`/`..` WITHOUT touching the filesystem.
-fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
+pub(crate) fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
     use std::path::{Component, Path, PathBuf};
     let raw = if Path::new(p).is_absolute() {
         PathBuf::from(p)
@@ -487,6 +488,11 @@ pub struct ModePermissionChecker {
     pub classifier: Option<Arc<dyn SafetyClassifier>>,
     /// PreToolUse hook matchers; a blocking hook denies the tool.
     pub pre_tool_use: Vec<crate::hooks::HookMatcher>,
+    /// Optional Scope envelope for the low-friction permission model (Phase 2).
+    /// When `Some`, it governs the decision before the mode match; `None` uses
+    /// the legacy mode logic. Resolved in the builder (SCOPE-7), consulted in
+    /// `check` (SCOPE-8).
+    pub scope: Option<Scope>,
 }
 
 impl ModePermissionChecker {
@@ -510,10 +516,156 @@ impl ModePermissionChecker {
         let Some(path) = extract_path_from_input(tool_input) else {
             return true;
         };
+        Self::path_within_read_roots(cwd, path, &self.read_dirs)
+    }
+
+    /// Whether a read-only bash command only touches paths within the allowed read
+    /// roots. Returns `true` when containment is disabled (`cwd` is `None`). When
+    /// cwd is set, only auto-allows if every identifiable path argument is
+    /// contained; unparsable commands fail closed (prompt).
+    fn read_only_bash_allowed(&self, tool_input: &Value) -> bool {
+        let Some(cwd) = self.cwd.as_deref() else {
+            return true;
+        };
+        let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        let Some(path_args) = extract_read_only_bash_paths(cmd) else {
+            return false;
+        };
+        if path_args.is_empty() {
+            return true;
+        }
+        path_args
+            .iter()
+            .all(|path| Self::path_within_read_roots(cwd, path, &self.read_dirs))
+    }
+
+    fn path_within_read_roots(cwd: &str, path: &str, read_dirs: &[String]) -> bool {
         let target = lexical_abs(cwd, path);
         std::iter::once(lexical_abs(cwd, "."))
-            .chain(self.read_dirs.iter().map(|d| lexical_abs(cwd, d)))
+            .chain(read_dirs.iter().map(|d| lexical_abs(cwd, d)))
             .any(|root| target.starts_with(&root))
+    }
+}
+
+/// Skip leading flag tokens (`-l`, `--all`, `-n 10`, …) and return the remainder.
+fn skip_bash_flag_tokens<'a, 'b>(args: &'b [&'a str]) -> &'b [&'a str] {
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i];
+        if a == "--" {
+            return &args[i + 1..];
+        }
+        if !a.starts_with('-') {
+            break;
+        }
+        if a.contains('=') {
+            i += 1;
+            continue;
+        }
+        if a.len() > 1
+            && !a.starts_with("--")
+            && a.chars().skip(1).all(|c| c.is_ascii_alphabetic())
+        {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i < args.len() && !args[i].starts_with('-') {
+            i += 1;
+        }
+    }
+    &args[i..]
+}
+
+/// Collect non-flag arguments that refer to filesystem paths.
+fn collect_bash_path_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let mut paths = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i];
+        if a == "--" {
+            paths.extend(&args[i + 1..]);
+            break;
+        }
+        if a.starts_with('-') {
+            if a.contains('=') {
+                i += 1;
+                continue;
+            }
+            if a.len() > 1
+                && !a.starts_with("--")
+                && a.chars().skip(1).all(|c| c.is_ascii_alphabetic())
+            {
+                i += 1;
+                continue;
+            }
+            i += 1;
+            if i < args.len() && !args[i].starts_with('-') {
+                i += 1;
+            }
+            continue;
+        }
+        paths.push(a);
+        i += 1;
+    }
+    paths
+}
+
+/// Path arguments from a read-only bash command. `None` when the command cannot
+/// be parsed reliably (caller should prompt).
+fn extract_read_only_bash_paths(cmd: &str) -> Option<Vec<&str>> {
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    let base = tokens[0].trim_start_matches('(');
+    match base {
+        "pwd" | "df" | "echo" | "which" => Some(vec![]),
+        "ls" | "ll" | "dir" | "cat" | "head" | "tail" | "wc" | "file" | "stat" | "du" | "tree" => {
+            Some(collect_bash_path_args(&tokens[1..]))
+        }
+        "find" => {
+            // `find` can execute commands or write/delete via these actions —
+            // it is not read-only when any are present, so fail closed (prompt).
+            const FIND_UNSAFE: &[&str] = &[
+                "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf",
+                "-fprintf0", "-fls",
+            ];
+            if tokens[1..].iter().any(|t| FIND_UNSAFE.contains(t)) {
+                return None;
+            }
+            // Leading operands (before the first predicate/option) are the search
+            // roots; check every one, not just the first. No roots = searches cwd.
+            Some(
+                tokens[1..]
+                    .iter()
+                    .take_while(|t| !t.starts_with('-'))
+                    .copied()
+                    .collect(),
+            )
+        }
+        "grep" | "rg" => {
+            // `-f/--file` reads a patterns FILE we wouldn't containment-check, and
+            // `-e/--regexp` supplies the pattern via flag (so the first positional
+            // is a path, not the pattern). Both break the parse below — fail closed.
+            if tokens[1..].iter().any(|t| {
+                matches!(*t, "-f" | "--file" | "-e" | "--regexp")
+                    || t.starts_with("--file=")
+                    || t.starts_with("--regexp=")
+            }) {
+                return None;
+            }
+            let rest = skip_bash_flag_tokens(&tokens[1..]);
+            if rest.is_empty() {
+                Some(vec![])
+            } else {
+                Some(rest[1..].to_vec())
+            }
+        }
+        "test" | "[" => None,
+        _ => None,
     }
 }
 
@@ -559,6 +711,37 @@ impl PermissionChecker for ModePermissionChecker {
                 return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
             }
 
+            // CFG-3: an explicit `ask` rule (settings.json `permissions.ask`) forces the
+            // interactive prompt, skipping mode + read-only auto-allow. Deny still wins
+            // (handled above); bypassPermissions never reaches here.
+            if self.inner.rules.explicitly_asks(tool_name, tool_input) {
+                return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
+            }
+
+            // Scope envelope (when active) governs the decision before mode logic.
+            if let Some(scope) = &self.scope {
+                let cwd = self.cwd.as_deref().unwrap_or(".");
+                return match scope.evaluate(tool_name, tool_input, cwd) {
+                    crate::scope::ScopeDecision::Forbidden => {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                        false
+                    }
+                    crate::scope::ScopeDecision::InScope => {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                        true
+                    }
+                    crate::scope::ScopeDecision::OutOfScope => match scope.on_exceed() {
+                        crate::scope::OnExceed::Escalate => {
+                            self.inner.inner.check(tool_call_id, tool_name, tool_input).await
+                        }
+                        crate::scope::OnExceed::Deny => {
+                            push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                            false
+                        }
+                    },
+                };
+            }
+
             match self.mode.as_str() {
                 "dontAsk" => {
                     push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -579,8 +762,12 @@ impl PermissionChecker for ModePermissionChecker {
                     if normalize_tool_name(tool_name) == "bash"
                         && is_read_only_bash_command(tool_input) =>
                 {
-                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                    true
+                    if self.read_only_bash_allowed(tool_input) {
+                        push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                        true
+                    } else {
+                        self.inner.inner.check(tool_call_id, tool_name, tool_input).await
+                    }
                 }
                 "acceptEdits" if is_edit_tool(tool_name) => {
                     push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -643,6 +830,10 @@ pub fn build_mode_permission_checker(
         tool_policies,
         inner,
     };
+    // Scope is on by default (Phase 5 / SCOPE-15): resolve the baseline before
+    // moving `extras.cwd` into the struct below. Active whenever a cwd is known;
+    // sessions without a cwd fall back to the legacy mode logic.
+    let scope = extras.cwd.as_deref().map(Scope::baseline);
     Some(Arc::new(ModePermissionChecker {
         mode: mode.to_string(),
         inner: rules_checker,
@@ -650,6 +841,7 @@ pub fn build_mode_permission_checker(
         read_dirs: extras.additional_read_dirs,
         classifier: extras.classifier,
         pre_tool_use: extras.pre_tool_use,
+        scope,
     }))
 }
 
@@ -671,6 +863,7 @@ pub async fn check_tool_permission(
     // always empty. The caller passes a turn-scoped buffer and drains it into the
     // session's audit_log after the turn.
     audit_buf: AuditBuf,
+    extras: PermissionExtras,
 ) -> bool {
     if mode == "bypassPermissions" {
         return true;
@@ -688,8 +881,7 @@ pub async fn check_tool_permission(
         audit_buf,
         // One-shot gate (xai/openrouter): no ExitPlanMode handling, so a throwaway cell.
         Arc::new(Mutex::new(None)),
-        // Containment/classifier not wired for the one-shot path; defaults are inert.
-        PermissionExtras::default(),
+        extras,
     ) else {
         return true;
     };
@@ -872,6 +1064,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -891,6 +1084,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -913,6 +1107,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -937,6 +1132,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -956,6 +1152,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -983,6 +1180,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1002,6 +1200,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1020,6 +1219,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1038,6 +1238,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1060,6 +1261,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1079,6 +1281,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             checker
@@ -1098,6 +1301,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1118,6 +1322,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1139,6 +1344,7 @@ mod tests {
             read_dirs: vec![],
             classifier: None,
             pre_tool_use: vec![],
+            scope: None,
         };
         assert!(
             !checker
@@ -1619,7 +1825,148 @@ mod tests {
             read_dirs,
             classifier,
             pre_tool_use: vec![],
+            scope: None,
         }
+    }
+
+    fn scoped_checker(
+        mode: &str,
+        tx: PermissionTx,
+        cwd: &str,
+    ) -> ModePermissionChecker {
+        ModePermissionChecker {
+            mode: mode.to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: Some(cwd.to_string()),
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: Some(Scope::baseline(cwd)),
+        }
+    }
+
+    #[tokio::test]
+    async fn scope_in_cwd_write_file_auto_allowed_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("default", tx, "/abs/cwd");
+        assert!(
+            checker
+                .check(
+                    "tc-sw",
+                    "write_file",
+                    &serde_json::json!({"path": "src/x.rs", "content": "x"}),
+                )
+                .await,
+            "in-cwd write_file must be auto-allowed by scope without prompting"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_in_cwd_read_file_auto_allowed_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("default", tx, "/abs/cwd");
+        assert!(
+            checker
+                .check("tc-sr", "read_file", &serde_json::json!({"path": "src/x.rs"}))
+                .await,
+            "read-only tool in cwd must be auto-allowed by scope without prompting"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_fetch_url_out_of_scope_escalates_not_silent_allow() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check(
+                    "tc-sn",
+                    "fetch_url",
+                    &serde_json::json!({"url": "https://example.com"}),
+                )
+                .await,
+            "fetch_url (network denied by baseline) must escalate; dropped channel → false"
+        );
+    }
+
+    // SCOPE-14 dogfood (test proxy): the four "don't babysit me" scenarios driven
+    // through the real check() path with scope active. `dontAsk` is used as the
+    // mode precisely because, without scope, dontAsk auto-allows everything — so a
+    // `false` here proves scope pre-empts even the most permissive mode.
+
+    #[tokio::test]
+    async fn scope_dogfood_out_of_cwd_write_escalates() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check("tc-tmp", "write_file", &serde_json::json!({"path": "/tmp/escape.txt"}))
+                .await,
+            "write outside cwd must escalate (dropped channel → false), not silently allow"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_dogfood_dotenv_is_hard_denied() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("dontAsk", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check("tc-env", "read_file", &serde_json::json!({"path": ".env"}))
+                .await,
+            ".env is protected — scope must hard-deny it even under dontAsk"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_none_regression_dont_ask_auto_allows_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "dontAsk".to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: None,
+        };
+        assert!(
+            checker
+                .check("tc-reg-da", "bash", &serde_json::json!({"command": "rm -rf /"}))
+                .await,
+            "scope: None must preserve dontAsk auto-allow behavior"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_none_regression_default_auto_allows_read_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "default".to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: None,
+        };
+        assert!(
+            checker
+                .check(
+                    "tc-reg-dr",
+                    "read_file",
+                    &serde_json::json!({"path": "src/main.rs"}),
+                )
+                .await,
+            "scope: None must preserve default read-only auto-allow behavior"
+        );
     }
 
     #[tokio::test]
@@ -1679,6 +2026,52 @@ mod tests {
                 .check("tc", "read_file", &serde_json::json!({"path": "/etc/passwd"}))
                 .await,
             "reads outside cwd must not be auto-allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_bash_inside_cwd_allowed_outside_prompts() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("default", tx, Some("/work"), vec![], None);
+        assert!(
+            checker
+                .check("tc", "bash", &serde_json::json!({"command": "cat src/a.rs"}))
+                .await,
+            "read-only bash inside cwd must still auto-allow"
+        );
+        let (tx2, rx2) = mpsc::channel(1);
+        drop(rx2);
+        let checker2 = full_checker("default", tx2, Some("/work"), vec![], None);
+        assert!(
+            !checker2
+                .check("tc", "bash", &serde_json::json!({"command": "cat /etc/passwd"}))
+                .await,
+            "read-only bash outside cwd must not be auto-allowed"
+        );
+    }
+
+    #[test]
+    fn extract_paths_find_exec_and_grep_file_flags_fail_closed() {
+        // find that executes/writes is never read-only → None (caller prompts)
+        assert_eq!(extract_read_only_bash_paths("find . -exec rm {} ;"), None);
+        assert_eq!(extract_read_only_bash_paths("find . -delete"), None);
+        // grep reading a patterns file, or with a flag-supplied pattern → None
+        assert_eq!(extract_read_only_bash_paths("grep -f /etc/patterns ."), None);
+        assert_eq!(extract_read_only_bash_paths("grep --file=/etc/p ."), None);
+        assert_eq!(extract_read_only_bash_paths("grep -e foo bar"), None);
+        // benign forms still parse: every leading find root is checked
+        assert_eq!(
+            extract_read_only_bash_paths("find /etc -name x"),
+            Some(vec!["/etc"])
+        );
+        assert_eq!(
+            extract_read_only_bash_paths("find . sub -type f"),
+            Some(vec![".", "sub"])
+        );
+        assert_eq!(
+            extract_read_only_bash_paths("grep pattern src/a.rs"),
+            Some(vec!["src/a.rs"])
         );
     }
 
@@ -1771,6 +2164,34 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn check_tool_permission_auto_mode_uses_classifier_from_extras() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let extras = PermissionExtras {
+            classifier: Some(Arc::new(MockClassifier(ClassifierVerdict::Deny))),
+            ..PermissionExtras::default()
+        };
+        let allowed = check_tool_permission(
+            "auto",
+            "sess-1",
+            Some(&tx),
+            &[],
+            PermissionRules::default(),
+            &[],
+            "tc",
+            "write_file",
+            &serde_json::json!({"path": "a.rs", "content": "x"}),
+            Arc::new(Mutex::new(vec![])),
+            extras,
+        )
+        .await;
+        assert!(
+            !allowed,
+            "auto mode must consult the classifier passed via PermissionExtras"
+        );
+    }
+
     fn pre_hook(matcher: &str, command: &str) -> Vec<crate::hooks::HookMatcher> {
         vec![crate::hooks::HookMatcher {
             matcher: matcher.to_string(),
@@ -1830,6 +2251,47 @@ mod tests {
                 .check("tc", "read_file", &serde_json::json!({"path": "a.rs"}))
                 .await,
             "PreToolUse matcher must not fire for a non-matching tool"
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_dont_ask_explicit_ask_rule_prompts_via_channel() {
+        // An explicit `ask` rule must force the interactive prompt even in dontAsk
+        // mode (which otherwise auto-allows). The responder DENIES; the call can only
+        // return false if it actually routed through the channel — a plain dontAsk
+        // auto-allow would return true, so this discriminates the fix from a no-op.
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "dontAsk".to_string(),
+            inner: make_rules_checker("ask_commands: git push", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
+            pre_tool_use: vec![],
+            scope: None,
+        };
+        let got_request = tokio::spawn(async move {
+            match rx.recv().await {
+                Some(req) => {
+                    let _ = req.response_tx.send(false); // deny at the prompt
+                    true
+                }
+                None => false,
+            }
+        });
+        assert!(
+            !checker
+                .check(
+                    "tc-daa",
+                    "bash",
+                    &serde_json::json!({"command": "git push origin main"}),
+                )
+                .await,
+            "explicit ask rule must route to the prompt; denied there → false"
+        );
+        assert!(
+            got_request.await.unwrap(),
+            "the interactive channel must have received the request (not auto-allowed)"
         );
     }
 }

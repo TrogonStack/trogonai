@@ -97,6 +97,7 @@ pub fn message_to_v2(m: &Message) -> PortableMessageV2 {
             ContentBlock::ToolResult {
                 tool_use_id,
                 content,
+                ..
             } => PortableBlock::ToolResult {
                 id: tool_use_id.clone(),
                 output_summary: truncate_str(content, 500),
@@ -175,6 +176,7 @@ pub fn v2_to_messages(export: &PortableExportV2) -> Vec<Message> {
                     } => ContentBlock::ToolResult {
                         tool_use_id: id.clone(),
                         content: output_summary.clone(),
+                        blocks: vec![],
                     },
                     PortableBlock::Thinking { text } => ContentBlock::Thinking {
                         thinking: text.clone(),

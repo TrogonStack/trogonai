@@ -563,12 +563,12 @@ pub async fn dispatch_tool<H: HttpClient>(
         "read_slack_channel" => slack::read_channel(ctx, input).await,
         "read_file" | "git_status" | "write_file" | "list_dir" | "glob" | "str_replace"
         | "git_diff" | "git_log" | "fetch_url" | "search_files" => {
-            let tools_ctx = trogon_agent_core::tools::ToolContext {
-                proxy_url: ctx.proxy_url.clone(),
-                cwd: ctx.cwd.clone(),
-                http_client: reqwest::Client::new(),
-            };
-            Ok(trogon_agent_core::tools::dispatch_tool(&tools_ctx, name, input).await)
+            let tools_ctx = trogon_agent_core::tools::ToolContext::new(
+                ctx.proxy_url.clone(),
+                ctx.cwd.clone(),
+                reqwest::Client::new(),
+            );
+            Ok(trogon_agent_core::tools::dispatch_tool(&tools_ctx, name, input).await.display_text())
         }
         "spawn_agent" => Err("spawn_agent requires a NATS client — dispatch via trogon-acp-runner".to_string()),
         unknown => Err(format!("Unknown tool: {unknown}")),

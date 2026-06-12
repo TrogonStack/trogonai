@@ -40,13 +40,26 @@ pub struct TurnRenderer {
     /// and markdown-rendered when the turn (or a tool call) interrupts the text.
     stream: bool,
     response_buf: String,
+    /// Full assistant text for this turn (used by optional REPL transcript capture).
+    assistant_text: String,
     /// True once the bold `Trogon` prefix has been printed for the current text run.
     text_started: bool,
     tools_done: u32,
     running_tool: Option<String>,
-    /// True while a `▸ … tools` pill is live on stderr (no trailing newline).
+    /// True while a status line (spinner / tool pill) is live on stderr (no
+    /// trailing newline) and must be cleared before printing real output.
     pill_line: bool,
     stop: Option<TurnStop>,
+    /// Streaming mode: incomplete trailing line awaiting a newline before it can
+    /// be markdown-rendered (we render whole lines as they complete).
+    stream_line_buf: String,
+    /// Streaming mode: whether we are inside a ``` fenced code block.
+    stream_in_code: bool,
+    /// When the turn started — drives the live elapsed-time counter.
+    turn_start: std::time::Instant,
+    /// True while the model is working with nothing else on screen (no tool
+    /// running, no text streaming) — shows `Thinking… (Ns)`.
+    thinking: bool,
 }
 
 impl TurnRenderer {
@@ -54,11 +67,16 @@ impl TurnRenderer {
         Self {
             stream,
             response_buf: String::new(),
+            assistant_text: String::new(),
             text_started: false,
             tools_done: 0,
             running_tool: None,
             pill_line: false,
             stop: None,
+            stream_line_buf: String::new(),
+            stream_in_code: false,
+            turn_start: std::time::Instant::now(),
+            thinking: true,
         }
     }
 
@@ -70,6 +88,11 @@ impl TurnRenderer {
         self.stop.is_some()
     }
 
+    /// Accumulated assistant text for the current turn.
+    pub fn assistant_text(&self) -> &str {
+        &self.assistant_text
+    }
+
     pub fn on_ctrl_c(&mut self) {
         self.flush_pill();
         eprintln!("\n[cancelled]");
@@ -79,10 +102,25 @@ impl TurnRenderer {
         let mut cwd_sync = None;
         match event {
             StreamEvent::Text(text) => {
+                self.assistant_text.push_str(&text);
+                self.thinking = false;
                 self.flush_pill();
                 if self.stream {
                     self.start_text();
-                    print!("{text}");
+                    // Buffer until we have whole lines, then markdown-render each
+                    // completed line (bold/italic/code/headers/fences). The trailing
+                    // partial line stays buffered until its newline arrives or the
+                    // turn ends (flushed via `flush_stream_line`).
+                    self.stream_line_buf.push_str(&text);
+                    while let Some(nl) = self.stream_line_buf.find('\n') {
+                        let line: String = self.stream_line_buf[..nl].to_string();
+                        self.stream_line_buf.drain(..=nl);
+                        if let Some(rendered) =
+                            crate::markdown::render_line(&line, true, &mut self.stream_in_code)
+                        {
+                            println!("{rendered}");
+                        }
+                    }
                     let _ = std::io::stdout().flush();
                 } else {
                     self.response_buf.push_str(&text);
@@ -90,13 +128,15 @@ impl TurnRenderer {
             }
             StreamEvent::Thinking => {}
             StreamEvent::ToolCall(name) => {
+                self.flush_stream_line();
                 self.flush_buffered_markdown();
                 if self.text_started {
                     println!();
                     self.text_started = false;
                 }
+                self.thinking = false;
                 self.running_tool = Some(name);
-                self.render_tool_pill();
+                self.render_status_line();
             }
             StreamEvent::Diff(diff) => {
                 self.flush_pill();
@@ -123,6 +163,8 @@ impl TurnRenderer {
                         output,
                     });
                 }
+                // Back to waiting on the model for the next step.
+                self.thinking = true;
             }
             StreamEvent::Usage {
                 used_tokens,
@@ -133,6 +175,7 @@ impl TurnRenderer {
             }
             StreamEvent::Error(msg) => {
                 self.flush_pill();
+                self.flush_stream_line();
                 self.flush_buffered_markdown();
                 eprintln!("\n\x1b[31merror: {msg}\x1b[0m");
                 let _ = std::io::stdout().flush();
@@ -140,6 +183,7 @@ impl TurnRenderer {
             }
             StreamEvent::Done(reason) => {
                 self.flush_pill();
+                self.flush_stream_line();
                 self.flush_buffered_markdown();
                 if self.text_started {
                     println!();
@@ -152,7 +196,7 @@ impl TurnRenderer {
                         "\n\x1b[33m[max tool rounds reached — try rephrasing or using \x1b[35m/compact\x1b[33m]\x1b[0m"
                     );
                 } else if metrics.context_size > 0 {
-                    let pct = metrics.used_tokens * 100 / metrics.context_size;
+                    let pct = (metrics.used_tokens * 100).checked_div(metrics.context_size).unwrap_or(0);
                     eprintln!(
                         "\x1b[90m── {}/{} tokens ({}%) ──\x1b[0m",
                         fmt_tokens(metrics.used_tokens),
@@ -178,6 +222,21 @@ impl TurnRenderer {
         }
     }
 
+    /// In streaming mode, render and print any buffered partial (newline-less)
+    /// line as markdown. Called at turn/tool boundaries so the last line isn't
+    /// lost. Prints without a trailing newline (the caller adds one if needed).
+    fn flush_stream_line(&mut self) {
+        if self.stream && !self.stream_line_buf.is_empty() {
+            let line = std::mem::take(&mut self.stream_line_buf);
+            if let Some(rendered) =
+                crate::markdown::render_line(&line, true, &mut self.stream_in_code)
+            {
+                print!("{rendered}");
+                let _ = std::io::stdout().flush();
+            }
+        }
+    }
+
     /// In non-streaming mode, render and print any buffered text as markdown.
     fn flush_buffered_markdown(&mut self) {
         if !self.stream && !self.response_buf.is_empty() {
@@ -197,18 +256,21 @@ impl TurnRenderer {
         }
     }
 
-    /// Draw/refresh the `▸ N tools · name running…` pill in place.
-    fn render_tool_pill(&mut self) {
-        let running = self
-            .running_tool
-            .as_deref()
-            .map(|n| format!(" · {n} running…"))
-            .unwrap_or_default();
-        let total = self.tools_done + u32::from(self.running_tool.is_some());
-        let line = if total == 0 {
-            "▸ tools".to_string()
+    /// Draw/refresh the live status line in place: a `Thinking… (Ns)` verb while
+    /// the model works (no symbol, just the word + elapsed seconds), or the
+    /// `▸ N tools · name running… (Ns)` pill while tools run.
+    fn render_status_line(&mut self) {
+        let elapsed = fmt_elapsed(self.turn_start.elapsed().as_secs());
+        let line = if self.running_tool.is_some() || self.tools_done > 0 {
+            let running = self
+                .running_tool
+                .as_deref()
+                .map(|n| format!(" · {n} running…"))
+                .unwrap_or_default();
+            let total = self.tools_done + u32::from(self.running_tool.is_some());
+            format!("▸ {total} tools{running} ({elapsed})")
         } else {
-            format!("▸ {total} tools{running}")
+            format!("Thinking… ({elapsed})")
         };
         if self.pill_line {
             eprint!("\r\x1b[2K\x1b[2m{line}\x1b[0m");
@@ -217,6 +279,27 @@ impl TurnRenderer {
             self.pill_line = true;
         }
         let _ = std::io::stderr().flush();
+    }
+
+    /// Advance the live status line (called on a timer by the REPL): refreshes
+    /// the `Thinking…`/tool elapsed counter while the turn is in flight. Does
+    /// nothing once stopped or while assistant text is actively streaming.
+    pub fn tick(&mut self) {
+        if self.stop.is_none() && (self.thinking || self.running_tool.is_some()) {
+            self.render_status_line();
+        }
+    }
+}
+
+/// Human-readable elapsed time for the live status line: `45s`, `1m 10s`,
+/// `2h 5m` — never a bare `70s`.
+fn fmt_elapsed(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
     }
 }
 
@@ -276,5 +359,13 @@ mod tests {
         assert_eq!(fmt_tokens(42), "42");
         assert_eq!(fmt_tokens(1_500), "1.5k");
         assert_eq!(fmt_tokens(2_000_000), "2.0M");
+    }
+
+    #[test]
+    fn fmt_elapsed_is_human_readable() {
+        assert_eq!(fmt_elapsed(45), "45s");
+        assert_eq!(fmt_elapsed(70), "1m 10s");
+        assert_eq!(fmt_elapsed(600), "10m 0s");
+        assert_eq!(fmt_elapsed(3_725), "1h 2m");
     }
 }

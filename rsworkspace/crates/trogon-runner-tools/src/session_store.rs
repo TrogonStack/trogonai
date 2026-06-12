@@ -6,18 +6,33 @@ use std::sync::{Arc, Mutex};
 use trogon_tools::Message;
 
 use crate::egress::EgressPolicy;
+use crate::scope::Scope;
 
-/// A URL-based MCP server configuration stored per session.
-/// Stdio servers are not supported in the NATS model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// An MCP server configuration stored per session.
+///
+/// Two transports: HTTP/SSE (via `url`) and native stdio (via `command`). When
+/// `command` is non-empty the runner spawns the server subprocess and drives it
+/// in-process over stdio (no local HTTP bridge); otherwise `url` is used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredMcpServer {
     /// Human-readable name (used as tool prefix).
     pub name: String,
-    /// HTTP or SSE endpoint URL.
+    /// HTTP or SSE endpoint URL (empty for stdio servers).
+    #[serde(default)]
     pub url: String,
     /// Optional HTTP headers (name, value pairs).
     #[serde(default)]
     pub headers: Vec<(String, String)>,
+    /// For a stdio MCP server: the executable to spawn. When set, `url`/`headers`
+    /// are ignored and the runner drives the server natively over stdio.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub command: String,
+    /// Command-line arguments for the stdio server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Environment variables (name, value) for the stdio server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<(String, String)>,
     /// Optional per-request timeout in seconds. `None` uses the runner's default
     /// HTTP client timeout. Carried from the client via the ACP `_meta` field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,6 +88,22 @@ pub struct TodoItem {
 }
 
 const BUCKET: &str = "ACP_SESSIONS";
+
+/// A background bash job started via `bash` with `run_in_background: true`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BashJob {
+    pub id: String,
+    pub command: String,
+    pub terminal_id: String,
+    pub start_marker: String,
+    pub exit_marker_prefix: String,
+    #[serde(default)]
+    pub read_offset: usize,
+    #[serde(default)]
+    pub finished: bool,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+}
 
 /// Persisted state for a single ACP session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +162,10 @@ pub struct SessionState {
     /// Tools for which the user chose "Always Allow" — auto-approved on future calls.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Restrictive allowlist: when non-empty, only these tool names may be offered
+    /// to the model (empty = no restriction, inherit all tools).
+    #[serde(default)]
+    pub tool_allowlist: Vec<String>,
     /// Session this was branched from. None for root sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
@@ -141,6 +176,10 @@ pub struct SessionState {
     /// Structured per-tool path policies evaluated before the interactive gate.
     #[serde(default)]
     pub tool_policies: Vec<ToolPolicy>,
+    /// Optional Scope envelope for the low-friction permission model (Phase 2).
+    /// `None` falls back to the mode-based permission path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     /// Egress policy for outbound MCP server connections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub egress_policy: Option<EgressPolicy>,
@@ -182,6 +221,13 @@ pub struct SessionState {
     /// Cumulative cache-read tokens across all prompt turns in this session.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub total_cache_read_tokens: u64,
+    /// Background bash jobs started with `run_in_background: true`.
+    #[serde(default)]
+    pub background_jobs: Vec<BashJob>,
+    /// Extra environment variables applied to the session's bash terminal, from
+    /// settings.json `env` (received via `_meta.env` at session creation).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub env: std::collections::HashMap<String, String>,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -224,9 +270,11 @@ impl Default for SessionState {
             tool_hooks: crate::hooks::HooksConfig::default(),
             disable_builtin_tools: false,
             allowed_tools: Vec::new(),
+            tool_allowlist: Vec::new(),
             parent_session_id: None,
             branched_at_index: None,
             tool_policies: Vec::new(),
+            scope: None,
             egress_policy: None,
             audit_log: Vec::new(),
             terminal_id: None,
@@ -239,8 +287,41 @@ impl Default for SessionState {
             total_cache_creation_tokens: 0,
             total_cache_read_tokens: 0,
             spawn_depth: 0,
+            background_jobs: Vec::new(),
+            env: HashMap::new(),
         }
     }
+}
+
+/// Returns true when `allowlist` is empty (no restriction) or `name` is listed.
+pub fn is_tool_in_allowlist(allowlist: &[String], name: &str) -> bool {
+    allowlist.is_empty() || allowlist.iter().any(|t| t == name)
+}
+
+/// Restrict `tools` to names in `allowlist` when the allowlist is non-empty.
+pub fn filter_tool_defs_by_allowlist(
+    tools: Vec<trogon_tools::ToolDef>,
+    allowlist: &[String],
+) -> Vec<trogon_tools::ToolDef> {
+    if allowlist.is_empty() {
+        return tools;
+    }
+    tools
+        .into_iter()
+        .filter(|d| allowlist.iter().any(|t| t == &d.name))
+        .collect()
+}
+
+/// Intersect `enabled` with `allowlist` when the allowlist is non-empty.
+pub fn intersect_enabled_tools(enabled: &[String], allowlist: &[String]) -> Vec<String> {
+    if allowlist.is_empty() {
+        return enabled.to_vec();
+    }
+    enabled
+        .iter()
+        .filter(|t| allowlist.iter().any(|a| a == *t))
+        .cloned()
+        .collect()
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
@@ -646,6 +727,9 @@ mod tests {
                 ("Authorization".to_string(), "Bearer tok".to_string()),
                 ("X-Tenant".to_string(), "acme".to_string()),
             ],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
             timeout_secs: None,
         };
         let json = serde_json::to_string(&server).unwrap();
@@ -662,11 +746,33 @@ mod tests {
             name: "bare".to_string(),
             url: "http://localhost:8080".to_string(),
             headers: vec![],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
             timeout_secs: None,
         };
         let json = serde_json::to_string(&server).unwrap();
         let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
         assert!(back.headers.is_empty());
+    }
+
+    #[test]
+    fn stored_mcp_server_stdio_roundtrip() {
+        let server = StoredMcpServer {
+            name: "fs".to_string(),
+            url: String::new(),
+            headers: vec![],
+            command: "npx".to_string(),
+            args: vec!["-y".to_string(), "server-filesystem".to_string()],
+            env: vec![("TOKEN".to_string(), "x".to_string())],
+            timeout_secs: Some(10),
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.command, "npx");
+        assert_eq!(back.args.len(), 2);
+        assert_eq!(back.env[0], ("TOKEN".to_string(), "x".to_string()));
+        assert!(back.url.is_empty());
     }
 
     #[test]
@@ -765,6 +871,24 @@ mod tests {
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains("claude-opus-4-6"), "model must be serialized: {json}");
+    }
+
+    #[test]
+    fn session_state_scope_round_trips() {
+        let scope = Scope::baseline("/repo");
+        let state = SessionState {
+            scope: Some(scope.clone()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.scope, Some(scope));
+    }
+
+    #[test]
+    fn session_state_scope_none_omitted_from_json() {
+        let json = serde_json::to_string(&SessionState::default()).unwrap();
+        assert!(!json.contains("\"scope\""), "None scope must be omitted: {json}");
     }
 
     // ── branching fields ──────────────────────────────────────────────────────
@@ -1109,5 +1233,32 @@ mod tests {
             let children = store.list_children("root-session").await.unwrap();
             assert!(children.is_empty());
         }
+    }
+
+    #[test]
+    fn filter_tool_defs_by_allowlist_empty_means_no_restriction() {
+        let defs = trogon_tools::all_tool_defs();
+        let len = defs.len();
+        let filtered = filter_tool_defs_by_allowlist(defs, &[]);
+        assert_eq!(filtered.len(), len);
+    }
+
+    #[test]
+    fn filter_tool_defs_by_allowlist_keeps_only_listed_names() {
+        let defs = trogon_tools::all_tool_defs();
+        let filtered = filter_tool_defs_by_allowlist(defs, &["read_file".to_string()]);
+        assert!(filtered.iter().any(|d| d.name == "read_file"));
+        assert!(!filtered.iter().any(|d| d.name == "write_file"));
+    }
+
+    #[test]
+    fn intersect_enabled_tools_applies_allowlist() {
+        let enabled = vec![
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "web_search".to_string(),
+        ];
+        let out = intersect_enabled_tools(&enabled, &["read_file".to_string()]);
+        assert_eq!(out, vec!["read_file".to_string()]);
     }
 }

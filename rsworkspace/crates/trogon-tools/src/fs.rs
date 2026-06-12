@@ -1,5 +1,8 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::Value;
 
+use crate::types::{ContentBlock, ImageSource, ToolOutput};
 use crate::ToolContext;
 
 /// Build a collision-resistant sibling temp path for atomic writes.
@@ -113,7 +116,9 @@ pub fn resolve_path(
     let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
 
     // Resolve symlinks for parts that exist so a symlink pointing outside cwd
-    // is caught.
+    // is caught. For paths that don't exist yet (new files), walk up to the
+    // nearest existing ancestor, canonicalize it, and re-append the missing
+    // trailing components before re-checking containment.
     if let Ok(canonical) = std::fs::canonicalize(&normalized) {
         if !canonical.starts_with(&cwd_canonical) {
             return Err("path is outside the working directory".to_string());
@@ -121,24 +126,29 @@ pub fn resolve_path(
         return Ok(canonical);
     }
 
-    // The target does not exist yet (new file), so `canonicalize` above failed and
-    // could not check intermediate symlinks. Verify the deepest EXISTING ancestor
-    // still resolves inside cwd — otherwise a symlinked intermediate directory
-    // (e.g. `cwd/link -> /outside`) lets a new file escape the sandbox.
-    let mut ancestor = normalized.parent();
-    while let Some(a) = ancestor {
-        match std::fs::canonicalize(a) {
-            Ok(canon) => {
-                if !canon.starts_with(&cwd_canonical) {
-                    return Err("path is outside the working directory".to_string());
-                }
-                break;
-            }
-            Err(_) => ancestor = a.parent(),
+    let mut ancestor = normalized.clone();
+    let mut trailing: Vec<std::ffi::OsString> = Vec::new();
+    while !ancestor.exists() {
+        match ancestor.file_name() {
+            Some(name) => trailing.push(name.to_os_string()),
+            None => break,
+        }
+        if !ancestor.pop() {
+            break;
         }
     }
 
-    Ok(normalized)
+    let mut resolved = std::fs::canonicalize(&ancestor)
+        .map_err(|_| "path is outside the working directory".to_string())?;
+    trailing.reverse();
+    for component in trailing {
+        resolved.push(component);
+    }
+
+    if !resolved.starts_with(&cwd_canonical) {
+        return Err("path is outside the working directory".to_string());
+    }
+    Ok(resolved)
 }
 
 fn normalize_components(path: &std::path::Path) -> std::path::PathBuf {
@@ -158,10 +168,119 @@ fn normalize_components(path: &std::path::Path) -> std::path::PathBuf {
     out
 }
 
-pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
+/// Detected media type for a file read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MediaKind {
+    Png,
+    Jpeg,
+    Gif,
+    Webp,
+    Pdf,
+}
+
+impl MediaKind {
+    fn mime_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Gif => "image/gif",
+            Self::Webp => "image/webp",
+            Self::Pdf => "application/pdf",
+        }
+    }
+}
+
+/// Sniff magic bytes to identify common image and PDF formats.
+pub(crate) fn media_kind_from_bytes(data: &[u8]) -> Option<MediaKind> {
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(MediaKind::Png);
+    }
+    if data.starts_with(b"\xff\xd8\xff") {
+        return Some(MediaKind::Jpeg);
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return Some(MediaKind::Gif);
+    }
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        return Some(MediaKind::Webp);
+    }
+    if data.starts_with(b"%PDF") {
+        return Some(MediaKind::Pdf);
+    }
+    None
+}
+
+/// Map a file extension to a media kind (used when magic bytes are inconclusive).
+pub(crate) fn media_kind_from_extension(path: &std::path::Path) -> Option<MediaKind> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some(MediaKind::Png),
+        "jpg" | "jpeg" => Some(MediaKind::Jpeg),
+        "gif" => Some(MediaKind::Gif),
+        "webp" => Some(MediaKind::Webp),
+        "pdf" => Some(MediaKind::Pdf),
+        _ => None,
+    }
+}
+
+/// Resolve the media kind from file path and raw bytes (magic bytes take precedence).
+pub(crate) fn detect_media_kind(path: &std::path::Path, data: &[u8]) -> Option<MediaKind> {
+    media_kind_from_bytes(data).or_else(|| media_kind_from_extension(path))
+}
+
+fn image_output(data: &[u8], media_type: &str) -> ToolOutput {
+    ToolOutput::Blocks(vec![ContentBlock::Image {
+        source: ImageSource::Base64 {
+            media_type: media_type.to_string(),
+            data: BASE64.encode(data),
+        },
+    }])
+}
+
+fn extract_pdf_text(data: &[u8]) -> String {
+    match pdf_extract::extract_text_from_mem(data) {
+        Ok(text) if !text.trim().is_empty() => text,
+        Ok(_) => format!(
+            "PDF document ({} bytes). No extractable text found.",
+            data.len()
+        ),
+        Err(e) => format!(
+            "PDF document ({} bytes). Text extraction failed: {e}",
+            data.len()
+        ),
+    }
+}
+
+fn format_numbered_text(content: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset.unwrap_or(0);
+
+    // MED-13: `offset == lines.len()` previously slipped through (`>` only) and
+    // returned an empty string with no signal that the read was past the end.
+    // An empty file (0 lines) at offset 0 is still a legitimate empty read.
+    if start >= lines.len() && !lines.is_empty() {
+        return Err(format!(
+            "Error: offset {start} is at or past end of file ({} lines)",
+            lines.len()
+        ));
+    }
+
+    let end = limit
+        .map(|l| (start + l).min(lines.len()))
+        .unwrap_or(lines.len());
+
+    Ok(lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{:>6}\t{line}", start + i + 1))
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+pub async fn read_file(ctx: &ToolContext, input: &Value) -> ToolOutput {
     let path = match input.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
-        None => return "Error: missing required parameter 'path'".to_string(),
+        None => return ToolOutput::Text("Error: missing required parameter 'path'".to_string()),
     };
     let offset = input
         .get("offset")
@@ -174,46 +293,48 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
-        Err(e) => return format!("Error: {e}"),
+        Err(e) => return ToolOutput::Text(format!("Error: {e}")),
     };
 
-    let content = match tokio::fs::read_to_string(&full_path).await {
-        Ok(c) => c,
-        Err(e) => return format!("Error reading {path}: {e}"),
+    let bytes = match tokio::fs::read(&full_path).await {
+        Ok(b) => b,
+        Err(e) => return ToolOutput::Text(format!("Error reading {path}: {e}")),
     };
 
-    let lines: Vec<&str> = content.lines().collect();
-    let start = offset.unwrap_or(0);
+    let kind = detect_media_kind(&full_path, &bytes);
 
-    // MED-13: `offset == lines.len()` previously slipped through (`>` only) and
-    // returned an empty string with no signal that the read was past the end.
-    // An empty file (0 lines) at offset 0 is still a legitimate empty read.
-    if start >= lines.len() && !lines.is_empty() {
-        return format!(
-            "Error: offset {start} is at or past end of file ({} lines)",
-            lines.len()
-        );
-    }
-
-    let end = limit
-        .map(|l| start.saturating_add(l).min(lines.len()))
-        .unwrap_or(lines.len());
-
-    let mut result = lines[start..end]
-        .iter()
-        .enumerate()
-        .map(|(i, line)| format!("{:>6}\t{line}", start + i + 1))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut output = match kind {
+        Some(k @ (MediaKind::Png | MediaKind::Jpeg | MediaKind::Gif | MediaKind::Webp)) => {
+            image_output(&bytes, k.mime_type())
+        }
+        Some(MediaKind::Pdf) => ToolOutput::Text(extract_pdf_text(&bytes)),
+        None => {
+            let content = match String::from_utf8(bytes) {
+                Ok(c) => c,
+                Err(_) => {
+                    return ToolOutput::Text(format!(
+                        "Error reading {path}: file is not valid UTF-8 text"
+                    ));
+                }
+            };
+            match format_numbered_text(&content, offset, limit) {
+                Ok(text) => ToolOutput::Text(text),
+                Err(e) => return ToolOutput::Text(e),
+            }
+        }
+    };
 
     // On-demand TROGON.md: surface a subdirectory's rules when a file there is
     // read. The session-start loader walks UP from cwd, so cwd + ancestors are
     // already in the system prompt; subdirectories are not — this fills that gap.
-    if let Some(extra) = subdir_trogon_md(&ctx.cwd, &full_path).await {
-        result.push_str("\n\n");
-        result.push_str(&extra);
+    if kind.is_none()
+        && let ToolOutput::Text(ref mut text) = output
+        && let Some(extra) = subdir_trogon_md(&ctx.cwd, &full_path).await
+    {
+        text.push_str("\n\n");
+        text.push_str(&extra);
     }
-    result
+    output
 }
 
 /// When `file_path` lives in a directory *strictly below* `cwd`, return that
@@ -388,6 +509,63 @@ pub async fn glob_files(ctx: &ToolContext, input: &Value) -> String {
     matches.join("\n")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotebookEditMode {
+    Replace,
+    Insert,
+    Delete,
+}
+
+fn parse_notebook_edit_mode(input: &Value) -> Result<NotebookEditMode, String> {
+    if input.get("is_new_cell").and_then(|v| v.as_bool()) == Some(true) {
+        return Ok(NotebookEditMode::Insert);
+    }
+    match input.get("edit_mode").and_then(|v| v.as_str()) {
+        None | Some("replace") => Ok(NotebookEditMode::Replace),
+        Some("insert") => Ok(NotebookEditMode::Insert),
+        Some("delete") => Ok(NotebookEditMode::Delete),
+        Some(other) => Err(format!(
+            "Error: invalid edit_mode '{other}' (expected 'replace', 'insert', or 'delete')"
+        )),
+    }
+}
+
+fn content_to_source_lines(content: &str) -> Vec<String> {
+    let line_count = content.lines().count();
+    content
+        .lines()
+        .enumerate()
+        .map(|(i, line)| {
+            if i == line_count - 1 {
+                line.to_string()
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect()
+}
+
+fn new_notebook_cell(cell_type: &str, content: &str) -> Result<serde_json::Value, String> {
+    let source = content_to_source_lines(content);
+    match cell_type {
+        "code" => Ok(serde_json::json!({
+            "cell_type": "code",
+            "source": source,
+            "metadata": {},
+            "outputs": [],
+            "execution_count": null
+        })),
+        "markdown" => Ok(serde_json::json!({
+            "cell_type": "markdown",
+            "source": source,
+            "metadata": {}
+        })),
+        other => Err(format!(
+            "Error: invalid cell_type '{other}' (expected 'code' or 'markdown')"
+        )),
+    }
+}
+
 pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
     let path = match input.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
@@ -397,11 +575,16 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
         Some(i) => i as usize,
         None => return "Error: missing required parameter 'cell_index'".to_string(),
     };
-    let content = match input.get("content").and_then(|v| v.as_str()) {
-        Some(c) => c,
-        None => return "Error: missing required parameter 'content'".to_string(),
+    let edit_mode = match parse_notebook_edit_mode(input) {
+        Ok(mode) => mode,
+        Err(e) => return e,
     };
+    let content = input.get("content").and_then(|v| v.as_str());
     let cell_type = input.get("cell_type").and_then(|v| v.as_str());
+
+    if edit_mode != NotebookEditMode::Delete && content.is_none() {
+        return "Error: missing required parameter 'content'".to_string();
+    }
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
@@ -423,30 +606,48 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
         None => return "Error: notebook has no 'cells' array".to_string(),
     };
 
-    if cell_index >= cells.len() {
-        return format!(
-            "Error: cell_index {cell_index} out of range (notebook has {} cells)",
-            cells.len()
-        );
-    }
-
-    let cell = &mut cells[cell_index];
-    let line_count = content.lines().count();
-    let source_lines: Vec<String> = content
-        .lines()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == line_count - 1 {
-                line.to_string()
-            } else {
-                format!("{line}\n")
+    match edit_mode {
+        NotebookEditMode::Replace => {
+            if cell_index >= cells.len() {
+                return format!(
+                    "Error: cell_index {cell_index} out of range (notebook has {} cells)",
+                    cells.len()
+                );
             }
-        })
-        .collect();
-    cell["source"] = serde_json::json!(source_lines);
 
-    if let Some(ct) = cell_type {
-        cell["cell_type"] = serde_json::json!(ct);
+            let content = content.expect("content checked above");
+            let cell = &mut cells[cell_index];
+            cell["source"] = serde_json::json!(content_to_source_lines(content));
+
+            if let Some(ct) = cell_type {
+                cell["cell_type"] = serde_json::json!(ct);
+            }
+        }
+        NotebookEditMode::Insert => {
+            if cell_index > cells.len() {
+                return format!(
+                    "Error: cell_index {cell_index} out of range for insert (notebook has {} cells)",
+                    cells.len()
+                );
+            }
+
+            let content = content.expect("content checked above");
+            let ct = cell_type.unwrap_or("code");
+            let new_cell = match new_notebook_cell(ct, content) {
+                Ok(cell) => cell,
+                Err(e) => return e,
+            };
+            cells.insert(cell_index, new_cell);
+        }
+        NotebookEditMode::Delete => {
+            if cell_index >= cells.len() {
+                return format!(
+                    "Error: cell_index {cell_index} out of range (notebook has {} cells)",
+                    cells.len()
+                );
+            }
+            cells.remove(cell_index);
+        }
     }
 
     let updated = match serde_json::to_string_pretty(&notebook) {
@@ -464,14 +665,33 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ToolOutput;
     use serde_json::json;
     use tempfile::TempDir;
+
+    fn as_text(output: ToolOutput) -> String {
+        output.display_text()
+    }
+
+    /// Smallest valid 1×1 PNG (67 bytes).
+    const TINY_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+        0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08,
+        0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
+        0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// Valid PDF fixture with extractable text "Hello PDF".
+    const TEST_PDF: &[u8] = include_bytes!("../tests/fixtures/hello.pdf");
 
     fn ctx(dir: &TempDir) -> ToolContext {
         ToolContext {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }
     }
 
@@ -542,6 +762,28 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn resolve_path_symlink_parent_new_file_rejected() {
+        // NEW-5: a new file path through a symlinked parent dir that points
+        // outside cwd must be rejected; lexical containment alone is not enough.
+        let cwd_dir = TempDir::new().unwrap();
+        let outside_dir = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside_dir.path(), cwd_dir.path().join("evil")).unwrap();
+
+        let cwd = cwd_dir.path().to_string_lossy().into_owned();
+        let err = resolve_path(&cwd, "evil/new_secret.txt").unwrap_err();
+        assert!(err.contains("outside"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_path_new_file_directly_in_cwd_allowed() {
+        let dir = TempDir::new().unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let result = resolve_path(&cwd, "new_file.txt").unwrap();
+        assert_eq!(result, dir.path().join("new_file.txt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn resolve_path_symlink_within_cwd_allowed() {
         // A symlink that stays inside cwd must still resolve successfully.
         let cwd_dir = TempDir::new().unwrap();
@@ -554,37 +796,6 @@ mod tests {
         let resolved = resolve_path(&cwd, "link/file.txt").unwrap();
         // canonicalize() resolves the symlink to the real path inside cwd.
         assert!(resolved.starts_with(cwd_dir.path().canonicalize().unwrap()));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn resolve_path_symlink_escape_for_new_file_rejected() {
-        // C4: a NEW (non-existent) file routed through a symlinked directory that
-        // points outside cwd must be rejected. `canonicalize` fails for the
-        // not-yet-existing leaf, so the deepest-existing-ancestor check must catch it.
-        let cwd_dir = TempDir::new().unwrap();
-        let outside_dir = TempDir::new().unwrap();
-        std::os::unix::fs::symlink(outside_dir.path(), cwd_dir.path().join("evil")).unwrap();
-
-        let cwd = cwd_dir.path().to_string_lossy().into_owned();
-        let err = resolve_path(&cwd, "evil/new_file.txt").unwrap_err();
-        assert!(err.contains("outside"), "new file via symlink must be rejected, got: {err}");
-        let err2 = resolve_path(&cwd, "evil/sub/deep.txt").unwrap_err();
-        assert!(err2.contains("outside"), "deep new path via symlink must be rejected, got: {err2}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn resolve_path_new_file_in_cwd_allowed() {
-        // Containment regression guard: legitimate new files (directly in cwd, in a
-        // brand-new subdir, and in an existing real subdir) must still be allowed.
-        let cwd_dir = TempDir::new().unwrap();
-        std::fs::create_dir(cwd_dir.path().join("realsub")).unwrap();
-        let cwd = cwd_dir.path().to_string_lossy().into_owned();
-
-        assert!(resolve_path(&cwd, "newfile.txt").is_ok());
-        assert!(resolve_path(&cwd, "newdir/file.txt").is_ok());
-        assert!(resolve_path(&cwd, "realsub/file.txt").is_ok());
     }
 
     #[test]
@@ -637,11 +848,88 @@ mod tests {
         assert_eq!(resolved, abs);
     }
 
+    #[test]
+    fn media_kind_from_bytes_detects_png_jpeg_gif_webp_pdf() {
+        assert_eq!(media_kind_from_bytes(TINY_PNG), Some(MediaKind::Png));
+        assert_eq!(media_kind_from_bytes(b"\xff\xd8\xff\x00"), Some(MediaKind::Jpeg));
+        assert_eq!(media_kind_from_bytes(b"GIF89a"), Some(MediaKind::Gif));
+        assert_eq!(
+            media_kind_from_bytes(b"RIFF\x00\x00\x00\x00WEBP"),
+            Some(MediaKind::Webp)
+        );
+        assert_eq!(media_kind_from_bytes(TEST_PDF), Some(MediaKind::Pdf));
+        assert_eq!(media_kind_from_bytes(b"plain text"), None);
+    }
+
+    #[test]
+    fn media_kind_from_extension_maps_common_suffixes() {
+        assert_eq!(
+            media_kind_from_extension(std::path::Path::new("photo.JPG")),
+            Some(MediaKind::Jpeg)
+        );
+        assert_eq!(
+            media_kind_from_extension(std::path::Path::new("doc.pdf")),
+            Some(MediaKind::Pdf)
+        );
+        assert_eq!(
+            media_kind_from_extension(std::path::Path::new("readme.txt")),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_pdf_text_from_minimal_fixture() {
+        let text = extract_pdf_text(TEST_PDF);
+        assert!(
+            text.contains("Hello PDF"),
+            "expected extracted PDF text, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_png_returns_image_block() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("pixel.png"), TINY_PNG)
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = read_file(&ctx, &json!({"path": "pixel.png"})).await;
+        match result {
+            ToolOutput::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    ContentBlock::Image {
+                        source: ImageSource::Base64 { media_type, data },
+                    } => {
+                        assert_eq!(media_type, "image/png");
+                        assert_eq!(data, &BASE64.encode(TINY_PNG));
+                    }
+                    other => panic!("expected Image block, got {other:?}"),
+                }
+            }
+            other => panic!("expected Blocks output, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_pdf_returns_extracted_text() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("doc.pdf"), TEST_PDF)
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = as_text(read_file(&ctx, &json!({"path": "doc.pdf"})).await);
+        assert!(
+            result.contains("Hello PDF"),
+            "expected PDF text extraction, got: {result}"
+        );
+    }
+
     #[tokio::test]
     async fn read_file_missing_path_returns_error() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({})).await;
+        let result = as_text(read_file(&ctx, &json!({})).await);
         assert!(result.contains("missing required parameter 'path'"), "got: {result}");
     }
 
@@ -650,7 +938,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         tokio::fs::write(dir.path().join("f.txt"), "a\nb\nc").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 100})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "f.txt", "offset": 100})).await);
         assert!(result.contains("Error"), "got: {result}");
         assert!(result.contains("past end"), "got: {result}");
     }
@@ -661,7 +949,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         tokio::fs::write(dir.path().join("f.txt"), "a\nb\nc").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 3})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "f.txt", "offset": 3})).await);
         assert!(result.contains("past end"), "got: {result}");
     }
 
@@ -671,7 +959,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         tokio::fs::write(dir.path().join("empty.txt"), "").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "empty.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "empty.txt"})).await);
         assert!(!result.contains("Error"), "got: {result}");
         assert_eq!(result, "");
     }
@@ -683,7 +971,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "hello.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "hello.txt"})).await);
         assert!(result.contains("1\tline1"));
         assert!(result.contains("2\tline2"));
         assert!(result.contains("3\tline3"));
@@ -699,7 +987,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "src/main.rs"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "src/main.rs"})).await);
         assert!(result.contains("fn main()"), "file content missing: {result}");
         assert!(result.contains("Directory rules"), "subdir TROGON.md not surfaced: {result}");
         assert!(result.contains("prefer iterators"), "subdir rule body missing: {result}");
@@ -711,7 +999,7 @@ mod tests {
         tokio::fs::write(dir.path().join("TROGON.md"), "cwd rule").await.unwrap();
         tokio::fs::write(dir.path().join("a.txt"), "hello").await.unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "a.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "a.txt"})).await);
         assert!(result.contains("hello"));
         assert!(
             !result.contains("Directory rules"),
@@ -726,7 +1014,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 1, "limit": 2})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "f.txt", "offset": 1, "limit": 2})).await);
         assert!(result.contains("2\tb"));
         assert!(result.contains("3\tc"));
         assert!(!result.contains("1\ta"));
@@ -737,7 +1025,7 @@ mod tests {
     async fn read_file_missing_returns_error() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "no_such_file.txt"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "no_such_file.txt"})).await);
         assert!(result.starts_with("Error"));
     }
 
@@ -745,7 +1033,7 @@ mod tests {
     async fn read_file_traversal_rejected() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = read_file(&ctx, &json!({"path": "../../etc/passwd"})).await;
+        let result = as_text(read_file(&ctx, &json!({"path": "../../etc/passwd"})).await);
         assert!(result.contains("Error"));
     }
 
@@ -815,6 +1103,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: inner.to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = list_dir(&inner_ctx, &json!({})).await;
         assert_eq!(result, "(empty directory)");
@@ -1031,5 +1321,147 @@ mod tests {
         let raw = tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed["cells"][0]["cell_type"], "markdown");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_inserts_code_cell_at_index() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["first"], "metadata": {}, "outputs": [], "execution_count": null},
+                {"cell_type": "code", "source": ["third"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({
+                "path": "nb.ipynb",
+                "cell_index": 1,
+                "content": "second",
+                "cell_type": "code",
+                "edit_mode": "insert"
+            }),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 3);
+        assert_eq!(parsed["cells"][0]["source"][0], "first");
+        assert_eq!(parsed["cells"][1]["source"][0], "second");
+        assert_eq!(parsed["cells"][1]["cell_type"], "code");
+        assert_eq!(parsed["cells"][2]["source"][0], "third");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_inserts_markdown_cell_at_index() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["code"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({
+                "path": "nb.ipynb",
+                "cell_index": 0,
+                "content": "# heading",
+                "cell_type": "markdown",
+                "edit_mode": "insert"
+            }),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["cells"][0]["cell_type"], "markdown");
+        assert_eq!(parsed["cells"][0]["source"][0], "# heading");
+        assert_eq!(parsed["cells"][1]["source"][0], "code");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_insert_via_is_new_cell() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["only"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({
+                "path": "nb.ipynb",
+                "cell_index": 1,
+                "content": "appended",
+                "cell_type": "code",
+                "is_new_cell": true
+            }),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["cells"][0]["source"][0], "only");
+        assert_eq!(parsed["cells"][1]["source"][0], "appended");
+    }
+
+    #[tokio::test]
+    async fn notebook_edit_delete_cell() {
+        let dir = TempDir::new().unwrap();
+        let nb = serde_json::json!({
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "code", "source": ["keep"], "metadata": {}, "outputs": [], "execution_count": null},
+                {"cell_type": "code", "source": ["remove"], "metadata": {}, "outputs": [], "execution_count": null}
+            ]
+        });
+        tokio::fs::write(
+            dir.path().join("nb.ipynb"),
+            serde_json::to_string_pretty(&nb).unwrap(),
+        )
+        .await
+        .unwrap();
+        let ctx = ctx(&dir);
+        let result = notebook_edit(
+            &ctx,
+            &json!({"path": "nb.ipynb", "cell_index": 1, "edit_mode": "delete"}),
+        )
+        .await;
+        assert_eq!(result, "OK");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
+                .unwrap();
+        assert_eq!(parsed["cells"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["cells"][0]["source"][0], "keep");
     }
 }

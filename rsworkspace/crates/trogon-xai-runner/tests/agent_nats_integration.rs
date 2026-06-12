@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::{
     Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
-    NewSessionRequest, PromptRequest, SessionId, SessionNotification, SetSessionModelRequest,
+    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -1235,8 +1235,9 @@ impl SessionNotifier for RecordingNotifier {
     }
 }
 
-/// On the first turn asks to call the client-side `read_file` tool (no permission
-/// rule → `Ask`); ends on the continuation turn.
+/// On the first turn asks to call the client-side `read_file` tool on a protected
+/// path (`*.key`), which forces the permission prompt in every mode (read-only
+/// tools are otherwise auto-allowed); ends on the continuation turn.
 struct ReadFileToolThenDone {
     calls: std::sync::atomic::AtomicUsize,
 }
@@ -1259,7 +1260,7 @@ impl XaiHttpClient for ReadFileToolThenDone {
                 XaiEvent::FunctionCall {
                     call_id: "c1".to_string(),
                     name: "read_file".to_string(),
-                    arguments: r#"{"path":"secret.txt"}"#.to_string(),
+                    arguments: r#"{"path":"secret.key"}"#.to_string(),
                 },
                 XaiEvent::Done,
             ]))
@@ -1316,16 +1317,34 @@ async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let notes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Wire the production permission path: check_tool_permission → perm_tx →
+    // handle_permission_request_nats → NATS, exactly as main.rs does. (The legacy
+    // `with_permissions`/`ask_permission` path is no longer used by `prompt`.)
+    let (perm_tx, mut perm_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(32);
+    let perm_store = trogon_runner_tools::AllowedToolsSessionStore::new();
     let agent = XaiAgent::with_deps(
         RecordingNotifier { notes: notes.clone() },
         "grok-4",
         "dummy-key",
         ReadFileToolThenDone { calls: std::sync::atomic::AtomicUsize::new(0) },
     )
-    .with_permissions(nats.clone(), AcpPrefix::new("acp").unwrap());
+    .with_permission_gate(perm_tx, perm_store.clone());
 
+    let nats_bridge = nats.clone();
     tokio::task::LocalSet::new()
         .run_until(async move {
+            tokio::task::spawn_local(async move {
+                while let Some(req) = perm_rx.recv().await {
+                    trogon_runner_tools::handle_permission_request_nats(
+                        req,
+                        nats_bridge.clone(),
+                        AcpPrefix::new("acp").unwrap(),
+                        &perm_store,
+                    )
+                    .await;
+                }
+            });
             let sid = agent
                 .new_session(NewSessionRequest::new(tmp.path().to_path_buf()))
                 .await
@@ -1357,7 +1376,7 @@ async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
             .raw_output
             .as_ref()
             .and_then(|v| v.as_str())
-            .map(|s| s.contains("permission denied"))
+            .map(|s| s.to_lowercase().contains("permission denied"))
             .unwrap_or(false),
         _ => false,
     });

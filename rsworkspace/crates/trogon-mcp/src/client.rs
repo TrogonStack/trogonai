@@ -12,7 +12,7 @@ use tracing::debug;
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[cfg_attr(coverage, coverage(off))]
-fn next_id() -> u64 {
+pub(crate) fn next_id() -> u64 {
     REQUEST_ID.fetch_add(1, Ordering::Relaxed)
 }
 
@@ -67,6 +67,30 @@ pub struct McpPromptArgument {
     pub required: bool,
 }
 
+/// A resource advertised by an MCP server (`resources/list`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpResource {
+    pub uri: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+}
+
+/// Content returned by `resources/read` for a single resource URI.
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpResourceContent {
+    pub uri: String,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub blob: Option<String>,
+}
+
 // ── McpCallTool trait ─────────────────────────────────────────────────────────
 
 /// Abstraction over the single operation the agent loop needs from an MCP server:
@@ -94,6 +118,18 @@ struct ListToolsResult {
 struct ListPromptsResult {
     #[serde(default)]
     prompts: Vec<McpPrompt>,
+}
+
+#[derive(Deserialize)]
+struct ListResourcesResult {
+    #[serde(default)]
+    resources: Vec<McpResource>,
+}
+
+#[derive(Deserialize)]
+struct ReadResourceResult {
+    #[serde(default)]
+    contents: Vec<McpResourceContent>,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +176,8 @@ pub struct McpClient {
     /// Extra HTTP headers sent on every request (e.g. `Authorization: Bearer …`).
     headers: Vec<(String, String)>,
     /// Optional per-request timeout. When set, every JSON-RPC call (initialize,
-    /// tools/list, tools/call, …) is bounded by this duration so a hung server
+    /// tools/list, tools/call, resources/list, resources/read, …) is bounded
+    /// by this duration so a hung server
     /// can never stall the agent loop. `None` falls back to the `reqwest::Client`
     /// default (no timeout).
     timeout: Option<std::time::Duration>,
@@ -245,6 +282,47 @@ impl McpClient {
             .join("\n");
 
         if result.is_error { Err(text) } else { Ok(text) }
+    }
+
+    /// Retrieve the list of resources the server exposes (`resources/list`).
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn resources_list(&self) -> Result<Vec<McpResource>, String> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(),
+            "method": "resources/list",
+            "params": {}
+        });
+        let mut resp = self.rpc(body).await?;
+        if let Some(err) = resp.get("error") {
+            return Err(format!("MCP resources/list error: {err}"));
+        }
+        let result: ListResourcesResult = serde_json::from_value(resp["result"].take())
+            .map_err(|e| format!("MCP resources/list deserialize error: {e}"))?;
+        debug!(
+            url = %safe_url(&self.url),
+            count = result.resources.len(),
+            "MCP resources listed"
+        );
+        Ok(result.resources)
+    }
+
+    /// Read a resource by URI (`resources/read`).
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn resources_read(&self, uri: &str) -> Result<Vec<McpResourceContent>, String> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(),
+            "method": "resources/read",
+            "params": { "uri": uri }
+        });
+        let mut resp = self.rpc(body).await?;
+        if let Some(err) = resp.get("error") {
+            return Err(format!("MCP resources/read error: {err}"));
+        }
+        let result: ReadResourceResult = serde_json::from_value(resp["result"].take())
+            .map_err(|e| format!("MCP resources/read deserialize error: {e}"))?;
+        Ok(result.contents)
     }
 
     /// Retrieve the list of prompts the server exposes (`prompts/list`).
@@ -487,5 +565,160 @@ mod tests {
     #[test]
     fn safe_url_plain_host_no_path() {
         assert_eq!(safe_url("http://mcp.example.com"), "http://mcp.example.com");
+    }
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::{McpClient, McpResourceContent};
+    use httpmock::MockServer;
+    use serde_json::json;
+
+    fn client(server: &MockServer) -> McpClient {
+        McpClient::new(reqwest::Client::new(), server.base_url())
+    }
+
+    #[tokio::test]
+    async fn resources_list_returns_resource_definitions() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .body_contains("resources/list");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "resources": [
+                            {
+                                "uri": "file:///project/README.md",
+                                "name": "README",
+                                "description": "Project readme",
+                                "mimeType": "text/markdown"
+                            }
+                        ]
+                    }
+                }));
+        });
+
+        let resources = client(&server)
+            .resources_list()
+            .await
+            .expect("resources_list should succeed");
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].uri, "file:///project/README.md");
+        assert_eq!(resources[0].name, "README");
+        assert_eq!(resources[0].description, "Project readme");
+        assert_eq!(resources[0].mime_type, "text/markdown");
+    }
+
+    #[tokio::test]
+    async fn resources_list_propagates_rpc_error() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST);
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}));
+        });
+
+        let err = client(&server).resources_list().await.unwrap_err();
+        assert!(err.contains("MCP resources/list error"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn resources_list_deserialize_error() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST);
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"jsonrpc":"2.0","id":1,"result":"unexpected_string"}));
+        });
+
+        let err = client(&server).resources_list().await.unwrap_err();
+        assert!(
+            err.contains("MCP resources/list deserialize error"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resources_read_returns_contents() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .body_contains("resources/read")
+                .body_contains("\"uri\":\"file:///project/README.md\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {
+                        "contents": [
+                            {
+                                "uri": "file:///project/README.md",
+                                "mimeType": "text/markdown",
+                                "text": "# Hello"
+                            }
+                        ]
+                    }
+                }));
+        });
+
+        let contents = client(&server)
+            .resources_read("file:///project/README.md")
+            .await
+            .expect("resources_read should succeed");
+        assert_eq!(contents.len(), 1);
+        let McpResourceContent {
+            uri,
+            mime_type,
+            text,
+            blob,
+        } = &contents[0];
+        assert_eq!(uri, "file:///project/README.md");
+        assert_eq!(mime_type, "text/markdown");
+        assert_eq!(text.as_deref(), Some("# Hello"));
+        assert!(blob.is_none());
+    }
+
+    #[tokio::test]
+    async fn resources_read_propagates_rpc_error() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST);
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params"}}));
+        });
+
+        let err = client(&server)
+            .resources_read("file:///missing")
+            .await
+            .unwrap_err();
+        assert!(err.contains("MCP resources/read error"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn resources_read_deserialize_error() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST);
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"jsonrpc":"2.0","id":1,"result":"unexpected_string"}));
+        });
+
+        let err = client(&server)
+            .resources_read("file:///project/README.md")
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("MCP resources/read deserialize error"),
+            "got: {err}"
+        );
     }
 }
