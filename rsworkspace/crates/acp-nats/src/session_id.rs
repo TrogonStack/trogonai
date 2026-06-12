@@ -9,24 +9,25 @@ use trogon_nats::NatsToken;
 use trogon_nats::SubjectTokenViolation;
 
 /// Error returned when [`AcpSessionId`] validation fails.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SessionIdError(pub SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SessionIdError {
+    #[error("session_id must not be empty")]
+    Empty,
+    #[error("session_id contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("session_id is too long: {0} characters (max 128)")]
+    TooLong(usize),
+}
 
-impl std::fmt::Display for SessionIdError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            SubjectTokenViolation::Empty => write!(f, "session_id must not be empty"),
-            SubjectTokenViolation::InvalidCharacter(ch) => {
-                write!(f, "session_id contains invalid character: {:?}", ch)
-            }
-            SubjectTokenViolation::TooLong(len) => {
-                write!(f, "session_id is too long: {} characters (max 128)", len)
-            }
+impl From<SubjectTokenViolation> for SessionIdError {
+    fn from(v: SubjectTokenViolation) -> Self {
+        match v {
+            SubjectTokenViolation::Empty => Self::Empty,
+            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
         }
     }
 }
-
-impl std::error::Error for SessionIdError {}
 
 /// NATS-safe session ID. Guarantees validity at construction—invalid instances are unrepresentable.
 ///
@@ -37,7 +38,7 @@ pub struct AcpSessionId(NatsToken);
 
 impl AcpSessionId {
     pub fn new(s: impl AsRef<str>) -> Result<Self, SessionIdError> {
-        NatsToken::new(s).map(Self).map_err(SessionIdError)
+        NatsToken::new(s).map(Self).map_err(Into::into)
     }
 
     pub fn as_str(&self) -> &str {
@@ -76,7 +77,7 @@ mod tests {
     fn acp_session_id_too_long_returns_err() {
         let long_id = "a".repeat(129);
         let err = AcpSessionId::new(&long_id).err().unwrap();
-        assert_eq!(err, SessionIdError(SubjectTokenViolation::TooLong(129)));
+        assert_eq!(err, SessionIdError::TooLong(129));
 
         assert!(AcpSessionId::new("a".repeat(128).as_str()).is_ok());
     }
@@ -84,7 +85,7 @@ mod tests {
     #[test]
     fn acp_session_id_rejects_dots() {
         let err = AcpSessionId::new("session.id").err().unwrap();
-        assert_eq!(err, SessionIdError(SubjectTokenViolation::InvalidCharacter('.')));
+        assert_eq!(err, SessionIdError::InvalidCharacter('.'));
     }
 
     #[test]
@@ -97,7 +98,7 @@ mod tests {
     #[test]
     fn acp_session_id_rejects_non_ascii() {
         let err = AcpSessionId::new("séssion").err().unwrap();
-        assert_eq!(err, SessionIdError(SubjectTokenViolation::InvalidCharacter('é')));
+        assert_eq!(err, SessionIdError::InvalidCharacter('é'));
     }
 
     #[test]
@@ -109,7 +110,7 @@ mod tests {
     #[test]
     fn acp_session_id_empty_returns_err() {
         let err = AcpSessionId::new("").err().unwrap();
-        assert_eq!(err, SessionIdError(SubjectTokenViolation::Empty));
+        assert_eq!(err, SessionIdError::Empty);
     }
 
     #[test]
@@ -132,16 +133,13 @@ mod tests {
 
     #[test]
     fn session_id_error_display() {
+        assert_eq!(format!("{}", SessionIdError::Empty), "session_id must not be empty");
         assert_eq!(
-            format!("{}", SessionIdError(SubjectTokenViolation::Empty)),
-            "session_id must not be empty"
-        );
-        assert_eq!(
-            format!("{}", SessionIdError(SubjectTokenViolation::InvalidCharacter('.'))),
+            format!("{}", SessionIdError::InvalidCharacter('.')),
             "session_id contains invalid character: '.'"
         );
         assert_eq!(
-            format!("{}", SessionIdError(SubjectTokenViolation::TooLong(129))),
+            format!("{}", SessionIdError::TooLong(129)),
             "session_id is too long: 129 characters (max 128)"
         );
     }

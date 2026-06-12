@@ -6,31 +6,14 @@ use bytes::Bytes;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TerminalKillError {
-    MalformedJson(serde_json::Error),
-    InvalidParams(agent_client_protocol::Error),
-    ClientError(agent_client_protocol::Error),
-}
-
-impl std::fmt::Display for TerminalKillError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MalformedJson(e) => write!(f, "malformed JSON: {}", e),
-            Self::InvalidParams(e) => write!(f, "invalid params: {}", e),
-            Self::ClientError(e) => write!(f, "client error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for TerminalKillError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::MalformedJson(e) => Some(e),
-            Self::InvalidParams(e) => Some(e),
-            Self::ClientError(e) => Some(e),
-        }
-    }
+    #[error("malformed JSON: {0}")]
+    MalformedJson(#[source] serde_json::Error),
+    #[error("invalid params: {0}")]
+    InvalidParams(#[source] agent_client_protocol::Error),
+    #[error("client error: {0}")]
+    ClientError(#[source] agent_client_protocol::Error),
 }
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalKillError {

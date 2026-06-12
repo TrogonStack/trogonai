@@ -2,9 +2,11 @@ use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::{Resource, trace as sdktrace};
 use std::sync::OnceLock;
 
+use crate::TelemetryProviderShutdownError;
+
 pub(crate) static TRACER_PROVIDER: OnceLock<sdktrace::SdkTracerProvider> = OnceLock::new();
 
-pub(crate) fn init_provider(resource: &Resource) -> Result<sdktrace::SdkTracerProvider, Box<dyn std::error::Error>> {
+pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<sdktrace::SdkTracerProvider> {
     let exporter = SpanExporter::builder().with_http().build()?;
 
     let provider = sdktrace::SdkTracerProvider::builder()
@@ -15,11 +17,11 @@ pub(crate) fn init_provider(resource: &Resource) -> Result<sdktrace::SdkTracerPr
     Ok(provider)
 }
 
-pub(crate) fn shutdown() -> Result<(), String> {
+pub(crate) fn shutdown() -> Result<(), TelemetryProviderShutdownError> {
     if let Some(provider) = TRACER_PROVIDER.get()
-        && let Err(e) = provider.shutdown()
+        && let Err(source) = provider.shutdown()
     {
-        return Err(format!("failed to shutdown tracer provider: {e}"));
+        return Err(TelemetryProviderShutdownError::Tracer { source: source.into() });
     }
     Ok(())
 }

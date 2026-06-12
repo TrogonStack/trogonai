@@ -15,16 +15,9 @@ impl AllowedHost {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("allowed host must be a DNS name, IP address, or host:port")]
 pub struct AllowedHostError;
-
-impl std::fmt::Display for AllowedHostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "allowed host must be a DNS name, IP address, or host:port")
-    }
-}
-
-impl std::error::Error for AllowedHostError {}
 
 fn is_valid_allowed_host(raw: &str) -> bool {
     if raw.is_empty()

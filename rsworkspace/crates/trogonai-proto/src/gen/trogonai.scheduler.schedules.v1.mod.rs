@@ -80,22 +80,42 @@ pub mod __buffa {
 #[doc(inline)]
 pub use self::__buffa::view::DeliveryView;
 #[doc(inline)]
+pub use self::__buffa::view::DeliveryOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::MessageView;
+#[doc(inline)]
+pub use self::__buffa::view::MessageOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::HeaderView;
 #[doc(inline)]
+pub use self::__buffa::view::HeaderOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::ScheduleView;
+#[doc(inline)]
+pub use self::__buffa::view::ScheduleOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleStatusView;
 #[doc(inline)]
+pub use self::__buffa::view::ScheduleStatusOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::ScheduleCreatedView;
+#[doc(inline)]
+pub use self::__buffa::view::ScheduleCreatedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::SchedulePausedView;
 #[doc(inline)]
+pub use self::__buffa::view::SchedulePausedOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::ScheduleRemovedView;
+#[doc(inline)]
+pub use self::__buffa::view::ScheduleRemovedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleResumedView;
 #[doc(inline)]
+pub use self::__buffa::view::ScheduleResumedOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::ScheduleEventView;
+#[doc(inline)]
+pub use self::__buffa::view::ScheduleEventOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

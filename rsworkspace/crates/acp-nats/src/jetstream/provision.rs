@@ -3,32 +3,32 @@ use trogon_nats::jetstream::{JetStreamContext, JetStreamStreamUpdater};
 
 use super::streams;
 
-#[derive(Debug)]
-pub struct ProvisionError(pub String);
-
-impl std::fmt::Display for ProvisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream provisioning failed: {}", self.0)
-    }
+#[derive(Debug, thiserror::Error)]
+#[error("stream provisioning failed for {stream}")]
+pub struct ProvisionError {
+    stream: String,
+    #[source]
+    source: Box<dyn std::error::Error + Send + Sync>,
 }
 
-impl std::error::Error for ProvisionError {}
-
-pub async fn provision_streams<J>(
-    js: &J,
-    prefix: &crate::acp_prefix::AcpPrefix,
-) -> Result<(), ProvisionError>
+pub async fn provision_streams<J>(js: &J, prefix: &crate::acp_prefix::AcpPrefix) -> Result<(), ProvisionError>
 where
     J: JetStreamContext + JetStreamStreamUpdater,
+    <J as JetStreamContext>::Error: 'static,
+    <J as JetStreamStreamUpdater>::UpdateError: 'static,
 {
     for config in streams::all_configs(prefix) {
         let name = config.name.clone();
         js.get_or_create_stream(config.clone())
             .await
-            .map_err(|e| ProvisionError(format!("{name}: {e}")))?;
-        js.update_stream(config)
-            .await
-            .map_err(|e| ProvisionError(format!("{name}: {e}")))?;
+            .map_err(|source| ProvisionError {
+                stream: name.clone(),
+                source: Box::new(source),
+            })?;
+        js.update_stream(config).await.map_err(|source| ProvisionError {
+            stream: name.clone(),
+            source: Box::new(source),
+        })?;
         info!(stream = %name, "Provisioned JetStream stream");
     }
     Ok(())
@@ -38,6 +38,7 @@ where
 mod tests {
     use super::*;
     use crate::acp_prefix::AcpPrefix;
+    use std::error::Error;
     use trogon_nats::jetstream::MockJetStreamContext;
 
     fn p(s: &str) -> AcpPrefix {
@@ -84,8 +85,9 @@ mod tests {
         let ctx = MockJetStreamContext::new();
         ctx.fail_next();
         let result = provision_streams(&ctx, &p("acp")).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ACP_COMMANDS"));
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("ACP_COMMANDS"));
+        assert!(error.source().is_some());
     }
 
     #[tokio::test]

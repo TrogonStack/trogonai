@@ -87,24 +87,15 @@ impl<'de> Deserialize<'de> for SnapshotTypeName {
 }
 
 /// Error returned when constructing an invalid [`SnapshotTypeName`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidSnapshotTypeName {
     /// Snapshot type names cannot be empty.
+    #[error("snapshot type name cannot be empty")]
     Empty,
     /// Snapshot type names cannot contain control characters.
+    #[error("snapshot type name cannot contain control characters")]
     ContainsControlCharacter,
 }
-
-impl std::fmt::Display for InvalidSnapshotTypeName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => f.write_str("snapshot type name cannot be empty"),
-            Self::ContainsControlCharacter => f.write_str("snapshot type name cannot contain control characters"),
-        }
-    }
-}
-
-impl std::error::Error for InvalidSnapshotTypeName {}
 
 pub trait SnapshotType {
     type Error: std::error::Error + Send + Sync + 'static;

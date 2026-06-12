@@ -258,6 +258,17 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     // Return whatever comes after the start marker (if present), or empty.
                     let partial = extract_after_start_marker(&full_output, &start_marker)
                         .unwrap_or_default();
+                    // The command is still running in the terminal. Leaving `terminal_id`
+                    // in the store would make the next bash call reuse this terminal, so
+                    // its command queues behind the hung one (cascading timeouts). Clear
+                    // it so the next call creates a fresh terminal.
+                    // (Killing the orphaned wasm terminal to free its resource is a
+                    // follow-up; clearing terminal_id already prevents the cascade.)
+                    if let Ok(mut state) = store.load(&session_id).await {
+                        state.terminal_id = None;
+                        state.terminal_cwd = None;
+                        let _ = store.save(&session_id, &state).await;
+                    }
                     return Err(format!(
                         "timeout after {}s. Partial output:\n{partial}",
                         timeout.as_secs()

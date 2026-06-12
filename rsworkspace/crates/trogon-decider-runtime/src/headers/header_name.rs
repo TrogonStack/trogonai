@@ -64,21 +64,12 @@ impl Borrow<str> for HeaderName {
 }
 
 /// Error returned when constructing an invalid [`HeaderName`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HeaderNameError {
     /// Header names cannot be empty.
+    #[error("event header name cannot be empty")]
     Empty,
     /// Header names cannot contain control characters.
+    #[error("event header name cannot contain control characters")]
     ContainsControlCharacter,
 }
-
-impl std::fmt::Display for HeaderNameError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => f.write_str("event header name cannot be empty"),
-            Self::ContainsControlCharacter => f.write_str("event header name cannot contain control characters"),
-        }
-    }
-}
-
-impl std::error::Error for HeaderNameError {}

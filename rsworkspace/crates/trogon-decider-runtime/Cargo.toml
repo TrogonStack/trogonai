@@ -20,6 +20,7 @@ panic = "deny"
 unwrap_used = "deny"
 
 [dependencies]
+thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde = { workspace = true }

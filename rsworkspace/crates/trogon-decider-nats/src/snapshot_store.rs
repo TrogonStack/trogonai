@@ -40,206 +40,139 @@ impl<T> SnapshotKvBucket for T where
 {
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SnapshotStoreContext {
-    ListSnapshotKeys,
-    ReadSnapshotKey,
-    ReadSnapshotValue,
-    ReadSnapshotEntry,
-    AdvanceCheckpoint,
-    CreateCheckpoint,
-    ReadCheckpointEntry,
-    DecodeCheckpoint,
-    ReadEntryForUpdate,
-    UpdateEntry,
-    CreateEntry,
-    ReadEntryForSnapshotUpdate,
-    UpdateSnapshotEntry,
-    CreateSnapshotEntry,
-    ReadEntryForDelete,
-    DeleteEntry,
-}
-
-impl SnapshotStoreContext {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::ListSnapshotKeys => "failed to list stream snapshot keys",
-            Self::ReadSnapshotKey => "failed to read stream snapshot key",
-            Self::ReadSnapshotValue => "failed to read stream snapshot value",
-            Self::ReadSnapshotEntry => "failed to read stream snapshot entry",
-            Self::AdvanceCheckpoint => "failed to advance stream snapshot checkpoint",
-            Self::CreateCheckpoint => "failed to create stream snapshot checkpoint",
-            Self::ReadCheckpointEntry => "failed to read stream snapshot checkpoint entry",
-            Self::DecodeCheckpoint => "failed to decode stream snapshot checkpoint",
-            Self::ReadEntryForUpdate => "failed to read key-value entry for update",
-            Self::UpdateEntry => "failed to update key-value entry",
-            Self::CreateEntry => "failed to create key-value entry",
-            Self::ReadEntryForSnapshotUpdate => "failed to read key-value entry for snapshot update",
-            Self::UpdateSnapshotEntry => "failed to update snapshot entry",
-            Self::CreateSnapshotEntry => "failed to create snapshot entry",
-            Self::ReadEntryForDelete => "failed to read key-value entry for delete",
-            Self::DeleteEntry => "failed to delete key-value entry",
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// JetStream Key/Value error raised by snapshot storage.
 #[allow(missing_docs)]
 pub enum SnapshotKvError {
-    ListSnapshotKeys { source: kv::HistoryError },
-    ReadSnapshotKey { source: kv::WatcherError },
-    ReadSnapshotValue { source: kv::EntryError },
-    ReadSnapshotEntry { source: kv::EntryError },
-    AdvanceCheckpoint { source: kv::UpdateError },
-    CreateCheckpoint { source: kv::CreateError },
-    ReadCheckpointEntry { source: kv::EntryError },
+    #[error("failed to list stream snapshot keys: {source}")]
+    ListSnapshotKeys {
+        #[source]
+        source: kv::HistoryError,
+    },
+    #[error("failed to read stream snapshot key: {source}")]
+    ReadSnapshotKey {
+        #[source]
+        source: kv::WatcherError,
+    },
+    #[error("failed to read stream snapshot value: {source}")]
+    ReadSnapshotValue {
+        #[source]
+        source: kv::EntryError,
+    },
+    #[error("failed to read stream snapshot entry: {source}")]
+    ReadSnapshotEntry {
+        #[source]
+        source: kv::EntryError,
+    },
+    #[error("failed to advance stream snapshot checkpoint: {source}")]
+    AdvanceCheckpoint {
+        #[source]
+        source: kv::UpdateError,
+    },
+    #[error("failed to create stream snapshot checkpoint: {source}")]
+    CreateCheckpoint {
+        #[source]
+        source: kv::CreateError,
+    },
+    #[error("failed to read stream snapshot checkpoint entry: {source}")]
+    ReadCheckpointEntry {
+        #[source]
+        source: kv::EntryError,
+    },
+    #[error("failed to decode stream snapshot checkpoint: {key}")]
     DecodeCheckpoint { key: String },
-    ReadEntryForUpdate { source: kv::EntryError },
-    UpdateEntry { source: kv::UpdateError },
-    CreateEntry { source: kv::CreateError },
-    ReadEntryForSnapshotUpdate { source: kv::EntryError },
-    UpdateSnapshotEntry { source: kv::UpdateError },
-    CreateSnapshotEntry { source: kv::CreateError },
-    ReadEntryForDelete { source: kv::EntryError },
-    DeleteEntry { source: kv::DeleteError },
+    #[error("failed to read key-value entry for update: {source}")]
+    ReadEntryForUpdate {
+        #[source]
+        source: kv::EntryError,
+    },
+    #[error("failed to update key-value entry: {source}")]
+    UpdateEntry {
+        #[source]
+        source: kv::UpdateError,
+    },
+    #[error("failed to create key-value entry: {source}")]
+    CreateEntry {
+        #[source]
+        source: kv::CreateError,
+    },
+    #[error("failed to read key-value entry for snapshot update: {source}")]
+    ReadEntryForSnapshotUpdate {
+        #[source]
+        source: kv::EntryError,
+    },
+    #[error("failed to update snapshot entry: {source}")]
+    UpdateSnapshotEntry {
+        #[source]
+        source: kv::UpdateError,
+    },
+    #[error("failed to create snapshot entry: {source}")]
+    CreateSnapshotEntry {
+        #[source]
+        source: kv::CreateError,
+    },
+    #[error("failed to read key-value entry for delete: {source}")]
+    ReadEntryForDelete {
+        #[source]
+        source: kv::EntryError,
+    },
+    #[error("failed to delete key-value entry: {source}")]
+    DeleteEntry {
+        #[source]
+        source: kv::DeleteError,
+    },
 }
 
-impl std::fmt::Display for SnapshotKvError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ListSnapshotKeys { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ListSnapshotKeys.as_str())
-            }
-            Self::ReadSnapshotKey { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ReadSnapshotKey.as_str())
-            }
-            Self::ReadSnapshotValue { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ReadSnapshotValue.as_str())
-            }
-            Self::ReadSnapshotEntry { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ReadSnapshotEntry.as_str())
-            }
-            Self::AdvanceCheckpoint { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::AdvanceCheckpoint.as_str())
-            }
-            Self::CreateCheckpoint { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::CreateCheckpoint.as_str())
-            }
-            Self::ReadCheckpointEntry { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ReadCheckpointEntry.as_str())
-            }
-            Self::DecodeCheckpoint { key } => write!(f, "{}: {key}", SnapshotStoreContext::DecodeCheckpoint.as_str()),
-            Self::ReadEntryForUpdate { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ReadEntryForUpdate.as_str())
-            }
-            Self::UpdateEntry { source } => write!(f, "{}: {source}", SnapshotStoreContext::UpdateEntry.as_str()),
-            Self::CreateEntry { source } => write!(f, "{}: {source}", SnapshotStoreContext::CreateEntry.as_str()),
-            Self::ReadEntryForSnapshotUpdate { source } => {
-                write!(
-                    f,
-                    "{}: {source}",
-                    SnapshotStoreContext::ReadEntryForSnapshotUpdate.as_str()
-                )
-            }
-            Self::UpdateSnapshotEntry { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::UpdateSnapshotEntry.as_str())
-            }
-            Self::CreateSnapshotEntry { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::CreateSnapshotEntry.as_str())
-            }
-            Self::ReadEntryForDelete { source } => {
-                write!(f, "{}: {source}", SnapshotStoreContext::ReadEntryForDelete.as_str())
-            }
-            Self::DeleteEntry { source } => write!(f, "{}: {source}", SnapshotStoreContext::DeleteEntry.as_str()),
-        }
-    }
-}
-
-impl std::error::Error for SnapshotKvError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::ListSnapshotKeys { source } => Some(source),
-            Self::ReadSnapshotKey { source } => Some(source),
-            Self::ReadSnapshotValue { source } => Some(source),
-            Self::ReadSnapshotEntry { source } => Some(source),
-            Self::AdvanceCheckpoint { source } => Some(source),
-            Self::CreateCheckpoint { source } => Some(source),
-            Self::ReadCheckpointEntry { source } => Some(source),
-            Self::DecodeCheckpoint { .. } => None,
-            Self::ReadEntryForUpdate { source } => Some(source),
-            Self::UpdateEntry { source } => Some(source),
-            Self::CreateEntry { source } => Some(source),
-            Self::ReadEntryForSnapshotUpdate { source } => Some(source),
-            Self::UpdateSnapshotEntry { source } => Some(source),
-            Self::CreateSnapshotEntry { source } => Some(source),
-            Self::ReadEntryForDelete { source } => Some(source),
-            Self::DeleteEntry { source } => Some(source),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Snapshot envelope or payload codec error.
 #[allow(missing_docs)]
 pub enum SnapshotCodecError<PayloadError, SnapshotTypeError = Infallible> {
-    SnapshotType { source: SnapshotTypeError },
-    EncodePayload { source: PayloadError },
-    EncodeEnvelope { source: SnapshotEnvelopeEncodeError },
-    DecodeEnvelope { source: SnapshotEnvelopeDecodeError },
+    #[error("failed to resolve stream snapshot type: {source}")]
+    SnapshotType {
+        #[source]
+        source: SnapshotTypeError,
+    },
+    #[error("failed to encode stream snapshot payload: {source}")]
+    EncodePayload {
+        #[source]
+        source: PayloadError,
+    },
+    #[error("failed to encode stream snapshot envelope: {source}")]
+    EncodeEnvelope {
+        #[source]
+        source: SnapshotEnvelopeEncodeError,
+    },
+    #[error("failed to decode stream snapshot envelope: {source}")]
+    DecodeEnvelope {
+        #[source]
+        source: SnapshotEnvelopeDecodeError,
+    },
+    #[error("unexpected stream snapshot type: expected {expected}, got {actual}")]
     UnexpectedSnapshotType { expected: SnapshotTypeName, actual: String },
-    DecodePayload { source: PayloadError },
+    #[error("failed to decode stream snapshot payload: {source}")]
+    DecodePayload {
+        #[source]
+        source: PayloadError,
+    },
 }
 
-impl<PayloadError, SnapshotTypeError> std::fmt::Display for SnapshotCodecError<PayloadError, SnapshotTypeError>
-where
-    PayloadError: std::fmt::Display,
-    SnapshotTypeError: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SnapshotType { source } => write!(f, "failed to resolve stream snapshot type: {source}"),
-            Self::EncodePayload { source } => write!(f, "failed to encode stream snapshot payload: {source}"),
-            Self::EncodeEnvelope { source } => write!(f, "failed to encode stream snapshot envelope: {source}"),
-            Self::DecodeEnvelope { source } => write!(f, "failed to decode stream snapshot envelope: {source}"),
-            Self::UnexpectedSnapshotType { expected, actual } => {
-                write!(f, "unexpected stream snapshot type: expected {expected}, got {actual}")
-            }
-            Self::DecodePayload { source } => write!(f, "failed to decode stream snapshot payload: {source}"),
-        }
-    }
-}
-
-impl<PayloadError, SnapshotTypeError> std::error::Error for SnapshotCodecError<PayloadError, SnapshotTypeError>
-where
-    PayloadError: std::error::Error + 'static,
-    SnapshotTypeError: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::SnapshotType { source } => Some(source),
-            Self::EncodePayload { source } => Some(source),
-            Self::EncodeEnvelope { source } => Some(source),
-            Self::DecodeEnvelope { source } => Some(source),
-            Self::UnexpectedSnapshotType { .. } => None,
-            Self::DecodePayload { source } => Some(source),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 /// Error raised while reading, writing, or decoding snapshot state.
 pub enum SnapshotStoreError<PayloadError = Infallible, SnapshotTypeError = Infallible> {
     /// JetStream Key/Value operation failed.
-    Kv(SnapshotKvError),
+    #[error("KV error: {0}")]
+    Kv(#[source] SnapshotKvError),
     /// Snapshot envelope or payload encoding failed.
-    Codec(SnapshotCodecError<PayloadError, SnapshotTypeError>),
+    #[error("Snapshot codec error: {0}")]
+    Codec(#[source] SnapshotCodecError<PayloadError, SnapshotTypeError>),
     /// A key used the snapshot namespace prefix but did not include a snapshot id.
+    #[error("Invalid stream snapshot key: {key}")]
     InvalidSnapshotKey {
         /// Invalid key observed in the Key/Value bucket.
         key: String,
     },
     /// Checkpoint operations were requested without a checkpoint name.
+    #[error("Missing checkpoint name for snapshot type: {snapshot_type}")]
     MissingCheckpointName {
         /// Snapshot type that requires a checkpoint name.
         snapshot_type: SnapshotTypeName,
@@ -322,39 +255,6 @@ impl<PayloadError, SnapshotTypeError> From<SnapshotCodecError<PayloadError, Snap
 {
     fn from(source: SnapshotCodecError<PayloadError, SnapshotTypeError>) -> Self {
         Self::Codec(source)
-    }
-}
-
-impl<PayloadError, SnapshotTypeError> std::fmt::Display for SnapshotStoreError<PayloadError, SnapshotTypeError>
-where
-    PayloadError: std::fmt::Display,
-    SnapshotTypeError: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Kv(source) => write!(f, "KV error: {source}"),
-            Self::Codec(source) => write!(f, "Snapshot codec error: {source}"),
-            Self::InvalidSnapshotKey { key } => {
-                write!(f, "Invalid stream snapshot key: {key}")
-            }
-            Self::MissingCheckpointName { snapshot_type } => {
-                write!(f, "Missing checkpoint name for snapshot type: {snapshot_type}")
-            }
-        }
-    }
-}
-
-impl<PayloadError, SnapshotTypeError> std::error::Error for SnapshotStoreError<PayloadError, SnapshotTypeError>
-where
-    PayloadError: std::error::Error + 'static,
-    SnapshotTypeError: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Kv(source) => Some(source),
-            Self::Codec(source) => Some(source),
-            Self::InvalidSnapshotKey { .. } | Self::MissingCheckpointName { .. } => None,
-        }
     }
 }
 
@@ -912,16 +812,9 @@ mod tests {
         id: String,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, thiserror::Error)]
+    #[error("missing snapshot type")]
     struct TestSnapshotTypeError;
-
-    impl std::fmt::Display for TestSnapshotTypeError {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("missing snapshot type")
-        }
-    }
-
-    impl std::error::Error for TestSnapshotTypeError {}
 
     #[derive(Debug)]
     struct UnavailableSnapshotTypePayload;

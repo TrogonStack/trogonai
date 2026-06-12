@@ -28,4 +28,6 @@ pub mod __buffa {
 #[doc(inline)]
 pub use self::__buffa::view::ContentView;
 #[doc(inline)]
+pub use self::__buffa::view::ContentOwnedView;
+#[doc(inline)]
 pub use self::__buffa::register_types;

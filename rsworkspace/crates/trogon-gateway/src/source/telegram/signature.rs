@@ -1,23 +1,13 @@
 use sha2::{Digest, Sha256};
-use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SignatureError {
+    #[error("missing secret token header")]
     Missing,
+    #[error("secret token mismatch")]
     Mismatch,
 }
-
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SignatureError::Missing => f.write_str("missing secret token header"),
-            SignatureError::Mismatch => f.write_str("secret token mismatch"),
-        }
-    }
-}
-
-impl std::error::Error for SignatureError {}
 
 /// Verifies the Telegram webhook secret token using constant-time comparison.
 ///

@@ -1,30 +1,31 @@
 use trogon_nats::{DottedNatsToken, SubjectTokenViolation};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct McpPrefixError(pub SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum McpPrefixError {
+    #[error("mcp_prefix must not be empty")]
+    Empty,
+    #[error("mcp_prefix contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("mcp_prefix is too long: {0} bytes (max 128)")]
+    TooLong(usize),
+}
 
-impl std::fmt::Display for McpPrefixError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            SubjectTokenViolation::Empty => write!(f, "mcp_prefix must not be empty"),
-            SubjectTokenViolation::InvalidCharacter(ch) => {
-                write!(f, "mcp_prefix contains invalid character: {:?}", ch)
-            }
-            SubjectTokenViolation::TooLong(len) => {
-                write!(f, "mcp_prefix is too long: {} bytes (max 128)", len)
-            }
+impl From<SubjectTokenViolation> for McpPrefixError {
+    fn from(violation: SubjectTokenViolation) -> Self {
+        match violation {
+            SubjectTokenViolation::Empty => Self::Empty,
+            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
         }
     }
 }
-
-impl std::error::Error for McpPrefixError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct McpPrefix(DottedNatsToken);
 
 impl McpPrefix {
     pub fn new(s: impl AsRef<str>) -> Result<Self, McpPrefixError> {
-        DottedNatsToken::new(s).map(Self).map_err(McpPrefixError)
+        DottedNatsToken::new(s).map(Self).map_err(McpPrefixError::from)
     }
 
     pub fn as_str(&self) -> &str {

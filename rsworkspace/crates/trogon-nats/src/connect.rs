@@ -1,50 +1,26 @@
 use crate::auth::{NatsAuth, NatsConfig};
+use crate::constants::MAX_RECONNECT_DELAY;
 use async_nats::{Client, ClientError, ConnectOptions, Event, ServerError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tracing::{info, instrument, warn};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    InvalidCredentials(std::io::Error),
+    #[error("Failed to load credentials file: {0}")]
+    InvalidCredentials(#[source] std::io::Error),
     /// NATS server rejected the connection due to invalid credentials.
     /// Retrying will not help — the credentials must be corrected.
+    #[error("NATS authorization violation: invalid credentials")]
     AuthorizationViolation,
+    #[error("Failed to connect to NATS servers {servers:?}: {error}")]
     ConnectionFailed {
         servers: Vec<String>,
+        #[source]
         error: async_nats::ConnectError,
     },
 }
-
-impl std::fmt::Display for ConnectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidCredentials(e) => {
-                write!(f, "Failed to load credentials file: {}", e)
-            }
-            Self::AuthorizationViolation => {
-                write!(f, "NATS authorization violation: invalid credentials")
-            }
-            Self::ConnectionFailed { servers, error } => {
-                write!(f, "Failed to connect to NATS servers {:?}: {}", servers, error)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConnectError {
-    #[cfg_attr(coverage, coverage(off))]
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidCredentials(e) => Some(e),
-            Self::AuthorizationViolation => None,
-            Self::ConnectionFailed { error, .. } => Some(error),
-        }
-    }
-}
-
-const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 /// How long to wait for the initial connection outcome before assuming the server
 /// is temporarily unreachable and letting the retry loop continue in the background.
@@ -96,9 +72,7 @@ fn apply_reconnect_options(
                 let signal: Option<bool> = match &event {
                     Event::Connected => Some(true),
                     Event::ServerError(ServerError::AuthorizationViolation) => Some(false),
-                    Event::ClientError(ClientError::Other(msg))
-                        if msg.contains("authorization violation") =>
-                    {
+                    Event::ClientError(ClientError::Other(msg)) if msg.contains("authorization violation") => {
                         Some(false)
                     }
                     _ => None,
@@ -147,13 +121,9 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
             }
         }
         NatsAuth::NKey(seed) => {
-            apply_reconnect_options(
-                ConnectOptions::with_nkey(seed.clone()),
-                connection_timeout,
-                outcome_tx,
-            )
-            .connect(&config.servers)
-            .await
+            apply_reconnect_options(ConnectOptions::with_nkey(seed.clone()), connection_timeout, outcome_tx)
+                .connect(&config.servers)
+                .await
         }
         NatsAuth::UserPassword { user, password } => {
             apply_reconnect_options(
@@ -343,11 +313,7 @@ mod tests {
                     "display must mention the failure: {}",
                     msg
                 );
-                assert!(
-                    msg.contains("19122"),
-                    "display must include the server: {}",
-                    msg
-                );
+                assert!(msg.contains("19122"), "display must include the server: {}", msg);
                 assert!(
                     std::error::Error::source(&err).is_some(),
                     "source() must expose the inner async_nats error"
@@ -378,10 +344,7 @@ mod tests {
             msg.contains("Failed to connect to NATS servers"),
             "display missing prefix; got: {msg}"
         );
-        assert!(
-            msg.contains("127.0.0.1:1"),
-            "display missing server; got: {msg}"
-        );
+        assert!(msg.contains("127.0.0.1:1"), "display missing server; got: {msg}");
     }
 
     /// `source()` on `ConnectionFailed` must return `Some`.
@@ -425,5 +388,4 @@ mod tests {
             "error message must mention credentials file; got: {err}"
         );
     }
-
 }

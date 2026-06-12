@@ -59,30 +59,14 @@ fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Bri
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    Prefix(McpPrefixError),
-    ClientId(McpPeerIdError),
-    ServerId(McpPeerIdError),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Prefix(_) => write!(f, "invalid MCP prefix"),
-            Self::ClientId(_) => write!(f, "invalid MCP client id"),
-            Self::ServerId(_) => write!(f, "invalid MCP server id"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Prefix(source) => Some(source),
-            Self::ClientId(source) | Self::ServerId(source) => Some(source),
-        }
-    }
+    #[error("invalid MCP prefix")]
+    Prefix(#[source] McpPrefixError),
+    #[error("invalid MCP client id")]
+    ClientId(#[source] McpPeerIdError),
+    #[error("invalid MCP server id")]
+    ServerId(#[source] McpPeerIdError),
 }
 
 #[cfg(test)]
