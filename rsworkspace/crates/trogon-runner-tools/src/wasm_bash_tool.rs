@@ -61,6 +61,10 @@ fn terminal_env(state: &crate::session_store::SessionState) -> Vec<agent_client_
 
 pub const DEFAULT_BASH_TIMEOUT_SECS: u64 = 120;
 pub const MAX_BASH_TIMEOUT_SECS: u64 = 600;
+/// Floor for a model-supplied `timeout_secs`: a too-short value (e.g. a weak
+/// model passing `10`) would kill legitimate commands like a wide `find`, so we
+/// never give a command less than this much wall-clock.
+pub const MIN_BASH_TIMEOUT_SECS: u64 = 30;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const START_MARKER_PREFIX: &str = "__START_";
@@ -552,7 +556,7 @@ fn parse_exit_code(output: &str, exit_prefix: &str) -> Option<i32> {
 fn resolve_timeout(arguments: &Value, default: Duration) -> Duration {
     let args_timeout = arguments["timeout_secs"].as_u64();
     args_timeout
-        .map(|s| s.clamp(1, MAX_BASH_TIMEOUT_SECS))
+        .map(|s| s.clamp(MIN_BASH_TIMEOUT_SECS, MAX_BASH_TIMEOUT_SECS))
         .map(Duration::from_secs)
         .unwrap_or(default)
 }
@@ -855,12 +859,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_timeout_clamps_zero_to_one() {
-        let args = serde_json::json!({ "command": "ls", "timeout_secs": 0 });
-        assert_eq!(
-            resolve_timeout(&args, Duration::from_secs(DEFAULT_BASH_TIMEOUT_SECS)),
-            Duration::from_secs(1)
-        );
+    fn resolve_timeout_clamps_below_floor() {
+        // A too-short model-supplied timeout (e.g. 0 or 10) is raised to the floor
+        // so it can't kill a legitimate command.
+        for short in [0u64, 5, 10, 29] {
+            let args = serde_json::json!({ "command": "ls", "timeout_secs": short });
+            assert_eq!(
+                resolve_timeout(&args, Duration::from_secs(DEFAULT_BASH_TIMEOUT_SECS)),
+                Duration::from_secs(MIN_BASH_TIMEOUT_SECS)
+            );
+        }
     }
 
     // ── tool_def ──────────────────────────────────────────────────────────────
