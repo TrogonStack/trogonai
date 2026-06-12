@@ -3,7 +3,7 @@ name = "trogon-decider-nats"
 version = "0.1.0"
 edition = "2024"
 description = "NATS JetStream storage adapter for Trogon decider runtime"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/TrogonStack/trogonai"
 
 [lints.rust]
