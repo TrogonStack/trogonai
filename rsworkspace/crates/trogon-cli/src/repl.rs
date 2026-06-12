@@ -1481,6 +1481,12 @@ async fn fetch_mcp_prompt(
 ) -> Result<String, String> {
     let conns = mcp.active_connections(session_id);
     let Some((_, url, headers)) = conns.into_iter().find(|(n, _, _)| n == &inv.server) else {
+        if mcp.active_for_session(session_id).iter().any(|(n, _)| n == &inv.server) {
+            return Err(format!(
+                "MCP server `{}` is native stdio; CLI prompt commands are only available for HTTP/SSE MCP servers",
+                inv.server
+            ));
+        }
         return Err(format!("no active MCP server named `{}` (see /mcp list)", inv.server));
     };
     let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
@@ -1541,9 +1547,9 @@ async fn handle_mcp_command<F: Fs, S: Session>(
             }
             let active = mcp.active_for_session(session.session_id());
             if active.is_empty() {
-                println!("active bridges: (none)");
+                println!("active MCP servers: (none)");
             } else {
-                println!("active bridges:");
+                println!("active MCP servers:");
                 for (name, url) in active {
                     println!("  {name} → {url}");
                 }
@@ -1604,7 +1610,11 @@ async fn handle_mcp_command<F: Fs, S: Session>(
         "prompts" => {
             let conns = mcp.active_connections(session.session_id());
             if conns.is_empty() {
-                println!("no active MCP servers");
+                if mcp.active_for_session(session.session_id()).is_empty() {
+                    println!("no active MCP servers");
+                } else {
+                    println!("no active HTTP/SSE MCP servers with CLI-readable prompts");
+                }
                 return;
             }
             println!("available MCP prompts (call as /mcp__<server>__<prompt> [k=v...]):");

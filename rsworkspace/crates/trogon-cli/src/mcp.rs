@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 pub const MCP_CONFIG_PATH: &str = "~/.config/trogon/mcp.json";
 
-/// An active MCP connection: `(name, url, headers)`. Headers are empty for stdio
-/// servers (the local bridge needs no auth) and carry auth for HTTP servers.
+/// An active MCP connection reachable by the CLI-side HTTP MCP client:
+/// `(name, url, headers)`.
 pub type McpConnection = (String, String, Vec<(String, String)>);
 
 /// Transport used to reach an MCP server. Defaults to `Stdio` so existing
@@ -273,24 +273,23 @@ impl McpManager {
         (acp_servers, bridges)
     }
 
-    /// Active MCP connections for a session as `(name, url, headers)`. Stdio
-    /// servers carry no headers (the local bridge needs no auth); HTTP servers
-    /// carry their configured headers. Used to fetch MCP prompts on demand.
+    /// Active HTTP/SSE MCP connections for a session as `(name, url, headers)`.
+    ///
+    /// Native stdio servers are intentionally excluded: the runner owns those
+    /// subprocesses directly, so the CLI cannot fetch prompts from them through
+    /// the HTTP MCP client.
     pub fn active_connections(&self, session_id: &str) -> Vec<McpConnection> {
         self.active
             .get(session_id)
             .map(|bridges| {
                 bridges
                     .iter()
-                    .map(|b| {
-                        let headers = self
-                            .config
+                    .filter_map(|b| {
+                        self.config
                             .servers
                             .iter()
                             .find(|c| c.name == b.name && c.transport.is_remote())
-                            .map(|c| c.headers.clone())
-                            .unwrap_or_default();
-                        (b.name.clone(), b.url.clone(), headers)
+                            .map(|c| (b.name.clone(), b.url.clone(), c.headers.clone()))
                     })
                     .collect()
             })
@@ -739,6 +738,62 @@ mod tests {
         }
         // No local bridge subprocess was spawned for the stdio server.
         assert!(mgr.pending.iter().all(|b| b.bridge.is_none()));
+    }
+
+    #[tokio::test]
+    async fn active_connections_excludes_native_stdio_servers() {
+        use crate::fs::mock::MockFs;
+        let mut mgr = McpManager {
+            config: McpConfig {
+                servers: vec![
+                    McpServerConfig {
+                        name: "fs".to_string(),
+                        transport: McpTransport::Stdio,
+                        command: "/usr/bin/server".to_string(),
+                        args: vec![],
+                        env: HashMap::new(),
+                        url: String::new(),
+                        headers: vec![],
+                        oauth: false,
+                        timeout_secs: None,
+                    },
+                    McpServerConfig {
+                        name: "api".to_string(),
+                        transport: McpTransport::Http,
+                        command: String::new(),
+                        args: vec![],
+                        env: HashMap::new(),
+                        url: "https://api.example.com/mcp".to_string(),
+                        headers: vec![("Authorization".to_string(), "Bearer t".to_string())],
+                        oauth: false,
+                        timeout_secs: None,
+                    },
+                ],
+            },
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::default(),
+            oauth_http: reqwest::Client::new(),
+        };
+
+        let _ = mgr.spawn_pending(&MockFs::new()).await;
+        mgr.commit_pending("s1");
+
+        assert_eq!(
+            mgr.active_for_session("s1"),
+            vec![
+                ("fs".to_string(), "stdio:/usr/bin/server".to_string()),
+                ("api".to_string(), "https://api.example.com/mcp".to_string()),
+            ]
+        );
+        assert_eq!(
+            mgr.active_connections("s1"),
+            vec![(
+                "api".to_string(),
+                "https://api.example.com/mcp".to_string(),
+                vec![("Authorization".to_string(), "Bearer t".to_string())],
+            )]
+        );
     }
 
     #[test]
