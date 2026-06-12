@@ -170,7 +170,9 @@ async fn compact_messages(
     )
     .await?;
 
-    if let Some(ref new_msgs) = outcome {
+    let new_messages = outcome.map(|r| r.messages);
+
+    if let Some(ref new_msgs) = new_messages {
         info!(
             session_id,
             tokens_before = estimate_token_count(messages),
@@ -179,7 +181,7 @@ async fn compact_messages(
         );
     }
 
-    Ok(outcome)
+    Ok(new_messages)
 }
 
 /// Agent implementation that handles all ACP methods via NATS.

@@ -1,46 +1,45 @@
-//! Context compaction for xai-runner via the `trogon-compactor` NATS service (protobuf wire).
+//! Context compaction for xai-runner via the shared `trogon-compactor` helper.
+//!
+//! The wire protocol, NATS request-reply, decoding, and fallback logging all live
+//! in [`trogon_runner_tools::request_compaction`]. This module keeps only the
+//! xai-specific concerns: converting the runner's [`Message`] type to/from the
+//! shared [`trogon_tools::Message`], the compaction gate ([`should_compact`]), and
+//! the request timeout.
 
 use std::time::Duration;
 
 use async_nats::Client;
-use buffa::Message as _;
-use trogonai_compactor_proto::{
-    __buffa::oneof::content_block::Kind as BlockKind, CompactError as ProtoCompactError,
-    CompactRequest as ProtoRequest, CompactResponse as ProtoResponse, ContentBlock as ProtoBlock,
-    Message as ProtoMessage,
-};
+use trogon_runner_tools::{CompactProviders, request_compaction};
+use trogon_tools::{ContentBlock, Message as ToolMessage};
 
 use crate::client::Message;
 
-const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
 const SESSION_PROVIDER: &str = "xai";
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 
-fn to_proto_messages(history: &[Message]) -> Vec<ProtoMessage> {
+/// Convert the runner's text-only [`Message`] into the shared tool [`ToolMessage`].
+fn to_tool_messages(history: &[Message]) -> Vec<ToolMessage> {
     history
         .iter()
-        .map(|m| ProtoMessage {
+        .map(|m| ToolMessage {
             role: m.role.clone(),
-            content: vec![ProtoBlock {
-                kind: Some(BlockKind::Text(Box::new(trogonai_compactor_proto::TextBlock {
-                    text: m.content.clone().unwrap_or_default(),
-                    __buffa_unknown_fields: Default::default(),
-                }))),
-                __buffa_unknown_fields: Default::default(),
+            content: vec![ContentBlock::Text {
+                text: m.content.clone().unwrap_or_default(),
             }],
-            __buffa_unknown_fields: Default::default(),
         })
         .collect()
 }
 
-fn from_proto_messages(wire: Vec<ProtoMessage>) -> Vec<Message> {
+/// Convert shared tool messages back into the runner's [`Message`] type, flattening
+/// each message's text blocks into the single `content` string.
+fn from_tool_messages(wire: Vec<ToolMessage>) -> Vec<Message> {
     wire.into_iter()
         .map(|m| {
             let text = m
                 .content
                 .iter()
-                .filter_map(|b| match b.kind.as_ref()? {
-                    BlockKind::Text(t) => Some(t.text.as_str()),
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -53,39 +52,6 @@ fn from_proto_messages(wire: Vec<ProtoMessage>) -> Vec<Message> {
             }
         })
         .collect()
-}
-
-fn encode_request(
-    history: &[Message],
-    model: &str,
-    compactor_provider: Option<&str>,
-    compactor_model: Option<&str>,
-    context_window: u64,
-) -> Vec<u8> {
-    ProtoRequest {
-        messages: to_proto_messages(history),
-        provider: SESSION_PROVIDER.to_string(),
-        model: model.to_string(),
-        context_window,
-        compactor_provider: compactor_provider.map(str::to_string),
-        compactor_model: compactor_model.map(str::to_string),
-        __buffa_unknown_fields: Default::default(),
-    }
-    .encode_to_vec()
-}
-
-fn decode_response(payload: &[u8]) -> Option<(Vec<Message>, bool, usize)> {
-    if let Ok(err) = ProtoCompactError::decode_from_slice(payload)
-        && !err.error.is_empty()
-    {
-        return None;
-    }
-    let resp = ProtoResponse::decode_from_slice(payload).ok()?;
-    if resp.compacted {
-        Some((from_proto_messages(resp.messages), true, resp.kept_count as usize))
-    } else {
-        None
-    }
 }
 
 /// Rough token estimate: 1 token ≈ 4 bytes of text content.
@@ -112,8 +78,9 @@ fn request_timeout() -> Duration {
 }
 
 /// Sends the history to the compactor service and returns
-/// `(new_history, compacted)`. On any failure returns the original history
-/// unchanged with `compacted == false`.
+/// `(new_history, compacted)`. On any failure (compactor down, timeout, invalid
+/// response, or "not compacted") returns the original history unchanged with
+/// `compacted == false`.
 pub async fn compact(
     nats: &Client,
     history: Vec<Message>,
@@ -122,18 +89,17 @@ pub async fn compact(
     compactor_model: Option<&str>,
     context_window: u64,
 ) -> (Vec<Message>, bool) {
-    let payload = encode_request(&history, model, compactor_provider, compactor_model, context_window);
+    let messages = to_tool_messages(&history);
+    let providers = CompactProviders {
+        session_provider: SESSION_PROVIDER,
+        session_model: model,
+        compactor_provider,
+        compactor_model,
+    };
 
-    let request = async_nats::Request::new()
-        .payload(payload.into())
-        .timeout(Some(request_timeout()));
-
-    match nats.send_request(COMPACT_SUBJECT, request).await {
-        Ok(reply) => match decode_response(&reply.payload) {
-            Some((new_history, true, _)) => (new_history, true),
-            _ => (history, false),
-        },
-        Err(_) => (history, false),
+    match request_compaction(nats, &messages, Some(context_window), providers, request_timeout()).await {
+        Ok(Some(resp)) => (from_tool_messages(resp.messages), true),
+        Ok(None) | Err(_) => (history, false),
     }
 }
 
@@ -151,10 +117,10 @@ mod tests {
     }
 
     #[test]
-    fn proto_round_trip_preserves_text() {
+    fn tool_message_round_trip_preserves_text() {
         let history = vec![msg("user", "hello"), msg("assistant", "hi there")];
-        let proto = to_proto_messages(&history);
-        let restored = from_proto_messages(proto);
+        let tool = to_tool_messages(&history);
+        let restored = from_tool_messages(tool);
         assert_eq!(restored.len(), 2);
         assert_eq!(restored[0].content.as_deref(), Some("hello"));
         assert_eq!(restored[1].content.as_deref(), Some("hi there"));
@@ -175,11 +141,27 @@ mod tests {
     }
 
     #[test]
-    fn encode_request_includes_compactor_provider() {
+    fn payload_carries_session_and_compactor_identity() {
+        // The wire payload is built by the shared helper's `encode_compact_request`;
+        // assert it stamps the xai session provider plus the compactor override.
+        use buffa::Message as _;
+        use trogon_runner_tools::encode_compact_request;
+        use trogonai_compactor_proto::CompactRequest as ProtoRequest;
+
         let history = vec![msg("user", "hi")];
-        let bytes = encode_request(&history, "grok-4", Some("anthropic"), Some("claude-haiku"), 131_072);
+        let messages = to_tool_messages(&history);
+        let bytes = encode_compact_request(
+            &messages,
+            SESSION_PROVIDER,
+            "grok-4",
+            Some(131_072),
+            Some("anthropic"),
+            Some("claude-haiku"),
+        );
         let proto = ProtoRequest::decode_from_slice(&bytes).unwrap();
         assert_eq!(proto.provider, "xai");
+        assert_eq!(proto.model, "grok-4");
+        assert_eq!(proto.context_window, 131_072);
         assert_eq!(proto.compactor_provider.as_deref(), Some("anthropic"));
         assert_eq!(proto.compactor_model.as_deref(), Some("claude-haiku"));
     }

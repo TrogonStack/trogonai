@@ -9,7 +9,7 @@ use std::time::Duration;
 use tracing::warn;
 use trogon_tools::Message;
 
-use crate::compactor_wire::{decode_compact_response, encode_compact_request};
+use crate::compactor_wire::{CompactWireResponse, decode_compact_response, encode_compact_request};
 
 pub const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
 pub const DEFAULT_TOKEN_BUDGET: usize = 200_000;
@@ -72,15 +72,20 @@ pub struct CompactProviders<'a> {
 /// Does **not** decide *when* to compact (no threshold check) and does **not**
 /// consolidate per-runner message conversion — callers own those. This helper only
 /// builds the [`encode_compact_request`] payload from `providers` + `context_window`,
-/// performs the NATS request-reply with `timeout`, decodes the response, and maps it
-/// to `Ok(Some(messages))` when the compactor compacted else `Ok(None)`.
+/// performs the NATS request-reply with `timeout`, and decodes the response.
+///
+/// Returns `Ok(Some(response))` with the full [`CompactWireResponse`] when the
+/// compactor compacted, else `Ok(None)`. The rich response preserves the
+/// `fallback_model`, token counts, and `kept_count` so callers can surface the
+/// fallback to the user (ADR 0004) and reuse the original tail. The helper also
+/// emits a `warn!` log whenever a fallback model was used.
 pub async fn request_compaction(
     nats: &async_nats::Client,
     messages: &[Message],
     context_window: Option<u64>,
     providers: CompactProviders<'_>,
     timeout: Duration,
-) -> Result<Option<Vec<Message>>, CompactError> {
+) -> Result<Option<CompactWireResponse>, CompactError> {
     let payload = encode_compact_request(
         messages,
         providers.session_provider,
@@ -101,11 +106,7 @@ pub async fn request_compaction(
         warn!(fallback_model = %fallback, "compactor used fallback model");
     }
 
-    if resp.compacted {
-        Ok(Some(resp.messages))
-    } else {
-        Ok(None)
-    }
+    if resp.compacted { Ok(Some(resp)) } else { Ok(None) }
 }
 
 /// Request compaction from `trogon-compactor` when history is over the threshold.
@@ -123,7 +124,8 @@ pub async fn maybe_compact(
         return Ok(None);
     }
 
-    request_compaction(nats, messages, None, providers, COMPACT_TIMEOUT).await
+    let resp = request_compaction(nats, messages, None, providers, COMPACT_TIMEOUT).await?;
+    Ok(resp.map(|r| r.messages))
 }
 
 #[cfg(test)]
