@@ -1909,6 +1909,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let mut prompt_output_total: u64 = 0;
         let mut prompt_cache_read_total: u64 = 0;
         let mut prompt_cache_creation_total: u64 = 0;
+        // Auto-summary guarantee: nudged the model once for a recap after a
+        // silent (tools-ran, no-text) turn, so we nudge at most once.
+        let mut auto_summary_done = false;
 
         let stop_reason = 'outer: loop {
             assistant_text.clear();
@@ -2009,6 +2012,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         // trailing [DONE]).
                         if finished {
                             drop(stream);
+                            // Auto-summary guarantee: ran tools but produced no
+                            // text → nudge once for a recap, then loop again.
+                            if tool_rounds > 0
+                                && assistant_text.trim().is_empty()
+                                && !auto_summary_done
+                            {
+                                auto_summary_done = true;
+                                let nudge =
+                                    Message::user(trogon_runner_tools::AUTO_SUMMARY_NUDGE);
+                                messages.push(nudge.clone());
+                                wire_messages.push(nudge);
+                                info!(session_id, "openrouter: silent after tools — requesting recap");
+                                continue 'outer;
+                            }
                             break 'outer StopReason::EndTurn;
                         }
                     }
@@ -2023,6 +2040,18 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterEvent::Finished { .. } => {}
                     OpenRouterEvent::Done => {
                         drop(stream);
+                        // Auto-summary guarantee (see above): silent after tools → recap.
+                        if tool_rounds > 0
+                            && assistant_text.trim().is_empty()
+                            && !auto_summary_done
+                        {
+                            auto_summary_done = true;
+                            let nudge = Message::user(trogon_runner_tools::AUTO_SUMMARY_NUDGE);
+                            messages.push(nudge.clone());
+                            wire_messages.push(nudge);
+                            info!(session_id, "openrouter: silent after tools — requesting recap");
+                            continue 'outer;
+                        }
                         break 'outer StopReason::EndTurn;
                     }
                     OpenRouterEvent::Error { message } => {

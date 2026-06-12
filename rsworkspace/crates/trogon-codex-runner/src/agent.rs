@@ -708,6 +708,9 @@ where
         let mut assistant_text = String::new();
         let mut tool_call_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
         let mut tool_result_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
+        // Auto-summary guarantee: nudged the model once for a recap after a
+        // silent (tools-ran, no-text) turn, so we nudge at most once.
+        let mut auto_summary_done = false;
         let stop_reason = loop {
             let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
                 Err(_elapsed) => {
@@ -791,28 +794,62 @@ where
                     let text = std::mem::take(&mut assistant_text);
                     let tool_calls = std::mem::take(&mut tool_call_blocks);
                     let tool_results = std::mem::take(&mut tool_result_blocks);
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        if !tool_calls.is_empty() {
-                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                                role: "assistant".to_string(),
-                                text: "[tool call]".to_string(),
-                                blocks: tool_calls,
-                            });
+                    let ran_tools = !tool_calls.is_empty();
+                    let silent = text.trim().is_empty();
+                    // Will we nudge for a recap? (ran tools, no text, not yet nudged)
+                    let will_nudge = ran_tools && silent && !auto_summary_done;
+                    {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            if !tool_calls.is_empty() {
+                                s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                    role: "assistant".to_string(),
+                                    text: "[tool call]".to_string(),
+                                    blocks: tool_calls,
+                                });
+                            }
+                            if !tool_results.is_empty() {
+                                s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                    role: "user".to_string(),
+                                    text: String::new(),
+                                    blocks: tool_results,
+                                });
+                            }
+                            // Defer recording the (empty) assistant text when nudging —
+                            // the recap turn's TurnCompleted records it instead.
+                            if !will_nudge {
+                                s.history.push(
+                                    trogon_runner_tools::portable_session::PortableMessage::text_only(
+                                        "assistant", text,
+                                    ),
+                                );
+                            }
                         }
-                        if !tool_results.is_empty() {
-                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                                role: "user".to_string(),
-                                text: String::new(),
-                                blocks: tool_results,
-                            });
+                    } // drop sessions lock before re-acquiring the process
+
+                    // Auto-summary guarantee: ran tools but produced no text → the
+                    // model went silent. Re-prompt once for a brief recap (codex
+                    // takes no system prompt, so this is the only backstop) and keep
+                    // looping to stream it. Never fires on greetings / plain answers.
+                    if will_nudge {
+                        auto_summary_done = true;
+                        if let Ok(p) = self.process().await
+                            && let Ok(rx) = p
+                                .turn_start(
+                                    &thread_id,
+                                    trogon_runner_tools::AUTO_SUMMARY_NUDGE,
+                                    model.as_deref(),
+                                    approval_policy,
+                                )
+                                .await
+                        {
+                            drop(p);
+                            event_rx = rx;
+                            info!(session_id, "codex: silent after tools — requesting recap");
+                            continue;
                         }
-                        s.history.push(
-                            trogon_runner_tools::portable_session::PortableMessage::text_only(
-                                "assistant", text,
-                            ),
-                        );
                     }
+
                     break StopReason::EndTurn;
                 }
 
