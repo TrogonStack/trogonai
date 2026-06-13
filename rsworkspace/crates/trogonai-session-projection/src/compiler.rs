@@ -78,6 +78,17 @@ pub(crate) fn compile_projection(input: ProjectionInput) -> Result<PromptProject
         prefer_context_twin,
     );
 
+    // Component 12: record the content-degradation metadata for the transformations
+    // the projection applied (images omitted, tool calls textualized, reasoning not
+    // portable, history summarized), so the runner/UX can surface what was lost.
+    record_content_degradations(
+        &input,
+        &mut degradations,
+        use_artifact_refs,
+        textualize_tools,
+        prefer_context_twin,
+    );
+
     candidates.sort_by(|left, right| {
         block_priority(
             left.block
@@ -526,6 +537,72 @@ fn push_older_transcript(
     }
 }
 
+/// True when any message in the snapshot carries a content block matching `pred`.
+fn conversation_has_block(
+    snapshot: &trogonai_session_contracts::SessionSnapshotState,
+    pred: impl Fn(&BlockKind) -> bool,
+) -> bool {
+    snapshot
+        .conversation
+        .iter()
+        .any(|message| message.content.iter().any(|block| block.kind.as_ref().is_some_and(&pred)))
+}
+
+/// Record the degradation metadata for the content transformations the projection
+/// applied (Component 12: `images_omitted`, `tool_calls_textualized`,
+/// `reasoning_not_portable`, `history_summarized`). Each is emitted only when the
+/// projection actually degrades that content: the adaptation strategy is active and
+/// the canonical session contains the affected block type.
+fn record_content_degradations(
+    input: &ProjectionInput,
+    degradations: &mut Vec<DegradationMetadata>,
+    use_artifact_refs: bool,
+    textualize_tools: bool,
+    prefer_context_twin: bool,
+) {
+    let snapshot = &input.snapshot;
+    let mut record = |kind: DegradationKind, detail: &str| {
+        degradations.push(DegradationMetadata {
+            kind: EnumValue::Known(kind),
+            detail: detail.to_string(),
+            ..DegradationMetadata::default()
+        });
+    };
+
+    if use_artifact_refs && conversation_has_block(snapshot, |k| matches!(k, BlockKind::ImageRef(_))) {
+        record(
+            DegradationKind::ImagesOmitted,
+            "images replaced with artifact references for a model without image input",
+        );
+    }
+    if textualize_tools
+        && conversation_has_block(snapshot, |k| {
+            matches!(k, BlockKind::ToolUse(_) | BlockKind::ToolResult(_))
+        })
+    {
+        record(
+            DegradationKind::ToolCallsTextualized,
+            "structured tool calls rendered as text for a model without tool use",
+        );
+    }
+    // Provider hidden reasoning is never portable across a switch (a non-goal), so
+    // any reasoning content is degraded in the projection regardless of the target.
+    if conversation_has_block(snapshot, |k| matches!(k, BlockKind::Thinking(_))) {
+        record(
+            DegradationKind::ReasoningNotPortable,
+            "provider reasoning is not portable across a model switch",
+        );
+    }
+    // With the context-window adaptation, older transcript is represented by
+    // summaries plus recent turns rather than the full history.
+    if prefer_context_twin && !snapshot.summaries.is_empty() {
+        record(
+            DegradationKind::HistorySummarized,
+            "older transcript represented by summaries plus recent turns",
+        );
+    }
+}
+
 fn project_message(
     message: &trogonai_session_contracts::CanonicalMessage,
     use_artifact_refs: bool,
@@ -646,8 +723,9 @@ mod tests {
     use buffa_types::google::protobuf::Timestamp;
     use trogonai_capabilities::{FreshnessStatus, ResolvedCapabilities};
     use trogonai_session_contracts::{
-        ArtifactRef, CapabilitySchema, CapabilitySource, ContextTwin, SessionConfig,
-        SessionSnapshotState, SwitchAdaptation, SwitchAdaptationPlan, ToolResultFormat,
+        ArtifactRef, CanonicalMessage, CapabilitySchema, CapabilitySource, ContextTwin,
+        SessionConfig, SessionSnapshotState, SwitchAdaptation, SwitchAdaptationPlan,
+        ToolResultFormat, ToolUseBlock,
     };
 
     fn fixed_timestamp() -> Timestamp {
@@ -677,6 +755,114 @@ mod tests {
             freshness: FreshnessStatus::Fresh,
             degraded: false,
         }
+    }
+
+    fn image_block() -> ContentBlock {
+        ContentBlock {
+            kind: Some(BlockKind::ImageRef(Box::new(ArtifactRef {
+                artifact_id: "art_img".to_string(),
+                preview: "a diagram".to_string(),
+                ..ArtifactRef::default()
+            }))),
+            ..ContentBlock::default()
+        }
+    }
+
+    fn tool_use_block() -> ContentBlock {
+        ContentBlock {
+            kind: Some(BlockKind::ToolUse(Box::new(ToolUseBlock {
+                id: "tu_1".to_string(),
+                name: "fs_read".to_string(),
+                input_json: "{}".to_string(),
+                ..ToolUseBlock::default()
+            }))),
+            ..ContentBlock::default()
+        }
+    }
+
+    fn thinking_block() -> ContentBlock {
+        ContentBlock {
+            kind: Some(BlockKind::Thinking("internal reasoning".to_string())),
+            ..ContentBlock::default()
+        }
+    }
+
+    #[test]
+    fn records_content_degradation_for_images_tools_and_reasoning() {
+        let input = ProjectionInput {
+            session_id: "sess_degrade".to_string(),
+            model_id: "text-only".to_string(),
+            snapshot: SessionSnapshotState {
+                config: MessageField::some(SessionConfig {
+                    system_prompt: Some("You are helpful".to_string()),
+                    ..SessionConfig::default()
+                }),
+                conversation: vec![CanonicalMessage {
+                    message_id: "msg_mixed".to_string(),
+                    role: "user".to_string(),
+                    content: vec![
+                        text_block("look at this"),
+                        image_block(),
+                        tool_use_block(),
+                        thinking_block(),
+                    ],
+                    ..CanonicalMessage::default()
+                }],
+                ..SessionSnapshotState::default()
+            },
+            context_twin: ContextTwin {
+                schema_version: SCHEMA_VERSION_V1,
+                session_id: "sess_degrade".to_string(),
+                current_objective: "mixed content".to_string(),
+                ..ContextTwin::default()
+            },
+            // Target lacks tools and images -> textualize tools, use artifact refs.
+            adaptation_plan: Some(SwitchAdaptationPlan {
+                plan_id: "adapt_degrade".to_string(),
+                from_model: "anthropic/claude-sonnet".to_string(),
+                to_model: "text-only".to_string(),
+                adaptations: vec![
+                    SwitchAdaptation {
+                        capability: "tool_use".to_string(),
+                        action: EnumValue::Known(CapabilityAdaptationAction::Textualize),
+                        ..SwitchAdaptation::default()
+                    },
+                    SwitchAdaptation {
+                        capability: "image_input".to_string(),
+                        action: EnumValue::Known(CapabilityAdaptationAction::UseArtifactRefs),
+                        ..SwitchAdaptation::default()
+                    },
+                ],
+                ..SwitchAdaptationPlan::default()
+            }),
+            capabilities: capabilities(200_000),
+            token_budget: 200_000,
+            current_request: None,
+            continuity_warnings: Vec::new(),
+            config: crate::config::ProjectionConfig {
+                output_reserve_tokens: 0,
+                ..crate::config::ProjectionConfig::default()
+            },
+            created_at: Some(fixed_timestamp()),
+            projection_id: Some("proj_degrade".to_string()),
+        };
+
+        let projection = DefaultPromptCompiler.compile(input).unwrap();
+        let emitted = |kind: DegradationKind| {
+            projection
+                .degradation_metadata
+                .iter()
+                .any(|entry| entry.kind == EnumValue::Known(kind))
+        };
+        assert!(emitted(DegradationKind::ImagesOmitted), "images_omitted must be recorded");
+        assert!(
+            emitted(DegradationKind::ToolCallsTextualized),
+            "tool_calls_textualized must be recorded"
+        );
+        assert!(
+            emitted(DegradationKind::ReasoningNotPortable),
+            "reasoning_not_portable must be recorded"
+        );
     }
 
     #[test]
