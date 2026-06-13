@@ -4,8 +4,9 @@ use trogonai_session_contracts::{EventId, SessionId, ToolExecutionId};
 use trogonai_session_kernel::SessionKernelConfig;
 
 use trogonai_artifacts::{
-    ArtifactStorageMode, ArtifactStore, ArtifactStoreConfig, ArtifactStoreError, StoreArtifactRequest,
-    artifact_object_key, artifact_storage_ref, sha256_hex,
+    ArtifactAvailability, ArtifactStorageMode, ArtifactStore, ArtifactStoreConfig,
+    ArtifactStoreError, ArtifactUnavailableReason, StoreArtifactRequest, artifact_object_key,
+    artifact_storage_ref, sha256_hex,
 };
 
 fn test_store() -> ArtifactStore<MockObjectStore> {
@@ -120,4 +121,76 @@ async fn checksum_verification_rejects_tampered_content() {
     tampered.sha256 = "0".repeat(64);
     let err = store.retrieve(&tampered).await.unwrap_err();
     assert!(matches!(err, ArtifactStoreError::ChecksumMismatch { .. }));
+}
+
+#[tokio::test]
+async fn missing_referenced_object_yields_artifact_unavailable() {
+    let store = test_store();
+    let inline_limit = store.config().inline_limit_bytes;
+    let session_id = SessionId::new("sess_unavailable").unwrap();
+    let event_id = EventId::new("evt_unavailable").unwrap();
+    let content = Bytes::from("z".repeat(inline_limit + 1));
+
+    let stored = store
+        .store(StoreArtifactRequest::new(
+            session_id,
+            event_id,
+            "text/plain",
+            content,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stored.storage_mode, ArtifactStorageMode::ClaimCheck);
+
+    // The store that persisted the object resolves it as available.
+    match store.retrieve_availability(&stored.metadata).await.unwrap() {
+        ArtifactAvailability::Available(retrieved) => {
+            assert_eq!(retrieved.metadata.artifact_id, stored.metadata.artifact_id);
+        }
+        other => panic!("expected available, got {other:?}"),
+    }
+
+    // A store that never persisted the object: the reference exists in the session
+    // but the bytes are gone -> explicit `artifact_unavailable`, not a hard error.
+    let empty = test_store();
+    match empty.retrieve_availability(&stored.metadata).await.unwrap() {
+        ArtifactAvailability::Unavailable(unavailable) => {
+            assert_eq!(
+                unavailable.reason,
+                ArtifactUnavailableReason::NotInObjectStore
+            );
+        }
+        other => panic!("expected unavailable, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn corrupted_referenced_object_yields_artifact_unavailable() {
+    let store = test_store();
+    let inline_limit = store.config().inline_limit_bytes;
+    let session_id = SessionId::new("sess_corrupt").unwrap();
+    let event_id = EventId::new("evt_corrupt").unwrap();
+    let content = Bytes::from("c".repeat(inline_limit + 1));
+
+    let stored = store
+        .store(StoreArtifactRequest::new(
+            session_id,
+            event_id,
+            "text/plain",
+            content,
+        ))
+        .await
+        .unwrap();
+
+    let mut tampered = stored.metadata.clone();
+    tampered.sha256 = "0".repeat(64);
+    match store.retrieve_availability(&tampered).await.unwrap() {
+        ArtifactAvailability::Unavailable(unavailable) => {
+            assert_eq!(
+                unavailable.reason,
+                ArtifactUnavailableReason::ChecksumMismatch
+            );
+        }
+        other => panic!("expected unavailable, got {other:?}"),
+    }
 }

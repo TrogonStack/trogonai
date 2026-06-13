@@ -115,6 +115,47 @@ pub struct RetrievedArtifact {
     pub content: Bytes,
 }
 
+/// Why a referenced artifact could not be produced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactUnavailableReason {
+    /// The artifact's `storage_ref` is absent or unparseable.
+    MissingStorageRef,
+    /// The object is not retrievable from the object store (GC'd, expired, or
+    /// never persisted).
+    NotInObjectStore,
+    /// The retrieved bytes failed checksum verification (corrupted).
+    ChecksumMismatch,
+}
+
+impl ArtifactUnavailableReason {
+    /// Stable, low-cardinality label for telemetry / UX.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingStorageRef => "missing_storage_ref",
+            Self::NotInObjectStore => "not_in_object_store",
+            Self::ChecksumMismatch => "checksum_mismatch",
+        }
+    }
+}
+
+/// A referenced artifact that exists in the canonical session but cannot be
+/// retrieved. Surfaced explicitly (Error UX Policy) instead of silently dropped.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactUnavailable {
+    pub artifact_id: ArtifactId,
+    pub reason: ArtifactUnavailableReason,
+}
+
+/// Outcome of retrieving a referenced artifact: either the verified bytes or an
+/// explicit `artifact_unavailable` state (`cambio-modelo.md`: a referenced
+/// artifact either exists or produces `artifact_unavailable`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArtifactAvailability {
+    /// Boxed to keep the enum small: `RetrievedArtifact` carries the full payload.
+    Available(Box<RetrievedArtifact>),
+    Unavailable(ArtifactUnavailable),
+}
+
 /// Claim-check artifact store backed by NATS Object Store.
 #[derive(Clone, Debug)]
 pub struct ArtifactStore<S> {
@@ -296,6 +337,40 @@ where
             metadata: metadata.clone(),
             content,
         })
+    }
+
+    /// Retrieve a referenced artifact, mapping "the bytes aren't there or can't be
+    /// trusted" to an explicit [`ArtifactAvailability::Unavailable`] state instead
+    /// of a hard error (Error UX Policy). Inline artifacts and transient read
+    /// errors stay `Err` (caller misuse / retryable), never silent unavailability.
+    pub async fn retrieve_availability(
+        &self,
+        metadata: &ArtifactMetadata,
+    ) -> Result<ArtifactAvailability, ArtifactStoreError> {
+        let unavailable = |artifact_id: ArtifactId, reason: ArtifactUnavailableReason| {
+            telemetry::metrics::record_artifact_unavailable(
+                metadata.session_id.as_str(),
+                metadata.artifact_id.as_str(),
+                reason.as_str(),
+            );
+            Ok(ArtifactAvailability::Unavailable(ArtifactUnavailable {
+                artifact_id,
+                reason,
+            }))
+        };
+        match self.retrieve(metadata).await {
+            Ok(retrieved) => Ok(ArtifactAvailability::Available(Box::new(retrieved))),
+            Err(ArtifactStoreError::MissingStorageRef { artifact_id }) => {
+                unavailable(artifact_id, ArtifactUnavailableReason::MissingStorageRef)
+            }
+            Err(ArtifactStoreError::ObjectStoreGet { artifact_id, .. }) => {
+                unavailable(artifact_id, ArtifactUnavailableReason::NotInObjectStore)
+            }
+            Err(ArtifactStoreError::ChecksumMismatch { artifact_id, .. }) => {
+                unavailable(artifact_id, ArtifactUnavailableReason::ChecksumMismatch)
+            }
+            Err(other) => Err(other),
+        }
     }
 
     pub async fn retrieve_by_ref(

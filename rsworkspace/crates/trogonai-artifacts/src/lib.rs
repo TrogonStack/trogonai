@@ -23,7 +23,8 @@ pub use preview::build_preview;
 pub use provision::provision_artifact_object_store;
 pub use redaction::{redact_secrets, RedactionOutcome};
 pub use store::{
-    ArtifactStorageMode, ArtifactStore, RetrievedArtifact, StoreArtifactRequest, StoredArtifact,
+    ArtifactAvailability, ArtifactStorageMode, ArtifactStore, ArtifactUnavailable,
+    ArtifactUnavailableReason, RetrievedArtifact, StoreArtifactRequest, StoredArtifact,
 };
 
 pub use checksum::sha256_hex;
