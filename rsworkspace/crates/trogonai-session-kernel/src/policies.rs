@@ -56,6 +56,10 @@ pub struct ContinuitySloPolicy {
 
     #[config(env = "TROGON_SLO_ARTIFACT_MISSING_RATE", default = 0.0)]
     pub artifact_missing_rate: f64,
+
+    /// Retries must never duplicate external side effects (doc target = 0).
+    #[config(env = "TROGON_SLO_EVENT_DUPLICATE_SIDE_EFFECT_RATE", default = 0.0)]
+    pub event_duplicate_side_effect_rate: f64,
 }
 
 /// Product-level operational policies for cancellation, fork/branch, and error UX.
@@ -143,6 +147,53 @@ impl SessionErrorUxState {
             Self::RequiresReconciliation => "Inspect pending tool state and confirm how to proceed.",
         }
     }
+
+    /// The real impact on the user's work (Error UX Policy attribute).
+    pub fn real_impact(self) -> &'static str {
+        match self {
+            Self::SessionBusy => "The switch cannot start until the current operation finishes.",
+            Self::SwitchBlocked => "The switch will not proceed and the session stays on the current model.",
+            Self::ConfirmationRequired => "Some context or capability will be degraded after the switch.",
+            Self::CapabilityMissing => "That capability will be unavailable or degraded on the target model.",
+            Self::CheckpointFailed => "The target model may act without fully understanding the session.",
+            Self::ArtifactUnavailable => "That content is not available in the projection right now.",
+            Self::RunnerFailed => "The switch did not complete; the canonical session is preserved.",
+            Self::SnapshotStale => "A view may be briefly out of date while the snapshot rebuilds.",
+            Self::RequiresReconciliation => "A non-idempotent operation may have partially applied.",
+        }
+    }
+
+    /// The options available to the user (Error UX Policy attribute).
+    pub fn available_options(self) -> &'static [&'static str] {
+        match self {
+            Self::SessionBusy => &["wait", "cancel", "retry_when_idle"],
+            Self::SwitchBlocked => &["wait", "cancel", "persist_pending"],
+            Self::ConfirmationRequired => &["confirm", "choose_other_model", "cancel"],
+            Self::CapabilityMissing => &["confirm_with_degradation", "choose_other_model", "cancel"],
+            Self::CheckpointFailed => &["retry_with_more_context", "keep_current_model", "cancel"],
+            Self::ArtifactUnavailable => &["continue_without", "regenerate"],
+            Self::RunnerFailed => &["retry", "keep_current_model"],
+            Self::SnapshotStale => &["wait", "retry"],
+            Self::RequiresReconciliation => &["inspect", "confirm_continue", "cancel"],
+        }
+    }
+
+    /// Whether it is safe to keep working in this state (Error UX Policy attribute).
+    pub fn safe_to_continue(self) -> bool {
+        match self {
+            // Blocked / busy / unsafe states require resolution first.
+            Self::SessionBusy
+            | Self::SwitchBlocked
+            | Self::CheckpointFailed
+            | Self::RequiresReconciliation => false,
+            // Degradations and recoverable states: safe to continue, with awareness.
+            Self::ConfirmationRequired
+            | Self::CapabilityMissing
+            | Self::ArtifactUnavailable
+            | Self::RunnerFailed
+            | Self::SnapshotStale => true,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +205,9 @@ mod tests {
         let policy = SessionKernelOperationalPolicy::default();
         assert_eq!(policy.nats.event_stream_replicas, 1);
         assert!(policy.continuity_slos.switch_success_rate > 0.98);
+        // Retries must never duplicate external side effects (doc target = 0).
+        assert_eq!(policy.continuity_slos.event_duplicate_side_effect_rate, 0.0);
+        assert_eq!(policy.continuity_slos.artifact_missing_rate, 0.0);
         assert!(policy.product.export_sanitized_by_default);
     }
 
@@ -162,5 +216,34 @@ mod tests {
         assert!(SessionErrorUxState::SwitchBlocked
             .recommended_action()
             .contains("pending"));
+    }
+
+    #[test]
+    fn every_error_ux_state_has_all_five_attributes() {
+        // Error UX Policy: every state must include a short explanation, the real
+        // impact, a recommended action, available options, and whether it is safe
+        // to continue.
+        let states = [
+            SessionErrorUxState::SessionBusy,
+            SessionErrorUxState::SwitchBlocked,
+            SessionErrorUxState::ConfirmationRequired,
+            SessionErrorUxState::CapabilityMissing,
+            SessionErrorUxState::CheckpointFailed,
+            SessionErrorUxState::ArtifactUnavailable,
+            SessionErrorUxState::RunnerFailed,
+            SessionErrorUxState::SnapshotStale,
+            SessionErrorUxState::RequiresReconciliation,
+        ];
+        for state in states {
+            assert!(!state.short_explanation().is_empty());
+            assert!(!state.real_impact().is_empty());
+            assert!(!state.recommended_action().is_empty());
+            assert!(!state.available_options().is_empty());
+            // safe_to_continue is a bool; just exercise it.
+            let _ = state.safe_to_continue();
+        }
+        // Blocked/unsafe states are not safe to continue; degradations are.
+        assert!(!SessionErrorUxState::SwitchBlocked.safe_to_continue());
+        assert!(SessionErrorUxState::ConfirmationRequired.safe_to_continue());
     }
 }
