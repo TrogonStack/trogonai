@@ -322,6 +322,8 @@ mod tests {
 
     fn ctx(dir: &TempDir) -> ToolContext {
         ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
@@ -505,6 +507,8 @@ mod tests {
         let inner = dir.path().join("empty");
         tokio::fs::create_dir(&inner).await.unwrap();
         let inner_ctx = ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: String::new(),
             cwd: inner.to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
