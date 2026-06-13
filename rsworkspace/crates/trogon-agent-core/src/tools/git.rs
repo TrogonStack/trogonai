@@ -58,6 +58,8 @@ mod tests {
 
     fn ctx() -> ToolContext {
         ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: String::new(),
             cwd: std::env::current_dir()
                 .unwrap()
@@ -125,6 +127,8 @@ mod tests {
             .unwrap();
 
         let large_ctx = ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
@@ -138,6 +142,8 @@ mod tests {
         use tempfile::TempDir;
         let dir = TempDir::new().unwrap();
         let non_git_ctx = ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),

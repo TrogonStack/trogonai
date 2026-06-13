@@ -152,6 +152,8 @@ async fn agent_loop_run_chat_streaming_through_proxy_emits_text_delta() {
         max_iterations: 1,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             cwd: String::new(),
             http_client: reqwest::Client::new(),

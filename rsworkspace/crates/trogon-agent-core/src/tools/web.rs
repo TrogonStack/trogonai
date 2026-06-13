@@ -77,6 +77,8 @@ mod tests {
 
     fn ctx() -> ToolContext {
         ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: String::new(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),

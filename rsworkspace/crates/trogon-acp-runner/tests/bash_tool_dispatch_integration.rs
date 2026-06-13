@@ -66,6 +66,8 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
@@ -508,6 +510,8 @@ async fn bash_sandbox_dir_passed_as_cwd_in_create_terminal_request() {
         max_iterations: 5,
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
