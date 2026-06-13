@@ -8,6 +8,7 @@ pub mod freshness;
 pub mod probe;
 pub mod registry;
 pub mod resolve;
+pub mod seed;
 pub mod telemetry;
 
 pub use adaptation::{
@@ -23,3 +24,4 @@ pub use freshness::{FreshnessStatus, apply_freshness_policy};
 pub use probe::{CapabilityProbe, ProbeKind, ProbeResult, StaticProbe, run_probe_battery};
 pub use registry::{CapabilityRegistry, METADATA_CAPABILITY_SCHEMAS};
 pub use resolve::{ResolvedCapabilities, resolve_model_capabilities};
+pub use seed::known_model_schema;

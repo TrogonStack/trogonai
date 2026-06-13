@@ -85,4 +85,119 @@ impl ProviderCertificationMatrix {
         self.entries.push(entry);
         Ok(())
     }
+
+    /// Kernel-owned initial certification matrix (cambio-modelo.md "Open
+    /// Implementation Decisions": *"Matriz inicial con dos proveedores/runners y
+    /// capabilities esperadas"*).
+    ///
+    /// The recorded set is the first-party Claude (`trogon-acp-runner`, runner
+    /// `claude`) and Grok (`trogon-xai-runner`, runner `xai`) model families, with
+    /// their **expected** capabilities and the intended switch pairs (full mesh).
+    ///
+    /// Crucially, every entry is `CertificationLevel::Basic` with
+    /// `last_verified_at: None`: the design rule *"no asumir soporte si no esta
+    /// verificado"* (Capability Registry Freshness) forbids treating un-probed
+    /// capabilities as switch-safe. `Basic` is **not** `allows_switch_without_warning`,
+    /// so the Switch Safety Gate still asks for confirmation. Promotion to
+    /// `SwitchSafe`/`Production` must come from the runner health-checks/probes and
+    /// contract tests (still to be implemented), not from this static baseline.
+    /// Models/runners outside this set resolve to `Experimental`.
+    pub fn baseline() -> Self {
+        // (runner, model). Runner ids match the runners' default `AGENT_TYPE`; model
+        // ids match their advertised model lists. Capabilities are *expected*, not
+        // verified, so the level stays conservative until a probe confirms them.
+        let recorded: &[(&str, &str)] = &[
+            ("claude", "claude-opus-4-6"),
+            ("claude", "claude-sonnet-4-6"),
+            ("claude", "claude-haiku-4-5-20251001"),
+            ("xai", "grok-4"),
+            ("xai", "grok-3"),
+            ("xai", "grok-3-mini"),
+            ("xai", "grok-code-fast"),
+        ];
+        let all_models: Vec<&str> = recorded.iter().map(|(_, model)| *model).collect();
+
+        let mut matrix = Self::default();
+        for (runner, model) in recorded {
+            // Full mesh: the intended switch pairs (effective once verified).
+            let others: Vec<String> = all_models
+                .iter()
+                .filter(|candidate| **candidate != *model)
+                .map(|candidate| candidate.to_string())
+                .collect();
+            matrix.entries.push(ProviderCertificationEntry {
+                model: model.to_string(),
+                runner: runner.to_string(),
+                text: true,
+                tool_use: true,
+                parallel_tools: true,
+                // Grok lacks image input; Claude supports it.
+                image_input: *runner == "claude",
+                json_schema: true,
+                long_context: true,
+                streaming: true,
+                artifact_refs: true,
+                mcp_tools: true,
+                switch_from: others.clone(),
+                switch_to: others,
+                // Expected-but-unverified -> Basic (gate still asks confirmation).
+                certified_level: CertificationLevel::Basic,
+                last_verified_at: None,
+            });
+        }
+        matrix
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn baseline_records_expected_pairs_as_unverified_basic() {
+        let matrix = ProviderCertificationMatrix::baseline();
+
+        // Expected-but-unverified: Basic, and NOT switch-safe-without-warning, so
+        // the gate still asks confirmation ("no asumir soporte si no esta verificado").
+        assert_eq!(
+            matrix.certification_level("claude-sonnet-4-6", "claude"),
+            CertificationLevel::Basic
+        );
+        assert_eq!(
+            matrix.certification_level("grok-code-fast", "xai"),
+            CertificationLevel::Basic
+        );
+        assert!(!CertificationLevel::Basic.allows_switch_without_warning());
+
+        // Entries are unverified until a probe/contract-test confirms them.
+        assert!(
+            matrix
+                .get("claude-sonnet-4-6", "claude")
+                .unwrap()
+                .last_verified_at
+                .is_none()
+        );
+
+        // The intended switch pairs are recorded in both directions (full mesh),
+        // so once verified they become switch-safe without a matrix gap.
+        assert!(matrix.is_switch_allowed("claude-sonnet-4-6", "claude", "grok-code-fast", "xai"));
+        assert!(matrix.is_switch_allowed("grok-code-fast", "xai", "claude-sonnet-4-6", "claude"));
+    }
+
+    #[test]
+    fn baseline_treats_unknown_models_as_experimental() {
+        let matrix = ProviderCertificationMatrix::baseline();
+        assert_eq!(
+            matrix.certification_level("mystery/model-x", "unknown"),
+            CertificationLevel::Experimental
+        );
+        assert!(!matrix.is_switch_allowed("mystery/model-x", "unknown", "grok-4", "xai"));
+    }
+
+    #[test]
+    fn baseline_grok_lacks_image_input() {
+        let matrix = ProviderCertificationMatrix::baseline();
+        assert!(!matrix.get("grok-4", "xai").unwrap().image_input);
+        assert!(matrix.get("claude-opus-4-6", "claude").unwrap().image_input);
+    }
 }

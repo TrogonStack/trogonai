@@ -84,7 +84,10 @@ impl SessionKernelStack {
             switching_config,
             projection_config,
             capability_config: CapabilityConfig::default(),
-            certification: ProviderCertificationMatrix::default(),
+            // Initial certification matrix (cambio-modelo.md): the Switch Safety
+            // Gate uses it to allow/warn cross-provider switches. An empty matrix
+            // would treat every model as Experimental.
+            certification: ProviderCertificationMatrix::baseline(),
         })
     }
 }

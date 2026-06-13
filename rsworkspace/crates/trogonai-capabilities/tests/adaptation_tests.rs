@@ -9,9 +9,10 @@ use trogonai_session_contracts::{
 };
 
 use trogonai_capabilities::{
-    CapabilityConfig, CapabilityRegistry, CertificationLevel, ProviderCertificationEntry,
-    ProviderCertificationMatrix, ResolvedCapabilities, StaticProbe, build_adaptation_plan,
-    create_switch_adaptation_plan, detect_session_capability_usage, run_probe_battery,
+    CapabilityConfig, CapabilityError, CapabilityRegistry, CertificationLevel,
+    ProviderCertificationEntry, ProviderCertificationMatrix, ResolvedCapabilities, StaticProbe,
+    build_adaptation_plan, create_switch_adaptation_plan, detect_session_capability_usage,
+    resolve_model_capabilities, run_probe_battery,
 };
 
 fn timestamp(seconds: i64) -> Timestamp {
@@ -275,6 +276,46 @@ async fn create_switch_adaptation_plan_resolves_registry_capabilities() {
         .adaptations
         .iter()
         .any(|item| item.capability == "image_input"));
+}
+
+#[tokio::test]
+async fn resolve_falls_back_to_kernel_baseline_when_registry_empty() {
+    // Certified provider, but nobody registered a schema in AGENT_REGISTRY.
+    let registry = Registry::new(MockRegistryStore::new());
+    let now = OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap();
+
+    let resolved = resolve_model_capabilities(
+        &registry,
+        "anthropic/claude-sonnet-4-5",
+        now,
+        &CapabilityConfig::default(),
+    )
+    .await
+    .expect("certified model must resolve from the kernel-owned baseline");
+
+    assert_eq!(resolved.runner_id, "claude");
+    assert!(resolved.schema.tool_use);
+    assert!(resolved.schema.image_input);
+    assert!(resolved.schema.reasoning);
+    assert!(!resolved.degraded);
+}
+
+#[tokio::test]
+async fn resolve_errors_for_uncertified_model_when_registry_empty() {
+    // Unknown model + empty registry: refuse rather than guess capabilities.
+    let registry = Registry::new(MockRegistryStore::new());
+    let now = OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap();
+
+    let err = resolve_model_capabilities(
+        &registry,
+        "mystery/model-x",
+        now,
+        &CapabilityConfig::default(),
+    )
+    .await
+    .expect_err("uncharacterized model must not resolve");
+
+    assert!(matches!(err, CapabilityError::ModelNotFound { .. }));
 }
 
 #[test]
