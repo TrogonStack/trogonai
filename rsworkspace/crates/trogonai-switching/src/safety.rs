@@ -48,6 +48,7 @@ pub fn evaluate_switch_safety(input: &SwitchSafetyInput<'_>) -> SwitchSafetyDeci
     evaluate_indispensable_capabilities(input, &mut reasons, &mut blocked, &mut needs_confirmation);
     evaluate_previous_checkpoint(input.session, &mut reasons, &mut needs_confirmation);
     evaluate_certification(input, &mut reasons, &mut needs_confirmation);
+    evaluate_compactor_degradation(input, &mut reasons, &mut needs_confirmation);
 
     if input.force {
         if blocked && has_unreconciled_destructive_state(input.session) {
@@ -354,6 +355,40 @@ fn evaluate_certification(
     }
 }
 
+/// Token Budget Policy: `compactor_model` is an explicit user preference. If the
+/// switch would degrade it (the target cannot serve compaction, so it falls back to
+/// the session model), the Switch Safety Gate must warn / ask for confirmation so
+/// the change to the user's explicit choice is never silent (cambio-modelo.md,
+/// "Token Budget, Compaction and Prompt Projection Policy").
+fn evaluate_compactor_degradation(
+    input: &SwitchSafetyInput<'_>,
+    reasons: &mut Vec<SwitchSafetyReason>,
+    needs_confirmation: &mut bool,
+) {
+    let Some(compactor_model) = input
+        .session
+        .config
+        .as_option()
+        .and_then(|config| config.compactor_model.clone())
+    else {
+        // No explicit compactor preference -> the default tracks the session model,
+        // nothing to degrade.
+        return;
+    };
+
+    if !input.target_capabilities.schema.compaction_supported {
+        *needs_confirmation = true;
+        reasons.push(reason(
+            "compactor_model_degraded",
+            format!(
+                "explicit compactor_model {compactor_model} is unavailable on \
+                 {}/{}; compaction will fall back to the session model",
+                input.target_runner, input.target_model
+            ),
+        ));
+    }
+}
+
 fn has_unreconciled_destructive_state(session: &SessionSnapshotState) -> bool {
     session.tool_calls.iter().any(|tool| {
         tool.status.as_known() == Some(ToolCallStatus::RequiresReconciliation)
@@ -584,6 +619,61 @@ mod tests {
         assert_eq!(
             decision.status.as_known(),
             Some(SwitchSafetyStatus::BlockedUntilSafe)
+        );
+    }
+
+    #[test]
+    fn requires_confirmation_when_explicit_compactor_model_degrades() {
+        // User explicitly chose a compactor model; the target cannot serve
+        // compaction (compaction_supported defaults to false) -> the gate must warn.
+        let mut session = base_session();
+        if let Some(config) = session.config.as_option_mut() {
+            config.compactor_model = Some("anthropic/claude-haiku".to_string());
+        }
+        let caps = target_capabilities(true); // tool_use ok, compaction_supported = false
+        let config = SwitchingConfig::default();
+        let certification = ProviderCertificationMatrix::default();
+        let decision = evaluate_switch_safety(&safety_input(
+            &session,
+            &caps,
+            None,
+            &config,
+            &certification,
+        ));
+        assert!(
+            decision
+                .reasons
+                .iter()
+                .any(|reason| reason.kind == "compactor_model_degraded"),
+            "explicit compactor_model degradation must be recorded as a gate reason"
+        );
+        assert_eq!(
+            decision.status.as_known(),
+            Some(SwitchSafetyStatus::RequiresUserConfirmation)
+        );
+    }
+
+    #[test]
+    fn no_compactor_reason_when_no_explicit_preference() {
+        // No explicit compactor_model -> the default tracks the session model, so
+        // there is nothing to degrade and the gate adds no compactor reason.
+        let session = base_session();
+        let caps = target_capabilities(true);
+        let config = SwitchingConfig::default();
+        let certification = ProviderCertificationMatrix::default();
+        let decision = evaluate_switch_safety(&safety_input(
+            &session,
+            &caps,
+            None,
+            &config,
+            &certification,
+        ));
+        assert!(
+            !decision
+                .reasons
+                .iter()
+                .any(|reason| reason.kind == "compactor_model_degraded"),
+            "no compactor reason without an explicit preference"
         );
     }
 }
