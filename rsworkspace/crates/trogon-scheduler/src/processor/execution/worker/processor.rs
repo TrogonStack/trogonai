@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_nats::HeaderMap;
 use chrono::{DateTime, Utc};
 use tracing::Instrument;
 use trogon_decider_runtime::StreamEvent;
@@ -37,7 +38,7 @@ pub enum ProcessedOutcome {
     Purged,
     /// A paused create stored checkpoint without publishing.
     StoredPaused,
-    /// An enabled RRULE was recorded as unsupported by this processor version.
+    /// A schedule kind was recorded as unsupported by this processor version.
     Unsupported,
     /// A past-due one-shot `At` reconciled to a terminal expired outcome.
     Expired,
@@ -409,22 +410,9 @@ where
             return Ok(self.ack(ProcessedOutcome::DuplicateStale));
         }
 
-        match &reconciliation.action {
-            ReconcileAction::Publish(request) => {
-                let trace_headers = execution_trace_headers(&stream_event.event.headers);
-                self.execution_schedules
-                    .upsert(request, event_id, &trace_headers)
-                    .await
-                    .map_err(|source| RetrySignal::ExecutionSchedule { source })?;
-            }
-            ReconcileAction::Purge(subject) => {
-                self.execution_schedules
-                    .purge(subject)
-                    .await
-                    .map_err(|source| RetrySignal::ExecutionSchedule { source })?;
-            }
-            ReconcileAction::CheckpointOnly => {}
-        }
+        let trace_headers = execution_trace_headers(&stream_event.event.headers);
+        self.apply_action(&reconciliation.action, event_id, &trace_headers)
+            .await?;
 
         // The save error is not `Send`, so it is converted into a `Send` step
         // before any await (see the `process_inner` phase note).
@@ -447,10 +435,77 @@ where
         match &reconciliation.action {
             ReconcileAction::Publish(_) => self.metrics.record_publish(),
             ReconcileAction::Purge(_) => self.metrics.record_purge(),
+            ReconcileAction::Dispatch(_) => {}
+            ReconcileAction::Multiple(actions) => {
+                for action in actions {
+                    self.record_action_metric(action);
+                }
+            }
             ReconcileAction::CheckpointOnly => {}
         }
 
         Ok(self.ack(outcome_from(reconciliation.next_checkpoint.last_outcome)))
+    }
+
+    async fn apply_action(
+        &self,
+        action: &ReconcileAction,
+        event_id: &str,
+        trace_headers: &HeaderMap,
+    ) -> Result<(), RetrySignal> {
+        match action {
+            ReconcileAction::Multiple(actions) => {
+                for action in actions {
+                    self.apply_single_action(action, event_id, trace_headers, true).await?;
+                }
+                Ok(())
+            }
+            action => self.apply_single_action(action, event_id, trace_headers, false).await,
+        }
+    }
+
+    async fn apply_single_action(
+        &self,
+        action: &ReconcileAction,
+        event_id: &str,
+        trace_headers: &HeaderMap,
+        disambiguate_msg_id: bool,
+    ) -> Result<(), RetrySignal> {
+        match action {
+            ReconcileAction::Publish(request) => {
+                let msg_id = action_msg_id(event_id, "schedule", disambiguate_msg_id);
+                self.execution_schedules
+                    .upsert(request, &msg_id, trace_headers)
+                    .await
+                    .map_err(|source| RetrySignal::ExecutionSchedule { source })
+            }
+            ReconcileAction::Dispatch(request) => {
+                let msg_id = action_msg_id(event_id, "dispatch", disambiguate_msg_id);
+                self.execution_schedules
+                    .dispatch(request, &msg_id, trace_headers)
+                    .await
+                    .map_err(|source| RetrySignal::ExecutionSchedule { source })
+            }
+            ReconcileAction::Purge(subject) => self
+                .execution_schedules
+                .purge(subject)
+                .await
+                .map_err(|source| RetrySignal::ExecutionSchedule { source }),
+            ReconcileAction::Multiple(_) | ReconcileAction::CheckpointOnly => Ok(()),
+        }
+    }
+
+    fn record_action_metric(&self, action: &ReconcileAction) {
+        match action {
+            ReconcileAction::Publish(_) => self.metrics.record_publish(),
+            ReconcileAction::Purge(_) => self.metrics.record_purge(),
+            ReconcileAction::Dispatch(_) | ReconcileAction::CheckpointOnly => {}
+            ReconcileAction::Multiple(actions) => {
+                for action in actions {
+                    self.record_action_metric(action);
+                }
+            }
+        }
     }
 
     /// Another writer saved this schedule's checkpoint after our load. The
@@ -541,7 +596,7 @@ fn recover_corrupt_checkpoint(
         ScheduleChange::Created { .. } => return reconcile(None, change, stream_position, event_id, now).map(Some),
         ScheduleChange::Paused { schedule_id } => (schedule_id, ScheduleStatus::Paused),
         ScheduleChange::Removed { schedule_id } => (schedule_id, ScheduleStatus::Removed),
-        ScheduleChange::Resumed { .. } => return Ok(None),
+        ScheduleChange::Resumed { .. } | ScheduleChange::OccurrenceFired { .. } => return Ok(None),
     };
 
     let key = ScheduleKey::derive(schedule_id);
@@ -563,6 +618,14 @@ fn recover_corrupt_checkpoint(
             last_outcome: ReconcileOutcome::Purged,
         },
     }))
+}
+
+fn action_msg_id(event_id: &str, suffix: &str, disambiguate: bool) -> String {
+    if disambiguate {
+        format!("{event_id}:{suffix}")
+    } else {
+        event_id.to_string()
+    }
 }
 
 fn outcome_from(outcome: ReconcileOutcome) -> ProcessedOutcome {
@@ -717,12 +780,45 @@ mod tests {
         }
     }
 
+    fn occurrence_fired(id: &str, occurrence_sequence: u64, occurrence_at: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceFired {
+                    schedule_id: id.to_string(),
+                    occurrence_sequence: Some(occurrence_sequence),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                        &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
+                    )),
+                }
+                .into(),
+            ),
+        }
+    }
+
     fn every() -> Schedule {
         Schedule::every(Duration::from_secs(30)).unwrap()
     }
 
+    fn checkpoint_record(id: &str, schedule: Schedule, delivery: Delivery) -> ScheduleCheckpointRecord {
+        ScheduleCheckpointRecord {
+            schedule_id: schedule_id(id),
+            status: ScheduleStatus::Scheduled,
+            schedule,
+            delivery,
+            message: message(),
+            last_applied_stream_position: StreamPosition::try_new(1).unwrap(),
+            last_applied_event_id: Some("event-1".to_string()),
+            last_outcome: ReconcileOutcome::Published,
+        }
+    }
+
     fn key_for_stream(id: &str) -> ScheduleKey {
         ScheduleKey::for_stream(&StreamRoutingId::from(id))
+    }
+
+    #[test]
+    fn unsupported_outcome_has_a_metric_label() {
+        assert_eq!(ProcessedOutcome::Unsupported.metric_label(), "unsupported");
     }
 
     #[tokio::test]
@@ -863,17 +959,163 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enabled_rrule_is_unsupported_without_publishing() {
+    async fn enabled_rrule_expands_to_the_next_one_shot_schedule() {
         let harness = Harness::new();
         let id = "recurring";
-        let rrule = Schedule::rrule("2026-01-01T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
+        let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
+        let wakeup = ScheduleSubject::rrule_wakeup(&key_for_stream(id));
 
         let processed = harness
             .process(&created(id, ScheduleEventStatus::Scheduled, rrule), id, 1)
             .await;
 
-        assert_eq!(processed.outcome, ProcessedOutcome::Unsupported);
+        assert_eq!(processed.outcome, ProcessedOutcome::Published);
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
+        let headers = harness.execution.headers_for(harness.subject(id).as_str()).unwrap();
+        assert_eq!(
+            headers.get("Nats-Schedule").unwrap().as_str(),
+            "@at 2026-06-04T00:00:00Z"
+        );
+        assert_eq!(headers.get("Nats-Schedule-Target").unwrap().as_str(), wakeup.as_str());
+        assert_eq!(
+            harness
+                .execution
+                .payload_for(harness.subject(id).as_str())
+                .unwrap()
+                .as_ref(),
+            br#"{"schedule_id":"recurring","occurrence_at":"2026-06-04T00:00:00Z"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn rrule_occurrence_event_dispatches_advances_and_expires_at_the_end() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap();
+
+        harness
+            .process(&created(id, ScheduleEventStatus::Scheduled, rrule), id, 1)
+            .await;
+
+        let continued = harness
+            .process(&occurrence_fired(id, 1, "2026-06-04T00:00:00Z"), id, 2)
+            .await;
+
+        assert_eq!(continued.outcome, ProcessedOutcome::Published);
+        assert_eq!(harness.execution.scheduled_count("agent.run"), 1);
+        assert_eq!(
+            harness.execution.payload_for("agent.run").unwrap().as_ref(),
+            br#"{"ok":true}"#
+        );
+        let dispatch_headers = harness.execution.headers_for("agent.run").unwrap();
+        assert_eq!(
+            dispatch_headers
+                .get("Trogon-Schedule-Occurrence-Sequence")
+                .unwrap()
+                .as_str(),
+            "1"
+        );
+        assert_eq!(
+            dispatch_headers.get("Trogon-Schedule-Occurrence-At").unwrap().as_str(),
+            "2026-06-04T00:00:00Z"
+        );
+        let headers = harness.execution.headers_for(harness.subject(id).as_str()).unwrap();
+        assert_eq!(
+            headers.get("Nats-Schedule").unwrap().as_str(),
+            "@at 2026-06-05T00:00:00Z"
+        );
+
+        let expired = harness
+            .process(&occurrence_fired(id, 2, "2026-06-05T00:00:00Z"), id, 3)
+            .await;
+
+        assert_eq!(expired.outcome, ProcessedOutcome::Expired);
         assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 0);
+        assert_eq!(harness.execution.scheduled_count("agent.run"), 2);
+        let checkpoint = ScheduleCheckpointStore::new(harness.kv.clone())
+            .load(&key_for_stream(id))
+            .await
+            .unwrap()
+            .unwrap()
+            .record;
+        assert_eq!(checkpoint.status, ScheduleStatus::Expired);
+    }
+
+    #[tokio::test]
+    async fn direct_dispatch_action_uses_the_event_id_without_disambiguation() {
+        let harness = Harness::new();
+        let request = crate::processor::execution::reconciliation::DispatchRequest::build(
+            &schedule_id("recurring"),
+            &Delivery::nats_event("agent.run").unwrap(),
+            &message(),
+        )
+        .unwrap();
+        let trace_headers = HeaderMap::new();
+
+        harness
+            .processor
+            .apply_action(&ReconcileAction::Dispatch(request), "event-2", &trace_headers)
+            .await
+            .unwrap();
+
+        assert_eq!(harness.execution.scheduled_count("agent.run"), 1);
+        let headers = harness.execution.headers_for("agent.run").unwrap();
+        assert_eq!(headers.get("Nats-Msg-Id").unwrap().as_str(), "event-2");
+        assert_eq!(
+            harness.execution.payload_for("agent.run").unwrap().as_ref(),
+            br#"{"ok":true}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn rrule_occurrence_event_reports_missing_checkpoints() {
+        let harness = Harness::new();
+
+        let error = harness
+            .processor
+            .process(
+                &stream_event(&occurrence_fired("missing", 1, "2026-06-04T00:00:00Z"), "missing", 2),
+                now(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, RetrySignal::MissingCheckpoint { .. }));
+    }
+
+    #[tokio::test]
+    async fn rrule_occurrence_event_acks_non_rrule_checkpoints_as_duplicate_stale() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let record = checkpoint_record(id, every(), Delivery::nats_event("agent.run").unwrap());
+        ScheduleCheckpointStore::new(harness.kv.clone())
+            .save(&record, None)
+            .await
+            .unwrap();
+
+        let processed = harness
+            .process(&occurrence_fired(id, 1, "2026-06-04T00:00:00Z"), id, 2)
+            .await;
+
+        assert_eq!(processed.outcome, ProcessedOutcome::DuplicateStale);
+    }
+
+    #[tokio::test]
+    async fn rrule_occurrence_event_rejects_scheduler_internal_targets() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
+        let record = checkpoint_record(id, rrule, Delivery::nats_event(harness.subject(id).as_str()).unwrap());
+        ScheduleCheckpointStore::new(harness.kv.clone())
+            .save(&record, None)
+            .await
+            .unwrap();
+
+        let processed = harness
+            .process(&occurrence_fired(id, 1, "2026-06-03T00:00:00Z"), id, 2)
+            .await;
+
+        assert_eq!(processed.outcome, ProcessedOutcome::DurableFailure);
     }
 
     #[tokio::test]
@@ -1380,6 +1622,14 @@ mod tests {
     fn outcome_from_maps_duplicate_stale() {
         assert_eq!(
             outcome_from(ReconcileOutcome::DuplicateStale),
+            ProcessedOutcome::DuplicateStale
+        );
+        assert_eq!(
+            outcome_from(ReconcileOutcome::Unsupported),
+            ProcessedOutcome::Unsupported
+        );
+        assert_eq!(
+            outcome_from(ReconcileOutcome::Unknown),
             ProcessedOutcome::DuplicateStale
         );
     }
