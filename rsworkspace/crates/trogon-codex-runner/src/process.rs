@@ -357,23 +357,8 @@ impl CodexProcess {
             } else if let Some(method) = &msg.method {
                 // It's a server notification — route to the right thread's channel.
                 if let Some((thread_id, event)) = Self::parse_event(method, msg.params.as_ref()) {
-                    let is_terminal =
-                        matches!(event, CodexEvent::TurnCompleted | CodexEvent::Error { .. });
                     let mut senders = turn_senders.lock().await;
-                    if thread_id.is_empty() {
-                        // No thread_id in params — broadcast to all active turns.
-                        for tx in senders.values() {
-                            let _ = tx.send(event.clone());
-                        }
-                        if is_terminal {
-                            senders.clear();
-                        }
-                    } else if let Some(tx) = senders.get(&thread_id) {
-                        let _ = tx.send(event);
-                        if is_terminal {
-                            senders.remove(&thread_id);
-                        }
-                    }
+                    Self::route_notification(&mut senders, method, &thread_id, event);
                 }
             }
         }
@@ -393,6 +378,38 @@ impl CodexProcess {
             });
         }
         senders.clear();
+    }
+
+    /// Route a parsed server notification to the appropriate turn channel(s).
+    fn route_notification(
+        senders: &mut HashMap<String, broadcast::Sender<CodexEvent>>,
+        method: &str,
+        thread_id: &str,
+        event: CodexEvent,
+    ) {
+        let is_terminal =
+            matches!(event, CodexEvent::TurnCompleted | CodexEvent::Error { .. });
+        if thread_id.is_empty() {
+            // Terminal events without threadId must not broadcast-and-clear:
+            // unrelated keyed turns would be ended together. The runner is
+            // observational/single-session today, but turn_senders is keyed
+            // to support concurrent multi-thread turns on one subprocess.
+            if is_terminal {
+                warn!(
+                    method = %method,
+                    "codex: ignoring terminal notification without threadId"
+                );
+            } else {
+                for tx in senders.values() {
+                    let _ = tx.send(event.clone());
+                }
+            }
+        } else if let Some(tx) = senders.get(thread_id) {
+            let _ = tx.send(event);
+            if is_terminal {
+                senders.remove(thread_id);
+            }
+        }
     }
 
     fn parse_event(method: &str, params: Option<&Value>) -> Option<(String, CodexEvent)> {
@@ -963,6 +980,33 @@ mod tests {
             Err(broadcast::error::RecvError::Closed) => {} // expected
             other => panic!("expected Closed, got {:?}", other),
         }
+    }
+
+    // ── threadId-less terminal notifications ─────────────────────────────────
+
+    /// Terminal notifications without `threadId` must not broadcast-and-clear all
+    /// active turn channels — unrelated keyed turns would be ended together.
+    #[tokio::test]
+    async fn threadless_terminal_event_does_not_clear_other_turns() {
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+
+        let mut senders: HashMap<String, broadcast::Sender<CodexEvent>> = HashMap::new();
+        let (tx1, mut rx1) = broadcast::channel(8);
+        let (tx2, mut rx2) = broadcast::channel(8);
+        senders.insert("t1".to_string(), tx1);
+        senders.insert("t2".to_string(), tx2);
+
+        CodexProcess::route_notification(
+            &mut senders,
+            "turn/completed",
+            "",
+            CodexEvent::TurnCompleted,
+        );
+
+        assert_eq!(senders.len(), 2);
+        assert!(rx1.try_recv().is_err());
+        assert!(rx2.try_recv().is_err());
     }
 
     #[test]
