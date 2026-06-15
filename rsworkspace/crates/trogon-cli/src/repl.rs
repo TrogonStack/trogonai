@@ -1309,7 +1309,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             // the model addresses it on its next step. Other runners
                                             // don't subscribe yet, so fall back to front-of-queue so
                                             // the side question is never lost.
-                                            if crate::app::display::runner_label(&prefix) == "claude" {
+                                            if crate::app::runner_label(&prefix) == "claude" {
                                                 eprintln!("\x1b[2m↪ steering: {q}\x1b[0m");
                                                 session.steer(q).await;
                                             } else {
@@ -2140,6 +2140,31 @@ fn bug_report_text() -> String {
     )
 }
 
+const BUNDLED_CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+
+/// Most recent version block from the bundled changelog (whole file when small).
+fn bundled_changelog_section() -> &'static str {
+    const MAX_WHOLE_FILE: usize = 800;
+    let trimmed = BUNDLED_CHANGELOG.trim();
+    if trimmed.len() <= MAX_WHOLE_FILE {
+        return trimmed;
+    }
+    let start = trimmed.find("\n## ").map(|i| i + 1).unwrap_or(0);
+    let section = trimmed[start..].trim_start();
+    match section.find("\n## ") {
+        Some(next) => section[..next].trim(),
+        None => section,
+    }
+}
+
+fn release_notes_text() -> String {
+    format!(
+        "trogon {}\n\n{}",
+        env!("CARGO_PKG_VERSION"),
+        bundled_changelog_section(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_slash_command<F: Fs>(
     cmd: &str,
@@ -2244,11 +2269,7 @@ Ctrl+D    quit");
 
         "/bug" => bug_report_text(),
 
-        "/release-notes" => format!(
-            "trogon {}\n\nNo release notes are bundled with this build — see your project's \
-             releases / CHANGELOG for version history.",
-            env!("CARGO_PKG_VERSION")
-        ),
+        "/release-notes" => release_notes_text(),
 
         "/login" | "/logout" => {
             "trogon has no interactive login. Authentication uses provider tokens from the \
@@ -3451,6 +3472,20 @@ mod tests {
         let out = bug_report_text();
         assert!(out.contains(env!("CARGO_PKG_VERSION")));
         assert!(out.contains(std::env::consts::OS));
+    }
+
+    #[test]
+    fn release_notes_bundles_changelog() {
+        let out = release_notes_text();
+        assert!(out.contains(env!("CARGO_PKG_VERSION")));
+        assert!(
+            !out.to_lowercase().contains("no release notes"),
+            "should bundle changelog, got: {out}"
+        );
+        assert!(
+            out.contains("Cross-runner model switching"),
+            "should include changelog bullet, got: {out}"
+        );
     }
 
     #[test]
