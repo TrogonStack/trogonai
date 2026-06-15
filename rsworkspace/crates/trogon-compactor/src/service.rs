@@ -198,11 +198,12 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
     let compactor = Compactor::with_provider(settings, provider);
 
     let tokens_before = estimate_total_tokens(&req.messages);
-    let (messages, kept_count) = compactor.compact_if_needed_counted(req.messages).await?;
+    let (messages, kept_count, compacted) =
+        compactor.compact_if_needed_counted(req.messages).await?;
     let tokens_after = estimate_total_tokens(&messages);
 
     Ok(CompactResponse {
-        compacted: tokens_after < tokens_before,
+        compacted,
         messages,
         tokens_before,
         tokens_after,

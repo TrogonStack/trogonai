@@ -108,25 +108,26 @@ impl<L: LlmProvider> Compactor<L> {
         Ok(self.compact_if_needed_counted(messages).await?.0)
     }
 
-    /// Like [`compact_if_needed`], but also returns `kept_count`: the number of
-    /// trailing messages preserved verbatim. When no compaction happens this is
-    /// `messages.len()`. When compaction happens it is the length of the kept
-    /// tail (NOT counting the prepended summary + ack). Used by stateless
-    /// runners (e.g. openrouter) to reuse their own original tail messages
-    /// instead of converting the compacted ones back.
+    /// Like [`compact_if_needed`], but also returns `kept_count` and whether
+    /// compaction actually ran. When no compaction happens, `kept_count` is
+    /// `messages.len()` and `compacted` is `false`. When compaction happens,
+    /// `kept_count` is the length of the kept tail (NOT counting the prepended
+    /// summary + ack) and `compacted` is `true`. Used by stateless runners
+    /// (e.g. openrouter) to reuse their own original tail messages instead of
+    /// converting the compacted ones back.
     pub async fn compact_if_needed_counted(
         &self,
         messages: Vec<Message>,
-    ) -> Result<(Vec<Message>, usize), CompactorError> {
+    ) -> Result<(Vec<Message>, usize, bool), CompactorError> {
         if !detector::should_compact(&messages, &self.settings) {
             let n = messages.len();
-            return Ok((messages, n));
+            return Ok((messages, n, false));
         }
 
         let Some(cut_point) = detector::find_cut_point(&messages, self.settings.keep_recent_tokens)
         else {
             let n = messages.len();
-            return Ok((messages, n));
+            return Ok((messages, n, false));
         };
 
         let (to_summarize, to_keep) = messages.split_at(cut_point);
@@ -157,7 +158,7 @@ impl<L: LlmProvider> Compactor<L> {
             .generate_summary(messages_for_summary, previous_summary)
             .await?;
 
-        Ok((build_compacted_history(summary, to_keep), kept_count))
+        Ok((build_compacted_history(summary, to_keep), kept_count, true))
     }
 }
 
@@ -347,11 +348,12 @@ mod tests {
             MockLlmProvider { summary: String::new() },
         );
         let messages = msgs(&[("user", "hi"), ("assistant", "hello")]);
-        let (out, kept) = compactor
+        let (out, kept, compacted) = compactor
             .compact_if_needed_counted(messages)
             .await
             .unwrap();
         // Not compacted → everything is kept verbatim.
+        assert!(!compacted);
         assert_eq!(kept, 2);
         assert_eq!(out.len(), 2);
     }
@@ -375,12 +377,13 @@ mod tests {
             Message::user(format!("q2 {big}")),
             Message::assistant(format!("a2 {big}")),
         ];
-        let (out, kept) = compactor
+        let (out, kept, compacted) = compactor
             .compact_if_needed_counted(messages)
             .await
             .unwrap();
         // kept_count must equal the verbatim tail length (NOT counting the
         // prepended summary + ack). Output = summary + ack + kept tail.
+        assert!(compacted);
         assert!(kept >= 1, "must keep at least the most recent turn");
         assert_eq!(out.len(), 2 + kept, "output = summary + ack + kept tail");
         // First two are the prepended summary/ack.
