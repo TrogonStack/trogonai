@@ -167,14 +167,44 @@ async fn run_one(cmd: &HookCommand, stdin_json: &str) -> HookCmdResult {
         Ok(c) => c,
         Err(e) => return HookCmdResult::Error(format!("could not spawn hook: {e}")),
     };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(stdin_json.as_bytes()).await;
-    }
     let timeout = Duration::from_secs(cmd.timeout.unwrap_or(DEFAULT_HOOK_TIMEOUT_SECS));
-    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(o)) => o,
-        Ok(Err(e)) => return HookCmdResult::Error(format!("hook io error: {e}")),
-        Err(_) => return HookCmdResult::Error(format!("hook timed out after {}s", timeout.as_secs())),
+    let stdin_json = stdin_json.to_owned();
+    let output = if let Some(mut stdin) = child.stdin.take() {
+        match tokio::time::timeout(timeout, async {
+            let write = async {
+                stdin
+                    .write_all(stdin_json.as_bytes())
+                    .await
+                    .map_err(|e| format!("hook stdin write error: {e}"))?;
+                drop(stdin);
+                Ok(())
+            };
+            let (write_res, output_res) = tokio::join!(write, child.wait_with_output());
+            write_res?;
+            output_res.map_err(|e| format!("hook io error: {e}"))
+        })
+        .await
+        {
+            Ok(Ok(output)) => output,
+            Ok(Err(msg)) => return HookCmdResult::Error(msg),
+            Err(_) => {
+                return HookCmdResult::Error(format!(
+                    "hook timed out after {}s",
+                    timeout.as_secs()
+                ));
+            }
+        }
+    } else {
+        match tokio::time::timeout(timeout, child.wait_with_output()).await {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => return HookCmdResult::Error(format!("hook io error: {e}")),
+            Err(_) => {
+                return HookCmdResult::Error(format!(
+                    "hook timed out after {}s",
+                    timeout.as_secs()
+                ));
+            }
+        }
     };
     decide(
         output.status.code(),
