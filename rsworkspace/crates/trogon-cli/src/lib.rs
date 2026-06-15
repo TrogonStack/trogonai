@@ -1,5 +1,6 @@
 pub mod app;
 pub mod commands;
+pub mod md_template;
 pub mod client_supervisor;
 pub mod doctor;
 pub mod env_local;
@@ -14,6 +15,7 @@ pub mod print;
 pub mod repl;
 pub mod runtime;
 pub mod session;
+pub mod skills;
 pub mod session_rewind;
 pub mod session_transcript;
 pub mod session_store;

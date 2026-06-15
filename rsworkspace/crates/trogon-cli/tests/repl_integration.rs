@@ -313,7 +313,7 @@ fn config_set_persists_to_real_file_and_get_reads_it_back() {
     let fs = TestFs::new(config_file.clone());
 
     let set_out =
-        handle_slash_command("/config", "set theme dark", 0, 0, "test-model", dir.path(), &fs, None);
+        handle_slash_command("/config", "set theme dark", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert_eq!(set_out, "theme = dark", "set must confirm the assignment; got: {set_out}");
 
     let written = std::fs::read_to_string(&config_file).expect("config file must exist after set");
@@ -321,7 +321,7 @@ fn config_set_persists_to_real_file_and_get_reads_it_back() {
     assert!(written.contains("dark"), "config file must contain the value; got: {written}");
 
     let get_out =
-        handle_slash_command("/config", "get theme", 0, 0, "test-model", dir.path(), &fs, None);
+        handle_slash_command("/config", "get theme", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert_eq!(get_out, "theme = dark", "get must return the persisted value; got: {get_out}");
 }
 
@@ -333,7 +333,7 @@ fn config_set_overwrites_existing_value_on_real_disk() {
     let config_file = dir.path().join("config.json");
     let fs = TestFs::new(config_file);
 
-    handle_slash_command("/config", "set model grok-3", 0, 0, "test-model", dir.path(), &fs, None);
+    handle_slash_command("/config", "set model grok-3", 0, 0, "test-model", dir.path(), &fs, None, None);
     handle_slash_command(
         "/config",
         "set model claude-opus-4-7",
@@ -343,10 +343,11 @@ fn config_set_overwrites_existing_value_on_real_disk() {
         dir.path(),
         &fs,
         None,
+        None,
     );
 
     let get_out =
-        handle_slash_command("/config", "get model", 0, 0, "test-model", dir.path(), &fs, None);
+        handle_slash_command("/config", "get model", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert_eq!(
         get_out, "model = claude-opus-4-7",
         "second set must overwrite first; got: {get_out}"
@@ -361,7 +362,7 @@ fn config_get_missing_key_returns_not_set_from_real_file() {
     let fs = TestFs::new(config_file);
 
     let out =
-        handle_slash_command("/config", "get nonexistent", 0, 0, "test-model", dir.path(), &fs, None);
+        handle_slash_command("/config", "get nonexistent", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert!(out.contains("not set"), "missing key must say 'not set'; got: {out}");
 }
 
@@ -372,9 +373,9 @@ fn config_no_args_shows_path_and_contents_from_real_file() {
     let config_file = dir.path().join("config.json");
     let fs = TestFs::new(config_file.clone());
 
-    handle_slash_command("/config", "set env production", 0, 0, "test-model", dir.path(), &fs, None);
+    handle_slash_command("/config", "set env production", 0, 0, "test-model", dir.path(), &fs, None, None);
 
-    let out = handle_slash_command("/config", "", 0, 0, "test-model", dir.path(), &fs, None);
+    let out = handle_slash_command("/config", "", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert!(out.contains("config:"), "output must begin with 'config:'; got: {out}");
     assert!(out.contains("production"), "output must contain the stored value; got: {out}");
 }
@@ -406,7 +407,7 @@ fn cost_no_usage_data_returns_sentinel_message() {
     let config_file = dir.path().join("config.json");
     let fs = TestFs::new(config_file);
 
-    let out = handle_slash_command("/cost", "", 0, 0, "test-model", dir.path(), &fs, None);
+    let out = handle_slash_command("/cost", "", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert!(
         out.contains("no usage data"),
         "cost with no data must say 'no usage data'; got: {out}"
@@ -432,11 +433,12 @@ fn cost_reads_model_from_real_config_and_formats_output() {
         dir.path(),
         &fs,
         None,
+        None,
     );
 
     // 500_000 tokens at $28.5/Mtoken = $14.25
     let out =
-        handle_slash_command("/cost", "", 500_000, 1_000_000, "claude-opus-4-7", dir.path(), &fs, None);
+        handle_slash_command("/cost", "", 500_000, 1_000_000, "claude-opus-4-7", dir.path(), &fs, None, None);
 
     assert!(out.contains("500"), "used tokens must appear; got: {out}");
     assert!(out.contains("1,000"), "context size must appear; got: {out}");
@@ -453,7 +455,7 @@ fn cost_defaults_to_sonnet_rate_when_no_config_exists() {
 
     // 1_000_000 tokens at sonnet rate $6.0/Mtoken = $6.00
     let out =
-        handle_slash_command("/cost", "", 1_000_000, 2_000_000, "test-model", dir.path(), &fs, None);
+        handle_slash_command("/cost", "", 1_000_000, 2_000_000, "test-model", dir.path(), &fs, None, None);
 
     assert!(out.contains("6.00"), "default sonnet rate must produce $6.00 for 1M tokens; got: {out}");
 }

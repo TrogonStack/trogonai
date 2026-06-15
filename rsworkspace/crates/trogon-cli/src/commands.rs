@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::md_template::split_frontmatter;
+pub use crate::md_template::substitute_args;
+
 /// A user-defined slash command discovered from markdown on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomCommand {
@@ -214,31 +217,6 @@ pub fn parse_command_file(content: &str, source: &Path, base: &Path) -> Option<C
     })
 }
 
-fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return Some(("", content));
-    }
-    let rest = trimmed.strip_prefix("---")?;
-    let rest = rest.strip_prefix('\n').or_else(|| rest.strip_prefix("\r\n"))?;
-    let end = rest.find("\n---")?;
-    let (yaml, body) = rest.split_at(end);
-    let body = body.strip_prefix("\n---").unwrap_or(body);
-    let body = body.strip_prefix('\n').or_else(|| body.strip_prefix("\r\n")).unwrap_or(body);
-    Some((yaml, body))
-}
-
-/// Replace `$ARGUMENTS` and positional `$1`, `$2`, … in a command template.
-pub fn substitute_args(template: &str, args: &str) -> String {
-    let trimmed = args.trim();
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    let mut out = template.to_string();
-    for i in (1..=parts.len()).rev() {
-        out = out.replace(&format!("${i}"), parts[i - 1]);
-    }
-    out.replace("$ARGUMENTS", trimmed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,19 +262,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cmd.allowed_tools, vec!["Read", "Bash(git:*)"]);
-    }
-
-    #[test]
-    fn substitute_arguments_and_positional() {
-        assert_eq!(
-            substitute_args("All: $ARGUMENTS", "hello world"),
-            "All: hello world"
-        );
-        assert_eq!(
-            substitute_args("First=$1 second=$2 rest=$ARGUMENTS", "a b c d"),
-            "First=a second=b rest=a b c d"
-        );
-        assert_eq!(substitute_args("No args: $1", ""), "No args: $1");
     }
 
     #[test]
