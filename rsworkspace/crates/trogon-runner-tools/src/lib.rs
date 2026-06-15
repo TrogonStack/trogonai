@@ -53,8 +53,9 @@ pub use portable_session::{
 };
 pub use session_store::{
     append_audit_entries, filter_tool_defs_by_allowlist, intersect_enabled_tools,
-    is_tool_in_allowlist, AllowedToolsSessionStore, AuditEntry, AuditOutcome, BashJob,
-    NatsSessionStore, SessionState, SessionStore, StoredMcpServer, TodoItem,
+    is_tool_in_allowlist, turn_tool_allowlist_from_prompt_meta, AllowedToolsSessionStore,
+    AuditEntry, AuditOutcome, BashJob, NatsSessionStore, SessionState, SessionStore,
+    StoredMcpServer, TodoItem,
 };
 pub use wasm_bash_tool::{BashOutputTool, WasmRuntimeBashTool};
 pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogon_md_hierarchy, load_trogon_md, project_trogon_md_path};

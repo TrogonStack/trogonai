@@ -17,9 +17,9 @@ pub struct CustomCommand {
     pub description: String,
     /// Prompt template body (after frontmatter).
     pub body: String,
-    /// Optional model override from frontmatter (not applied by the REPL yet).
+    /// Optional model override from frontmatter (applied by the REPL for that invocation).
     pub model: Option<String>,
-    /// Optional tool allow-list from frontmatter (not applied by the REPL yet).
+    /// Optional tool allow-list from frontmatter (applied per turn via prompt `_meta`).
     pub allowed_tools: Vec<String>,
     pub source: PathBuf,
 }
@@ -70,6 +70,24 @@ impl CustomCommandRegistry {
             model: def.model.clone(),
             allowed_tools: def.allowed_tools.clone(),
         })
+    }
+}
+
+/// Map Claude-style custom-command tool names to trogon runner tool ids.
+pub fn normalize_allowed_tools_for_runner(tools: &[String]) -> Vec<String> {
+    tools
+        .iter()
+        .map(|t| {
+            let base = t.split('(').next().unwrap_or(t).trim();
+            trogon_runner_tools::permission_rules::normalize_tool_name(base).to_string()
+        })
+        .collect()
+}
+
+/// Per-turn prompt overrides derived from a custom-command dispatch.
+pub fn prompt_opts_from_dispatch(dispatch: &CustomCommandDispatch) -> crate::session::PromptOpts {
+    crate::session::PromptOpts {
+        tool_allowlist: normalize_allowed_tools_for_runner(&dispatch.allowed_tools),
     }
 }
 
@@ -354,6 +372,25 @@ mod tests {
         let disp = registry.dispatch("/test", "one two").unwrap();
         assert_eq!(disp.prompt, "Run: one two (one)");
         assert!(registry.dispatch("/nope", "").is_none());
+    }
+
+    #[test]
+    fn normalize_allowed_tools_maps_claude_names() {
+        assert_eq!(
+            normalize_allowed_tools_for_runner(&["Read".into(), "Bash(git:*)".into()]),
+            vec!["read_file", "bash"]
+        );
+    }
+
+    #[test]
+    fn prompt_opts_from_dispatch_normalizes_allowed_tools() {
+        let dispatch = CustomCommandDispatch {
+            prompt: "do it".into(),
+            model: Some("claude-opus-4-7".into()),
+            allowed_tools: vec!["Read".into(), "Bash".into()],
+        };
+        let opts = prompt_opts_from_dispatch(&dispatch);
+        assert_eq!(opts.tool_allowlist, vec!["read_file", "bash"]);
     }
 
     #[test]

@@ -149,6 +149,15 @@ impl Session for QueuedSession {
         async move {}
     }
 
+    fn prompt_with_opts(
+        &self,
+        text: &str,
+        _opts: trogon_cli::session::PromptOpts,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
+    {
+        self.prompt(text)
+    }
+
     fn set_model(
         &self,
         _model_id: &str,

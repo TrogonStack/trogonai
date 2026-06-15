@@ -684,6 +684,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
         state.messages.push(user_message_from_request(req));
 
+        let tool_allowlist = trogon_runner_tools::turn_tool_allowlist_from_prompt_meta(
+            req.meta.as_ref(),
+            state.tool_allowlist.clone(),
+        );
+
         // Compact history when token estimate exceeds 85 % of the session budget.
         // Degrades gracefully — if trogon-compactor is not running, continues unchanged.
         if let Some(ref nats) = self.compactor_nats
@@ -713,7 +718,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         if state.mode == "plan" {
             tools.push(exit_plan_mode_tool_def());
         }
-        tools = trogon_runner_tools::filter_tool_defs_by_allowlist(tools, &state.tool_allowlist);
+        tools = trogon_runner_tools::filter_tool_defs_by_allowlist(tools, &tool_allowlist);
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
@@ -755,14 +760,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     let (mcp_defs, mcp_dispatch) = mcp_cache
                         .get_or_build(&self.http, &state.mcp_servers, &policy)
                         .await;
-                    let (mcp_defs, mcp_dispatch): (Vec<_>, Vec<_>) = if state.tool_allowlist.is_empty() {
+                    let (mcp_defs, mcp_dispatch): (Vec<_>, Vec<_>) = if tool_allowlist.is_empty() {
                         (mcp_defs, mcp_dispatch)
                     } else {
                         mcp_defs
                             .into_iter()
                             .zip(mcp_dispatch)
                             .filter(|(def, _)| {
-                                trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, &def.name)
+                                trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, &def.name)
                             })
                             .unzip()
                     };
@@ -773,7 +778,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats)
                     && let Ok(entries) = reg.discover("execution").await
                     && let Some(entry) = entries.first()
-                    && trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, "bash")
+                    && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "bash")
                 {
                     let prefix = entry.metadata["acp_prefix"]
                         .as_str()
@@ -811,7 +816,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 // responder lives in main.rs; routed via {prefix}.spawn (off the
                 // `agent.` namespace to avoid the global-wildcard collision).
                 if let Some(ref nats) = self.execution_nats
-                    && trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, "spawn_agent")
+                    && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "spawn_agent")
                 {
                     let spawn = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::new(
                         nats.clone(),

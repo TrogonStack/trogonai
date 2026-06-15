@@ -312,6 +312,28 @@ pub fn filter_tool_defs_by_allowlist(
         .collect()
 }
 
+/// Per-turn tool allow-list from an ACP prompt `_meta.toolAllowlist` array.
+/// When the meta field is absent or empty, returns `session_allowlist`.
+pub fn turn_tool_allowlist_from_prompt_meta(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    session_allowlist: Vec<String>,
+) -> Vec<String> {
+    let from_meta = meta
+        .and_then(|m| m.get("toolAllowlist"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if from_meta.is_empty() {
+        session_allowlist
+    } else {
+        from_meta
+    }
+}
+
 /// Intersect `enabled` with `allowlist` when the allowlist is non-empty.
 pub fn intersect_enabled_tools(enabled: &[String], allowlist: &[String]) -> Vec<String> {
     if allowlist.is_empty() {
@@ -1249,6 +1271,25 @@ mod tests {
         let filtered = filter_tool_defs_by_allowlist(defs, &["read_file".to_string()]);
         assert!(filtered.iter().any(|d| d.name == "read_file"));
         assert!(!filtered.iter().any(|d| d.name == "write_file"));
+    }
+
+    #[test]
+    fn turn_tool_allowlist_from_prompt_meta_prefers_non_empty_meta() {
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "toolAllowlist".into(),
+            serde_json::json!(["read_file", "bash"]),
+        );
+        let out = turn_tool_allowlist_from_prompt_meta(Some(&meta), vec!["write_file".into()]);
+        assert_eq!(out, vec!["read_file", "bash"]);
+    }
+
+    #[test]
+    fn turn_tool_allowlist_from_prompt_meta_falls_back_to_session() {
+        let out = turn_tool_allowlist_from_prompt_meta(None, vec!["read_file".into()]);
+        assert_eq!(out, vec!["read_file"]);
+        let out = turn_tool_allowlist_from_prompt_meta(Some(&serde_json::Map::new()), vec!["bash".into()]);
+        assert_eq!(out, vec!["bash"]);
     }
 
     #[test]

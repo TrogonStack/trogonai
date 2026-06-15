@@ -1663,6 +1663,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.env.clone(),
             )
         };
+        let tool_allowlist = trogon_runner_tools::turn_tool_allowlist_from_prompt_meta(
+            req.meta.as_ref(),
+            tool_allowlist,
+        );
         let offered_tools =
             trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer shared across this turn's permission

@@ -1717,6 +1717,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.env.clone(),
             )
         };
+        let tool_allowlist = trogon_runner_tools::turn_tool_allowlist_from_prompt_meta(
+            req.meta.as_ref(),
+            tool_allowlist,
+        );
         let offered_tools =
             trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer, drained into session_audit after the turn.

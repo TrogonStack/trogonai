@@ -73,6 +73,30 @@ pub struct SessionSummary {
 
 // ── Session trait ─────────────────────────────────────────────────────────────
 
+/// Per-prompt options (e.g. custom slash-command frontmatter overrides).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptOpts {
+    /// Turn-scoped tool allow-list sent as prompt `_meta.toolAllowlist`.
+    pub tool_allowlist: Vec<String>,
+}
+
+/// Build an ACP `session/prompt` request, attaching `_meta.toolAllowlist` when set.
+pub fn build_prompt_request(session_id: &str, text: &str, opts: &PromptOpts) -> PromptRequest {
+    let mut req =
+        PromptRequest::new(session_id.to_string(), vec![ContentBlock::Text(TextContent::new(text))]);
+    if !opts.tool_allowlist.is_empty() {
+        let arr = opts
+            .tool_allowlist
+            .iter()
+            .map(|t| Value::String(t.clone()))
+            .collect();
+        let mut meta = serde_json::Map::new();
+        meta.insert("toolAllowlist".into(), Value::Array(arr));
+        req = req.meta(meta);
+    }
+    req
+}
+
 /// Abstraction over an ACP session. Allows injecting a mock in tests.
 pub trait Session: Send + Sync + 'static {
     fn session_id(&self) -> &str;
@@ -84,6 +108,15 @@ pub trait Session: Send + Sync + 'static {
         &self,
         text: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_;
+
+    fn prompt_with_opts(
+        &self,
+        text: &str,
+        opts: PromptOpts,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
+        let _ = (text, opts);
+        async { Err(anyhow::anyhow!("prompt_with_opts not implemented")) }
+    }
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 
@@ -402,7 +435,14 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         &self,
         text: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
-        // Clone text upfront so the returned future owns it (no captured &str across awaits).
+        self.prompt_with_opts(text, PromptOpts::default())
+    }
+
+    fn prompt_with_opts(
+        &self,
+        text: &str,
+        opts: PromptOpts,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
         let text = text.to_string();
         let nats = &self.nats;
         let session_id = self.session_id.clone();
@@ -436,7 +476,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .await
                 .map_err(|e| anyhow::anyhow!("subscribe response: {e}"))?;
 
-            let req = PromptRequest::new(session_id, vec![ContentBlock::Text(TextContent::new(&text))]);
+            let req = build_prompt_request(&session_id, &text, &opts);
             let payload = serde_json::to_vec(&req)?;
 
             nats.publish_with_req_id_bytes(prompt_subject, req_id, payload.into())
@@ -1011,6 +1051,7 @@ pub mod mock {
         /// Last prompt text passed to `prompt()`. Used in tests to verify the
         /// content of prompts sent to the session (e.g., language detection in /init).
         pub last_prompt_text: Mutex<Option<String>>,
+        pub last_prompt_opts: Mutex<PromptOpts>,
         exported_history: Mutex<String>,
         imported_history: Mutex<Vec<String>>,
         load_session_count: Mutex<u32>,
@@ -1029,6 +1070,7 @@ pub mod mock {
                 compact_error: Mutex::new(None),
                 last_cwd: Mutex::new(None),
                 last_prompt_text: Mutex::new(None),
+                last_prompt_opts: Mutex::new(PromptOpts::default()),
                 exported_history: Mutex::new("[]".to_string()),
                 imported_history: Mutex::new(Vec::new()),
                 load_session_count: Mutex::new(0),
@@ -1101,7 +1143,16 @@ pub mod mock {
             &self,
             text: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
+            self.prompt_with_opts(text, PromptOpts::default())
+        }
+
+        fn prompt_with_opts(
+            &self,
+            text: &str,
+            opts: PromptOpts,
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
             *self.last_prompt_text.lock().unwrap() = Some(text.to_string());
+            *self.last_prompt_opts.lock().unwrap() = opts;
             let events = self
                 .turns
                 .lock()
@@ -1225,6 +1276,14 @@ pub mod mock {
             text: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
             (**self).prompt(text)
+        }
+
+        fn prompt_with_opts(
+            &self,
+            text: &str,
+            opts: PromptOpts,
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
+            (**self).prompt_with_opts(text, opts)
         }
 
         fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
@@ -1889,7 +1948,32 @@ mod tests {
 
 #[cfg(test)]
 mod session_init_tests {
-    use super::SessionInit;
+    use super::{build_prompt_request, PromptOpts, SessionInit};
+
+    #[test]
+    fn build_prompt_request_attaches_tool_allowlist_meta() {
+        let req = build_prompt_request(
+            "sess-1",
+            "hello",
+            &PromptOpts {
+                tool_allowlist: vec!["read_file".into(), "bash".into()],
+            },
+        );
+        let meta = req.meta.as_ref().expect("meta present");
+        let tools = meta
+            .get("toolAllowlist")
+            .and_then(|v| v.as_array())
+            .expect("toolAllowlist array");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].as_str(), Some("read_file"));
+        assert_eq!(tools[1].as_str(), Some("bash"));
+    }
+
+    #[test]
+    fn build_prompt_request_omits_meta_when_no_tool_allowlist() {
+        let req = build_prompt_request("sess-1", "hello", &PromptOpts::default());
+        assert!(req.meta.is_none());
+    }
 
     #[test]
     fn empty_init_produces_no_meta() {

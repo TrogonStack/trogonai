@@ -5,7 +5,7 @@ use crate::app::{
 };
 use crate::fs::Fs;
 use crate::mcp::McpManager;
-use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
+use crate::session::{CompactResult, PromptOpts, Session, SessionFactory, StreamEvent};
 use crate::session_rewind::{
     RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns,
 };
@@ -36,6 +36,40 @@ use trogon_registry::{Registry, RegistryStore};
 use trogon_tools::fs::{resolve_directory_target, resolve_path};
 
 const HISTORY_PATH: &str = "~/.local/share/trogon/history";
+
+/// A prompt queued for auto-submission (custom slash commands, /review, stream input).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueuedPrompt {
+    text: String,
+    model: Option<String>,
+    allowed_tools: Vec<String>,
+}
+
+impl QueuedPrompt {
+    fn from_text(text: String) -> Self {
+        Self {
+            text,
+            model: None,
+            allowed_tools: Vec::new(),
+        }
+    }
+
+    fn from_dispatch(dispatch: crate::commands::CustomCommandDispatch) -> Self {
+        Self {
+            text: dispatch.prompt,
+            model: dispatch.model,
+            allowed_tools: dispatch.allowed_tools,
+        }
+    }
+
+    fn prompt_opts(&self) -> PromptOpts {
+        crate::commands::prompt_opts_from_dispatch(&crate::commands::CustomCommandDispatch {
+            prompt: self.text.clone(),
+            model: self.model.clone(),
+            allowed_tools: self.allowed_tools.clone(),
+        })
+    }
+}
 
 // ── FileAtHelper ──────────────────────────────────────────────────────────────
 
@@ -561,7 +595,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let mut pending_input: Option<String> = None;
     // Messages typed while a response was streaming. Auto-submitted in order
     // (one per turn) once the current turn finishes.
-    let mut queued_prompts: VecDeque<String> = VecDeque::new();
+    let mut queued_prompts: VecDeque<QueuedPrompt> = VecDeque::new();
     let mut rewind_state = SessionRewindState::default();
     let custom_commands = crate::commands::load_commands(&project_dir);
     let mut spawn_tracker = SpawnTracker::default();
@@ -578,16 +612,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
-        let (read, from_queue): (rustyline::Result<String>, bool) =
+        let (read, from_queue, queued_invocation): (rustyline::Result<String>, bool, Option<QueuedPrompt>) =
             match queued_prompts.pop_front() {
-                Some(q) => (Ok(q), true),
+                Some(q) => (Ok(q.text.clone()), true, Some(q)),
                 None => {
                     let prompt = format_mode_prompt(&session_mode);
                     let r = match pending_input.take() {
                         Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
                         None => rl.readline(&prompt),
                     };
-                    (r, false)
+                    (r, false, None)
                 }
             };
         match read {
@@ -989,9 +1023,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/review" {
                         // Drive the model to review via its shell tools; runs like a
                         // normal prompt on the next loop turn.
-                        queued_prompts.push_back(review_prompt(arg));
+                        queued_prompts.push_back(QueuedPrompt::from_text(review_prompt(arg)));
                     } else if cmd == "/pr-comments" {
-                        queued_prompts.push_back(pr_comments_prompt(arg));
+                        queued_prompts.push_back(QueuedPrompt::from_text(pr_comments_prompt(arg)));
                     } else if cmd == "/compact" {
                         if !hooks_config.pre_compact.is_empty() {
                             let payload = serde_json::json!({
@@ -1177,13 +1211,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             }
                         }
                     } else if let Some(dispatch) = custom_commands.dispatch(cmd, arg) {
-                        if dispatch.model.is_some() || !dispatch.allowed_tools.is_empty() {
-                            eprintln!(
-                                "note: per-command model/allowed-tools from {} are not applied yet",
-                                cmd
-                            );
-                        }
-                        queued_prompts.push_back(dispatch.prompt);
+                        queued_prompts.push_back(QueuedPrompt::from_dispatch(dispatch));
                     } else {
                         println!(
                             "{}",
@@ -1236,15 +1264,43 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     expanded.push_str("\n\n");
                     expanded.push_str(&ctx);
                 }
+                let prompt_opts = queued_invocation
+                    .as_ref()
+                    .map(QueuedPrompt::prompt_opts)
+                    .unwrap_or_default();
+                if let Some(inv) = queued_invocation.as_ref()
+                    && let Some(model) = inv.model.as_deref()
+                {
+                    session = apply_dispatch_model_switch(
+                        &mut switcher,
+                        &factory,
+                        session,
+                        &mut prefix,
+                        &mut session_mode,
+                        &mut session_used_tokens,
+                        &mut session_context_size,
+                        &mut compactor_model_sel,
+                        &mut rewind_state,
+                        &mut mcp_manager,
+                        &cwd,
+                        &fs,
+                        &project_dir,
+                        session_name.as_deref(),
+                        skip_permissions,
+                        client_supervisor.as_ref(),
+                        model,
+                    )
+                    .await;
+                }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
-                let prompt_result = match session.prompt(&expanded).await {
+                let prompt_result = match session.prompt_with_opts(&expanded, prompt_opts.clone()).await {
                     Err(e) if e.to_string().contains("not found") => {
                         eprintln!("\x1b[33mwarning: session lost (runner restarted?) — reconnecting...\x1b[0m");
                         match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await
                         {
                             Ok(s) => {
                                 session = s;
-                                session.prompt(&expanded).await
+                                session.prompt_with_opts(&expanded, prompt_opts).await
                             }
                             Err(e2) => {
                                 eprintln!("error: runner unavailable: {e2}\n  Restart trogon to recover.");
@@ -1399,8 +1455,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         // they're likely changing direction. `_input_reader` drops at
                         // the end of this block, restoring the terminal before readline.
                         if !interrupted {
-                            queued_prompts.extend(front_queued);
-                            queued_prompts.extend(queued);
+                            queued_prompts.extend(
+                                front_queued.into_iter().map(QueuedPrompt::from_text),
+                            );
+                            queued_prompts.extend(queued.into_iter().map(QueuedPrompt::from_text));
                         }
                     }
                 }
@@ -2000,6 +2058,93 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
         new_prefix,
         new_session_id,
     })
+}
+
+/// Apply a custom-command `model` frontmatter override using the same `/model` path.
+/// On failure, prints a warning and returns the original session unchanged.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn apply_dispatch_model_switch<SF, S, SW, F>(
+    switcher: &mut SW,
+    factory: &SF,
+    session: S,
+    prefix: &mut String,
+    session_mode: &mut String,
+    session_used_tokens: &mut u64,
+    session_context_size: &mut u64,
+    compactor_model_sel: &mut Option<String>,
+    rewind_state: &mut SessionRewindState,
+    mcp_manager: &mut McpManager,
+    cwd: &Path,
+    fs: &F,
+    project_dir: &Path,
+    session_name: Option<&str>,
+    skip_permissions: bool,
+    client_supervisor: Option<&Rc<AcpClientSupervisor>>,
+    model: &str,
+) -> S
+where
+    SF: SessionFactory<Sess = S>,
+    S: Session,
+    SW: RunnerSwitcher,
+    F: Fs,
+{
+    let model_id = resolve_model_alias(model.trim());
+    let cwd_str = cwd
+        .canonicalize()
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    match apply_model_switch(switcher, prefix, session.session_id(), &model_id, &cwd_str).await {
+        Ok(outcome) => {
+            if outcome.same_runner {
+                match session.set_model(&model_id).await {
+                    Ok(()) => {
+                        persist_session_index(
+                            fs,
+                            project_dir,
+                            prefix,
+                            session.session_id(),
+                            &model_id,
+                            session_name,
+                        );
+                    }
+                    Err(e) => eprintln!(
+                        "warning: custom command model `{model_id}` could not be set: {e} — using current model"
+                    ),
+                }
+                session
+            } else {
+                let applied = finish_cross_runner_model_switch(
+                    factory,
+                    session,
+                    &outcome,
+                    &model_id,
+                    mcp_manager,
+                    cwd,
+                    fs,
+                    project_dir,
+                    session_name,
+                    skip_permissions,
+                    client_supervisor,
+                    None,
+                )
+                .await;
+                *prefix = applied.prefix;
+                *session_mode = applied.session_mode;
+                *session_used_tokens = 0;
+                *session_context_size = 0;
+                *compactor_model_sel = None;
+                rewind_state.reset();
+                applied.session
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "warning: custom command model `{model_id}` not available: {e} — using current model"
+            );
+            session
+        }
+    }
 }
 
 /// Handle `/compact-model [<model_id>|default]`.
@@ -4194,6 +4339,62 @@ mod tests {
         assert!(outcome.same_runner);
         session.set_model("claude-opus-4-7").await.unwrap();
         assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn queued_prompt_from_dispatch_carries_frontmatter() {
+        let dispatch = crate::commands::CustomCommandDispatch {
+            prompt: "do it".into(),
+            model: Some("claude-opus-4-7".into()),
+            allowed_tools: vec!["Read".into()],
+        };
+        let q = QueuedPrompt::from_dispatch(dispatch);
+        assert_eq!(q.model.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(q.allowed_tools, vec!["Read"]);
+        assert_eq!(q.prompt_opts().tool_allowlist, vec!["read_file"]);
+    }
+
+    #[tokio::test]
+    async fn apply_dispatch_model_switch_same_runner_sets_model() {
+        use crate::session::mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        let factory = MockSessionFactory::new("default");
+        let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
+        let mut prefix = "acp".to_string();
+        let mut session_mode = "default".to_string();
+        let mut session_used_tokens = 0;
+        let mut session_context_size = 0;
+        let mut compactor_model_sel = None;
+        let mut rewind_state = SessionRewindState::default();
+        let mut mcp_manager = McpManager::load(&MockFs::new());
+        let cwd = std::env::temp_dir();
+        let fs = MockFs::new();
+        let project_dir = cwd.clone();
+
+        let updated = apply_dispatch_model_switch(
+            &mut switcher,
+            &factory,
+            session,
+            &mut prefix,
+            &mut session_mode,
+            &mut session_used_tokens,
+            &mut session_context_size,
+            &mut compactor_model_sel,
+            &mut rewind_state,
+            &mut mcp_manager,
+            &cwd,
+            &fs,
+            &project_dir,
+            None,
+            false,
+            None,
+            "claude-opus-4-7",
+        )
+        .await;
+
+        assert_eq!(updated.last_model().as_deref(), Some("claude-opus-4-7"));
     }
 
     // ── /checkpoint and /rewind ────────────────────────────────────────────────
