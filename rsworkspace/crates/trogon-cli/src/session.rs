@@ -60,6 +60,50 @@ async fn ext_method<N: NatsClient>(
     serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid ext response: {e}"))
 }
 
+async fn forward_prompt_notification(bytes: &[u8], tx: &mpsc::Sender<StreamEvent>) {
+    if let Ok(notif) = serde_json::from_slice::<SessionNotification>(bytes) {
+        match notif.update {
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                if let ContentBlock::Text(t) = chunk.content {
+                    let _ = tx.send(StreamEvent::Text(t.text)).await;
+                }
+            }
+            SessionUpdate::AgentThoughtChunk(_) => {
+                let _ = tx.send(StreamEvent::Thinking).await;
+            }
+            SessionUpdate::ToolCall(tc) => {
+                if let Some(diff) = render_diff(&tc.title, tc.raw_input.as_ref()) {
+                    let _ = tx.send(StreamEvent::ToolCall(tc.title.clone())).await;
+                    let _ = tx.send(StreamEvent::Diff(diff)).await;
+                } else {
+                    let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                }
+            }
+            SessionUpdate::ToolCallUpdate(update) => {
+                if let Some(finished) = map_tool_call_update(&update) {
+                    let _ = tx
+                        .send(StreamEvent::ToolFinished {
+                            name: finished.name,
+                            output: finished.output,
+                            exit_code: finished.exit_code,
+                            status: finished.status,
+                        })
+                        .await;
+                }
+            }
+            SessionUpdate::UsageUpdate(u) => {
+                let _ = tx
+                    .send(StreamEvent::Usage {
+                        used_tokens: u.used,
+                        context_size: u.size,
+                    })
+                    .await;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Summary row for `/sessions` and session listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
@@ -481,49 +525,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                         // in the same batch), we drain notifications first and don't drop them.
                         bytes = notif_rx.recv() => {
                             let Some(bytes) = bytes else { break };
-                            if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&bytes) {
-                                match notif.update {
-                                    SessionUpdate::AgentMessageChunk(chunk) => {
-                                        if let ContentBlock::Text(t) = chunk.content {
-                                            let _ = tx.send(StreamEvent::Text(t.text)).await;
-                                        }
-                                    }
-                                    SessionUpdate::AgentThoughtChunk(_) => {
-                                        let _ = tx.send(StreamEvent::Thinking).await;
-                                    }
-                                    SessionUpdate::ToolCall(tc) => {
-                                        if let Some(diff) =
-                                            render_diff(&tc.title, tc.raw_input.as_ref())
-                                        {
-                                            let _ = tx.send(StreamEvent::ToolCall(tc.title.clone())).await;
-                                            let _ = tx.send(StreamEvent::Diff(diff)).await;
-                                        } else {
-                                            let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
-                                        }
-                                    }
-                                    SessionUpdate::ToolCallUpdate(update) => {
-                                        if let Some(finished) = map_tool_call_update(&update) {
-                                            let _ = tx
-                                                .send(StreamEvent::ToolFinished {
-                                                    name: finished.name,
-                                                    output: finished.output,
-                                                    exit_code: finished.exit_code,
-                                                    status: finished.status,
-                                                })
-                                                .await;
-                                        }
-                                    }
-                                    SessionUpdate::UsageUpdate(u) => {
-                                        let _ = tx
-                                            .send(StreamEvent::Usage {
-                                                used_tokens: u.used,
-                                                context_size: u.size,
-                                            })
-                                            .await;
-                                    }
-                                    _ => {}
-                                }
-                            }
+                            forward_prompt_notification(&bytes, &tx).await;
                         }
                         bytes = resp_rx.recv() => {
                             let Some(bytes) = bytes else { break };
@@ -545,6 +547,9 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                                 let _ = tx.send(StreamEvent::Done(stop)).await;
                             } else {
                                 let _ = tx.send(StreamEvent::Done("end_turn".to_string())).await;
+                            }
+                            while let Ok(bytes) = notif_rx.try_recv() {
+                                forward_prompt_notification(&bytes, &tx).await;
                             }
                             break;
                         }
@@ -735,10 +740,12 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let nats = &self.nats;
         let messages_json = messages_json.to_string();
         async move {
-            let params = serde_json::from_str::<Value>(&format!(
-                r#"{{"sessionId":"{session_id}","messages":{messages_json}}}"#
-            ))
-            .map_err(|e| anyhow::anyhow!("invalid session/import params: {e}"))?;
+            let messages = serde_json::from_str::<Value>(&messages_json)
+                .map_err(|e| anyhow::anyhow!("invalid session/import messages: {e}"))?;
+            let params = json!({
+                "sessionId": session_id,
+                "messages": messages,
+            });
             ext_method(nats, &prefix, "session/import", params).await?;
             Ok(())
         }
@@ -1352,6 +1359,19 @@ mod tests {
         });
     }
 
+    #[test]
+    fn session_import_params_escapes_session_id() {
+        let session_id = r#"sess"quote"#;
+        let messages_json = r#"[{"role":"user","text":"hi"}]"#;
+        let messages: Value = serde_json::from_str(messages_json).unwrap();
+        let params = json!({
+            "sessionId": session_id,
+            "messages": messages,
+        });
+        let roundtrip: Value = serde_json::from_str(&params.to_string()).unwrap();
+        assert_eq!(roundtrip["sessionId"].as_str().unwrap(), session_id);
+    }
+
     // ── render_diff ───────────────────────────────────────────────────────────
 
     #[test]
@@ -1648,6 +1668,62 @@ mod tests {
             }
         }
         assert!(got_text, "expected Text event");
+        assert!(got_done, "expected Done event");
+    }
+
+    #[tokio::test]
+    async fn prompt_forwards_trailing_usage_after_done() {
+        let nats = MockNatsClient::new();
+        queue_new_session_setup(&nats, "s1").await;
+
+        let (notif_tx, notif_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        let (reply_tx, reply_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        nats.add_subscription(notif_rx);
+        nats.add_subscription(reply_rx);
+
+        let session = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
+
+        let mut events_rx = session.prompt("hello").await.unwrap();
+
+        let done = json!({"stopReason": "end_turn"});
+        reply_tx
+            .send(Bytes::from(serde_json::to_vec(&done).unwrap()))
+            .await
+            .unwrap();
+
+        let usage_notif = json!({
+            "sessionId": "s1",
+            "update": {
+                "sessionUpdate": "usage_update",
+                "used": 42,
+                "size": 1000
+            }
+        });
+        notif_tx
+            .send(Bytes::from(serde_json::to_vec(&usage_notif).unwrap()))
+            .await
+            .unwrap();
+
+        let mut got_usage = false;
+        let mut got_done = false;
+        while let Some(ev) = events_rx.recv().await {
+            match ev {
+                StreamEvent::Usage { used_tokens, context_size } => {
+                    assert_eq!(used_tokens, 42);
+                    assert_eq!(context_size, 1000);
+                    got_usage = true;
+                }
+                StreamEvent::Done(r) => {
+                    assert_eq!(r, "end_turn");
+                    got_done = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_usage, "expected trailing Usage event after Done");
         assert!(got_done, "expected Done event");
     }
 

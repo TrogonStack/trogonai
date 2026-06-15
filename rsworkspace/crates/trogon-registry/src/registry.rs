@@ -69,7 +69,7 @@ impl<S: RegistryStore> Registry<S> {
     pub async fn get(&self, agent_type: &str) -> Result<Option<AgentCapability>, RegistryError> {
         match self.store.get(agent_type).await.map_err(|e| RegistryError::Get(Box::new(e)))? {
             Some(bytes) => {
-                let cap = serde_json::from_slice(&bytes).map_err(RegistryError::Serialization)?;
+                let cap = serde_json::from_slice(&bytes).map_err(RegistryError::Deserialization)?;
                 Ok(Some(cap))
             }
             None => Ok(None),
@@ -140,13 +140,18 @@ impl<S: RegistryStore> Registry<S> {
 
     pub async fn find_by_model(&self, model_id: &str) -> Result<Option<AgentCapability>, String> {
         let all = self.list_all().await.map_err(|e| e.to_string())?;
-        Ok(all.into_iter().find(|cap| {
-            cap.metadata
-                .get("models")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().any(|m| m.as_str() == Some(model_id)))
-                .unwrap_or(false)
-        }))
+        // Stable tie-break: when multiple agents advertise the same model, pick the
+        // one with the smallest agent_type lexicographically.
+        Ok(all
+            .into_iter()
+            .filter(|cap| {
+                cap.metadata
+                    .get("models")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().any(|m| m.as_str() == Some(model_id)))
+                    .unwrap_or(false)
+            })
+            .min_by(|a, b| a.agent_type.cmp(&b.agent_type)))
     }
 }
 
@@ -370,6 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_returns_err_for_corrupted_bytes() {
+        use crate::error::RegistryError;
         use crate::store::RegistryStore as _;
         let store = MockRegistryStore::new();
         let r = Registry::new(store.clone());
@@ -378,7 +384,7 @@ mod tests {
             .await
             .unwrap();
         let result = r.get("BadAgent").await;
-        assert!(result.is_err());
+        assert!(matches!(result, Err(RegistryError::Deserialization(_))));
     }
 
     // ── find_by_model ─────────────────────────────────────────────────────────
@@ -458,6 +464,20 @@ mod tests {
         assert!(r.find_by_model("grok-3-mini").await.unwrap().is_none());
         // exact match must work
         assert!(r.find_by_model("grok-3").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn find_by_model_picks_smallest_agent_type_on_tie() {
+        let r = registry();
+        r.register(&agent_with_models("zebra", &["shared-model"]))
+            .await
+            .unwrap();
+        r.register(&agent_with_models("alpha", &["shared-model"]))
+            .await
+            .unwrap();
+
+        let found = r.find_by_model("shared-model").await.unwrap().unwrap();
+        assert_eq!(found.agent_type, "alpha");
     }
 
     #[tokio::test]
