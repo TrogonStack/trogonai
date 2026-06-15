@@ -1577,52 +1577,37 @@ async fn nats_publish_failure_for_tool_events_is_non_fatal() {
     unsafe { std::env::remove_var("MOCK_SEND_TOOL_EVENT") };
 }
 
-// ── broadcast error (no threadId) reaches all active turns ───────────────────
+// ── threadId-less terminal notifications ───────────────────────────────────────
 
-/// When `read_loop` receives a notification whose `threadId` is absent/empty,
-/// it must broadcast the event to ALL active turn channels (lines 346-353 of
-/// process.rs), and clear all senders if the event is terminal.
-///
-/// Setup: two sessions run concurrent prompts. The mock acks both `turn/start`
-/// requests normally, then on the second ack immediately emits an `error`
-/// notification without a `threadId`. Both receivers must get the error and
-/// both prompts must complete with `StopReason::EndTurn`.
+/// Terminal notifications without `threadId` must be ignored rather than
+/// broadcast to all active turn channels (which would end unrelated keyed turns).
+/// The mock emits such an error after the first `turn/start` ack without sending
+/// `turn/completed`; the prompt must not fail with a codex error.
 #[tokio::test(flavor = "current_thread")]
-async fn broadcast_error_without_thread_id_reaches_all_active_turns() {
+async fn threadless_terminal_error_is_ignored() {
     let _guard = bin_env_lock().lock().await;
-    // Emit the broadcast error after the 2nd turn/start is acked so that both
-    // turn senders are registered before the error is routed.
-    unsafe { std::env::set_var("MOCK_BROADCAST_ERROR_AFTER_TURNS", "2") };
+    unsafe { std::env::set_var("MOCK_BROADCAST_ERROR_AFTER_TURNS", "1") };
     let local = LocalSet::new();
     local
         .run_until(async {
             let agent = make_agent().await;
-
-            let sess1 = agent
+            let sess = agent
                 .new_session(NewSessionRequest::new("/s1"))
                 .await
                 .unwrap();
-            let sess2 = agent
-                .new_session(NewSessionRequest::new("/s2"))
-                .await
-                .unwrap();
 
-            // Run both prompts concurrently. The mock will broadcast an error
-            // (no threadId) after the second turn/start, so both should
-            // receive it and complete.
-            let (r1, r2) = tokio::join!(
-                agent.prompt(PromptRequest::new(
-                    sess1.session_id.to_string(),
-                    vec![ContentBlock::Text(TextContent::new("session 1"))],
-                )),
-                agent.prompt(PromptRequest::new(
-                    sess2.session_id.to_string(),
-                    vec![ContentBlock::Text(TextContent::new("session 2"))],
-                )),
+            let result = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("hello"))],
+                ))
+                .await;
+
+            assert!(
+                result.is_ok(),
+                "threadId-less terminal error must not fail the prompt; got: {result:?}"
             );
-
-            assert_eq!(r1.unwrap().stop_reason, StopReason::EndTurn);
-            assert_eq!(r2.unwrap().stop_reason, StopReason::EndTurn);
+            assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
         })
         .await;
     unsafe { std::env::remove_var("MOCK_BROADCAST_ERROR_AFTER_TURNS") };

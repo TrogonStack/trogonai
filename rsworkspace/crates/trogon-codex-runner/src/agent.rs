@@ -605,13 +605,12 @@ where
             );
         }
 
-        let (thread_id, model, mode, pending_history, cwd, prepend_trogon, orig_first_turn, first_turn) = {
+        let (thread_id, model, mode, pending_history, cwd, orig_first_turn, first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
             let orig_first_turn = s.first_turn;
-            let prepend_trogon = s.first_turn || s.pending_history.is_some();
             let ph = s.pending_history.take();
             let ft = s.first_turn;
             let cwd = s.cwd.clone();
@@ -621,11 +620,10 @@ where
             ));
             (
                 s.thread_id.clone(),
-                s.model.clone().or_else(|| Some(self.default_model.clone())),
+                s.model.clone(),
                 s.mode.clone(),
                 ph,
                 cwd,
-                prepend_trogon,
                 orig_first_turn,
                 ft,
             )
@@ -652,7 +650,10 @@ where
             user_input
         };
 
-        if prepend_trogon
+        // Import path: pending history was formatted above; prepend TROGON.md once
+        // with the labeled wrapper. Fresh first turns use the `else if first_turn`
+        // arm instead — do not also run here or TROGON.md is duplicated.
+        if ph_backup.is_some()
             && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
         {
             user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
@@ -1166,6 +1167,87 @@ mod tests {
         events: Vec<CodexEvent>,
     }
 
+    struct TurnStartCapture {
+        model: Option<String>,
+    }
+
+    struct CapturingMockCodexProcess {
+        events: Vec<CodexEvent>,
+        captured: Arc<Mutex<Option<TurnStartCapture>>>,
+    }
+
+    #[async_trait(?Send)]
+    impl CodexProcessClient for CapturingMockCodexProcess {
+        fn is_alive(&self) -> bool {
+            true
+        }
+
+        async fn thread_start(
+            &self,
+            _cwd: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("mock-thread-id".to_string())
+        }
+
+        async fn thread_resume(
+            &self,
+            thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(thread_id.to_string())
+        }
+
+        async fn thread_fork(
+            &self,
+            _thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(format!("fork-{}", Uuid::new_v4()))
+        }
+
+        async fn turn_start(
+            &self,
+            _thread_id: &str,
+            _user_input: &str,
+            model: Option<&str>,
+            _approval_policy: Option<&str>,
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            *self.captured.lock().await = Some(TurnStartCapture {
+                model: model.map(str::to_string),
+            });
+            let (tx, rx) = broadcast::channel(64);
+            for event in &self.events {
+                let _ = tx.send(event.clone());
+            }
+            Ok(rx)
+        }
+
+        async fn turn_interrupt(
+            &self,
+            _thread_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    struct CapturingMockProcessSpawner {
+        events: Vec<CodexEvent>,
+        captured: Arc<Mutex<Option<TurnStartCapture>>>,
+    }
+
+    #[async_trait(?Send)]
+    impl ProcessSpawner for CapturingMockProcessSpawner {
+        type Process = CapturingMockCodexProcess;
+
+        async fn spawn(
+            &self,
+        ) -> Result<CapturingMockCodexProcess, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(CapturingMockCodexProcess {
+                events: self.events.clone(),
+                captured: Arc::clone(&self.captured),
+            })
+        }
+    }
+
     impl MockProcessSpawner {
         fn new() -> Self {
             Self { events: vec![] }
@@ -1296,6 +1378,67 @@ mod tests {
                 .set_session_model(SetSessionModelRequest::new("missing", "o3"))
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_omits_model_when_session_has_no_override() {
+        let captured = Arc::new(Mutex::new(None));
+        let spawner = CapturingMockProcessSpawner {
+            captured: Arc::clone(&captured),
+            events: vec![CodexEvent::TurnCompleted],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent.test_insert_session("s-no-model", "/tmp", None).await;
+
+        agent
+            .prompt(PromptRequest::new(
+                "s-no-model",
+                vec![ContentBlock::from("hi")],
+            ))
+            .await
+            .unwrap();
+
+        let cap = captured
+            .lock()
+            .await
+            .take()
+            .expect("turn_start must be called");
+        assert!(
+            cap.model.is_none(),
+            "model must be omitted when session has no override"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_sends_model_when_session_override_set() {
+        let captured = Arc::new(Mutex::new(None));
+        let spawner = CapturingMockProcessSpawner {
+            captured: Arc::clone(&captured),
+            events: vec![CodexEvent::TurnCompleted],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent
+            .test_insert_session("s-model", "/tmp", Some("o3".to_string()))
+            .await;
+
+        agent
+            .prompt(PromptRequest::new(
+                "s-model",
+                vec![ContentBlock::from("hi")],
+            ))
+            .await
+            .unwrap();
+
+        let cap = captured
+            .lock()
+            .await
+            .take()
+            .expect("turn_start must be called");
+        assert_eq!(
+            cap.model.as_deref(),
+            Some("o3"),
+            "session model override must be sent to turn_start"
         );
     }
 
