@@ -928,6 +928,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         additional_read_dirs: read_dirs,
                         classifier: self.classifier.clone(),
                         pre_tool_use: state.tool_hooks.pre_tool_use.clone(),
+                        // RT-3: wire the session-level scope override (highest
+                        // precedence in Scope::resolve); settings/TROGON.md scopes
+                        // default to None until those sources are threaded here.
+                        session_scope: state.scope.clone(),
+                        ..Default::default()
                     };
                     if let Some(checker) = build_mode_permission_checker(
                         &state.mode,

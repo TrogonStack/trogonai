@@ -529,6 +529,13 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                         }
                         bytes = resp_rx.recv() => {
                             let Some(bytes) = bytes else { break };
+                            // Drain any already-buffered trailing notifications (e.g. a
+                            // final UsageUpdate published just before the response)
+                            // BEFORE emitting the terminal event, so a consumer that
+                            // stops reading at Done still observes them.
+                            while let Ok(n) = notif_rx.try_recv() {
+                                forward_prompt_notification(&n, &tx).await;
+                            }
                             if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
                                 // ACP error response serializes as {"code": <int>, "message": "..."}.
                                 // PromptResponse serializes as {"stopReason": "..."}.
@@ -547,9 +554,6 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                                 let _ = tx.send(StreamEvent::Done(stop)).await;
                             } else {
                                 let _ = tx.send(StreamEvent::Done("end_turn".to_string())).await;
-                            }
-                            while let Ok(bytes) = notif_rx.try_recv() {
-                                forward_prompt_notification(&bytes, &tx).await;
                             }
                             break;
                         }
@@ -1687,12 +1691,8 @@ mod tests {
 
         let mut events_rx = session.prompt("hello").await.unwrap();
 
-        let done = json!({"stopReason": "end_turn"});
-        reply_tx
-            .send(Bytes::from(serde_json::to_vec(&done).unwrap()))
-            .await
-            .unwrap();
-
+        // Buffer the trailing UsageUpdate BEFORE the terminal response so the
+        // forwarding loop deterministically drains it before emitting Done.
         let usage_notif = json!({
             "sessionId": "s1",
             "update": {
@@ -1703,6 +1703,12 @@ mod tests {
         });
         notif_tx
             .send(Bytes::from(serde_json::to_vec(&usage_notif).unwrap()))
+            .await
+            .unwrap();
+
+        let done = json!({"stopReason": "end_turn"});
+        reply_tx
+            .send(Bytes::from(serde_json::to_vec(&done).unwrap()))
             .await
             .unwrap();
 

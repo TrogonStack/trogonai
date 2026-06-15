@@ -24,7 +24,9 @@ impl CancelSubscription {
     pub fn from_receiver(rx: tokio::sync::oneshot::Receiver<()>) -> Self {
         Self {
             rx,
-            task: tokio::task::spawn_local(async {}),
+            // `tokio::spawn` (not `spawn_local`) so this test-only constructor
+            // works without a `LocalSet` context; the dummy task is inert.
+            task: tokio::spawn(async {}),
         }
     }
 }
@@ -395,7 +397,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn cancel_subscription_abort_on_drop() {
         let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::task::spawn_local(async move {
+        let task = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
             let _ = done_tx.send(());
         });
