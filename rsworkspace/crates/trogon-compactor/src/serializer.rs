@@ -72,9 +72,13 @@ fn truncate(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         s.to_owned()
     } else {
+        let mut end = max_bytes.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
         format!(
             "{}…\n[{} more chars truncated]",
-            &s[..max_bytes],
+            &s[..end],
             s.len() - max_bytes
         )
     }
@@ -190,6 +194,18 @@ mod tests {
         };
         let out = serialize_for_prompt(&[msg]);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn truncate_at_multibyte_char_boundary_does_not_panic() {
+        // 1999 ASCII bytes + a 3-byte UTF-8 char → byte 2000 is mid-codepoint.
+        let content = format!("{}あああ", "x".repeat(1999));
+        assert!(content.len() > TOOL_RESULT_TRUNCATE);
+        assert!(!content.is_char_boundary(TOOL_RESULT_TRUNCATE));
+
+        let out = truncate(&content, TOOL_RESULT_TRUNCATE);
+        assert!(out.is_char_boundary(out.len()));
+        assert!(out.contains("truncated"));
     }
 
     #[test]
