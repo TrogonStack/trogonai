@@ -487,15 +487,22 @@ fn process_sse_line(
 
         if let Some(reason) = choice["finish_reason"].as_str() {
             if reason == "tool_calls" {
-                let mut calls: Vec<AssembledToolCall> = acc
+                let mut indexed: Vec<(usize, AssembledToolCall)> = acc
                     .drain()
-                    .map(|(_, p)| AssembledToolCall {
-                        id: p.id,
-                        name: p.name,
-                        arguments: p.arguments,
+                    .map(|(index, p)| {
+                        (
+                            index,
+                            AssembledToolCall {
+                                id: p.id,
+                                name: p.name,
+                                arguments: p.arguments,
+                            },
+                        )
                     })
                     .collect();
-                calls.sort_by_key(|c| c.id.clone());
+                indexed.sort_by_key(|(index, _)| *index);
+                let calls: Vec<AssembledToolCall> =
+                    indexed.into_iter().map(|(_, call)| call).collect();
                 pending.push_back(OpenRouterEvent::ToolCallsReady { calls });
             } else if !reason.is_empty() {
                 pending.push_back(OpenRouterEvent::Finished {
@@ -1105,6 +1112,24 @@ mod tests {
         match &events[0] {
             OpenRouterEvent::ToolCallsReady { calls } => {
                 assert!(calls.is_empty(), "empty accumulator must produce ToolCallsReady with no calls");
+            }
+            other => panic!("expected ToolCallsReady, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_parser_preserves_streaming_index_order_not_lexicographic_id() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"first","arguments":""}},{"index":1,"id":"call_10","type":"function","function":{"name":"second","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        match &events[0] {
+            OpenRouterEvent::ToolCallsReady { calls } => {
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id, "call_2");
+                assert_eq!(calls[0].name, "first");
+                assert_eq!(calls[1].id, "call_10");
+                assert_eq!(calls[1].name, "second");
             }
             other => panic!("expected ToolCallsReady, got {other:?}"),
         }

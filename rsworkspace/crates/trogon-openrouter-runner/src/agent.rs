@@ -164,7 +164,10 @@ fn context_window_tokens(model_id: &str) -> Option<u64> {
     if m.contains("o1") || m.contains("o3") || m.contains("o4") {
         return Some(200_000);
     }
-    if m.contains("gpt-4o") || m.contains("gpt-4-turbo") || m.contains("gpt-4-1") {
+    if m.contains("gpt-4.1") || m.contains("gpt-4-1") {
+        return Some(1_000_000);
+    }
+    if m.contains("gpt-4o") || m.contains("gpt-4-turbo") {
         return Some(128_000);
     }
     if m.contains("gpt-4") {
@@ -1979,7 +1982,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     }
                     OpenRouterEvent::ToolCallsReady { calls } => {
                         assembled_calls = calls;
-                        break;
+                        // Trailing Usage arrives after finish_reason:"tool_calls";
+                        // keep draining like Stop/Length so tokens are accounted.
+                        finished = true;
                     }
                     OpenRouterEvent::Usage {
                         prompt_tokens,
@@ -2012,6 +2017,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         // trailing [DONE]).
                         if finished {
                             drop(stream);
+                            if !assembled_calls.is_empty() {
+                                // Tool round: usage consumed; proceed to dispatch.
+                                break;
+                            }
                             // Auto-summary guarantee: ran tools but produced no
                             // text → nudge once for a recap, then loop again.
                             if tool_rounds > 0
@@ -2040,6 +2049,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterEvent::Finished { .. } => {}
                     OpenRouterEvent::Done => {
                         drop(stream);
+                        if !assembled_calls.is_empty() {
+                            break;
+                        }
                         // Auto-summary guarantee (see above): silent after tools → recap.
                         if tool_rounds > 0
                             && assistant_text.trim().is_empty()
@@ -2076,9 +2088,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 break StopReason::MaxTurnRequests;
             }
 
-            let tool_calls_msg = Message::assistant_tool_calls(&assembled_calls);
+            let mut tool_calls_msg = Message::assistant_tool_calls(&assembled_calls);
+            if !assistant_text.is_empty() {
+                tool_calls_msg.content = assistant_text.clone();
+            }
             messages.push(tool_calls_msg.clone());
             wire_messages.push(tool_calls_msg);
+            assistant_text.clear();
 
             let ctx = trogon_tools::ToolContext::new(
                 String::new(),
@@ -3734,7 +3750,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn partial_text_before_tool_calls_not_stored_in_history() {
+    async fn partial_text_before_tool_calls_is_stored_with_tool_calls_message() {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "thinking...".to_string() },
@@ -3754,13 +3770,12 @@ mod tests {
             agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
             let sessions = agent.sessions.lock().await;
             let history = &sessions.get(&sid.to_string()).unwrap().history;
-            assert!(
-                !history.iter().any(|m| m.content.contains("thinking")),
-                "partial text before tool_calls must not be stored as a history message"
-            );
-            assert!(
-                history.iter().any(|m| m.tool_calls.is_some()),
-                "tool_calls message must still be stored in history"
+            let tool_msg = history.iter()
+                .find(|m| m.tool_calls.is_some())
+                .expect("tool_calls message must be stored in history");
+            assert_eq!(
+                tool_msg.content, "thinking...",
+                "preamble text before tool_calls must be persisted on the assistant tool_calls message"
             );
         }).await;
     }
@@ -6556,6 +6571,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn usage_after_tool_calls_ready_is_accounted() {
+        // OpenRouter include_usage emits Usage AFTER finish_reason:"tool_calls".
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+            OpenRouterEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            },
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")])).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(
+                s.total_input_tokens, 30,
+                "trailing usage after tool_calls must be consumed before dispatch"
+            );
+            assert_eq!(s.total_output_tokens, 13);
+        }).await;
+    }
+
+    #[tokio::test]
     async fn list_sessions_exposes_token_totals_after_prompt() {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
@@ -6703,6 +6755,13 @@ mod tests {
     }
 
     // ── bash_extract_before_marker ────────────────────────────────────────────
+
+    #[test]
+    fn context_window_tokens_gpt_4_1_family_is_one_million() {
+        assert_eq!(context_window_tokens("openai/gpt-4.1"), Some(1_000_000));
+        assert_eq!(context_window_tokens("gpt-4.1-mini"), Some(1_000_000));
+        assert_ne!(context_window_tokens("openai/gpt-4.1"), Some(8_192));
+    }
 
     #[test]
     fn bash_extract_no_marker_returns_none() {
