@@ -377,6 +377,29 @@ impl Message {
             usage: None,
         }
     }
+
+    /// True when this is a user turn containing only `tool_result` blocks.
+    pub fn is_tool_result_only(&self) -> bool {
+        self.role == "user"
+            && !self.content.is_empty()
+            && self
+                .content
+                .iter()
+                .all(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    }
+}
+
+/// Index into `messages` where a trimmed slice may safely start.
+///
+/// Anthropic rejects histories that begin with orphan `tool_result` blocks
+/// (no preceding `tool_use`). After a naive cut, skip any leading
+/// tool-result-only user turns.
+fn trim_safe_start(messages: &[Message], naive_drop_count: usize) -> usize {
+    let mut start = naive_drop_count.min(messages.len());
+    while start < messages.len() && messages[start].is_tool_result_only() {
+        start += 1;
+    }
+    start
 }
 
 /// A single block within a message's `content` array.
@@ -396,6 +419,9 @@ pub enum ContentBlock {
         tool_use_id: String,
         content: String,
     },
+    /// Unrecognized block type from the API (e.g. `thinking`) — ignored.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Pair of tool-use ID and the string result to feed back to the model.
@@ -779,6 +805,7 @@ fn render_messages_for_summary(messages: &[Message]) -> String {
                     out.push_str(content);
                     out.push_str("\n\n");
                 }
+                ContentBlock::Unknown => {}
             }
         }
     }
@@ -1153,6 +1180,9 @@ impl AgentLoop {
         // (either via a checkpoint or a heartbeat). Initialised to now because
         // the promise was just claimed moments ago at the call site.
         let mut last_heartbeat_at = std::time::Instant::now();
+        let mut max_token_continuations = 0u32;
+        const MAX_TOKEN_CONTINUATIONS: u32 = 5;
+        let mut continuation_text = String::new();
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Agent loop iteration");
@@ -1395,7 +1425,7 @@ impl AgentLoop {
 
             match response.stop_reason.as_str() {
                 "end_turn" => {
-                    let text = response
+                    let mut text = response
                         .content
                         .iter()
                         .filter_map(|b| {
@@ -1407,6 +1437,13 @@ impl AgentLoop {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    if !continuation_text.is_empty() {
+                        if !text.is_empty() {
+                            continuation_text.push('\n');
+                        }
+                        continuation_text.push_str(&text);
+                        text = continuation_text.clone();
+                    }
 
                     info!(iterations = iteration + 1, "Agent completed");
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
@@ -1538,22 +1575,23 @@ impl AgentLoop {
                         while drop_count > 0 && messages[drop_count].role != "user" {
                             drop_count -= 1;
                         }
-                        if drop_count > 0 {
+                        let trim_start = trim_safe_start(&messages, drop_count);
+                        if trim_start > 0 && trim_start < messages.len() {
                             let summary = tokio::time::timeout(
                                 std::time::Duration::from_secs(30),
                                 summarize_dropped_messages(
                                     &*self.anthropic_client,
                                     &self.model,
-                                    &messages[..drop_count],
+                                    &messages[..trim_start],
                                 ),
                             )
                             .await
                             .unwrap_or_default();
                             messages = if summary.is_empty() {
-                                messages[drop_count..].to_vec()
+                                messages[trim_start..].to_vec()
                             } else {
                                 let mut v = summary;
-                                v.extend_from_slice(&messages[drop_count..]);
+                                v.extend_from_slice(&messages[trim_start..]);
                                 v
                             };
                             warn!(
@@ -1611,7 +1649,12 @@ impl AgentLoop {
                                     if keep >= messages.len() {
                                         continue; // divisor too small to reduce history
                                     }
-                                    p.messages = messages[messages.len() - keep..].to_vec();
+                                    let trim_start =
+                                        trim_safe_start(&messages, messages.len() - keep);
+                                    if trim_start >= messages.len() {
+                                        continue;
+                                    }
+                                    p.messages = messages[trim_start..].to_vec();
                                     let trimmed_len = serde_json::to_vec(p as &_)
                                         .map(|v| v.len())
                                         .unwrap_or(usize::MAX);
@@ -1622,7 +1665,8 @@ impl AgentLoop {
                                 }
                                 if let Some(keep) = trim_keep {
                                     let drop_count = messages.len() - keep;
-                                    // p.messages is already the plain trim (messages[drop_count..]).
+                                    let trim_start = trim_safe_start(&messages, drop_count);
+                                    // p.messages is already the plain trim (messages[trim_start..]).
                                     // Attempt to enrich with an LLM-generated summary of the dropped
                                     // messages so a crash-recovered run has semantic context.
                                     // Hard cap: summarization is best-effort —
@@ -1636,14 +1680,14 @@ impl AgentLoop {
                                         summarize_dropped_messages(
                                             &*self.anthropic_client,
                                             &self.model,
-                                            &messages[..drop_count],
+                                            &messages[..trim_start],
                                         ),
                                     )
                                     .await
                                     .unwrap_or_default();
                                     if !summary_pair.is_empty() {
                                         let mut with_summary = summary_pair;
-                                        with_summary.extend_from_slice(&messages[drop_count..]);
+                                        with_summary.extend_from_slice(&messages[trim_start..]);
                                         p.messages = with_summary;
                                         let summary_len = serde_json::to_vec(p as &_)
                                             .map(|v| v.len())
@@ -1659,7 +1703,7 @@ impl AgentLoop {
                                             );
                                         } else {
                                             // Summary + kept still over limit — revert to plain trim
-                                            p.messages = messages[drop_count..].to_vec();
+                                            p.messages = messages[trim_start..].to_vec();
                                             warn!(
                                                 promise_id = %pid,
                                                 original_messages = messages.len(),
@@ -1913,32 +1957,55 @@ impl AgentLoop {
                     }
                 }
                 "max_tokens" => {
-                    // Deterministic: the conversation has exceeded the model's
-                    // context window. The same history always hits max_tokens on
-                    // retry — mark PermanentFailed to stop cycling.
-                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
-                        if let Some((ref mut p, ref mut rev)) = checkpoint {
-                            write_promise_terminal(
-                                store.as_ref(),
-                                &self.tenant_id,
-                                pid,
-                                p,
-                                *rev,
-                                crate::promise_store::PromiseStatus::PermanentFailed,
-                                "max_tokens",
-                            )
-                            .await;
-                        } else {
-                            try_mark_permanent_failed_fresh(
-                                store.as_ref(),
-                                &self.tenant_id,
-                                pid,
-                                "max_tokens (checkpoint lost)",
-                            )
-                            .await;
+                    // Output hit the per-request `max_tokens` cap — not context-window
+                    // exhaustion (that surfaces as HTTP 400 on the request). Append the
+                    // partial assistant turn and continue generation.
+                    max_token_continuations += 1;
+                    if max_token_continuations > MAX_TOKEN_CONTINUATIONS {
+                        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                            if let Some((ref mut p, ref mut rev)) = checkpoint {
+                                write_promise_terminal(
+                                    store.as_ref(),
+                                    &self.tenant_id,
+                                    pid,
+                                    p,
+                                    *rev,
+                                    crate::promise_store::PromiseStatus::Failed,
+                                    "max_tokens continuation limit",
+                                )
+                                .await;
+                            }
                         }
+                        return Err(AgentError::UnexpectedStopReason(
+                            "max_tokens continuation limit exceeded".to_string(),
+                        ));
                     }
-                    return Err(AgentError::UnexpectedStopReason("max_tokens".to_string()));
+                    let partial_text: String = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !partial_text.is_empty() {
+                        if !continuation_text.is_empty() {
+                            continuation_text.push('\n');
+                        }
+                        continuation_text.push_str(&partial_text);
+                    }
+                    let mut assistant_msg = Message::assistant(response.content);
+                    assistant_msg.usage = response.usage;
+                    messages.push(assistant_msg);
+                    warn!(
+                        continuations = max_token_continuations,
+                        "Model output truncated at max_tokens — continuing generation"
+                    );
+                    continue;
                 }
                 other => {
                     // Unknown stop_reason: treat as transient (`Failed`) so
@@ -2426,6 +2493,49 @@ mod tests {
             ContentBlock::ToolResult { tool_use_id, content }
             if tool_use_id == "id1" && content == "output"
         ));
+    }
+
+    #[test]
+    fn message_is_tool_result_only_detects_tool_result_user_turn() {
+        let msg = Message::tool_results(vec![ToolResult {
+            tool_use_id: "tu1".to_string(),
+            content: "ok".to_string(),
+        }]);
+        assert!(msg.is_tool_result_only());
+        assert!(!Message::user_text("hello").is_tool_result_only());
+    }
+
+    #[test]
+    fn trim_safe_start_skips_leading_orphan_tool_results() {
+        let messages = vec![
+            Message::user_text("start"),
+            Message::assistant(vec![ContentBlock::ToolUse {
+                id: "tu1".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({}),
+            }]),
+            Message::tool_results(vec![ToolResult {
+                tool_use_id: "tu1".to_string(),
+                content: "file contents".to_string(),
+            }]),
+            Message::assistant(vec![ContentBlock::Text {
+                text: "done".to_string(),
+            }]),
+        ];
+        // Naive cut at index 2 would start on the orphan tool_result user turn.
+        let start = trim_safe_start(&messages, 2);
+        assert_eq!(start, 3, "trim must skip orphan tool_result-only user turn");
+        assert!(
+            !messages[start].is_tool_result_only(),
+            "kept slice must begin on a non-tool_result user turn or assistant turn"
+        );
+    }
+
+    #[test]
+    fn content_block_unknown_deserializes_tolerant() {
+        let raw = serde_json::json!({"type": "thinking", "thinking": "hmm"});
+        let block: ContentBlock = serde_json::from_value(raw).unwrap();
+        assert!(matches!(block, ContentBlock::Unknown));
     }
 
     #[test]
