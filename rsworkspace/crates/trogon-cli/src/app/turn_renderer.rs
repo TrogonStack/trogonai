@@ -95,7 +95,10 @@ impl TurnRenderer {
 
     pub fn on_ctrl_c(&mut self) {
         self.flush_pill();
-        eprintln!("\n[cancelled]");
+        // In-progress feedback only — the confirming "[cancelled]" is printed when
+        // the runner's terminal Done("cancelled") arrives (see handle()). Asserting
+        // "[cancelled]" here would claim the turn stopped before it is confirmed.
+        eprintln!("\n[cancelling…]");
     }
 
     pub fn handle(&mut self, event: StreamEvent, metrics: &mut TurnMetrics) -> Option<CwdSync> {

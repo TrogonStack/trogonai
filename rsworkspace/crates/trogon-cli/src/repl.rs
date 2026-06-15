@@ -1110,8 +1110,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if cmd == "/init" {
                         let force = arg == "--force";
-                        let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
-                        let dest = root.join("TROGON.md");
+                        // BUG-CLI-2: write to the current directory, not the git root.
+                        // The init session runs in `cwd` (see create_session below), so
+                        // targeting `cwd` keeps the CLI's write/check path consistent with
+                        // where the model writes if it uses write_file, and matches the
+                        // directory the user ran `/init` from. `load_trogon_md` reads the
+                        // whole hierarchy upward from `cwd`, so a cwd-local file is picked
+                        // up as the most-specific layer.
+                        let dest = cwd.join("TROGON.md");
                         if fs.read_to_string(&dest).is_ok() && !force {
                             println!(
                                 "TROGON.md already exists at {}\nRun \x1b[35m/init --force\x1b[0m to overwrite.",
@@ -1119,7 +1125,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             );
                         } else {
                             eprintln!("analyzing project with AI...");
-                            let prompt = build_init_prompt(&root, &fs);
+                            let prompt = build_init_prompt(&cwd, &fs);
                             match factory.create_session(&init_prefix, cwd.clone(), vec![]).await {
                                 Err(e) => eprintln!("error creating init session: {e}"),
                                 Ok(init_session) => {
@@ -1289,6 +1295,45 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 _ = &mut ctrl_c => {
                                     session.cancel().await;
                                     renderer.on_ctrl_c();
+                                    // BUG-CLI-3: cancel() is fire-and-forget. Returning to the
+                                    // prompt now would claim the turn stopped before the runner
+                                    // confirms. Keep draining the stream until the runner's
+                                    // terminal event arrives — it aborts the in-flight turn and
+                                    // emits Done("cancelled") (which handle() renders as the
+                                    // confirming "[cancelled]"). A second Ctrl+C or a bounded
+                                    // timeout forces an early return with a warning so the user
+                                    // is never told the runner stopped when it may still be working.
+                                    let mut confirmed = false;
+                                    {
+                                        let second_ctrl_c = tokio::signal::ctrl_c();
+                                        tokio::pin!(second_ctrl_c);
+                                        let ack_deadline =
+                                            tokio::time::sleep(std::time::Duration::from_secs(3));
+                                        tokio::pin!(ack_deadline);
+                                        loop {
+                                            tokio::select! {
+                                                biased;
+                                                _ = &mut second_ctrl_c => break,
+                                                _ = &mut ack_deadline => break,
+                                                event = rx.recv() => match event {
+                                                    None => break,
+                                                    Some(ev) => {
+                                                        let _ = renderer.handle(ev, &mut metrics);
+                                                        if renderer.is_stopped() {
+                                                            confirmed = true;
+                                                            break;
+                                                        }
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    }
+                                    if !confirmed {
+                                        reset_display();
+                                        eprintln!(
+                                            "\x1b[33mwarning: cancellation not confirmed — the runner may still be working\x1b[0m"
+                                        );
+                                    }
                                     // Claude-style: restore the interrupted prompt so the
                                     // next readline is pre-filled with it, ready to edit/resend.
                                     pending_input = Some(line.clone());
@@ -2763,18 +2808,6 @@ fn strip_code_fence(s: &str) -> String {
     inner.to_string()
 }
 
-fn find_git_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
-    loop {
-        if dir.join(".git").exists() {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
-}
-
 fn detect_languages(root: &Path) -> Vec<&'static str> {
     const INDICATORS: &[(&str, &str)] = &[
         ("Cargo.toml", "Rust"),
@@ -3656,40 +3689,6 @@ mod tests {
     #[test]
     fn strip_code_fence_empty_string() {
         assert_eq!(strip_code_fence(""), "");
-    }
-
-    // ── find_git_root ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn find_git_root_returns_none_when_no_git_dir() {
-        let dir = std::env::temp_dir().join("trogon_no_git");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(find_git_root(&dir).is_none());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn find_git_root_finds_direct_git_dir() {
-        let dir = std::env::temp_dir().join("trogon_has_git");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::create_dir_all(dir.join(".git")).unwrap();
-        let root = find_git_root(&dir);
-        assert_eq!(root, Some(dir.clone()));
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn find_git_root_traverses_up_to_git_dir() {
-        let base = std::env::temp_dir().join("trogon_git_traverse");
-        let child = base.join("a").join("b").join("c");
-        std::fs::remove_dir_all(&base).ok();
-        std::fs::create_dir_all(&child).unwrap();
-        std::fs::create_dir_all(base.join(".git")).unwrap();
-        let root = find_git_root(&child);
-        assert_eq!(root, Some(base.clone()));
-        std::fs::remove_dir_all(&base).ok();
     }
 
     // ── detect_languages ──────────────────────────────────────────────────────
