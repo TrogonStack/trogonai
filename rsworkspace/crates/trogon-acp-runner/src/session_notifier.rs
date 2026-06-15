@@ -8,6 +8,33 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::StreamExt;
 
+/// Cancel signal scoped to a single prompt. Dropping aborts the NATS forwarder task.
+pub struct CancelSubscription {
+    rx: tokio::sync::oneshot::Receiver<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl CancelSubscription {
+    pub fn receiver_mut(&mut self) -> &mut tokio::sync::oneshot::Receiver<()> {
+        &mut self.rx
+    }
+
+    /// Build a subscription for tests that supply their own oneshot receiver.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn from_receiver(rx: tokio::sync::oneshot::Receiver<()>) -> Self {
+        Self {
+            rx,
+            task: tokio::task::spawn_local(async {}),
+        }
+    }
+}
+
+impl Drop for CancelSubscription {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 /// Publishes ACP `SessionNotification` messages during a prompt run.
 ///
 /// The real implementation delegates to `NatsClientProxy`; the test mock
@@ -44,7 +71,7 @@ pub trait SessionNotifier: Clone {
     async fn subscribe_cancel(
         &self,
         subject: String,
-    ) -> Option<tokio::sync::oneshot::Receiver<()>>;
+    ) -> Option<CancelSubscription>;
 
     /// Subscribe to `subject` for mid-turn steer messages.
     ///
@@ -98,18 +125,18 @@ impl SessionNotifier for NatsSessionNotifier {
     async fn subscribe_cancel(
         &self,
         subject: String,
-    ) -> Option<tokio::sync::oneshot::Receiver<()>> {
+    ) -> Option<CancelSubscription> {
         let mut sub = match self.client.subscribe(subject).await {
             Ok(s) => s,
             Err(_) => return None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
-        tokio::task::spawn_local(async move {
+        let task = tokio::task::spawn_local(async move {
             if sub.next().await.is_some() {
                 let _ = tx.send(());
             }
         });
-        Some(rx)
+        Some(CancelSubscription { rx, task })
     }
 
     async fn subscribe_steer(
@@ -275,10 +302,10 @@ pub mod mock {
             self.published.lock().unwrap().push((subject, payload));
         }
 
-        async fn subscribe_cancel(&self, _subject: String) -> Option<oneshot::Receiver<()>> {
+        async fn subscribe_cancel(&self, _subject: String) -> Option<CancelSubscription> {
             let (tx, rx) = oneshot::channel();
             *self.cancel_tx.lock().unwrap() = Some(tx);
-            Some(rx)
+            Some(CancelSubscription::from_receiver(rx))
         }
 
         async fn subscribe_steer(
@@ -327,6 +354,7 @@ pub mod mock {
 #[cfg(all(test, feature = "test-helpers"))]
 mod tests {
     use bytes::Bytes;
+    use super::CancelSubscription;
     use super::SessionNotifier as _;
     use super::mock::MockSessionNotifier;
 
@@ -355,11 +383,32 @@ mod tests {
     #[tokio::test]
     async fn subscribe_cancel_and_trigger_fires_receiver() {
         let notifier = MockSessionNotifier::new();
-        let rx = notifier.subscribe_cancel("cancel.subj".into()).await;
-        assert!(rx.is_some(), "subscribe_cancel must return Some");
-        let rx = rx.unwrap();
+        let mut sub = notifier.subscribe_cancel("cancel.subj".into()).await;
+        assert!(sub.is_some(), "subscribe_cancel must return Some");
+        let mut sub = sub.unwrap();
         notifier.trigger_cancel();
-        rx.await.expect("cancel receiver must fire after trigger_cancel");
+        sub.receiver_mut()
+            .await
+            .expect("cancel receiver must fire after trigger_cancel");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancel_subscription_abort_on_drop() {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::task::spawn_local(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            let _ = done_tx.send(());
+        });
+        let sub = CancelSubscription {
+            rx: tokio::sync::oneshot::channel().1,
+            task,
+        };
+        drop(sub);
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(
+            done_rx.try_recv().is_err(),
+            "forwarder task must be aborted when CancelSubscription is dropped"
+        );
     }
 
     #[tokio::test]
