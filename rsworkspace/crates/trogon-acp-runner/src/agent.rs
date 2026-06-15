@@ -30,10 +30,10 @@ use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
 use trogon_runner_tools::egress::EgressPolicy;
 use trogon_runner_tools::permission_rules::PermissionRules;
 use crate::prompt_converter::PromptEventConverter;
-use crate::session_notifier::{AccumulatingPromptClient, PromptEventClient, SessionNotifier};
+use crate::session_notifier::{AccumulatingPromptClient, CancelSubscription, PromptEventClient, SessionNotifier};
 use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
 use trogon_runner_tools::build_mode_permission_checker;
-use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601};
+use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionState, SessionStore, append_audit_entries, now_iso8601};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 use trogon_runner_tools::CompactError;
@@ -120,6 +120,13 @@ fn user_message_from_request(req: &PromptRequest) -> Message {
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
+}
+
+fn invalid_session_id(e: acp_nats::session_id::SessionIdError) -> Error {
+    Error::new(
+        ErrorCode::InvalidParams.into(),
+        format!("Invalid session ID: {e}"),
+    )
 }
 
 /// Estimates the token count of a message list using the heuristic `bytes / 4`.
@@ -417,11 +424,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn publish_session_ready(&self, session_id: &str) {
-        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+    async fn publish_session_ready(
+        &self,
+        session_id: &str,
+    ) -> agent_client_protocol::Result<()> {
+        let acp_prefix = self.make_acp_prefix()?;
+        let acp_session_id = AcpSessionId::new(session_id).map_err(invalid_session_id)?;
         let subject = session_subjects::agent::ExtReadySubject::new(
             &acp_prefix,
-            &AcpSessionId::new(session_id).expect("valid session_id"),
+            &acp_session_id,
         )
         .to_string();
         let message = ExtSessionReady::new(SessionId::from(session_id.to_owned()));
@@ -433,13 +444,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 warn!(error = %e, "agent: failed to serialize session.ready");
             }
         }
+        Ok(())
     }
 
     fn make_acp_session_id(
         &self,
         session_id: &agent_client_protocol::SessionId,
     ) -> agent_client_protocol::Result<AcpSessionId> {
-        AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))
+        AcpSessionId::try_from(session_id).map_err(invalid_session_id)
     }
 
     fn make_acp_prefix(&self) -> agent_client_protocol::Result<AcpPrefix> {
@@ -635,13 +647,73 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
     }
 
+    /// Reload the latest persisted session and merge only the fields owned by this prompt.
+    #[cfg_attr(coverage, coverage(off))]
+    async fn save_prompt_state_merged(
+        &self,
+        session_id: &str,
+        prompt_state: &SessionState,
+        orig_cwd: &str,
+        orig_mode: &str,
+        updated_messages: Vec<Message>,
+        last_input_tokens: u32,
+        last_output_tokens: u32,
+        last_cache_creation_tokens: u32,
+        last_cache_read_tokens: u32,
+        audit_buf: &AuditBuf,
+    ) {
+        let prompt_title = prompt_state.title.clone();
+        let cwd_changed = prompt_state.cwd != orig_cwd;
+        let mode_changed = prompt_state.mode != orig_mode;
+        let prompt_cwd = prompt_state.cwd.clone();
+        let prompt_terminal_cwd = prompt_state.terminal_cwd.clone();
+        let prompt_mode = prompt_state.mode.clone();
+
+        let mut merged = match self.store.load(session_id).await {
+            Ok(fresh) => fresh,
+            Err(_) => prompt_state.clone(),
+        };
+        merged.messages = updated_messages;
+        merged.updated_at = now_iso8601();
+        if !prompt_title.is_empty() {
+            merged.title = prompt_title;
+        }
+        if cwd_changed {
+            merged.cwd = prompt_cwd;
+            merged.terminal_cwd = prompt_terminal_cwd;
+        }
+        if mode_changed {
+            merged.mode = prompt_mode;
+        }
+        merged.total_input_tokens = merged
+            .total_input_tokens
+            .saturating_add(last_input_tokens as u64);
+        merged.total_output_tokens = merged
+            .total_output_tokens
+            .saturating_add(last_output_tokens as u64);
+        merged.total_cache_creation_tokens = merged
+            .total_cache_creation_tokens
+            .saturating_add(last_cache_creation_tokens as u64);
+        merged.total_cache_read_tokens = merged
+            .total_cache_read_tokens
+            .saturating_add(last_cache_read_tokens as u64);
+        let new_entries = audit_buf
+            .lock()
+            .map(|mut g| g.drain(..).collect::<Vec<_>>())
+            .unwrap_or_default();
+        append_audit_entries(&mut merged.audit_log, new_entries);
+        if let Err(e) = self.store.save(session_id, &merged).await {
+            warn!(session_id, error = %e, "agent: failed to save session");
+        }
+    }
+
     /// Core prompt execution. Streams events via `prompt_client` and returns the final response.
     #[cfg_attr(coverage, coverage(off))]
     async fn run_prompt(
         &self,
         req: &PromptRequest,
         prompt_client: &dyn PromptEventClient,
-        cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+        mut cancel_sub: Option<CancelSubscription>,
         steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
     ) -> agent_client_protocol::Result<PromptResponse> {
         use acp_nats::prompt_event::PromptEvent;
@@ -979,12 +1051,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let mut last_cache_creation_tokens: u32 = 0;
         let mut last_cache_read_tokens: u32 = 0;
         let mut tool_name_by_id: HashMap<String, String> = HashMap::new();
-        let mut cancel_rx = cancel_rx;
 
         loop {
             let cancel_fut = async {
-                match cancel_rx.as_mut() {
-                    Some(rx) => { let _ = rx.await; }
+                match cancel_sub.as_mut().map(CancelSubscription::receiver_mut) {
+                    Some(rx) => {
+                        let _ = rx.await;
+                    }
                     None => std::future::pending().await,
                 }
             };
@@ -1121,13 +1194,6 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
-                                        state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
-                                        state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
-                                        state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
-                                        state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
-                                        if let Err(e) = self.store.save(&session_id, &state).await {
-                                            warn!(session_id, error = %e, "agent: failed to save token usage on max_iterations");
-                                        }
                                         publish_via_converter(
                                             prompt_client,
                                             &mut converter,
@@ -1140,18 +1206,24 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                             },
                                         )
                                         .await;
+                                        self.save_prompt_state_merged(
+                                            &session_id,
+                                            &state,
+                                            &orig_cwd,
+                                            &orig_mode,
+                                            state.messages.clone(),
+                                            last_input_tokens,
+                                            last_output_tokens,
+                                            last_cache_creation_tokens,
+                                            last_cache_read_tokens,
+                                            &audit_buf,
+                                        )
+                                        .await;
                                     }
                                     return Ok(PromptResponse::new(StopReason::MaxTurnRequests));
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
-                                        state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
-                                        state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
-                                        state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
-                                        state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
-                                        if let Err(e) = self.store.save(&session_id, &state).await {
-                                            warn!(session_id, error = %e, "agent: failed to save token usage on max_tokens");
-                                        }
                                         publish_via_converter(
                                             prompt_client,
                                             &mut converter,
@@ -1162,6 +1234,19 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                                 cache_read_tokens: last_cache_read_tokens,
                                                 context_window,
                                             },
+                                        )
+                                        .await;
+                                        self.save_prompt_state_merged(
+                                            &session_id,
+                                            &state,
+                                            &orig_cwd,
+                                            &orig_mode,
+                                            state.messages.clone(),
+                                            last_input_tokens,
+                                            last_output_tokens,
+                                            last_cache_creation_tokens,
+                                            last_cache_read_tokens,
+                                            &audit_buf,
                                         )
                                         .await;
                                     }
@@ -1259,54 +1344,19 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         if let Some(updated) = final_messages {
-            // MED-17: compaction and the turn itself are long; meanwhile other ops
-            // write the session KV (permission bridge → allowed_tools, bash →
-            // terminal_id, todo_write → todos, set_session_model/config → model/
-            // config, load_session → mcp_servers, …). The old code only merged
-            // allowed_tools/terminal_id back, so every other concurrent write was
-            // clobbered by this save. Instead, start from the freshest persisted
-            // state and re-apply ONLY the fields this prompt owns.
-            let prompt_title = state.title.clone();
-            let cwd_changed = state.cwd != orig_cwd;
-            let mode_changed = state.mode != orig_mode;
-            let prompt_cwd = state.cwd.clone();
-            let prompt_terminal_cwd = state.terminal_cwd.clone();
-            let prompt_mode = state.mode.clone();
-
-            let mut merged = match self.store.load(&session_id).await {
-                Ok(fresh) => fresh,
-                // Reload failed — fall back to the in-memory state we already hold.
-                Err(_) => state,
-            };
-            merged.messages = updated;
-            merged.updated_at = now_iso8601();
-            // The prompt assigns the title on the first turn; carry it if set.
-            if !prompt_title.is_empty() {
-                merged.title = prompt_title;
-            }
-            // change_directory during the turn updates cwd + clears terminal_cwd.
-            if cwd_changed {
-                merged.cwd = prompt_cwd;
-                merged.terminal_cwd = prompt_terminal_cwd;
-            }
-            // ExitPlanMode flow flips mode to "plan" mid-turn.
-            if mode_changed {
-                merged.mode = prompt_mode;
-            }
-            // Accumulate this turn's token usage onto the reloaded `merged` state
-            // (the value actually persisted below), preserving prior totals.
-            merged.total_input_tokens = merged.total_input_tokens.saturating_add(last_input_tokens as u64);
-            merged.total_output_tokens = merged.total_output_tokens.saturating_add(last_output_tokens as u64);
-            merged.total_cache_creation_tokens = merged.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
-            merged.total_cache_read_tokens = merged.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
-            let new_entries = audit_buf
-                .lock()
-                .map(|mut g| g.drain(..).collect::<Vec<_>>())
-                .unwrap_or_default();
-            append_audit_entries(&mut merged.audit_log, new_entries);
-            if let Err(e) = self.store.save(&session_id, &merged).await {
-                warn!(session_id, error = %e, "agent: failed to save session");
-            }
+            self.save_prompt_state_merged(
+                &session_id,
+                &state,
+                &orig_cwd,
+                &orig_mode,
+                updated,
+                last_input_tokens,
+                last_output_tokens,
+                last_cache_creation_tokens,
+                last_cache_read_tokens,
+                &audit_buf,
+            )
+            .await;
         }
 
         Ok(PromptResponse::new(if cancelled {
@@ -1481,7 +1531,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let response = NewSessionResponse::new(session_id.clone())
             .modes(self.session_mode_state(&state.mode))
             .models(self.session_model_state(state.model.as_deref()));
-        self.publish_session_ready(&session_id).await;
+        self.publish_session_ready(&session_id).await?;
         Ok(response)
     }
 
@@ -1491,6 +1541,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
+        self.make_acp_session_id(&req.session_id)?;
         let mut state = self.store.load(&session_id).await.unwrap_or_default();
         let mut needs_save = false;
         let new_cwd = req.cwd.to_string_lossy().into_owned();
@@ -1518,7 +1569,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let response = LoadSessionResponse::new()
             .modes(self.session_mode_state(&state.mode))
             .models(self.session_model_state(state.model.as_deref()));
-        self.publish_session_ready(&session_id).await;
+        self.publish_session_ready(&session_id).await?;
         Ok(response)
     }
 
@@ -1762,7 +1813,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             warn!(new_id, error = %e, "agent: failed to save forked session");
         }
 
-        self.publish_session_ready(&new_id).await;
+        self.publish_session_ready(&new_id).await?;
         Ok(ForkSessionResponse::new(new_id))
     }
 
@@ -1772,7 +1823,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: ResumeSessionRequest,
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
-        self.publish_session_ready(&session_id).await;
+        self.make_acp_session_id(&req.session_id)?;
+        self.publish_session_ready(&session_id).await?;
         Ok(ResumeSessionResponse::new())
     }
 
@@ -1784,10 +1836,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let session_id = req.session_id.to_string();
 
         // Cancel any running prompt for this session.
-        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let acp_prefix = self.make_acp_prefix()?;
+        let acp_session_id = self.make_acp_session_id(&req.session_id)?;
         let cancel_subject = session_subjects::agent::CancelSubject::new(
             &acp_prefix,
-            &AcpSessionId::new(&session_id).expect("valid session_id"),
+            &acp_session_id,
         )
         .to_string();
         let cancel_payload = serde_json::to_vec(
@@ -1828,15 +1881,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let acp_session_id = self.make_acp_session_id(&req.session_id)?;
         let cancel_subject = session_subjects::agent::CancelSubject::new(
             &acp_prefix,
-            &AcpSessionId::new(&session_id).expect("valid session_id"),
+            &acp_session_id,
         )
         .to_string();
 
-        let cancel_rx = self.notifier.subscribe_cancel(cancel_subject).await;
+        let cancel_sub = self.notifier.subscribe_cancel(cancel_subject).await;
 
         let steer_subject = session_subjects::agent::SteerSubject::new(
             &acp_prefix,
-            &AcpSessionId::new(&session_id).expect("valid session_id"),
+            &acp_session_id,
         )
         .to_string();
         let steer_rx = self.notifier.subscribe_steer(steer_subject).await;
@@ -1845,7 +1898,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .notifier
             .make_prompt_client(acp_session_id, acp_prefix);
 
-        self.run_prompt(&req, &*prompt_client, cancel_rx, steer_rx).await
+        self.run_prompt(&req, &*prompt_client, cancel_sub, steer_rx).await
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -1853,11 +1906,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         &self,
         req: CancelNotification,
     ) -> agent_client_protocol::Result<()> {
-        let session_id = req.session_id.to_string();
-        let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
+        let acp_prefix = self.make_acp_prefix()?;
+        let acp_session_id = self.make_acp_session_id(&req.session_id)?;
         let subject = session_subjects::agent::CancelSubject::new(
             &acp_prefix,
-            &AcpSessionId::new(&session_id).expect("valid session_id"),
+            &acp_session_id,
         )
         .to_string();
         self.notifier.publish(subject, Bytes::new()).await;
@@ -2284,7 +2337,12 @@ mod tests {
                     let _ = cancel_tx.send(());
                 };
                 let (resp, ()) = tokio::join!(
-                    agent.run_prompt(&req, &*prompt_client, Some(cancel_rx), Some(steer_rx)),
+                    agent.run_prompt(
+                        &req,
+                        &*prompt_client,
+                        Some(CancelSubscription::from_receiver(cancel_rx)),
+                        Some(steer_rx),
+                    ),
                     canceller,
                 );
                 let resp = resp.expect("run_prompt must return Ok on cancel");
@@ -2377,7 +2435,12 @@ mod tests {
                     let _ = cancel_tx.send(());
                 };
                 let (resp, ()) = tokio::join!(
-                    agent.run_prompt(&req, &*prompt_client, Some(cancel_rx), Some(steer_rx)),
+                    agent.run_prompt(
+                        &req,
+                        &*prompt_client,
+                        Some(CancelSubscription::from_receiver(cancel_rx)),
+                        Some(steer_rx),
+                    ),
                     canceller,
                 );
                 assert!(matches!(
@@ -2986,7 +3049,14 @@ mod tests {
         local.run_until(async move {
             let handle = tokio::task::spawn_local(async move {
                 let client = crate::session_notifier::mock::NullPromptEventClient;
-                agent_clone.run_prompt(&req, &client, Some(cancel_rx), None).await
+                agent_clone
+                    .run_prompt(
+                        &req,
+                        &client,
+                        Some(CancelSubscription::from_receiver(cancel_rx)),
+                        None,
+                    )
+                    .await
             });
             started.notified().await;
             let _ = cancel_tx.send(());
@@ -3526,5 +3596,136 @@ mod tests {
         let offered = runner.captured_chat_tools();
         assert!(offered.contains(&"read_file".to_string()));
         assert!(offered.contains(&"write_file".to_string()));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancel_rejects_invalid_session_id() {
+        use agent_client_protocol::CancelNotification;
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            MemorySessionStore::new(),
+            crate::agent_runner::mock::MockAgentRunner::new("claude-test"),
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let err = agent
+            .cancel(CancelNotification::new("invalid.session.id"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+        assert!(err.to_string().contains("Invalid session ID"));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn max_iterations_save_preserves_concurrent_store_writes() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use agent_client_protocol::PromptRequest;
+        use async_trait::async_trait;
+        use trogon_agent_core::agent_loop::{AgentError, AgentEvent};
+        use trogon_runner_tools::session_store::{SessionState, SessionStore, mock::MemorySessionStore};
+
+        #[derive(Clone)]
+        struct SplitLoadStore {
+            inner: MemorySessionStore,
+            loads: Arc<AtomicUsize>,
+        }
+
+        #[async_trait]
+        impl SessionStore for SplitLoadStore {
+            async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
+                let n = self.loads.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    Ok(SessionState {
+                        model: Some("stale-model".into()),
+                        ..Default::default()
+                    })
+                } else {
+                    self.inner.load(session_id).await
+                }
+            }
+
+            async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
+                self.inner.save(session_id, state).await
+            }
+
+            async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
+                self.inner.delete(session_id).await
+            }
+
+            async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+                self.inner.list_ids().await
+            }
+
+            async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>> {
+                self.inner.list_children(parent_id).await
+            }
+        }
+
+        let inner = MemorySessionStore::new();
+        inner
+            .save(
+                "s1",
+                &SessionState {
+                    model: Some("concurrent-model".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let store = SplitLoadStore {
+            inner: inner.clone(),
+            loads: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            }])
+            .with_error(AgentError::MaxIterationsReached);
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        let saved = inner.load("s1").await.unwrap();
+        assert_eq!(
+            saved.model.as_deref(),
+            Some("concurrent-model"),
+            "merge save must not clobber concurrent model update"
+        );
+        assert_eq!(saved.total_input_tokens, 10);
+        assert_eq!(saved.total_output_tokens, 5);
     }
 }

@@ -99,9 +99,10 @@ impl PromptEventConverter {
                 context_window,
                 ..
             } => {
-                let used =
-                    (input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens)
-                        as u64;
+                let used = input_tokens as u64
+                    + cache_creation_tokens as u64
+                    + cache_read_tokens as u64
+                    + output_tokens as u64;
                 let size = context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW);
                 let notif = self.notif(SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)));
                 (vec![notif], None)
@@ -768,6 +769,25 @@ mod tests {
             }
         }
         panic!("no UsageUpdate notification found");
+    }
+
+    /// Token sums widen to u64 before adding so large counts cannot wrap in u32.
+    #[test]
+    fn usage_update_sums_token_counts_in_u64() {
+        let mut c = make_converter();
+        let (notifs, _) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: u32::MAX - 5,
+            output_tokens: 3,
+            cache_creation_tokens: 2,
+            cache_read_tokens: 4,
+            context_window: Some(200_000),
+        });
+        let u = extract_usage(notifs);
+        assert_eq!(
+            u.used,
+            (u32::MAX - 5) as u64 + 3 + 2 + 4,
+            "used must be computed at u64 width"
+        );
     }
 
     /// `used` is the sum of all four token types.
