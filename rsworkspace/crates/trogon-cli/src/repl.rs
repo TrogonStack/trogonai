@@ -9,6 +9,10 @@ use crate::session::{CompactResult, PromptOpts, Session, SessionFactory, StreamE
 use crate::session_rewind::{
     RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns,
 };
+use crate::session_transcript::{
+    format_history_list, format_import_summary, resolve_export_path, resolve_import_path,
+    write_export_file,
+};
 use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
 use crate::transcript::SessionTranscriptRecorder;
@@ -1018,6 +1022,24 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         match handle_rewind_command(&session, &mut rewind_state, arg).await {
                             Ok(msg) => println!("{msg}"),
                             Err(RewindError::ListRequested) => println!("{}", rewind_state.list_checkpoints()),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/export" {
+                        match handle_export_command(&session, arg, &cwd, &fs).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/history" {
+                        match handle_history_command(&session).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/import" {
+                        match handle_import_command(&session, arg, &cwd, &fs).await {
+                            Ok(msg) => {
+                                println!("{msg}");
+                                rewind_state.reset();
+                            }
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else if cmd == "/review" {
@@ -2225,6 +2247,41 @@ async fn handle_rewind_command<S: Session>(
     ))
 }
 
+async fn handle_export_command<S: Session, F: Fs>(
+    session: &S,
+    arg: &str,
+    cwd: &Path,
+    fs: &F,
+) -> Result<String, String> {
+    let json = session.export_history().await.map_err(|e| e.to_string())?;
+    let path = resolve_export_path(arg, session.session_id(), cwd);
+    write_export_file(&path, &json, fs)?;
+    Ok(format!("exported session to {}", path.display()))
+}
+
+async fn handle_history_command<S: Session>(session: &S) -> Result<String, String> {
+    let json = session.export_history().await.map_err(|e| e.to_string())?;
+    format_history_list(&json)
+}
+
+async fn handle_import_command<S: Session, F: Fs>(
+    session: &S,
+    arg: &str,
+    cwd: &Path,
+    fs: &F,
+) -> Result<String, String> {
+    let path = resolve_import_path(arg, cwd)?;
+    let json = fs
+        .read_to_string(&path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let summary = format_import_summary(&json)?;
+    session
+        .import_history(json.trim())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format!("{summary}\nhistory loaded into current session"))
+}
+
 // ── new slash-command helpers ───────────────────────────────────────────────────
 
 /// Describe how the current permission mode gates each tool category — i.e. which
@@ -2353,6 +2410,9 @@ Commands:
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
   {m}/checkpoint{r} [name]  save conversation state at the current turn
   {m}/rewind{r} [name|N]    restore to a checkpoint or back N turns  |  {m}/rewind{r} lists checkpoints
+  {m}/export{r} [path]      write session transcript to JSON (default: ~/.local/share/trogon/exports/)
+  {m}/history{r}            list messages in the current session (read-only)
+  {m}/import{r} <path>      load a previously exported transcript into this session
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
@@ -2460,6 +2520,10 @@ Ctrl+D    quit");
 
         "/rewind" | "/checkpoint" => {
             "use /checkpoint and /rewind in the REPL — they need the live session".to_string()
+        }
+
+        "/export" | "/history" | "/import" => {
+            "use /export, /history, and /import in the REPL — they need the live session".to_string()
         }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
@@ -3409,6 +3473,9 @@ mod tests {
         assert!(out.contains("/sessions"));
         assert!(out.contains("/resume"));
         assert!(out.contains("/compact"));
+        assert!(out.contains("/export"));
+        assert!(out.contains("/history"));
+        assert!(out.contains("/import"));
         assert!(out.contains("/config"));
         assert!(out.contains("/model"));
         assert!(out.contains("/doctor"));
@@ -3650,7 +3717,7 @@ mod tests {
     #[test]
     fn informational_commands_are_recognised_not_unknown() {
         let fs = MockFs::new();
-        for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/release-notes", "/bug"] {
+        for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/export", "/history", "/import", "/release-notes", "/bug"] {
             let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
             assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
             assert!(!out.is_empty());
@@ -3670,6 +3737,9 @@ mod tests {
             "/bug",
             "/checkpoint",
             "/rewind",
+            "/export",
+            "/history",
+            "/import",
         ] {
             assert!(out.contains(c), "/help must mention {c}");
         }
@@ -4495,5 +4565,57 @@ mod tests {
         assert!(matches!(err, RewindError::ListRequested));
         let listed = rewind_state.list_checkpoints();
         assert!(listed.contains("alpha"));
+    }
+
+    // ── /export, /history, /import ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn export_command_writes_session_export_json() {
+        use crate::session::mock::MockSession;
+
+        let fs = MockFs::new();
+        let session = MockSession::new("sess-export");
+        let payload = r#"[{"role":"user","text":"persist me"}]"#;
+        session.set_exported_history(payload);
+
+        let msg = handle_export_command(&session, "out.json", Path::new("/tmp"), &fs)
+            .await
+            .unwrap();
+        assert!(msg.contains("/tmp/out.json"));
+        let written = fs.read_to_string(Path::new("/tmp/out.json")).unwrap();
+        assert_eq!(written, payload);
+    }
+
+    #[tokio::test]
+    async fn history_command_formats_exported_messages() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        session.set_exported_history(
+            r#"[{"role":"user","text":"hello"},{"role":"assistant","text":"world"}]"#,
+        );
+
+        let out = handle_history_command(&session).await.unwrap();
+        assert!(out.contains("user"));
+        assert!(out.contains("hello"));
+        assert!(out.contains("assistant"));
+        assert!(out.contains("world"));
+    }
+
+    #[tokio::test]
+    async fn import_command_loads_valid_export_and_calls_session_import() {
+        use crate::session::mock::MockSession;
+
+        let fs = MockFs::new();
+        let payload = r#"[{"role":"user","text":"from file"}]"#;
+        fs.write(Path::new("/tmp/import.json"), payload.as_bytes()).unwrap();
+        let session = MockSession::new("sess-1");
+
+        let msg = handle_import_command(&session, "/tmp/import.json", Path::new("/"), &fs)
+            .await
+            .unwrap();
+        assert!(msg.contains("1 messages"));
+        assert!(msg.contains("history loaded"));
+        assert_eq!(session.imported_history(), vec![payload]);
     }
 }
