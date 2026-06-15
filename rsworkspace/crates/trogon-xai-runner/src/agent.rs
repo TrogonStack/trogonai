@@ -227,11 +227,50 @@ fn parse_bash_cd(command: &str) -> Option<&str> {
     if trimmed == "cd" {
         return Some("");
     }
-    let rest = trimmed.strip_prefix("cd ")?;
-    if rest.contains(';') || rest.contains('|') || rest.contains('\n') {
+    let after_cd = trimmed.strip_prefix("cd")?;
+    if !after_cd.is_empty() && !after_cd.starts_with(char::is_whitespace) {
         return None;
     }
-    Some(rest.trim())
+    let rest = after_cd.trim_start();
+    if bash_cd_contains_shell_operator(rest) {
+        return None;
+    }
+    parse_bash_cd_dir_arg(rest)
+}
+
+fn bash_cd_contains_shell_operator(s: &str) -> bool {
+    if s.contains("$(") {
+        return true;
+    }
+    s.chars()
+        .any(|c| matches!(c, '&' | '|' | ';' | '<' | '>' | '\n' | '\r' | '`'))
+}
+
+fn parse_bash_cd_dir_arg(s: &str) -> Option<&str> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Some("");
+    }
+    if let Some(stripped) = s.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        return if stripped[end + 1..].trim().is_empty() {
+            Some(&stripped[..end])
+        } else {
+            None
+        };
+    }
+    if let Some(stripped) = s.strip_prefix('\'') {
+        let end = stripped.find('\'')?;
+        return if stripped[end + 1..].trim().is_empty() {
+            Some(&stripped[..end])
+        } else {
+            None
+        };
+    }
+    if s.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(s)
 }
 
 fn default_session_mode() -> String {
@@ -1747,30 +1786,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         //
         // These are `mut` because the stale-ID retry and Incomplete continuation
         // may update them across outer loop iterations.
-        let (mut current_input, mut current_prev_response_id) = if let Some(prev_id) =
-            &last_response_id
-        {
-            (
-                vec![InputItem::user(user_input.clone())],
-                Some(prev_id.clone()),
-            )
-        } else if resuming {
-            // History already ends with the user message. Build input from
-            // history[..len-1] so build_full_history_input re-appends it once.
-            (
-                build_full_history_input(
-                    session_system_prompt.as_deref(),
-                    &history[..history.len() - 1],
-                    &user_input,
-                ),
-                None,
-            )
-        } else {
-            (
-                build_full_history_input(session_system_prompt.as_deref(), &history, &user_input),
-                None,
-            )
-        };
+        let (mut current_input, mut current_prev_response_id) = build_initial_prompt_input(
+            last_response_id.as_deref(),
+            resuming,
+            session_system_prompt.as_deref(),
+            &history,
+            &user_input,
+        );
 
         // Register a cancel channel so cancel() can abort this prompt.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -2154,14 +2176,23 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             // Clear response ID from the failed request.
                             current_response_id = None;
                             current_prev_response_id = None;
-                            current_input = build_full_history_input(
+                            // Clear token totals from the failed attempt so retry
+                            // usage is not double-counted.
+                            prompt_input_total = 0;
+                            prompt_output_total = 0;
+                            prompt_cache_read_total = 0;
+                            let (input, _) = build_initial_prompt_input(
+                                None,
+                                resuming,
                                 session_system_prompt.as_deref(),
                                 &history,
                                 &user_input,
                             );
+                            current_input = input;
                             continue 'outer;
                         }
                         tracing::error!(session_id, error = %message, "xai: stream error");
+                        self.cancel_senders.lock().await.remove(&session_id);
                         return Err(internal_error(message));
                     }
                 }
@@ -2941,6 +2972,36 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
     }
 }
 
+/// Build the initial prompt `input` and optional `previous_response_id`.
+///
+/// When `last_response_id` is set, only the new user turn is sent. Otherwise the
+/// full history is built, honoring `resuming` so the current user message is not
+/// appended twice when history already ends with it.
+fn build_initial_prompt_input(
+    last_response_id: Option<&str>,
+    resuming: bool,
+    system_prompt: Option<&str>,
+    history: &[Message],
+    user_input: &str,
+) -> (Vec<InputItem>, Option<String>) {
+    if let Some(prev_id) = last_response_id {
+        (
+            vec![InputItem::user(user_input.to_string())],
+            Some(prev_id.to_string()),
+        )
+    } else {
+        let history_slice = if resuming && !history.is_empty() {
+            &history[..history.len() - 1]
+        } else {
+            history
+        };
+        (
+            build_full_history_input(system_prompt, history_slice, user_input),
+            None,
+        )
+    }
+}
+
 /// Build the full `input` array for a Responses API request from session history.
 ///
 /// Used when there is no `previous_response_id` (new session, forked session, or
@@ -3077,6 +3138,24 @@ const BASH_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const BASH_EXIT_MARKER_PREFIX: &str = "__EXIT_";
 const BASH_EXIT_MARKER_SUFFIX: &str = "__";
 
+fn bash_shell_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Prefix a command with `cd <cwd>` when reusing an existing terminal so the
+/// persistent shell matches the session's tracked working directory.
+fn bash_command_with_session_cwd(cwd: &str, terminal_exists: bool, command: &str) -> String {
+    if terminal_exists {
+        format!(
+            "cd {} && {}",
+            bash_shell_single_quote(cwd),
+            command
+        )
+    } else {
+        command.to_string()
+    }
+}
+
 /// Execute a bash command using a persistent terminal per session.
 ///
 /// On the first call, creates a `bash` terminal (no `-c` args) with `cwd` as
@@ -3110,6 +3189,7 @@ async fn execute_bash_stateful(
 
     // 1. Obtain or create the persistent terminal (outside timeout closure to
     //    allow mutation of terminal_id, which cannot be captured by &mut in async move).
+    let terminal_exists = terminal_id.is_some();
     let tid: String = if let Some(id) = terminal_id.as_deref() {
         id.to_string()
     } else {
@@ -3137,6 +3217,8 @@ async fn execute_bash_stateful(
         *terminal_id = Some(new_tid.clone());
         new_tid
     };
+
+    let command = bash_command_with_session_cwd(cwd, terminal_exists, &command);
 
     let nats = nats.clone();
     let session_id_owned = session_id.to_string();
@@ -5398,6 +5480,67 @@ mod tests {
         );
     }
 
+    // ── parse_bash_cd ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_bash_cd_simple_path() {
+        assert_eq!(parse_bash_cd("cd /foo"), Some("/foo"));
+    }
+
+    #[test]
+    fn parse_bash_cd_compound_command_rejected() {
+        assert_eq!(parse_bash_cd("cd /foo && ls"), None);
+    }
+
+    #[test]
+    fn parse_bash_cd_semicolon_compound_rejected() {
+        assert_eq!(parse_bash_cd("cd a; b"), None);
+    }
+
+    #[test]
+    fn parse_bash_cd_quoted_space_path_accepted() {
+        assert_eq!(parse_bash_cd(r#"cd "x y""#), Some("x y"));
+    }
+
+    #[test]
+    fn parse_bash_cd_multiple_unquoted_words_rejected() {
+        assert_eq!(parse_bash_cd("cd a b"), None);
+    }
+
+    #[test]
+    fn parse_bash_cd_bare_cd_returns_home_sentinel() {
+        assert_eq!(parse_bash_cd("cd"), Some(""));
+    }
+
+    #[test]
+    fn parse_bash_cd_command_substitution_rejected() {
+        assert_eq!(parse_bash_cd("cd $(pwd)"), None);
+    }
+
+    // ── bash_command_with_session_cwd ─────────────────────────────────────────
+
+    #[test]
+    fn bash_command_with_session_cwd_prefixes_when_terminal_exists() {
+        assert_eq!(
+            bash_command_with_session_cwd("/tmp/work", true, "ls"),
+            "cd '/tmp/work' && ls"
+        );
+    }
+
+    #[test]
+    fn bash_command_with_session_cwd_no_prefix_on_first_terminal_use() {
+        assert_eq!(
+            bash_command_with_session_cwd("/tmp/work", false, "ls"),
+            "ls"
+        );
+    }
+
+    #[test]
+    fn bash_command_with_session_cwd_escapes_single_quotes_in_path() {
+        let cmd = bash_command_with_session_cwd("/tmp/a'b", true, "pwd");
+        assert_eq!(cmd, "cd '/tmp/a'\\''b' && pwd");
+    }
+
     // ── prompt: stream error returns Ok ──────────────────────────────────────────
 
     #[tokio::test]
@@ -5415,6 +5558,26 @@ mod tests {
         assert!(
             err.message.contains("server exploded"),
             "error must surface the stream error message, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_stream_error_clears_cancel_channel() {
+        let agent = make_agent();
+        agent.test_insert_session("err3", "/tmp", None).await;
+        agent.client.push_response(vec![XaiEvent::Error {
+            message: "server exploded".to_string(),
+        }]);
+
+        agent
+            .prompt(PromptRequest::new("err3", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            agent.test_cancel_channels_len().await,
+            0,
+            "stream error must remove the cancel sender before returning"
         );
     }
 
@@ -6459,6 +6622,112 @@ mod tests {
         assert_eq!(
             calls[1].previous_response_id, None,
             "retry call must not use previous_response_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_stale_id_retry_resets_token_totals_from_failed_attempt() {
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_response_id(
+                "stale-tok",
+                "/tmp",
+                None,
+                Some("stale-id".to_string()),
+            )
+            .await;
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                cached_tokens: 25,
+            },
+            XaiEvent::Error {
+                message: "connection reset".to_string(),
+            },
+        ]);
+        agent.client.push_response(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cached_tokens: 2,
+            },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("stale-tok", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "stale-tok")
+            .expect("stale-tok must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be set after prompt with usage");
+        assert_eq!(
+            meta["totalInputTokens"], 10,
+            "stale retry must not double-count input tokens from failed attempt"
+        );
+        assert_eq!(
+            meta["totalOutputTokens"], 5,
+            "stale retry must not double-count output tokens from failed attempt"
+        );
+        assert_eq!(
+            meta["totalCacheReadTokens"], 2,
+            "stale retry must not double-count cache-read tokens from failed attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_stale_id_retry_honors_resuming_without_duplicate_user() {
+        let agent = make_agent();
+        let user_text = "retry me";
+        agent
+            .test_insert_session_with_response_id(
+                "stale-resume",
+                "/tmp",
+                None,
+                Some("stale-id".to_string()),
+            )
+            .await;
+        agent
+            .test_set_session_history(
+                "stale-resume",
+                vec![Message::user(user_text)],
+            )
+            .await;
+
+        agent.client.push_response(vec![XaiEvent::Error {
+            message: "upstream timeout".to_string(),
+        }]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(
+                "stale-resume",
+                vec![ContentBlock::from(user_text)],
+            ))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "stale-ID retry must cause exactly 2 HTTP calls");
+        let retry_user_messages: Vec<_> = calls[1]
+            .input
+            .iter()
+            .filter(|item| item.role() == Some("user"))
+            .filter_map(|item| item.content())
+            .filter(|content| *content == user_text)
+            .collect();
+        assert_eq!(
+            retry_user_messages.len(),
+            1,
+            "resuming stale retry must append the user turn exactly once, got: {:?}",
+            calls[1].input
         );
     }
 
