@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use trogon_cli::Session as _;
 use trogon_cli::{
-    CrossRunnerSwitcher, McpManager, NatsSessionFactory, OutputFormat, PrintOptions, RealFs,
-    SessionEntry, SessionFactory, SessionIndex, SessionInit, connect_or_start_nats,
-    persist_session, repl::resolve_model_alias, session::TrogonSession, should_use_ansi,
+    CrossRunnerSwitcher, McpManager, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry,
+    SessionFactory, SessionIndex, SessionInit, connect_or_start_nats, persist_session, repl::resolve_model_alias,
+    session::TrogonSession, should_use_ansi,
 };
 
 #[derive(Subcommand)]
@@ -35,7 +35,12 @@ struct Args {
     #[command(subcommand)]
     command: Option<Command>,
     /// NATS server URL (overrides TROGON_NATS_URL)
-    #[arg(long, env = "TROGON_NATS_URL", default_value = "nats://localhost:4222", global = true)]
+    #[arg(
+        long,
+        env = "TROGON_NATS_URL",
+        default_value = "nats://localhost:4222",
+        global = true
+    )]
     nats_url: String,
 
     /// ACP prefix (overrides ACP_PREFIX)
@@ -182,14 +187,38 @@ fn trogon_dev_script() -> anyhow::Result<PathBuf> {
 /// (default filter: `warn`). With `--verbose` the default filter is raised to
 /// `debug`, while an explicit `RUST_LOG` always wins so power users keep full
 /// control. Logs go to stderr so they never pollute `--print` stdout output.
-fn init_tracing(verbose: bool) {
+fn otlp_env_configured() -> bool {
+    std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_some()
+        || std::env::var_os("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").is_some()
+        || std::env::var_os("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").is_some()
+        || std::env::var_os("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").is_some()
+}
+
+fn init_tracing(verbose: bool, prefix: &str) -> bool {
     use tracing_subscriber::{EnvFilter, fmt};
+
+    if otlp_env_configured() {
+        trogon_telemetry::init_logger(
+            trogon_telemetry::ServiceName::TrogonCli,
+            [trogon_telemetry::ResourceAttribute::acp_prefix(prefix)],
+            &trogon_std::env::SystemEnv,
+            &trogon_std::fs::SystemFs,
+        );
+        return true;
+    }
 
     let default_level = if verbose { "debug" } else { "warn" };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     // `try_init` so a double-init (e.g. in tests) is a no-op rather than a panic.
     let _ = fmt().with_env_filter(filter).with_writer(std::io::stderr).try_init();
+    false
+}
+
+fn shutdown_tracing(otel_enabled: bool) {
+    if otel_enabled && let Err(error) = trogon_telemetry::shutdown_otel() {
+        eprintln!("warning: OpenTelemetry shutdown failed: {error}");
+    }
 }
 
 /// Build the per-session init metadata from the CLI flags.
@@ -315,21 +344,27 @@ async fn main() -> anyhow::Result<()> {
     trogon_cli::env_local::load_env_local();
     let args = Args::parse();
 
-    init_tracing(args.verbose);
+    let otel_enabled = init_tracing(args.verbose, &args.prefix);
 
     if matches!(args.command, Some(Command::Dev)) {
-        return run_dev_stack();
+        let result = run_dev_stack();
+        shutdown_tracing(otel_enabled);
+        return result;
     }
 
     if args.doctor || matches!(args.command, Some(Command::Doctor)) {
-        return trogon_cli::doctor::run(&args.nats_url).await;
+        let result = trogon_cli::doctor::run(&args.nats_url).await;
+        shutdown_tracing(otel_enabled);
+        return result;
     }
 
     // `trogon sessions [list]` — non-interactive equivalent of the REPL's /sessions.
     if let Some(Command::Sessions { action }) = &args.command {
         match action {
             None | Some(SessionsAction::List) => {
-                return run_sessions_list(&args.nats_url, &args.prefix).await;
+                let result = run_sessions_list(&args.nats_url, &args.prefix).await;
+                shutdown_tracing(otel_enabled);
+                return result;
             }
         }
     }
@@ -385,6 +420,7 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("error: prompt is empty — pass a string or pipe text to stdin");
             // MED-40: drop KillOnDrop guard so the autostarted NATS server is killed.
             drop(nats_server);
+            shutdown_tracing(otel_enabled);
             std::process::exit(1);
         }
         let format = match args.output_format.as_str() {
@@ -403,8 +439,7 @@ async fn main() -> anyhow::Result<()> {
         }
         let resumed = resume.is_some();
 
-        let mut mcp_manager =
-            McpManager::load_for_cli(&RealFs, Some(&cwd), &args.mcp_config, args.strict_mcp_config);
+        let mut mcp_manager = McpManager::load_for_cli(&RealFs, Some(&cwd), &args.mcp_config, args.strict_mcp_config);
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
@@ -429,24 +464,13 @@ async fn main() -> anyhow::Result<()> {
 
         let nats_for_perm = nats.clone();
         let session = if let Some(entry) = resume {
-            match resume_print_session(
-                nats,
-                &mut mcp_manager,
-                &target_prefix,
-                &entry.session_id,
-                &cwd,
-            )
-            .await
-            {
+            match resume_print_session(nats, &mut mcp_manager, &target_prefix, &entry.session_id, &cwd).await {
                 Ok(s) => {
                     eprintln!("resumed session {} on {target_prefix}", s.session_id());
                     s
                 }
                 Err(e) => {
-                    eprintln!(
-                        "warning: could not resume {}: {e} — starting fresh",
-                        entry.session_id
-                    );
+                    eprintln!("warning: could not resume {}: {e} — starting fresh", entry.session_id);
                     start_print_session(
                         nats_for_perm.clone(),
                         &mut mcp_manager,
@@ -458,14 +482,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         } else {
-            start_print_session(
-                nats,
-                &mut mcp_manager,
-                &target_prefix,
-                cwd.clone(),
-                &session_init,
-            )
-            .await?
+            start_print_session(nats, &mut mcp_manager, &target_prefix, cwd.clone(), &session_init).await?
         };
         // Permission handling in non-interactive mode: `--dangerously-skip-permissions`
         // sets `bypassPermissions` (auto-allow, no prompts). Otherwise — since there is
@@ -477,28 +494,24 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = session.set_mode("bypassPermissions").await {
                 eprintln!("warning: could not set bypassPermissions: {e}");
             }
-        } else if let Some(task) = trogon_cli::print::spawn_auto_deny_permissions(
-            nats_for_perm,
-            &target_prefix,
-            session.session_id(),
-        )
-        .await
+        } else if let Some(task) =
+            trogon_cli::print::spawn_auto_deny_permissions(nats_for_perm, &target_prefix, session.session_id()).await
         {
             deny_task = Some(task);
         } else {
             mcp_manager.shutdown_session(session.session_id()).await;
             drop(nats_server);
+            shutdown_tracing(otel_enabled);
             std::process::exit(1);
         }
-        if !resumed
-            && let Some(model) = &chosen_model
-        {
+        if !resumed && let Some(model) = &chosen_model {
             let model_id = resolve_model_alias(model);
             if let Err(e) = session.set_model(&model_id).await {
                 eprintln!("error: could not set model: {e}");
                 mcp_manager.shutdown_session(session.session_id()).await;
                 // MED-40: drop KillOnDrop guard before exit.
                 drop(nats_server);
+                shutdown_tracing(otel_enabled);
                 std::process::exit(1);
             }
         }
@@ -524,6 +537,7 @@ async fn main() -> anyhow::Result<()> {
         // MED-40: explicitly drop the KillOnDrop guard so the auto-started NATS
         // server process is killed before process::exit bypasses normal Drop.
         drop(nats_server);
+        shutdown_tracing(otel_enabled);
         std::process::exit(code as i32);
     } else {
         let acp_prefix = AcpPrefix::new(&args.prefix).map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
@@ -548,8 +562,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         let repl_default_model =
-            effective_model(args.model.as_deref(), settings.model.as_deref())
-                .map(|m| resolve_model_alias(&m));
+            effective_model(args.model.as_deref(), settings.model.as_deref()).map(|m| resolve_model_alias(&m));
 
         trogon_cli::runtime::run_interactive(
             factory,
@@ -572,15 +585,21 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     }
 
+    shutdown_tracing(otel_enabled);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, Command, SessionsAction, build_session_init, effective_model, resolve_resume};
+    use super::{
+        Args, Command, SessionsAction, build_session_init, effective_model, otlp_env_configured, resolve_resume,
+    };
     use clap::Parser;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
     use trogon_cli::{Settings, should_use_ansi};
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn no_stream_defaults_off_and_flag_enables() {
@@ -592,11 +611,40 @@ mod tests {
     }
 
     #[test]
+    fn otlp_env_configured_detects_standard_endpoint_vars() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let vars = [
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        ];
+        let old: Vec<_> = vars.iter().map(|name| (*name, std::env::var_os(name))).collect();
+        unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT") };
+        unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") };
+        unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") };
+        unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") };
+        assert!(!otlp_env_configured());
+
+        unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318") };
+        assert!(otlp_env_configured());
+
+        for (name, value) in old {
+            match value {
+                Some(value) => unsafe { std::env::set_var(name, value) },
+                None => unsafe { std::env::remove_var(name) },
+            }
+        }
+    }
+
+    #[test]
     fn sessions_list_subcommand_parses() {
         let args = Args::try_parse_from(["trogon", "sessions", "list"]).unwrap();
         assert!(matches!(
             args.command,
-            Some(Command::Sessions { action: Some(SessionsAction::List) })
+            Some(Command::Sessions {
+                action: Some(SessionsAction::List)
+            })
         ));
     }
 

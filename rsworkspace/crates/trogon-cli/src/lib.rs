@@ -1,11 +1,11 @@
 pub mod app;
-pub mod commands;
-pub mod md_template;
 pub mod client_supervisor;
+pub mod commands;
 pub mod doctor;
 pub mod env_local;
 pub mod fs;
 pub mod markdown;
+pub mod md_template;
 pub mod memory_recall;
 pub mod mcp;
 pub mod mcp_oauth;
@@ -19,8 +19,8 @@ pub mod skills;
 pub mod session_rewind;
 pub mod session_transcript;
 pub mod session_store;
-pub mod spawn_tracker;
 pub mod settings;
+pub mod spawn_tracker;
 pub mod stdio_mcp_bridge;
 pub mod stream_input;
 pub mod terminal;
@@ -35,8 +35,8 @@ pub use print::{OutputFormat, PrintExitCode, PrintOptions, should_use_ansi};
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionInit, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, persist_session, project_key};
 pub use settings::{PermissionsSettings, Settings};
-pub use trogon_runner_tools::{HookOutcome, HooksConfig};
 pub use stdio_mcp_bridge::StdioMcpBridge;
+pub use trogon_runner_tools::{HookOutcome, HooksConfig};
 
 pub mod cross_runner;
 pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher};
@@ -56,6 +56,36 @@ impl Drop for KillOnDrop {
     fn drop(&mut self) {
         let _ = self.0.kill();
     }
+}
+
+fn nats_server_command(port: &str) -> Command {
+    let mut command = Command::new("nats-server");
+    command
+        .args(["-p", port, "-js"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(all(unix, target_os = "linux"))]
+    {
+        use std::os::unix::process::CommandExt;
+
+        // If the CLI dies through SIGINT/SIGTERM before Rust drops can run, the
+        // kernel sends SIGTERM to the autostarted nats-server instead of leaving
+        // it orphaned. Normal exits are still handled by KillOnDrop.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() == 1 {
+                    libc::raise(libc::SIGTERM);
+                }
+                Ok(())
+            });
+        }
+    }
+
+    command
 }
 
 /// Connect to NATS with an event callback that surfaces disconnects.
@@ -140,12 +170,7 @@ pub async fn connect_or_start_nats(
 
     // LOW-22: suppress stderr so a second concurrent instance that loses the port-bind
     // race does not produce "address already in use" noise on the terminal.
-    let child = match Command::new("nats-server")
-        .args(["-p", port, "-js"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
+    let child = match nats_server_command(port).spawn() {
         Ok(c) => c,
         Err(_) => {
             return Err(anyhow::anyhow!(

@@ -39,6 +39,7 @@ trogon-memory          = { path = "../trogon-memory" }
 trogon-nats            = { workspace = true }
 trogon-registry        = { workspace = true }
 trogon-runner-tools    = { path = "../trogon-runner-tools" }
+trogon-telemetry       = { workspace = true }
 trogon-tools           = { path = "../trogon-tools" }
 trogon-std             = { workspace = true }
 uuid                   = { workspace = true }

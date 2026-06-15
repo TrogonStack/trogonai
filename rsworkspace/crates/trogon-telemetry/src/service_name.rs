@@ -9,6 +9,7 @@ pub enum ServiceName {
     McpNatsStdio,
     McpNatsServer,
     TrogonGateway,
+    TrogonCli,
     TrogonPrActor,
     TrogonRouter,
     TrogonSourceDiscord,
@@ -28,6 +29,7 @@ impl ServiceName {
             Self::McpNatsStdio => "mcp-nats-stdio",
             Self::McpNatsServer => "mcp-nats-server",
             Self::TrogonGateway => "trogon-gateway",
+            Self::TrogonCli => "trogon-cli",
             Self::TrogonPrActor => "trogon-pr-actor",
             Self::TrogonRouter => "trogon-router",
             Self::TrogonSourceDiscord => "trogon-source-discord",
@@ -58,32 +60,15 @@ mod tests {
         assert_eq!(ServiceName::McpNatsStdio.as_str(), "mcp-nats-stdio");
         assert_eq!(ServiceName::McpNatsServer.as_str(), "mcp-nats-server");
         assert_eq!(ServiceName::TrogonGateway.as_str(), "trogon-gateway");
+        assert_eq!(ServiceName::TrogonCli.as_str(), "trogon-cli");
         assert_eq!(ServiceName::TrogonPrActor.as_str(), "trogon-pr-actor");
         assert_eq!(ServiceName::TrogonRouter.as_str(), "trogon-router");
-        assert_eq!(
-            ServiceName::TrogonSourceDiscord.as_str(),
-            "trogon-source-discord"
-        );
-        assert_eq!(
-            ServiceName::TrogonSourceGithub.as_str(),
-            "trogon-source-github"
-        );
-        assert_eq!(
-            ServiceName::TrogonSourceGitlab.as_str(),
-            "trogon-source-gitlab"
-        );
-        assert_eq!(
-            ServiceName::TrogonSourceLinear.as_str(),
-            "trogon-source-linear"
-        );
-        assert_eq!(
-            ServiceName::TrogonSourceSlack.as_str(),
-            "trogon-source-slack"
-        );
-        assert_eq!(
-            ServiceName::TrogonSourceTelegram.as_str(),
-            "trogon-source-telegram"
-        );
+        assert_eq!(ServiceName::TrogonSourceDiscord.as_str(), "trogon-source-discord");
+        assert_eq!(ServiceName::TrogonSourceGithub.as_str(), "trogon-source-github");
+        assert_eq!(ServiceName::TrogonSourceGitlab.as_str(), "trogon-source-gitlab");
+        assert_eq!(ServiceName::TrogonSourceLinear.as_str(), "trogon-source-linear");
+        assert_eq!(ServiceName::TrogonSourceSlack.as_str(), "trogon-source-slack");
+        assert_eq!(ServiceName::TrogonSourceTelegram.as_str(), "trogon-source-telegram");
     }
 
     #[test]
@@ -94,28 +79,14 @@ mod tests {
         assert_eq!(format!("{}", ServiceName::McpNatsStdio), "mcp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::McpNatsServer), "mcp-nats-server");
         assert_eq!(format!("{}", ServiceName::TrogonGateway), "trogon-gateway");
+        assert_eq!(format!("{}", ServiceName::TrogonCli), "trogon-cli");
         assert_eq!(format!("{}", ServiceName::TrogonPrActor), "trogon-pr-actor");
         assert_eq!(format!("{}", ServiceName::TrogonRouter), "trogon-router");
-        assert_eq!(
-            format!("{}", ServiceName::TrogonSourceDiscord),
-            "trogon-source-discord"
-        );
-        assert_eq!(
-            format!("{}", ServiceName::TrogonSourceGithub),
-            "trogon-source-github"
-        );
-        assert_eq!(
-            format!("{}", ServiceName::TrogonSourceGitlab),
-            "trogon-source-gitlab"
-        );
-        assert_eq!(
-            format!("{}", ServiceName::TrogonSourceLinear),
-            "trogon-source-linear"
-        );
-        assert_eq!(
-            format!("{}", ServiceName::TrogonSourceSlack),
-            "trogon-source-slack"
-        );
+        assert_eq!(format!("{}", ServiceName::TrogonSourceDiscord), "trogon-source-discord");
+        assert_eq!(format!("{}", ServiceName::TrogonSourceGithub), "trogon-source-github");
+        assert_eq!(format!("{}", ServiceName::TrogonSourceGitlab), "trogon-source-gitlab");
+        assert_eq!(format!("{}", ServiceName::TrogonSourceLinear), "trogon-source-linear");
+        assert_eq!(format!("{}", ServiceName::TrogonSourceSlack), "trogon-source-slack");
         assert_eq!(
             format!("{}", ServiceName::TrogonSourceTelegram),
             "trogon-source-telegram"
