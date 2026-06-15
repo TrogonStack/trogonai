@@ -2678,6 +2678,20 @@ fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
 
 // ── /init helpers ─────────────────────────────────────────────────────────────
 
+const INIT_README_MAX_BYTES: usize = 3000;
+
+fn truncate_init_readme(content: &str) -> String {
+    if content.len() <= INIT_README_MAX_BYTES {
+        content.to_string()
+    } else {
+        let mut end = INIT_README_MAX_BYTES;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…(truncated)", &content[..end])
+    }
+}
+
 fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
     let project_name = root
         .file_name()
@@ -2697,11 +2711,7 @@ fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
         .iter()
         .find_map(|name| {
             fs.read_to_string(&root.join(name)).ok().map(|content| {
-                let truncated = if content.len() > 3000 {
-                    format!("{}…(truncated)", &content[..3000])
-                } else {
-                    content
-                };
+                let truncated = truncate_init_readme(&content);
                 format!("{name}:\n{truncated}\n")
             })
         })
@@ -3725,6 +3735,15 @@ mod tests {
     }
 
     // ── build_init_prompt ─────────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_init_readme_multibyte_boundary_does_not_panic() {
+        let content = format!("a{}", "é".repeat(2000));
+        assert!(content.len() > INIT_README_MAX_BYTES);
+        let out = truncate_init_readme(&content);
+        assert!(out.ends_with("…(truncated)"), "got: {out}");
+        assert!(out.len() <= INIT_README_MAX_BYTES + "…(truncated)".len());
+    }
 
     #[test]
     fn build_init_prompt_contains_required_sections() {
