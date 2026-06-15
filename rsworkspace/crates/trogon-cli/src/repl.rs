@@ -1118,6 +1118,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if cmd == "/mcp" {
                         handle_mcp_command(arg, &mut mcp_manager, &fs, &session, &cwd, &mcp_http).await;
+                    } else if cmd == "/recall" {
+                        match client_supervisor.as_ref() {
+                            Some(sup) => {
+                                match crate::memory_recall::handle_recall(&sup.nats(), arg).await {
+                                    Ok(text) => println!("{text}"),
+                                    Err(e) => eprintln!("error: {e}"),
+                                }
+                            }
+                            None => eprintln!("error: /recall requires a NATS connection"),
+                        }
                     } else if cmd == "/memory" {
                         handle_memory_command(arg, &cwd, &fs).await;
                     } else if cmd == "/agents" {
@@ -2355,6 +2365,7 @@ Commands:
   {m}/release-notes{r}      show version / release info
   {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
+  {m}/recall{r} [query]     list entity memories from NATS KV (trogon-memory)
   {m}/agents{r}             list subagent definitions (.claude/agents/)  |  {m}/agents{r} <name> details
   {m}/tasks{r}              list background tasks
   {m}/init{r}               analyze project with AI and generate TROGON.md
@@ -2411,6 +2422,9 @@ Ctrl+D    quit");
         "/status" => "use /status in the REPL for live session status".to_string(),
 
         "/memory" => "use /memory in the REPL to list or show TROGON.md hierarchy".to_string(),
+
+        "/recall" => "use /recall in the REPL to list stored entity memories (SESSION_MEMORIES KV)"
+            .to_string(),
 
         "/bug" => bug_report_text(),
 

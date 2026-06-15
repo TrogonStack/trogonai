@@ -5844,6 +5844,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-mcp",
+ "trogon-memory",
  "trogon-nats",
  "trogon-registry",
  "trogon-runner-tools",

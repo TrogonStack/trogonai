@@ -98,6 +98,7 @@ pub(crate) trait MemoryHttpClient: Send + Sync {
     ) -> impl Future<Output = Result<MemResponse, DreamerError>> + Send + 'a;
 }
 
+#[allow(clippy::manual_async_fn)]
 impl MemoryHttpClient for reqwest::Client {
     fn call<'a>(
         &'a self,
@@ -231,12 +232,12 @@ fn build_prompt(transcript: &[TranscriptEntry], existing: Option<&EntityMemory>)
     }
     out.push_str("</transcript>");
 
-    if let Some(memory) = existing {
-        if !memory.facts.is_empty() {
-            out.push_str(UPDATE_SUFFIX);
-            let facts_json = serde_json::to_string(&memory.facts).unwrap_or_default();
-            out.push_str(&facts_json);
-        }
+    if let Some(memory) = existing
+        && !memory.facts.is_empty()
+    {
+        out.push_str(UPDATE_SUFFIX);
+        let facts_json = serde_json::to_string(&memory.facts).unwrap_or_default();
+        out.push_str(&facts_json);
     }
 
     out
@@ -415,7 +416,12 @@ mod tests {
             ) -> impl Future<Output = Result<MemResponse, DreamerError>> + Send + 'a {
                 self.saw_x_api_key
                     .store(auth_header == "x-api-key", Ordering::SeqCst);
-                async { Ok(MemResponse { stop_reason: "end_turn".into(), content: vec![MemBlock { kind: "text".into(), text: "[]".into() }] }) }
+                async {
+                    Ok(MemResponse {
+                        stop_reason: "end_turn".into(),
+                        content: vec![MemBlock { kind: "text".into(), text: "[]".into() }],
+                    })
+                }
             }
         }
 
@@ -438,7 +444,10 @@ mod tests {
                 _request: &'a MemRequest<'a>,
             ) -> impl Future<Output = Result<MemResponse, DreamerError>> + Send + 'a {
                 async {
-                    Ok(MemResponse { stop_reason: "end_turn".into(), content: vec![] })
+                    Ok(MemResponse {
+                        stop_reason: "end_turn".into(),
+                        content: vec![],
+                    })
                 }
             }
         }

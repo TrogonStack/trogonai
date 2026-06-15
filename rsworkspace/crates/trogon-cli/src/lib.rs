@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod env_local;
 pub mod fs;
 pub mod markdown;
+pub mod memory_recall;
 pub mod mcp;
 pub mod mcp_oauth;
 pub mod mcp_prompts;
