@@ -1,4 +1,4 @@
-# a2a-nats-http
+# a2a-nats-server
 
 Axum HTTP adapter that exposes A2A JSON-RPC (and SSE for streaming) via the in-tree **`a2a_nats::A2aClient`**. Targets local agents behind NATS; this is **not** the future HTTPS cross-binding bridge (**`a2a-bridge`**, see [A2A architecture](../../../docs/a2a/explanation/architecture.md)).
 
@@ -8,14 +8,14 @@ From `rsworkspace/`:
 
 ```bash
 export A2A_AGENT_ID=my-agent
-cargo run -p a2a-nats-http
+cargo run -p a2a-nats-server
 ```
 
 ## Environment
 
 | Variable | Required | Default | Meaning |
 |----------|----------|---------|---------|
-| **`A2A_AGENT_ID`** | **yes** | — | Deployed NATS **`agent_id`** (`{prefix}.agents.{agent_id}.…`). |
+| **`A2A_AGENT_ID`** | **yes** | — | Deployed NATS **`agent_id`** (`{prefix}.agent.{agent_id}.…`). |
 | **`NATS_URL`** | no | _(NATS tooling default)_ | Comma-separated URLs (`trogon_nats::NatsConfig`). |
 | **`A2A_PREFIX`** | no | **`a2a`** | Subject prefix. |
 | **`A2A_HTTP_BIND`** | no | **`0.0.0.0:8080`** | TCP listen address. |

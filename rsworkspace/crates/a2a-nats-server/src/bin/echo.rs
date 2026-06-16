@@ -292,7 +292,7 @@ fn echo_agent_card() -> a2a::agent_card::AgentCard {
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    if let Err(e) = a2a_nats_agent::run(EchoHandler::new()).await {
+    if let Err(e) = a2a_nats_server::run(EchoHandler::new()).await {
         error!(error = %e, "A2A echo agent exited with error");
         std::process::exit(1);
     }

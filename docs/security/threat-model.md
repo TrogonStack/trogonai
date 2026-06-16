@@ -145,7 +145,7 @@ The agent process is **on the untrusted side** of boundary 3. This is a delibera
 | D      | PDP slow / hung.                                                                        | Fail-closed timeout: deny on PDP timeout; per-decision latency budget; circuit-break.                        | (default deny)           |
 | E      | Backend (OPA/Cedar) returns allow that policy hierarchy should deny.                    | Backend result re-checked against deny immutability before being returned by `Decide`.                       | PO-02, PO-04             |
 
-## 7. `a2a-bridge`, `a2a-gateway`, `a2a-nats-server`
+## 7. `a2a-bridge`, `a2a-gateway`, `a2a-nats-http`
 
 These three sit on trust-boundary 1 (external → bus) for the A2A path. Same STRIDE matrix as `trogon-mcp-gateway` applies, with two extra concerns:
 

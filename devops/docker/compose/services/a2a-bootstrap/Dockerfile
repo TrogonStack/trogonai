@@ -38,7 +38,7 @@ COPY devops/docker/compose/services/a2a-bootstrap/tier3-pii-regex-redactor.manif
 COPY rsworkspace/crates/a2a-pack/skills/smoke-tier3-refuse.manifest.json /opt/a2a/tier3-manifests/smoke-tier3-refuse.manifest.json
 COPY rsworkspace/crates/a2a-pack/policies /opt/a2a/policies
 COPY scripts/a2a-nsc-bootstrap.sh scripts/a2a-auth-callout-bootstrap.sh /opt/a2a/scripts/
-COPY devops/docker/compose/services/a2a-bootstrap/a2a-nats-server-smoke.conf /opt/a2a/a2a-nats-server-smoke.conf
+COPY devops/docker/compose/services/a2a-bootstrap/a2a-nats-http-smoke.conf /opt/a2a/a2a-nats-http-smoke.conf
 COPY devops/docker/compose/services/a2a-bootstrap/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh /opt/a2a/scripts/*.sh

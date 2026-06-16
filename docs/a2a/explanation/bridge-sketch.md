@@ -24,7 +24,7 @@ Use the bridge when callers speak **standard A2A over HTTPS** but agents and tas
 | **HTTPS-only clients** | Browsers, SaaS webhooks, and third-party A2A agents that cannot adopt the NATS client stack still publish on `{prefix}.gateway.{agent_id}.{method}` after the bridge re-mints a short-lived User JWT. |
 | **Symmetric HTTPS agents** | External HTTPS agents register proxied AgentCards via the catalog registrar; inbound `{prefix}.agent.{agent_id}.>` traffic from the gateway is forwarded over HTTPS on the reverse path. |
 
-Do **not** reach for the bridge when a process can connect to NATS directly with org-standard credentials. [`a2a-nats-server`](../../../rsworkspace/crates/a2a-nats-server) and [`a2a-nats-stdio`](../../../rsworkspace/crates/a2a-nats-stdio) are narrower local adapters over `a2a_nats::Client`; they do not terminate foreign HTTPS A2A or re-mint per-request Users for audit attribution.
+Do **not** reach for the bridge when a process can connect to NATS directly with org-standard credentials. [`a2a-nats-http`](../../../rsworkspace/crates/a2a-nats-http) and [`a2a-nats-stdio`](../../../rsworkspace/crates/a2a-nats-stdio) are narrower local adapters over `a2a_nats::Client`; they do not terminate foreign HTTPS A2A or re-mint per-request Users for audit attribution.
 
 ---
 

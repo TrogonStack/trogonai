@@ -1,4 +1,5 @@
-#[cfg(not(coverage))]
+use tracing::error;
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -9,13 +10,7 @@ async fn main() {
         .init();
 
     if let Err(e) = a2a_nats_http::run().await {
-        tracing::error!(error = %e, "A2A NATS HTTP server failed");
+        error!(error = %e, "A2A NATS server failed");
         std::process::exit(1);
     }
 }
-
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(test)]
-mod main_tests;

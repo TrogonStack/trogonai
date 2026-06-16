@@ -106,32 +106,6 @@ services:
       - a2a_smoke
     restart: unless-stopped
 
-  a2a-nats-agent:
-    build:
-      context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/a2a-nats-agent/Dockerfile
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        set -a
-        . /run/a2a-bootstrap/agent.env
-        set +a
-        exec /usr/local/bin/a2a-nats-agent
-    volumes:
-      - a2a_bootstrap:/run/a2a-bootstrap:ro
-    depends_on:
-      a2a-auth-callout:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q a2a-nats-agent"]
-      interval: 5s
-      timeout: 3s
-      start_period: 25s
-      retries: 10
-    networks:
-      - a2a_smoke
-    restart: unless-stopped
-
   a2a-nats-server:
     build:
       context: ../../../rsworkspace
@@ -140,13 +114,39 @@ services:
     command:
       - |
         set -a
-        . /run/a2a-bootstrap/nats-server.env
+        . /run/a2a-bootstrap/agent.env
         set +a
         exec /usr/local/bin/a2a-nats-server
     volumes:
       - a2a_bootstrap:/run/a2a-bootstrap:ro
     depends_on:
-      a2a-nats-agent:
+      a2a-auth-callout:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q a2a-nats-server"]
+      interval: 5s
+      timeout: 3s
+      start_period: 25s
+      retries: 10
+    networks:
+      - a2a_smoke
+    restart: unless-stopped
+
+  a2a-nats-http:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-nats-http/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/nats-server.env
+        set +a
+        exec /usr/local/bin/a2a-nats-http
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-nats-server:
         condition: service_healthy
       a2a-gateway:
         condition: service_healthy
@@ -176,7 +176,7 @@ services:
     volumes:
       - a2a_bootstrap:/run/a2a-bootstrap:ro
     depends_on:
-      a2a-nats-server:
+      a2a-nats-http:
         condition: service_healthy
     networks:
       - a2a_smoke

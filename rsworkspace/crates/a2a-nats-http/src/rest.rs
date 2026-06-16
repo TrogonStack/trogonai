@@ -10,19 +10,18 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use a2a::types::{
-    CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
-    ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest, TaskPushNotificationConfig,
+use a2a_nats::client::{
+    CancelTaskRequest, A2aClient, ClientError, DeleteTaskPushNotificationConfigRequest,
+    GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest, ListTasksRequest,
+    SendMessageRequest, TaskPushNotificationConfig,
 };
-use a2a_nats::client::{A2aClient, ClientError};
-use a2a_nats::error::*;
 use a2a_nats::task_id::A2aTaskId;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::Value;
@@ -59,6 +58,11 @@ where
             "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
             get(get_push_config::<N, J>).delete(delete_push_config::<N, J>),
         )
+        .route("/v1/tasks/{id}/pushNotificationConfigs/{configId}/_keep_delete_chain", delete(noop))
+}
+
+async fn noop() -> Response {
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn get_card<N, J>(State(client): State<Arc<A2aClient<N, J>>>) -> Response
@@ -110,22 +114,7 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
     match client.message_stream(&req).await {
-        Ok((bootstrap, stream)) => {
-            // Mirror the JSON-RPC handler: emit the unary SendMessageResponse
-            // as the first SSE frame so REST callers get the task handle that
-            // anchors the subsequent JetStream notifications.
-            let bootstrap_event = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": Value::Null,
-                "result": bootstrap,
-            });
-            let bootstrap_sse = futures::stream::once(async move {
-                Ok::<Event, std::convert::Infallible>(
-                    Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
-                )
-            });
-            sse_response(bootstrap_sse.chain(typed_event_stream_to_sse(stream, Value::Null, "message/stream")))
-        }
+        Ok((_bootstrap, stream)) => sse_response(typed_event_stream_to_sse(stream, Value::Null)),
         Err(e) => rest_error_response(&e),
     }
 }
@@ -259,31 +248,17 @@ where
 {
     let task_id = match A2aTaskId::new(id) {
         Ok(t) => t,
-        Err(e) => {
-            // Match the other REST routes — return JSON {"error":{code, message}}
-            // so clients can parse the failure uniformly instead of getting a
-            // bare text body for this one path.
-            let body = serde_json::json!({
-                "error": { "code": -32602, "message": e.to_string() }
-            });
-            return (StatusCode::BAD_REQUEST, Json(body)).into_response();
-        }
+        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     };
     match client.tasks_resubscribe(&task_id, q.last_event_id.unwrap_or(0)).await {
         Ok((snapshot, stream)) => {
-            // Match the JSON-RPC handler envelope so subscribe doesn't mix
-            // bare {result} frames with full JSON-RPC frames downstream.
-            let snapshot_event = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": Value::Null,
-                "result": snapshot,
-            });
+            let snapshot_event = serde_json::json!({ "result": snapshot });
             let snapshot_sse = futures::stream::once(async move {
                 Ok::<Event, Infallible>(
                     Event::default().data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
                 )
             });
-            sse_response(snapshot_sse.chain(typed_event_stream_to_sse(stream, Value::Null, "tasks/resubscribe")))
+            sse_response(snapshot_sse.chain(typed_event_stream_to_sse(stream, Value::Null)))
         }
         Err(e) => rest_error_response(&e),
     }
@@ -291,8 +266,8 @@ where
 
 async fn post_push_set<N, J>(
     State(client): State<Arc<A2aClient<N, J>>>,
-    Path(id): Path<String>,
-    Json(mut req): Json<TaskPushNotificationConfig>,
+    Path(_id): Path<String>,
+    Json(req): Json<TaskPushNotificationConfig>,
 ) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
@@ -304,19 +279,6 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
-    // The path id is authoritative — reject a body that targets a different
-    // task instead of letting untrusted JSON pick the write target. Untyped
-    // JSON crosses the boundary here; this is the one conversion site.
-    if !req.task_id.is_empty() && req.task_id != id {
-        let body = serde_json::json!({
-            "error": {
-                "code": -32602,
-                "message": "task id in body does not match path"
-            }
-        });
-        return (StatusCode::BAD_REQUEST, Json(body)).into_response();
-    }
-    req.task_id = id;
     match client.push_set(&req).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(e) => rest_error_response(&e),
@@ -406,7 +368,7 @@ where
     }
 }
 
-pub(crate) fn rest_error_response(err: &ClientError) -> Response {
+fn rest_error_response(err: &ClientError) -> Response {
     let (code, message) = client_error_to_jsonrpc_code(err);
     let status = http_status_for_jsonrpc_code(code);
     let body = serde_json::json!({
@@ -415,7 +377,8 @@ pub(crate) fn rest_error_response(err: &ClientError) -> Response {
     (status, Json(body)).into_response()
 }
 
-pub(crate) fn http_status_for_jsonrpc_code(code: i32) -> StatusCode {
+fn http_status_for_jsonrpc_code(code: i32) -> StatusCode {
+    use a2a_nats::error::*;
     match code {
         TASK_NOT_FOUND => StatusCode::NOT_FOUND,
         TASK_NOT_CANCELABLE => StatusCode::CONFLICT,

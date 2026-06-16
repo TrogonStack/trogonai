@@ -140,24 +140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "a2a-nats-agent"
-version = "0.1.0"
-dependencies = [
- "a2a-lf",
- "a2a-nats",
- "async-nats",
- "async-trait",
- "futures",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
- "uuid",
-]
-
-[[package]]
 name = "a2a-nats-discovery"
 version = "0.1.0"
 dependencies = [
@@ -182,7 +164,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "a2a-nats-server"
+name = "a2a-nats-http"
 version = "0.1.0"
 dependencies = [
  "a2a-auth-callout",
@@ -205,6 +187,24 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+]
+
+[[package]]
+name = "a2a-nats-server"
+version = "0.1.0"
+dependencies = [
+ "a2a-lf",
+ "a2a-nats",
+ "async-nats",
+ "async-trait",
+ "futures",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
 ]
 
 [[package]]

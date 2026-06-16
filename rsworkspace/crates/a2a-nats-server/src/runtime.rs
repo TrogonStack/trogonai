@@ -1,89 +1,59 @@
-use std::fmt;
-use std::net::SocketAddr;
-
-use a2a_auth_callout::MintedUserJwt;
-use a2a_nats::client::A2aClient;
-use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, Config, NatsConfig};
+use a2a_nats::server::{A2aExecutor, Bridge};
+use a2a_nats::jetstream::{StreamProvisionOptions, provision_streams_with_options};
+use a2a_nats::{
+    A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,
+    apply_timeout_overrides, nats_connect_timeout,
+};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
-use trogon_std::env::SystemEnv;
-use trogon_std::signal::shutdown_signal;
+use trogon_std::env::ReadEnv;
 
-use crate::router;
-
-const DEFAULT_BIND: &str = "0.0.0.0:8080";
-const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
-const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
-const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
-const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";
+const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
 
 #[derive(Debug)]
 pub enum RuntimeError {
     MissingAgentId,
-    MissingGatewayCallerJwt,
-    InvalidGatewayCallerJwt(String),
     InvalidAgentId(AgentIdError),
-    InvalidPrefix(A2aPrefixError),
-    InvalidBind(std::net::AddrParseError),
+    InvalidPrefix(a2a_nats::A2aPrefixError),
     NatsConnect(trogon_nats::ConnectError),
-    Io(std::io::Error),
+    Provision(a2a_nats::jetstream::ProvisionError),
+    Bridge(a2a_nats::server::BridgeError),
 }
 
-impl fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingAgentId => write!(f, "A2A_AGENT_ID environment variable is required"),
-            Self::MissingGatewayCallerJwt => write!(
-                f,
-                "{ENV_GATEWAY_CALLER_JWT} is required when {ENV_USE_GATEWAY} is enabled"
-            ),
-            Self::InvalidGatewayCallerJwt(msg) => write!(f, "invalid gateway caller JWT: {msg}"),
+            Self::MissingAgentId => write!(f, "A2A_AGENT_ID env var is required but not set"),
             Self::InvalidAgentId(e) => write!(f, "invalid agent id: {e}"),
             Self::InvalidPrefix(e) => write!(f, "invalid A2A prefix: {e}"),
-            Self::InvalidBind(e) => write!(f, "invalid bind address: {e}"),
             Self::NatsConnect(e) => write!(f, "NATS connection failed: {e}"),
-            Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::Provision(e) => write!(f, "JetStream provisioning failed: {e}"),
+            Self::Bridge(e) => write!(f, "bridge error: {e}"),
         }
     }
 }
 
-impl std::error::Error for RuntimeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidAgentId(e) => Some(e),
-            Self::InvalidPrefix(e) => Some(e),
-            Self::InvalidBind(e) => Some(e),
-            Self::NatsConnect(e) => Some(e),
-            Self::Io(e) => Some(e),
-            Self::MissingAgentId | Self::MissingGatewayCallerJwt | Self::InvalidGatewayCallerJwt(_) => None,
-        }
-    }
-}
+impl std::error::Error for RuntimeError {}
 
-fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
-    matches!(
-        trogon_std::env::ReadEnv::var(env, key).as_deref().map(str::trim),
-        Ok("1" | "true" | "TRUE" | "True" | "yes" | "YES" | "Yes" | "on" | "ON" | "On")
-    )
-}
+pub async fn run_with_env<H, E>(handler: H, env: &E) -> Result<(), RuntimeError>
+where
+    H: A2aExecutor,
+    E: ReadEnv,
+{
+    let prefix_raw = env
+        .var(ENV_A2A_PREFIX)
+        .unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_string());
+    let prefix = A2aPrefix::new(prefix_raw).map_err(RuntimeError::InvalidPrefix)?;
 
-pub async fn run() -> Result<(), RuntimeError> {
-    let env = SystemEnv;
+    let agent_id_raw = env.var(ENV_A2A_AGENT_ID).map_err(|_| RuntimeError::MissingAgentId)?;
+    let agent_id = A2aAgentId::new(&agent_id_raw).map_err(RuntimeError::InvalidAgentId)?;
 
-    let raw_prefix = trogon_std::env::ReadEnv::var(&env, a2a_nats::ENV_A2A_PREFIX)
-        .unwrap_or_else(|_| a2a_nats::DEFAULT_A2A_PREFIX.to_string());
-    let prefix = A2aPrefix::new(raw_prefix).map_err(RuntimeError::InvalidPrefix)?;
+    let nats_config = NatsConfig::from_env(env);
+    let base_config = Config::new(prefix.clone(), nats_config.clone());
+    let config = apply_timeout_overrides(base_config, env);
 
-    let raw_agent_id = trogon_std::env::ReadEnv::var(&env, ENV_AGENT_ID).map_err(|_| RuntimeError::MissingAgentId)?;
-    let agent_id = A2aAgentId::new(raw_agent_id).map_err(RuntimeError::InvalidAgentId)?;
-
-    let bind_addr: SocketAddr = trogon_std::env::ReadEnv::var(&env, ENV_HTTP_BIND)
-        .unwrap_or_else(|_| DEFAULT_BIND.to_string())
-        .parse()
-        .map_err(RuntimeError::InvalidBind)?;
-
-    let nats_config = NatsConfig::from_env(&env);
-    let connect_timeout = a2a_nats::nats_connect_timeout(&env);
+    let connect_timeout = nats_connect_timeout(env);
     let nats_client = trogon_nats::connect(&nats_config, connect_timeout)
         .await
         .map_err(RuntimeError::NatsConnect)?;
@@ -91,36 +61,192 @@ pub async fn run() -> Result<(), RuntimeError> {
     let js_context = async_nats::jetstream::new(nats_client.clone());
     let js_client = NatsJetStreamClient::new(js_context);
 
-    let a2a_config = Config::new(prefix, nats_config);
-    let a2a_config = a2a_nats::apply_timeout_overrides(a2a_config, &env);
-
-    let client = A2aClient::new(a2a_config, agent_id, nats_client, js_client);
-    let client = if env_flag(&env, ENV_USE_GATEWAY) {
-        let raw_jwt = trogon_std::env::ReadEnv::var(&env, ENV_GATEWAY_CALLER_JWT)
-            .map_err(|_| RuntimeError::MissingGatewayCallerJwt)?;
-        let caller_jwt = MintedUserJwt::new(raw_jwt);
-        caller_jwt
-            .ensure_fresh()
-            .map_err(|e| RuntimeError::InvalidGatewayCallerJwt(e.to_string()))?;
-        info!("Routing HTTP requests through a2a-gateway ingress");
-        client.routing_via_gateway_ingress(caller_jwt)
-    } else {
-        client
-    };
-
-    let app = router::build(client);
-
-    let listener = tokio::net::TcpListener::bind(bind_addr)
+    provision_streams_with_options(&js_client, &prefix, &StreamProvisionOptions::from_env(env))
         .await
-        .map_err(RuntimeError::Io)?;
+        .map_err(RuntimeError::Provision)?;
 
-    info!(address = %bind_addr, "A2A NATS server listening");
+    let shutdown = CancellationToken::new();
+    let shutdown_for_task = shutdown.clone();
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            shutdown_signal().await;
-            info!("Shutdown signal received");
-        })
+    tokio::spawn(async move {
+        trogon_std::signal::shutdown_signal().await;
+        shutdown_for_task.cancel();
+    });
+
+    let bridge = Bridge::new(config, handler, nats_client, js_client);
+    bridge
+        .run_with_agent_id(&agent_id, shutdown)
         .await
-        .map_err(RuntimeError::Io)
+        .map_err(RuntimeError::Bridge)?;
+
+    info!("A2A agent shutdown complete");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_std::env::InMemoryEnv;
+
+    fn subscriber() -> impl tracing::Subscriber {
+        tracing_subscriber::fmt().with_test_writer().finish()
+    }
+
+    #[test]
+    fn runtime_error_display_missing_agent_id() {
+        let e = RuntimeError::MissingAgentId;
+        assert!(e.to_string().contains("A2A_AGENT_ID"));
+    }
+
+    #[test]
+    fn runtime_error_display_invalid_agent_id() {
+        let inner = A2aAgentId::new("a.b").unwrap_err();
+        let e = RuntimeError::InvalidAgentId(inner);
+        assert!(e.to_string().contains("invalid agent id"));
+    }
+
+    #[test]
+    fn runtime_error_display_invalid_prefix() {
+        let inner = A2aPrefix::new("").unwrap_err();
+        let e = RuntimeError::InvalidPrefix(inner);
+        assert!(e.to_string().contains("invalid A2A prefix"));
+    }
+
+    #[test]
+    fn runtime_error_display_provision() {
+        let inner = a2a_nats::jetstream::ProvisionError("stream: fail".into());
+        let e = RuntimeError::Provision(inner);
+        assert!(e.to_string().contains("JetStream provisioning failed"));
+    }
+
+    #[test]
+    fn runtime_error_display_bridge() {
+        let inner = a2a_nats::server::BridgeError::Subscribe("no sub".into());
+        let e = RuntimeError::Bridge(inner);
+        assert!(e.to_string().contains("bridge error"));
+    }
+
+    #[test]
+    fn runtime_error_implements_std_error() {
+        let e: Box<dyn std::error::Error> = Box::new(RuntimeError::MissingAgentId);
+        assert!(!e.to_string().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_with_env_missing_agent_id_returns_error() {
+        let _guard = tracing::subscriber::set_default(subscriber());
+        let env = InMemoryEnv::new();
+        let result = run_with_env(StubHandler, &env).await;
+        assert!(matches!(result, Err(RuntimeError::MissingAgentId)));
+    }
+
+    #[tokio::test]
+    async fn run_with_env_invalid_agent_id_returns_error() {
+        let _guard = tracing::subscriber::set_default(subscriber());
+        let env = InMemoryEnv::new();
+        env.set(ENV_A2A_AGENT_ID, "a.b");
+        let result = run_with_env(StubHandler, &env).await;
+        assert!(matches!(result, Err(RuntimeError::InvalidAgentId(_))));
+    }
+
+    #[tokio::test]
+    async fn run_with_env_invalid_prefix_returns_error() {
+        let _guard = tracing::subscriber::set_default(subscriber());
+        let env = InMemoryEnv::new();
+        env.set(ENV_A2A_AGENT_ID, "bot");
+        env.set(ENV_A2A_PREFIX, "bad prefix!");
+        let result = run_with_env(StubHandler, &env).await;
+        assert!(matches!(result, Err(RuntimeError::InvalidPrefix(_))));
+    }
+
+    #[tokio::test]
+    async fn run_with_env_defaults_to_a2a_prefix_when_env_not_set() {
+        let _guard = tracing::subscriber::set_default(subscriber());
+        let env = InMemoryEnv::new();
+        // No A2A_AGENT_ID — proves env default path runs before the missing-id error.
+        let result = run_with_env(StubHandler, &env).await;
+        assert!(matches!(result, Err(RuntimeError::MissingAgentId)));
+    }
+
+    struct StubHandler;
+
+    #[async_trait::async_trait]
+    impl A2aExecutor for StubHandler {
+        async fn message_send(
+            &self,
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<a2a::types::SendMessageResponse, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+
+        async fn message_stream(
+            &self,
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<(a2a::types::Task, a2a_nats::server::TaskEventStream), a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+
+        async fn tasks_get(
+            &self,
+            _req: a2a::types::GetTaskRequest,
+        ) -> Result<a2a::types::Task, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+
+        async fn tasks_list(
+            &self,
+            _req: a2a::types::ListTasksRequest,
+        ) -> Result<a2a::types::ListTasksResponse, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+
+        async fn tasks_cancel(
+            &self,
+            _req: a2a::types::CancelTaskRequest,
+        ) -> Result<a2a::types::Task, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+
+        async fn tasks_resubscribe(
+            &self,
+            _req: a2a::types::SubscribeToTaskRequest,
+        ) -> Result<a2a::types::Task, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+
+        async fn push_notification_set(
+            &self,
+            _req: a2a::types::TaskPushNotificationConfig,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::push_notification_not_supported("stub"))
+        }
+
+        async fn push_notification_get(
+            &self,
+            _req: a2a::types::GetTaskPushNotificationConfigRequest,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::push_notification_not_supported("stub"))
+        }
+
+        async fn push_notification_list(
+            &self,
+            _req: a2a::types::ListTaskPushNotificationConfigsRequest,
+        ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::push_notification_not_supported("stub"))
+        }
+
+        async fn push_notification_delete(
+            &self,
+            _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
+        ) -> Result<(), a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::push_notification_not_supported("stub"))
+        }
+
+        async fn agent_card(
+            &self,
+            _req: a2a::types::GetExtendedAgentCardRequest,
+        ) -> Result<a2a::agent_card::AgentCard, a2a_nats::server::A2aError> {
+            Err(a2a_nats::server::A2aError::unsupported_operation("stub"))
+        }
+    }
 }

@@ -85,29 +85,18 @@ impl RequestedExtension {
         // RFC-style optional marker: a trailing `;q=0` is treated as "optional".
         // We also accept a `?` prefix as an alternative optional marker that
         // is easy to author by hand.
-        // Skip tokens whose URI segment ends up empty after stripping the
-        // optional `?` prefix or `;q=…` params — e.g. a bare `"?"` or a `;q=0`
-        // would otherwise be implicitly negotiated as an empty-URI extension.
         if let Some(stripped) = trimmed.strip_prefix('?') {
-            let uri = stripped.trim();
-            if uri.is_empty() {
-                return None;
-            }
             Some(Self {
-                uri: uri.to_string(),
+                uri: stripped.trim().to_string(),
                 required: false,
             })
         } else if let Some((uri, params)) = trimmed.split_once(';') {
-            let uri = uri.trim();
-            if uri.is_empty() {
-                return None;
-            }
             let optional = params.split(';').any(|p| {
                 let p = p.trim().to_ascii_lowercase();
                 p == "q=0" || p == "q=0.0" || p == "optional"
             });
             Some(Self {
-                uri: uri.to_string(),
+                uri: uri.trim().to_string(),
                 required: !optional,
             })
         } else {
@@ -120,7 +109,9 @@ impl RequestedExtension {
 }
 
 fn parse_extensions(raw: &str) -> Vec<RequestedExtension> {
-    raw.split(',').filter_map(RequestedExtension::parse).collect()
+    raw.split(',')
+        .filter_map(RequestedExtension::parse)
+        .collect()
 }
 
 /// Result of header negotiation that downstream handlers can read off the request extensions.
@@ -137,14 +128,19 @@ fn json_rpc_error(code: i32, message: &str) -> Response {
         "error": { "code": code, "message": message },
     });
     let mut response = (StatusCode::BAD_REQUEST, axum::Json(body)).into_response();
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static(A2A_MEDIA_TYPE));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(A2A_MEDIA_TYPE),
+    );
     response
 }
 
 /// Axum middleware that negotiates A2A spec headers + media type on every request/response.
-pub async fn negotiate(State(config): State<Arc<SpecNegotiationConfig>>, mut request: Request, next: Next) -> Response {
+pub async fn negotiate(
+    State(config): State<Arc<SpecNegotiationConfig>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     let headers = request.headers();
 
     let requested_version = headers
@@ -222,4 +218,58 @@ pub fn default_config() -> Arc<SpecNegotiationConfig> {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_optional_extension_with_question_prefix() {
+        let ext = RequestedExtension::parse("?https://example.com/ext/foo").unwrap();
+        assert_eq!(ext.uri, "https://example.com/ext/foo");
+        assert!(!ext.required);
+    }
+
+    #[test]
+    fn parses_required_extension_default() {
+        let ext = RequestedExtension::parse("https://example.com/ext/bar").unwrap();
+        assert_eq!(ext.uri, "https://example.com/ext/bar");
+        assert!(ext.required);
+    }
+
+    #[test]
+    fn parses_q_zero_as_optional() {
+        let ext = RequestedExtension::parse("https://example.com/ext/baz;q=0").unwrap();
+        assert_eq!(ext.uri, "https://example.com/ext/baz");
+        assert!(!ext.required);
+    }
+
+    #[test]
+    fn parse_extensions_splits_on_comma_and_ignores_empty() {
+        let exts = parse_extensions("https://a/, ,?https://b/");
+        assert_eq!(exts.len(), 2);
+        assert_eq!(exts[0].uri, "https://a/");
+        assert!(exts[0].required);
+        assert_eq!(exts[1].uri, "https://b/");
+        assert!(!exts[1].required);
+    }
+
+    #[test]
+    fn default_config_has_one_version() {
+        let cfg = SpecNegotiationConfig::default();
+        assert!(cfg.supported_versions.contains(DEFAULT_A2A_VERSION));
+        assert_eq!(cfg.default_version, DEFAULT_A2A_VERSION);
+        assert!(cfg.supported_extensions.is_empty());
+    }
+
+    #[test]
+    fn with_version_appends_to_supported_set() {
+        let cfg = SpecNegotiationConfig::new("0.3.0").with_version("0.2.0");
+        assert!(cfg.supported_versions.contains("0.3.0"));
+        assert!(cfg.supported_versions.contains("0.2.0"));
+    }
+
+    #[test]
+    fn with_extension_appends() {
+        let cfg = SpecNegotiationConfig::default().with_extension("https://example.com/ext/x");
+        assert!(cfg.supported_extensions.contains("https://example.com/ext/x"));
+    }
+}

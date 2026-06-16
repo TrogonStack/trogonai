@@ -18,23 +18,22 @@ RUN cargo chef cook --release --recipe-path recipe.json \
     -p a2a-auth-callout \
     -p a2a-gateway \
     -p a2a-bridge \
+    -p a2a-nats-http \
     -p a2a-nats-server \
-    -p a2a-nats-agent \
     -p a2a-smoke-test
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-RUN cargo build --release -p a2a-nats-agent --bin a2a-nats-agent-echo \
-    && strip target/release/a2a-nats-agent-echo
+RUN cargo build --release -p a2a-nats-http && strip target/release/a2a-nats-http
 
 FROM debian:bookworm-20250317-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    procps \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/a2a-nats-agent-echo /usr/local/bin/a2a-nats-agent
+COPY --from=builder /build/target/release/a2a-nats-http /usr/local/bin/a2a-nats-http
 
-ENTRYPOINT ["/usr/local/bin/a2a-nats-agent"]
+ENTRYPOINT ["/usr/local/bin/a2a-nats-http"]

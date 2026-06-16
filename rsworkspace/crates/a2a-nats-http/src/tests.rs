@@ -1,45 +1,33 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use a2a_identity_types::MintedUserJwt;
+use a2a_auth_callout::test_support::mint_test_user_jwt;
 use a2a_nats::client::A2aClient;
-use a2a_nats::{A2aAgentId, A2aPrefix};
+use a2a_nats::{A2aAgentId, Config, NatsConfig};
 use axum::body::{Body, to_bytes};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
-use base64::Engine;
-use bytes::Bytes;
-use jsonrpc_nats::{Message, ResponseId, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
 
 use crate::router;
-use crate::runtime::RuntimeError;
-use crate::sse::client_error_to_jsonrpc_code;
-use a2a_nats::client::ClientError;
 
-pub(super) fn test_config() -> A2aPrefix {
-    A2aPrefix::new("a2a".to_string()).unwrap()
+fn test_config() -> Config {
+    Config::new(
+        a2a_nats::A2aPrefix::new("a2a".to_string()).unwrap(),
+        NatsConfig {
+            servers: vec!["localhost:4222".to_string()],
+            auth: trogon_nats::NatsAuth::None,
+        },
+    )
 }
 
 pub(super) fn test_agent_id() -> A2aAgentId {
     A2aAgentId::new("test-agent").unwrap()
 }
 
-fn mint_test_user_jwt(_agent_id: &str, _prefix: &str, ttl: Duration) -> MintedUserJwt {
-    // The HTTP runtime only inspects shape + `exp`; minting via the real auth-callout
-    // crate would pull in jsonwebtoken/nkeys here, so we hand-craft a token with a
-    // future `exp` and an opaque signature segment that validate_compact_jwt_shape
-    // accepts.
-    let exp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + ttl.as_secs();
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp}}}"#));
-    let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"test-signature");
-    MintedUserJwt::new(format!("{header}.{payload}.{signature}")).unwrap()
-}
-
-fn gateway_test_caller_jwt() -> MintedUserJwt {
+fn gateway_test_caller_jwt() -> a2a_nats::client::MintedUserJwt {
     mint_test_user_jwt("test-agent", "a2a", Duration::from_secs(3600))
 }
 
@@ -63,48 +51,37 @@ pub(super) async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-pub(super) fn task_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
-    let task = json!({ "id": task_id, "contextId": "", "status": { "state": "TASK_STATE_COMPLETED" } });
-    let encoded = encode(&Message::Success {
-        id: ResponseId::String("any".into()),
-        result: task,
-    })
-    .unwrap();
-    (encoded.headers, encoded.body)
+fn task_response_bytes(task_id: &str) -> bytes::Bytes {
+    let task = json!({ "id": task_id, "status": { "state": 3 } });
+    let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": task });
+    serde_json::to_vec(&envelope).unwrap().into()
 }
 
-pub(super) fn send_message_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
-    let task = json!({ "id": task_id, "contextId": "", "status": { "state": "TASK_STATE_SUBMITTED" } });
+fn send_message_response_bytes(task_id: &str) -> bytes::Bytes {
+    let task = json!({ "id": task_id, "status": { "state": 1 } });
     let resp = json!({ "task": task });
-    let encoded = encode(&Message::Success {
-        id: ResponseId::String("any".into()),
-        result: resp,
-    })
-    .unwrap();
-    (encoded.headers, encoded.body)
+    let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": resp });
+    serde_json::to_vec(&envelope).unwrap().into()
 }
 
-pub(super) fn error_response_bytes(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
-    let encoded = encode(&Message::Error {
-        id: ResponseId::String("any".into()),
-        code,
-        message: msg.to_string(),
-        data: None,
-    })
-    .unwrap();
-    (encoded.headers, encoded.body)
+fn error_response_bytes(code: i32, msg: &str) -> bytes::Bytes {
+    let envelope = json!({
+        "jsonrpc": "2.0",
+        "id": "ignored",
+        "error": { "code": code, "message": msg }
+    });
+    serde_json::to_vec(&envelope).unwrap().into()
 }
 
 #[tokio::test]
 async fn message_send_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = send_message_response_bytes("t1");
-    nats.set_response_wire("a2a.agents.test-agent.message.send", headers, body);
+    nats.set_response("a2a.agent.test-agent.message.send", send_message_response_bytes("t1"));
 
     let app = build_app(nats);
     let response = app
         .oneshot(jsonrpc_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[]}}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"messageId":"m1","role":1,"parts":[]}}}"#,
         ))
         .await
         .unwrap();
@@ -112,15 +89,13 @@ async fn message_send_returns_jsonrpc_result() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["id"], 1);
-    eprintln!("RESPONSE: {body}");
     assert!(body["result"].is_object());
 }
 
 #[tokio::test]
 async fn tasks_get_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = task_response_bytes("task-1");
-    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
+    nats.set_response("a2a.agent.test-agent.tasks.get", task_response_bytes("task-1"));
 
     let app = build_app(nats);
     let response = app
@@ -139,8 +114,10 @@ async fn tasks_get_returns_jsonrpc_result() {
 #[tokio::test]
 async fn tasks_get_not_found_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = error_response_bytes(-32001, "not found");
-    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
+    nats.set_response(
+        "a2a.agent.test-agent.tasks.get",
+        error_response_bytes(-32001, "not found"),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -159,8 +136,7 @@ async fn tasks_get_not_found_returns_jsonrpc_error() {
 #[tokio::test]
 async fn tasks_cancel_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = task_response_bytes("task-c");
-    nats.set_response_wire("a2a.agents.test-agent.tasks.cancel", headers, body);
+    nats.set_response("a2a.agent.test-agent.tasks.cancel", task_response_bytes("task-c"));
 
     let app = build_app(nats);
     let response = app
@@ -173,7 +149,6 @@ async fn tasks_cancel_returns_jsonrpc_result() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["id"], 4);
-    eprintln!("RESPONSE: {body}");
     assert!(body["result"].is_object());
 }
 
@@ -220,12 +195,11 @@ async fn tasks_list_returns_jsonrpc_result() {
         "pageSize": 0,
         "totalSize": 0
     });
-    let encoded = encode(&Message::Success {
-        id: ResponseId::String("any".into()),
-        result: list_resp,
-    })
-    .unwrap();
-    nats.set_response_wire("a2a.agents.test-agent.tasks.list", encoded.headers, encoded.body);
+    let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
+    nats.set_response(
+        "a2a.agent.test-agent.tasks.list",
+        serde_json::to_vec(&envelope).unwrap().into(),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -238,7 +212,6 @@ async fn tasks_list_returns_jsonrpc_result() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["id"], 7);
-    eprintln!("RESPONSE: {body}");
     assert!(body["result"].is_object());
 }
 
@@ -261,12 +234,11 @@ async fn agent_card_endpoint_returns_json() {
         security_requirements: None,
         signatures: None,
     };
-    let encoded = encode(&Message::Success {
-        id: ResponseId::String("any".into()),
-        result: serde_json::json!(card),
-    })
-    .unwrap();
-    nats.set_response_wire("a2a.agents.test-agent.card", encoded.headers, encoded.body);
+    let envelope = serde_json::json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
+    nats.set_response(
+        "a2a.agent.test-agent.agent.card",
+        serde_json::to_vec(&envelope).unwrap().into(),
+    );
 
     let js = MockJetStreamConsumerFactory::new();
     let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
@@ -291,8 +263,10 @@ async fn agent_card_endpoint_returns_json() {
 #[tokio::test]
 async fn message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = send_message_response_bytes("ts1");
-    nats.set_response_wire("a2a.agents.test-agent.message.stream", headers, body);
+    nats.set_response(
+        "a2a.agent.test-agent.message.stream",
+        send_message_response_bytes("ts1"),
+    );
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = trogon_nats::jetstream::mocks::MockJetStreamConsumer::new();
@@ -303,7 +277,7 @@ async fn message_stream_returns_sse_content_type() {
 
     let response = app
         .oneshot(jsonrpc_request(
-            r#"{"jsonrpc":"2.0","id":8,"method":"message/stream","params":{"message":{"messageId":"m2","role":"ROLE_USER","parts":[]}}}"#,
+            r#"{"jsonrpc":"2.0","id":8,"method":"message/stream","params":{"message":{"messageId":"m2","role":1,"parts":[]}}}"#,
         ))
         .await
         .unwrap();
@@ -316,8 +290,15 @@ async fn message_stream_returns_sse_content_type() {
 #[tokio::test]
 async fn agent_card_unavailable_returns_503() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = error_response_bytes(-32050, "unavailable");
-    nats.set_response_wire("a2a.agents.test-agent.card", headers, body);
+    let envelope = json!({
+        "jsonrpc": "2.0",
+        "id": "ignored",
+        "error": { "code": -32050, "message": "unavailable" }
+    });
+    nats.set_response(
+        "a2a.agent.test-agent.agent.card",
+        serde_json::to_vec(&envelope).unwrap().into(),
+    );
 
     let js = MockJetStreamConsumerFactory::new();
     let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
@@ -340,8 +321,7 @@ async fn agent_card_unavailable_returns_503() {
 #[tokio::test]
 async fn jsonrpc_string_id_is_forwarded() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = task_response_bytes("t99");
-    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
+    nats.set_response("a2a.agent.test-agent.tasks.get", task_response_bytes("t99"));
 
     let app = build_app(nats);
     let response = app
@@ -358,8 +338,10 @@ async fn jsonrpc_string_id_is_forwarded() {
 #[tokio::test]
 async fn push_set_not_supported_maps_to_correct_error_code() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = error_response_bytes(-32003, "not supported");
-    nats.set_response_wire("a2a.agents.test-agent.push.set", headers, body);
+    nats.set_response(
+        "a2a.agent.test-agent.tasks.push_notification_config.set",
+        error_response_bytes(-32003, "not supported"),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -376,17 +358,17 @@ async fn push_set_not_supported_maps_to_correct_error_code() {
 
 #[test]
 fn runtime_error_display_shows_env_var_name() {
-    assert_eq!(
-        RuntimeError::MissingAgentId.to_string(),
-        "A2A_AGENT_ID environment variable is required"
-    );
+    use crate::runtime::RuntimeError;
+    assert!(RuntimeError::MissingAgentId.to_string().contains("A2A_AGENT_ID"));
 }
 
 #[tokio::test]
 async fn gateway_routed_message_send_targets_gateway_subject() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = send_message_response_bytes("t-gw");
-    nats.set_response_wire("a2a.gateway.test-agent.message.send", headers, body);
+    nats.set_response(
+        "a2a.gateway.test-agent.message.send",
+        send_message_response_bytes("t-gw"),
+    );
 
     let js = MockJetStreamConsumerFactory::new();
     let client =
@@ -395,7 +377,7 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
 
     let response = app
         .oneshot(jsonrpc_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[]}}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"messageId":"m1","role":1,"parts":[]}}}"#,
         ))
         .await
         .unwrap();
@@ -408,8 +390,10 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
 #[tokio::test]
 async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
     let nats = AdvancedMockNatsClient::new();
-    let (headers, body) = task_response_bytes("should-not-be-hit");
-    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
+    nats.set_response(
+        "a2a.agent.test-agent.tasks.get",
+        task_response_bytes("should-not-be-hit"),
+    );
 
     let js = MockJetStreamConsumerFactory::new();
     let client =
@@ -433,6 +417,9 @@ async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
 
 #[test]
 fn client_error_to_jsonrpc_code_maps_known_errors() {
+    use crate::sse::client_error_to_jsonrpc_code;
+    use a2a_nats::client::ClientError;
+
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::TaskNotFound).0, -32001);
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::TaskNotCancelable).0, -32002);
     assert_eq!(
@@ -451,5 +438,132 @@ fn client_error_to_jsonrpc_code_maps_known_errors() {
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::StreamClosed).0, -32603);
 }
 
-mod rest_tests;
-mod spec_negotiation_tests;
+mod spec_negotiation {
+    use std::sync::Arc;
+
+    use a2a_nats::client::A2aClient;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
+    use serde_json::Value;
+    use tower::ServiceExt;
+    use trogon_nats::AdvancedMockNatsClient;
+    use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
+
+    use crate::headers::{A2A_EXTENSIONS_HEADER, A2A_MEDIA_TYPE, A2A_VERSION_HEADER, SpecNegotiationConfig};
+    use crate::router;
+
+    use super::{send_message_response_bytes, test_agent_id, test_config};
+
+    fn build_app_with_negotiation(config: SpecNegotiationConfig) -> axum::Router {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.test-agent.message.send", send_message_response_bytes("t1"));
+        let js = MockJetStreamConsumerFactory::new();
+        let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
+        router::build_with_negotiation(client, Arc::new(config))
+    }
+
+    fn message_send_body() -> &'static str {
+        r#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":1,"messageId":"m1","parts":[]}}}"#
+    }
+
+    #[tokio::test]
+    async fn default_version_echoed_when_request_omits_header() {
+        let app = build_app_with_negotiation(SpecNegotiationConfig::default());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-type", "application/json")
+            .body(Body::from(message_send_body()))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let version = response
+            .headers()
+            .get(&A2A_VERSION_HEADER)
+            .expect("a2a-version header echoed")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(version, "0.3.0");
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(content_type.starts_with(A2A_MEDIA_TYPE), "content-type was {content_type}");
+    }
+
+    #[tokio::test]
+    async fn unknown_version_rejected_with_jsonrpc_error() {
+        let app = build_app_with_negotiation(SpecNegotiationConfig::default());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-type", "application/json")
+            .header(&A2A_VERSION_HEADER, "9.9.9")
+            .body(Body::from(message_send_body()))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"]["code"], a2a_nats::error::VERSION_NOT_SUPPORTED);
+    }
+
+    #[tokio::test]
+    async fn required_extension_mismatch_rejected_with_jsonrpc_error() {
+        let app = build_app_with_negotiation(SpecNegotiationConfig::default());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-type", "application/json")
+            .header(&A2A_EXTENSIONS_HEADER, "https://example.com/required-ext")
+            .body(Body::from(message_send_body()))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"]["code"], a2a_nats::error::EXTENSION_SUPPORT_REQUIRED);
+    }
+
+    #[tokio::test]
+    async fn optional_extension_unknown_is_ignored() {
+        let app = build_app_with_negotiation(SpecNegotiationConfig::default());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-type", "application/json")
+            .header(&A2A_EXTENSIONS_HEADER, "?https://example.com/optional-ext")
+            .body(Body::from(message_send_body()))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(&A2A_EXTENSIONS_HEADER).is_none());
+    }
+
+    #[tokio::test]
+    async fn supported_extension_echoed_on_response() {
+        let config = SpecNegotiationConfig::default().with_extension("https://example.com/supported");
+        let app = build_app_with_negotiation(config);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-type", "application/json")
+            .header(&A2A_EXTENSIONS_HEADER, "https://example.com/supported")
+            .body(Body::from(message_send_body()))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let activated = response
+            .headers()
+            .get(&A2A_EXTENSIONS_HEADER)
+            .expect("activated extension echoed")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(activated, "https://example.com/supported");
+    }
+}

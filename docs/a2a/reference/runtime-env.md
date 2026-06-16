@@ -44,7 +44,7 @@ Binaries that call `NatsConfig::from_env` honor **`trogon_nats`** auth and URL v
 
 ## Per-binary reference
 
-### `a2a-nats-agent`
+### `a2a-nats-server`
 
 NATS agent bridge: subscribes on `{prefix}.agent.{agent_id}.*`, provisions JetStream streams on startup (`provision_streams`).
 
@@ -63,13 +63,13 @@ NATS agent bridge: subscribes on `{prefix}.agent.{agent_id}.*`, provisions JetSt
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 | `A2A_EVENTS_MAX_AGE_SECS` | no | 86400 (24h) | Per-Account **`A2A_EVENTS`** JetStream `max_age` at provision time |
 
-Source: [`a2a-nats-agent/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-agent/src/runtime.rs).
+Source: [`a2a-nats-server/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-server/src/runtime.rs).
 
 ---
 
-### `a2a-nats-server`
+### `a2a-nats-http`
 
-HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run instructions and route notes: [`a2a-nats-server/README.md`](../../../rsworkspace/crates/a2a-nats-server/README.md).
+HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run instructions and route notes: [`a2a-nats-http/README.md`](../../../rsworkspace/crates/a2a-nats-http/README.md).
 
 | Variable | Required | Default | Meaning |
 |----------|----------|---------|---------|
@@ -88,7 +88,7 @@ HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run in
 | `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` when provisioning **`A2A_PUSH_DLQ`** |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 
-Source: [`a2a-nats-server/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-server/src/runtime.rs).
+Source: [`a2a-nats-http/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-http/src/runtime.rs).
 
 ---
 
@@ -171,7 +171,7 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no | `env` | Gateway JWT verification uses the same signing-key custody as `a2a-auth-callout` (`env` \| `file`; see auth-callout section) |
 | `A2A_GATEWAY_TRUST_CALLER_HEADERS` | no | off | **Deprecated.** Labs-only fallback: honor [`GATEWAY_PRINCIPAL_HEADER`](../../../rsworkspace/crates/a2a-nats/src/constants.rs) / [`GATEWAY_CALLER_ID_HEADER`](../../../rsworkspace/crates/a2a-nats/src/constants.rs) only when no verified `A2a-Caller-Jwt` is present. Scheduled for removal once all publishers attach the JWT header. |
 
-Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token). In-tree **`a2a-nats::Client`** carries a `MintedUserJwt` when [`routing_via_gateway_ingress`](../../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is enabled (`a2a-nats-server` supplies it via `A2A_GATEWAY_CALLER_JWT` when `A2A_USE_GATEWAY` is on). External NATS-native publishers that bypass `a2a-nats::Client` must attach the header themselves; until they do, `A2A_GATEWAY_TRUST_CALLER_HEADERS` remains the labs-only fallback.
+Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token). In-tree **`a2a-nats::Client`** carries a `MintedUserJwt` when [`routing_via_gateway_ingress`](../../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is enabled (`a2a-nats-http` supplies it via `A2A_GATEWAY_CALLER_JWT` when `A2A_USE_GATEWAY` is on). External NATS-native publishers that bypass `a2a-nats::Client` must attach the header themselves; until they do, `A2A_GATEWAY_TRUST_CALLER_HEADERS` remains the labs-only fallback.
 
 CLI/env wiring: [`a2a-gateway/src/config.rs`](../../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
 
