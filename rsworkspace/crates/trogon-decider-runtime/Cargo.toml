@@ -3,7 +3,7 @@ name = "trogon-decider-runtime"
 version = "0.1.0"
 edition = "2024"
 description = "Runtime execution, stream, and snapshot primitives for Trogon deciders"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/TrogonStack/trogonai"
 
 [features]
