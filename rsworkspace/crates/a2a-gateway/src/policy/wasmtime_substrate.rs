@@ -71,12 +71,18 @@ mod tests {
 
         let msg_in = Message {
             message_id: "m".into(),
-            role: Role::Agent.into(),
+            context_id: None,
+            task_id: None,
+            role: Role::Agent,
             parts: vec![a2a::types::Part {
                 content: PartContent::Text("x".into()),
-                ..Default::default()
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
         };
         let got = substrate
             .redact_message_parts(msg_in.clone(), &skill)
@@ -88,11 +94,16 @@ mod tests {
 
         let art_in = Artifact {
             artifact_id: "a".into(),
+            name: None,
+            description: None,
             parts: vec![a2a::types::Part {
                 content: PartContent::Text("blob".into()),
-                ..Default::default()
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
+            metadata: None,
+            extensions: None,
         };
         let got_art = substrate
             .redact_artifact_parts(art_in.clone(), &skill)

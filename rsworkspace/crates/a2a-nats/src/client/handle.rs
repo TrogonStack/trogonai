@@ -395,7 +395,7 @@ mod tests {
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = GetTaskRequest {
             id: "task-1".into(),
-            tenant: String::new(),
+            tenant: None,
             history_length: None,
         };
 
@@ -412,7 +412,7 @@ mod tests {
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = GetTaskRequest {
             id: "bad".into(),
-            tenant: String::new(),
+            tenant: None,
             history_length: None,
         };
 
@@ -427,7 +427,7 @@ mod tests {
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = CancelTaskRequest {
             id: "task-c".into(),
-            tenant: String::new(),
+            tenant: None,
             metadata: None,
         };
 
@@ -443,7 +443,7 @@ mod tests {
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = CancelTaskRequest {
             id: "task-c".into(),
-            tenant: String::new(),
+            tenant: None,
             metadata: None,
         };
 
@@ -460,13 +460,19 @@ mod tests {
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = SendMessageRequest {
-            message: Some(a2a::types::Message {
+            message: a2a::types::Message {
                 message_id: "msg-1".into(),
+                context_id: None,
+                task_id: None,
                 role: a2a::types::Role::User,
                 parts: vec![],
-                ..Default::default()
-            }),
-            ..Default::default()
+                metadata: None,
+                extensions: None,
+                reference_task_ids: None,
+            },
+            configuration: None,
+            metadata: None,
+            tenant: None,
         };
 
         let result = client.message_send(&req).await;
@@ -484,13 +490,19 @@ mod tests {
 
         let client = make_client(nats, js);
         let req = SendMessageRequest {
-            message: Some(a2a::types::Message {
+            message: a2a::types::Message {
                 message_id: "msg-2".into(),
+                context_id: None,
+                task_id: None,
                 role: a2a::types::Role::User,
                 parts: vec![],
-                ..Default::default()
-            }),
-            ..Default::default()
+                metadata: None,
+                extensions: None,
+                reference_task_ids: None,
+            },
+            configuration: None,
+            metadata: None,
+            tenant: None,
         };
 
         let result = client.message_stream(&req).await;
@@ -537,8 +549,17 @@ mod tests {
             name: "TestBot".into(),
             description: "A test bot".into(),
             version: "1.0.0".into(),
-            capabilities: Some(a2a::agent_card::AgentCapabilities::default()),
-            ..Default::default()
+            capabilities: a2a::agent_card::AgentCapabilities::default(),
+            supported_interfaces: vec![],
+            default_input_modes: vec![],
+            default_output_modes: vec![],
+            skills: vec![],
+            provider: None,
+            documentation_url: None,
+            icon_url: None,
+            security_schemes: None,
+            security_requirements: None,
+            signatures: None,
         };
         let json = serde_json::json!({
             "jsonrpc": "2.0",
@@ -565,7 +586,10 @@ mod tests {
         let req = TaskPushNotificationConfig {
             url: "https://example.com/hook".into(),
             task_id: "t1".into(),
-            ..Default::default()
+            id: None,
+            token: None,
+            authentication: None,
+            tenant: None,
         };
 
         assert!(matches!(
@@ -591,7 +615,16 @@ mod tests {
         nats.set_response("a2a.v1.agents.bot.tasks.list", serde_json::to_vec(&json).unwrap().into());
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let req = ListTasksRequest::default();
+        let req = ListTasksRequest {
+            context_id: None,
+            page_size: None,
+            page_token: None,
+            history_length: None,
+            status: None,
+            status_timestamp_after: None,
+            include_artifacts: None,
+            tenant: None,
+        };
 
         let result = client.tasks_list(&req).await;
         assert!(result.is_ok());
@@ -605,7 +638,7 @@ mod tests {
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = GetTaskRequest {
             id: "t".into(),
-            tenant: String::new(),
+            tenant: None,
             history_length: None,
         };
 
@@ -623,7 +656,7 @@ mod tests {
         let client = make_client(nats, MockJetStreamConsumerFactory::new()).routing_via_gateway_ingress(jwt);
         let req = GetTaskRequest {
             id: "task-gw".into(),
-            tenant: String::new(),
+            tenant: None,
             history_length: None,
         };
 

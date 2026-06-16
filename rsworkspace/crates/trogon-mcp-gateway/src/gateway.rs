@@ -13,17 +13,16 @@ use tracing::{Instrument, debug, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
-use crate::approvals::{RequestId, build_approval_required_step_up, jsonrpc_error_with_approval_data};
 use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
-use crate::anomaly::{AnomalyEmit, AnomalyIngressContext};
+use crate::anomaly::AnomalyIngressContext;
 use crate::approvals::{
     ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest, ApprovalSubject, RequestId,
     build_approval_required_step_up, build_approval_required_with_subject, jsonrpc_error_with_approval_data,
 };
 use crate::audit::{self, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED, AuditEnvelope};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
-use crate::context_throttle::{ContextThrottle, ContextThrottleKey, ContextThrottleOutcome};
+use crate::context_throttle::{ContextThrottleKey, ContextThrottleOutcome};
 use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, backend_target_aud, scope_for_tools_call,
     session_id_from_headers, strip_inbound_credentials,
@@ -99,6 +98,10 @@ pub struct GatewaySettings {
     /// Wired into `handle_ingress_inner` for region selection + session pinning; per-region NATS
     /// fan-out and cross-region audit topology remain v0.2 follow-up per `docs/roadmap/agentgateway-v0.2.md`.
     pub multi_region_router: Option<Arc<RegionRouter>>,
+    pub approval_gate: Option<Arc<dyn ApprovalGate>>,
+    pub mesh_config: crate::policy::MeshGatewayConfig,
+    pub context_throttle: Option<Arc<crate::context_throttle::ContextThrottle>>,
+    pub anomaly_emitter: Option<Arc<dyn crate::anomaly::AnomalyEmit>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -320,6 +323,7 @@ async fn handle_ingress_inner(
     };
     let gateway_identity = gateway_resolution.identity;
     let jwt_claims = gateway_resolution.claims;
+    let session_id = session_id_from_headers(msg.headers.as_ref(), &jwt_claims);
 
     if let Some(resolver) = settings.chain_resolver.as_ref()
         && let Some(deny) = resolver.resolve_inbound_chain(jwt_claims.act_chain.as_deref()).await

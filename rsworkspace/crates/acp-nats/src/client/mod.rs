@@ -11,7 +11,7 @@ pub(crate) mod terminal_output;
 pub(crate) mod terminal_release;
 pub(crate) mod terminal_wait_for_exit;
 
-use crate::server::Bridge;
+use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::jsonrpc::extract_request_id;
@@ -428,10 +428,10 @@ mod tests {
 
     fn make_bridge(
         nats: MockNatsClient,
-    ) -> Rc<Bridge<MockNatsClient, SystemClock, crate::server::test_support::MockJs>> {
+    ) -> Rc<Bridge<MockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
         Rc::new(Bridge::new(
             nats,
-            crate::server::test_support::MockJs::new(),
+            crate::agent::test_support::MockJs::new(),
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
@@ -441,10 +441,10 @@ mod tests {
 
     fn make_bridge_advanced(
         nats: AdvancedMockNatsClient,
-    ) -> Rc<Bridge<AdvancedMockNatsClient, SystemClock, crate::server::test_support::MockJs>> {
+    ) -> Rc<Bridge<AdvancedMockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
         Rc::new(Bridge::new(
             nats,
-            crate::server::test_support::MockJs::new(),
+            crate::agent::test_support::MockJs::new(),
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp"),
@@ -455,10 +455,10 @@ mod tests {
     fn make_bridge_with_operation_timeout(
         nats: MockNatsClient,
         operation_timeout: std::time::Duration,
-    ) -> Rc<Bridge<MockNatsClient, SystemClock, crate::server::test_support::MockJs>> {
+    ) -> Rc<Bridge<MockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
         Rc::new(Bridge::new(
             nats,
-            crate::server::test_support::MockJs::new(),
+            crate::agent::test_support::MockJs::new(),
             SystemClock,
             &opentelemetry::global::meter("acp-nats-test"),
             crate::config::Config::for_test("acp").with_operation_timeout(operation_timeout),

@@ -143,7 +143,7 @@ fn rotation_mint_verify_round_trip() {
         )
         .expect("mint with old key");
 
-    let verified_old = UserJwtClaims::verify_with_source(&old_token, &source).expect("verify old");
+    let verified_old = UserJwtClaims::verify_with_source(old_token.as_str(), &source).expect("verify old");
     assert_eq!(verified_old.kid.as_str(), "previous");
 
     let current_handle = source.current();

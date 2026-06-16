@@ -1116,6 +1116,7 @@ mod tests {
             TaskState::Canceled,
             TaskState::Rejected,
         ] {
+            let state_label = format!("{state:?}");
             let ev = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
                 task_id: "t".to_string(),
                 context_id: String::new(),
@@ -1126,7 +1127,7 @@ mod tests {
                 },
                 metadata: None,
             });
-            assert!(is_terminal_status_update(&ev), "expected terminal for state {state:?}");
+            assert!(is_terminal_status_update(&ev), "expected terminal for state {state_label}");
         }
     }
 }

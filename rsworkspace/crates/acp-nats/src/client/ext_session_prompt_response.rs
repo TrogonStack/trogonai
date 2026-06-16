@@ -123,16 +123,16 @@ fn extract_prompt_token_from_raw(payload: &[u8]) -> Option<PromptToken> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::Bridge;
+    use crate::agent::Bridge;
     use crate::config::Config;
     use agent_client_protocol::StopReason;
     use trogon_nats::MockNatsClient;
     use trogon_std::time::MockClock;
 
-    fn make_bridge() -> Bridge<MockNatsClient, MockClock, crate::server::test_support::MockJs> {
+    fn make_bridge() -> Bridge<MockNatsClient, MockClock, crate::agent::test_support::MockJs> {
         Bridge::new(
             MockNatsClient::new(),
-            crate::server::test_support::MockJs::new(),
+            crate::agent::test_support::MockJs::new(),
             MockClock::new(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),

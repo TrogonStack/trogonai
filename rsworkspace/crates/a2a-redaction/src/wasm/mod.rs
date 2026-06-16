@@ -180,8 +180,13 @@ mod tests {
         let host = WasmRedactorHost::new(dir).unwrap();
         let msg = Message {
             message_id: "m".into(),
-            role: Role::Agent.into(),
-            ..Default::default()
+            context_id: None,
+            task_id: None,
+            role: Role::Agent,
+            parts: vec![],
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
         };
         let out = host.redact_message(msg.clone(), &SkillId::new("missing")).unwrap();
         assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(msg).unwrap());
@@ -193,7 +198,11 @@ mod tests {
         let host = WasmRedactorHost::new(dir).unwrap();
         let art = Artifact {
             artifact_id: "aid".into(),
-            ..Default::default()
+            name: None,
+            description: None,
+            parts: vec![],
+            metadata: None,
+            extensions: None,
         };
         let out = host.redact_artifact(art.clone(), &SkillId::new("missing")).unwrap();
         assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(art).unwrap());
@@ -212,12 +221,18 @@ mod tests {
 
         let msg_in = Message {
             message_id: "m".into(),
-            role: Role::Agent.into(),
+            context_id: None,
+            task_id: None,
+            role: Role::Agent,
             parts: vec![a2a::types::Part {
                 content: PartContent::Text("x".into()),
-                ..Default::default()
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
         };
         let got = host.redact_message(msg_in.clone(), &skill).unwrap();
         assert_eq!(
@@ -239,11 +254,16 @@ mod tests {
 
         let art_in = Artifact {
             artifact_id: "a".into(),
+            name: None,
+            description: None,
             parts: vec![a2a::types::Part {
                 content: PartContent::Text("blob".into()),
-                ..Default::default()
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
+            metadata: None,
+            extensions: None,
         };
         let got = host.redact_artifact(art_in.clone(), &skill).unwrap();
         assert_eq!(

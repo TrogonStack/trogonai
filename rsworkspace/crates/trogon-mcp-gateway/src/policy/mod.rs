@@ -351,6 +351,16 @@ pub fn new_policy_cel_context(
     Ok(ctx)
 }
 
+pub fn new_policy_cel_context_for_request(
+    identity: &GatewayIdentity,
+    claims: &VerifiedJwtClaims,
+    act_chain: &[ActChainEntry],
+    _jsonrpc_method: &str,
+    _tool_name: Option<&str>,
+) -> Result<Context<'static>, PolicyError> {
+    new_policy_cel_context(identity, claims, act_chain)
+}
+
 pub fn add_jwt_to_cel_context(ctx: &mut Context, jwt: serde_json::Value) -> Result<(), PolicyError> {
     let value = cel_interpreter::to_value(&jwt).map_err(|e| PolicyError(e.to_string()))?;
     ctx.add_variable_from_value("jwt", value);

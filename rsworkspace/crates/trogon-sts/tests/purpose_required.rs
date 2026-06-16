@@ -3,6 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use support::*;
+use trogon_sts::attestor::build_attestor;
 use trogon_sts::audit::RecordingAuditPublisher;
 use trogon_sts::cache::{JwksCache, RegistryCache, TrustBundleCache};
 use trogon_sts::chain_resolution::ChainResolutionMode;
@@ -54,11 +55,14 @@ async fn purpose_missing_emits_deny_audit_reason() {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
     let registry = RegistryCache::new(InMemoryRegistry::new([sample_registry_record()]));
+    let attestor = build_attestor(trust.clone(), trogon_sts::attestor::AttestationPolicy::Shadow);
     let service = ExchangeService::new(
         DEFAULT_MESH_ISSUER.to_string(),
         keys.bootstrap_iss.clone(),
         jwks,
         trust,
+        attestor,
+        trogon_sts::attestor::AttestationPolicy::Shadow,
         registry,
         keys.mesh_signer.clone(),
         Arc::clone(&audit),

@@ -107,6 +107,43 @@ pub trait JetStreamPublishMessage: Send + Sync + Clone + 'static {
     ) -> impl Future<Output = Result<Self::AckFuture, Self::PublishError>> + Send;
 }
 
+pub trait PurgeOutcome: Send + 'static {
+    fn is_success(&self) -> bool;
+}
+
+impl PurgeOutcome for () {
+    fn is_success(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(not(coverage))]
+impl PurgeOutcome for async_nats::jetstream::stream::PurgeResponse {
+    fn is_success(&self) -> bool {
+        self.success
+    }
+}
+
+pub trait JetStreamSubjectPurger: Send + Sync + Clone + 'static {
+    type PurgeResponse: PurgeOutcome + Send;
+    type Error: Error + Send + Sync;
+
+    fn purge_subject_messages(
+        &self,
+        subject: &str,
+    ) -> impl Future<Output = Result<Self::PurgeResponse, Self::Error>> + Send;
+}
+
+#[cfg(not(coverage))]
+impl JetStreamSubjectPurger for async_nats::jetstream::stream::Stream {
+    type PurgeResponse = async_nats::jetstream::stream::PurgeResponse;
+    type Error = async_nats::error::Error<async_nats::jetstream::stream::PurgeErrorKind>;
+
+    async fn purge_subject_messages(&self, subject: &str) -> Result<Self::PurgeResponse, Self::Error> {
+        self.purge().filter(subject).await
+    }
+}
+
 pub trait JetStreamGetStream: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
     type Stream: JetStreamCreateConsumer + Send;

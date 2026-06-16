@@ -145,6 +145,7 @@ pub fn build_service_with_audit(
         Arc::clone(&audit),
         NoOpSpiceDb,
         chain_mode,
+        false,
     );
     (service, audit)
 }
@@ -153,6 +154,15 @@ pub fn build_service_with_mode(
     keys: &'static TestKeys,
     record: AgentRegistryRecord,
     chain_mode: ChainResolutionMode,
+) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
+    build_service_with_audit(keys, record, chain_mode).0
+}
+
+pub fn build_service_with_mode_and_purpose(
+    keys: &'static TestKeys,
+    record: AgentRegistryRecord,
+    chain_mode: ChainResolutionMode,
+    _require_purpose: bool,
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
     build_service_with_audit(keys, record, chain_mode).0
 }
