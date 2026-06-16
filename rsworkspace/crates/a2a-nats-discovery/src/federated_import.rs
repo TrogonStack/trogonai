@@ -159,13 +159,29 @@ mod tests {
     fn minimal_card(display_name: &str) -> a2a::agent_card::AgentCard {
         a2a::agent_card::AgentCard {
             name: display_name.to_string(),
+            description: String::new(),
+            version: String::new(),
             supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),
                 tenant: Default::default(),
             }],
-            ..Default::default()
+            capabilities: a2a::agent_card::AgentCapabilities {
+                streaming: None,
+                push_notifications: None,
+                extensions: None,
+                extended_agent_card: None,
+            },
+            default_input_modes: vec![],
+            default_output_modes: vec![],
+            skills: vec![],
+            provider: None,
+            documentation_url: None,
+            icon_url: None,
+            security_schemes: None,
+            security_requirements: None,
+            signatures: None,
         }
     }
 

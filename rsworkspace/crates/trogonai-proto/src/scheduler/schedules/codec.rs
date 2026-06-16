@@ -1,12 +1,11 @@
 use buffa::Message as _;
 use trogon_decider_runtime::{
     EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventPayloadError, EventType,
-    InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
-    SnapshotTypeName,
+    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
 };
 
 use super::{ScheduleEventCase, state_v1, v1};
-use crate::codec::{decode_event_case, event_type, snapshot_type as proto_snapshot_type};
+use crate::codec::{decode_event_case, event_type};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -80,11 +79,7 @@ fn schedule_event_case_type(event: &ScheduleEventCase) -> &'static str {
 }
 
 impl SnapshotType for state_v1::State {
-    type Error = InvalidSnapshotTypeName;
-
-    fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
-        proto_snapshot_type::<Self>()
-    }
+    const SNAPSHOT_STREAM_PREFIX: &'static str = <state_v1::State as buffa::MessageName>::FULL_NAME;
 }
 
 impl SnapshotPayloadEncode for state_v1::State {
@@ -365,7 +360,7 @@ mod tests {
     #[test]
     fn state_snapshot_type_uses_generated_full_name() {
         assert_eq!(
-            <state_v1::State as SnapshotType>::snapshot_type().unwrap().as_str(),
+            <state_v1::State as SnapshotType>::SNAPSHOT_STREAM_PREFIX,
             <state_v1::State as buffa::MessageName>::FULL_NAME
         );
     }

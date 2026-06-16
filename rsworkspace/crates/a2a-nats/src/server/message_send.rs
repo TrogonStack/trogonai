@@ -66,7 +66,7 @@ mod tests {
             &self,
             _req: a2a::types::SendMessageRequest,
         ) -> Result<a2a::types::SendMessageResponse, A2aError> {
-            Ok(a2a::types::SendMessageResponse { payload: None })
+            Ok(a2a::types::SendMessageResponse::Message(a2a::types::Message::new(a2a::types::Role::Agent, vec![])))
         }
         async fn message_stream(
             &self,

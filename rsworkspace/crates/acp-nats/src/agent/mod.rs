@@ -27,7 +27,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::Bridge;
-    use crate::server::test_support::MockJs;
+    use crate::agent::test_support::MockJs;
     use crate::config::Config;
     use agent_client_protocol::{
         Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,

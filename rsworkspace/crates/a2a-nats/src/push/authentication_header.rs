@@ -80,7 +80,7 @@ mod tests {
     fn auth(scheme: &str, credentials: &str) -> AuthenticationInfo {
         AuthenticationInfo {
             scheme: scheme.to_string(),
-            credentials: credentials.to_string(),
+            credentials: Some(credentials.to_string()),
         }
     }
 

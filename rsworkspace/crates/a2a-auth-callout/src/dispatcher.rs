@@ -135,7 +135,6 @@ pub(crate) mod tests {
     use crate::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
     use crate::permissions::IssuedPermissions;
     use crate::signing_key_source::{KeyVersion, StaticSigningKeySource};
-    use crate::permissions::IssuedPermissions;
     use crate::wire::test_encode::signed_auth_request;
     use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
     use nats_jwt_rs::Claims;

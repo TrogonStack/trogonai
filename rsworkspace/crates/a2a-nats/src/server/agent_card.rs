@@ -99,13 +99,24 @@ mod tests {
     fn minimal_valid_card(name: &str) -> a2a::agent_card::AgentCard {
         a2a::agent_card::AgentCard {
             name: name.to_string(),
+            description: String::new(),
+            version: String::new(),
             supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),
-                tenant: String::new(),
+                tenant: None,
             }],
-            ..Default::default()
+            capabilities: a2a::agent_card::AgentCapabilities::default(),
+            default_input_modes: vec![],
+            default_output_modes: vec![],
+            skills: vec![],
+            provider: None,
+            documentation_url: None,
+            icon_url: None,
+            security_schemes: None,
+            security_requirements: None,
+            signatures: None,
         }
     }
 
@@ -161,7 +172,19 @@ mod tests {
         let handler = stub();
         handler.lock().unwrap().agent_card_result = Some(Ok(a2a::agent_card::AgentCard {
             name: String::new(),
-            ..Default::default()
+            description: String::new(),
+            version: String::new(),
+            supported_interfaces: vec![],
+            capabilities: a2a::agent_card::AgentCapabilities::default(),
+            default_input_modes: vec![],
+            default_output_modes: vec![],
+            skills: vec![],
+            provider: None,
+            documentation_url: None,
+            icon_url: None,
+            security_schemes: None,
+            security_requirements: None,
+            signatures: None,
         }));
         handle(
             &handler,

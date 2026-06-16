@@ -55,7 +55,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::server::test_support::{
+    use crate::agent::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
     };
     use agent_client_protocol::{Agent, ErrorCode, ForkSessionRequest, ForkSessionResponse, SessionId};
@@ -89,7 +89,7 @@ mod tests {
     #[tokio::test]
     async fn fork_session_returns_error_when_response_is_invalid_json() {
         let (_mock, js, bridge) = mock_bridge();
-        crate::server::test_support::set_js_raw_response(&js, b"not json");
+        crate::agent::test_support::set_js_raw_response(&js, b"not json");
 
         let request = ForkSessionRequest::new("s1", ".");
         let err = bridge.fork_session(request).await.unwrap_err();

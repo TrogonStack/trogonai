@@ -1450,6 +1450,39 @@ impl ObjectStoreGet for MockObjectStore {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct MockJetStreamPurger {
+    purged: Arc<Mutex<Vec<String>>>,
+    fail_next: Arc<Mutex<bool>>,
+}
+
+impl MockJetStreamPurger {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn fail_next_purge(&self) {
+        *self.fail_next.lock().unwrap() = true;
+    }
+
+    pub fn purged_subjects(&self) -> Vec<String> {
+        self.purged.lock().unwrap().clone()
+    }
+}
+
+impl crate::jetstream::JetStreamSubjectPurger for MockJetStreamPurger {
+    type PurgeResponse = ();
+    type Error = MockError;
+
+    async fn purge_subject_messages(&self, subject: &str) -> Result<Self::PurgeResponse, Self::Error> {
+        if std::mem::take(&mut *self.fail_next.lock().unwrap()) {
+            return Err(MockError("simulated purge failure".to_string()));
+        }
+        self.purged.lock().unwrap().push(subject.to_string());
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

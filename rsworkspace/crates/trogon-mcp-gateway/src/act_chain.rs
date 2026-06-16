@@ -17,13 +17,6 @@ const ENV_GATEWAY_IDENTITY_WKL: &str = "MCP_GATEWAY_IDENTITY_WKL";
 const DEFAULT_GATEWAY_IDENTITY_SUB: &str = "trogon-mcp-gateway";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentIdentityMode {
-    Off,
-    Shadow,
-    Enforce,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActChainProjectOutcome {
     NoOp,
     Projected { depth: usize },

@@ -42,6 +42,7 @@ async fn x509_svid_actor_token_mints_attested_wkl() {
         audit.clone(),
         NoOpSpiceDb,
         ChainResolutionMode::Off,
+        false,
     );
 
     let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
@@ -117,6 +118,7 @@ async fn kv_trust_bundle_load_enables_exchange() {
         Arc::new(RecordingAuditPublisher::new()),
         NoOpSpiceDb,
         ChainResolutionMode::Off,
+        false,
     );
 
     let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
