@@ -2,11 +2,11 @@ mod go_duration;
 mod reconcile;
 mod recorded_events;
 mod request;
-mod rrule;
 mod rrule_wakeup_payload;
 mod schedule_key;
 mod schedule_subject;
 
+pub(crate) use crate::commands::rrule::RRuleExpansionError;
 pub(crate) use go_duration::{GoDurationError, format_go_duration};
 pub(crate) use reconcile::{
     CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE, ReconcileAction, ReconcileError, Reconciliation, ScheduleChange, reconcile,
@@ -17,7 +17,6 @@ pub(crate) use recorded_events::{
     stream_routing_matches_payload,
 };
 pub(crate) use request::{DispatchRequest, ScheduleRequest, ScheduleRequestError};
-pub(crate) use rrule::{RRuleCursor, RRuleExpansionError, next_rrule_occurrence};
 pub(crate) use rrule_wakeup_payload::RRuleWakeupPayload;
 pub(crate) use schedule_key::{ScheduleKey, StreamRoutingId};
 #[cfg(test)]

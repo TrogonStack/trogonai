@@ -40,6 +40,11 @@ pub enum ScheduleRequestError {
         #[source]
         source: RRuleExpansionError,
     },
+    #[error("schedule definition could not be encoded: {source}")]
+    ScheduleEncoding {
+        #[source]
+        source: trogonai_proto::convert::DurationConversionError,
+    },
     #[error("{field} duration is invalid: {source}")]
     GoDuration {
         field: &'static str,

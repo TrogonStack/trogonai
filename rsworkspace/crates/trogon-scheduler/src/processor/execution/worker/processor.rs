@@ -13,9 +13,10 @@ use std::time::Duration;
 use async_nats::HeaderMap;
 use chrono::{DateTime, Utc};
 use tracing::Instrument;
-use trogon_decider_runtime::StreamEvent;
+use trogon_decider_runtime::{CommandError, CommandExecution, StreamAppend, StreamEvent, StreamRead};
 
 use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleId, ScheduleMessage};
+use crate::commands::{ScheduleNextOccurrence, ScheduleNextOccurrenceError};
 use crate::processor::execution::checkpoints::{
     CheckpointStoreError, LoadedCheckpoint, ProcessingFailureRecord, ReconcileOutcome, ScheduleCheckpointRecord,
     ScheduleCheckpointStore, ScheduleStatus,
@@ -171,19 +172,26 @@ pub enum RetrySignal {
     /// poison record.
     #[error("no checkpoint yet for schedule '{schedule_id}', retrying")]
     MissingCheckpoint { schedule_id: ScheduleId },
+    /// Arming the next occurrence (the `ScheduleNextOccurrence` command) failed.
+    #[error("arming the next occurrence failed: {source}")]
+    ArmSchedule {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 /// Reconciles persisted schedule events into execution schedules against
 /// concrete NATS KV checkpoints and execution schedule writes.
 #[derive(Debug, Clone)]
-pub struct ScheduleProcessor<P, U, S> {
+pub struct ScheduleProcessor<P, U, S, E> {
     execution_schedules: ExecutionScheduleWriter<P, U>,
     checkpoints: ScheduleCheckpointStore<S>,
+    event_store: E,
     event_stream_name: String,
     metrics: Arc<ProcessorMetrics>,
 }
 
-impl<P, U, S> ScheduleProcessor<P, U, S>
+impl<P, U, S, E> ScheduleProcessor<P, U, S, E>
 where
     P: trogon_nats::jetstream::JetStreamPublisher,
     U: trogon_nats::jetstream::JetStreamSubjectPurger,
@@ -192,17 +200,23 @@ where
         + trogon_nats::jetstream::JetStreamKvCreate
         + trogon_nats::jetstream::JetStreamKeyValueUpdate
         + trogon_nats::jetstream::JetStreamKvKeys,
+    E: StreamRead<str> + StreamAppend<str>,
+    <E as StreamRead<str>>::Error: std::error::Error + Send + Sync + 'static,
+    <E as StreamAppend<str>>::Error: std::error::Error + Send + Sync + 'static,
 {
-    /// Assembles a processor over its execution schedule writer and checkpoint store.
+    /// Assembles a processor over its execution schedule writer, checkpoint store,
+    /// and the schedule event store used to arm recurrence occurrences.
     pub fn new(
         execution_schedules: ExecutionScheduleWriter<P, U>,
         checkpoints: ScheduleCheckpointStore<S>,
+        event_store: E,
         event_stream_name: impl Into<String>,
         metrics: Arc<ProcessorMetrics>,
     ) -> Self {
         Self {
             execution_schedules,
             checkpoints,
+            event_store,
             event_stream_name: event_stream_name.into(),
             metrics,
         }
@@ -435,18 +449,14 @@ where
         match &reconciliation.action {
             ReconcileAction::Publish(_) => self.metrics.record_publish(),
             ReconcileAction::Purge(_) => self.metrics.record_purge(),
-            ReconcileAction::Dispatch(_) => {}
-            ReconcileAction::Multiple(actions) => {
-                for action in actions {
-                    self.record_action_metric(action);
-                }
-            }
-            ReconcileAction::CheckpointOnly => {}
+            ReconcileAction::Dispatch(_) | ReconcileAction::ArmNext { .. } | ReconcileAction::CheckpointOnly => {}
         }
 
         Ok(self.ack(outcome_from(reconciliation.next_checkpoint.last_outcome)))
     }
 
+    /// Applies one reconciled side effect. Each schedule event maps to a single
+    /// action, so the durable event id is a stable, unique `Nats-Msg-Id`.
     async fn apply_action(
         &self,
         action: &ReconcileAction,
@@ -454,57 +464,46 @@ where
         trace_headers: &HeaderMap,
     ) -> Result<(), RetrySignal> {
         match action {
-            ReconcileAction::Multiple(actions) => {
-                for action in actions {
-                    self.apply_single_action(action, event_id, trace_headers, true).await?;
-                }
-                Ok(())
-            }
-            action => self.apply_single_action(action, event_id, trace_headers, false).await,
-        }
-    }
-
-    async fn apply_single_action(
-        &self,
-        action: &ReconcileAction,
-        event_id: &str,
-        trace_headers: &HeaderMap,
-        disambiguate_msg_id: bool,
-    ) -> Result<(), RetrySignal> {
-        match action {
-            ReconcileAction::Publish(request) => {
-                let msg_id = action_msg_id(event_id, "schedule", disambiguate_msg_id);
-                self.execution_schedules
-                    .upsert(request, &msg_id, trace_headers)
-                    .await
-                    .map_err(|source| RetrySignal::ExecutionSchedule { source })
-            }
-            ReconcileAction::Dispatch(request) => {
-                let msg_id = action_msg_id(event_id, "dispatch", disambiguate_msg_id);
-                self.execution_schedules
-                    .dispatch(request, &msg_id, trace_headers)
-                    .await
-                    .map_err(|source| RetrySignal::ExecutionSchedule { source })
-            }
+            ReconcileAction::Publish(request) => self
+                .execution_schedules
+                .upsert(request, event_id, trace_headers)
+                .await
+                .map_err(|source| RetrySignal::ExecutionSchedule { source }),
+            ReconcileAction::Dispatch(request) => self
+                .execution_schedules
+                .dispatch(request, event_id, trace_headers)
+                .await
+                .map_err(|source| RetrySignal::ExecutionSchedule { source }),
             ReconcileAction::Purge(subject) => self
                 .execution_schedules
                 .purge(subject)
                 .await
                 .map_err(|source| RetrySignal::ExecutionSchedule { source }),
-            ReconcileAction::Multiple(_) | ReconcileAction::CheckpointOnly => Ok(()),
+            ReconcileAction::ArmNext { schedule_id, now } => self.arm_next_occurrence(schedule_id, *now).await,
+            ReconcileAction::CheckpointOnly => Ok(()),
         }
     }
 
-    fn record_action_metric(&self, action: &ReconcileAction) {
-        match action {
-            ReconcileAction::Publish(_) => self.metrics.record_publish(),
-            ReconcileAction::Purge(_) => self.metrics.record_purge(),
-            ReconcileAction::Dispatch(_) | ReconcileAction::CheckpointOnly => {}
-            ReconcileAction::Multiple(actions) => {
-                for action in actions {
-                    self.record_action_metric(action);
-                }
-            }
+    /// Asks the schedule aggregate to plan the next occurrence. Rejections that
+    /// mean "nothing to arm" (already armed, paused, missing, deleted) are
+    /// idempotent no-ops; transient store failures and unexpected rejections
+    /// surface for redelivery.
+    async fn arm_next_occurrence(&self, schedule_id: &ScheduleId, now: DateTime<Utc>) -> Result<(), RetrySignal> {
+        let command = ScheduleNextOccurrence::new(schedule_id.clone(), now);
+        match CommandExecution::new(&self.event_store, &command).execute().await {
+            Ok(_) => Ok(()),
+            Err(CommandError::Decide(rejection)) => match rejection {
+                ScheduleNextOccurrenceError::AlreadyArmed { .. }
+                | ScheduleNextOccurrenceError::SchedulePaused { .. }
+                | ScheduleNextOccurrenceError::ScheduleNotFound { .. }
+                | ScheduleNextOccurrenceError::ScheduleDeleted { .. } => Ok(()),
+                other => Err(RetrySignal::ArmSchedule {
+                    source: Box::new(other),
+                }),
+            },
+            Err(error) => Err(RetrySignal::ArmSchedule {
+                source: Box::new(error),
+            }),
         }
     }
 
@@ -596,7 +595,10 @@ fn recover_corrupt_checkpoint(
         ScheduleChange::Created { .. } => return reconcile(None, change, stream_position, event_id, now).map(Some),
         ScheduleChange::Paused { schedule_id } => (schedule_id, ScheduleStatus::Paused),
         ScheduleChange::Removed { schedule_id } => (schedule_id, ScheduleStatus::Removed),
-        ScheduleChange::Resumed { .. } | ScheduleChange::OccurrenceFired { .. } => return Ok(None),
+        ScheduleChange::Resumed { .. }
+        | ScheduleChange::OccurrenceRecorded { .. }
+        | ScheduleChange::OccurrenceScheduled { .. }
+        | ScheduleChange::Completed { .. } => return Ok(None),
     };
 
     let key = ScheduleKey::derive(schedule_id);
@@ -618,14 +620,6 @@ fn recover_corrupt_checkpoint(
             last_outcome: ReconcileOutcome::Purged,
         },
     }))
-}
-
-fn action_msg_id(event_id: &str, suffix: &str, disambiguate: bool) -> String {
-    if disambiguate {
-        format!("{event_id}:{suffix}")
-    } else {
-        event_id.to_string()
-    }
 }
 
 fn outcome_from(outcome: ReconcileOutcome) -> ProcessedOutcome {
@@ -654,8 +648,8 @@ mod tests {
     use trogonai_proto::scheduler::schedules::v1;
 
     use super::super::testkit::{
-        InMemoryExecution, InMemoryKv, foreign_stream_event, malformed_stream_event, recorded_at, schedule_id,
-        stream_event, stream_event_with_headers,
+        InMemoryExecution, InMemoryKv, MemoryEventStore, foreign_stream_event, malformed_stream_event, recorded_at,
+        schedule_id, stream_event, stream_event_with_headers,
     };
     use super::*;
     use crate::commands::domain::{
@@ -666,22 +660,25 @@ mod tests {
     use crate::processor::execution::execution_schedules::ExecutionScheduleWriter;
     use crate::processor::execution::reconciliation::{ScheduleKey, ScheduleSubject, StreamRoutingId};
 
-    type Processor = ScheduleProcessor<InMemoryExecution, InMemoryExecution, InMemoryKv>;
+    type Processor = ScheduleProcessor<InMemoryExecution, InMemoryExecution, InMemoryKv, MemoryEventStore>;
 
     struct Harness {
         processor: Processor,
         kv: InMemoryKv,
         execution: InMemoryExecution,
+        event_store: MemoryEventStore,
     }
 
     impl Harness {
         fn new() -> Self {
             let kv = InMemoryKv::new();
             let execution = InMemoryExecution::new();
+            let event_store = MemoryEventStore::default();
             let writer = ExecutionScheduleWriter::new(execution.clone(), execution.clone());
             let processor = ScheduleProcessor::new(
                 writer,
                 ScheduleCheckpointStore::new(kv.clone()),
+                event_store.clone(),
                 "SCHEDULER_SCHEDULE_EVENTS",
                 Arc::new(ProcessorMetrics::new()),
             );
@@ -689,6 +686,7 @@ mod tests {
                 processor,
                 kv,
                 execution,
+                event_store,
             }
         }
 
@@ -703,6 +701,13 @@ mod tests {
         async fn process(&self, event: &v1::ScheduleEvent, id: &str, position: u64) -> Processed {
             self.processor
                 .process(&stream_event(event, id, position), recorded_at())
+                .await
+                .expect("durable outcome")
+        }
+
+        async fn process_stream(&self, event: &StreamEvent) -> Processed {
+            self.processor
+                .process(event, recorded_at())
                 .await
                 .expect("durable outcome")
         }
@@ -780,15 +785,42 @@ mod tests {
         }
     }
 
-    fn occurrence_fired(id: &str, occurrence_sequence: u64, occurrence_at: &str) -> v1::ScheduleEvent {
+    fn occurrence_recorded(id: &str, occurrence_sequence: u64, occurrence_at: &str) -> v1::ScheduleEvent {
         v1::ScheduleEvent {
             event: Some(
-                v1::ScheduleOccurrenceFired {
+                v1::ScheduleOccurrenceRecorded {
                     schedule_id: id.to_string(),
                     occurrence_sequence: Some(occurrence_sequence),
                     occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
                         &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
                     )),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn occurrence_scheduled(id: &str, occurrence_at: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: id.to_string(),
+                    occurrence_sequence: Some(2),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                        &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
+                    )),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn completed(id: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCompleted {
+                    schedule_id: id.to_string(),
+                    last_occurrence_sequence: Some(2),
                 }
                 .into(),
             ),
@@ -959,17 +991,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enabled_rrule_expands_to_the_next_one_shot_schedule() {
+    async fn enabled_rrule_arms_then_publishes_the_next_one_shot_wakeup() {
         let harness = Harness::new();
         let id = "recurring";
-        let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
         let wakeup = ScheduleSubject::rrule_wakeup(&key_for_stream(id));
+        let create = crate::CreateSchedule {
+            id: schedule_id(id),
+            status: ScheduleEventStatus::Scheduled,
+            schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
+            message: message(),
+        };
+        CommandExecution::new(&harness.event_store, &create)
+            .execute()
+            .await
+            .expect("seed schedule");
 
-        let processed = harness
-            .process(&created(id, ScheduleEventStatus::Scheduled, rrule), id, 1)
-            .await;
+        // Created arms the occurrence; the Scheduled event publishes the wakeup.
+        let events = harness.event_store.events(id);
+        harness.process_stream(&events[0]).await;
+        let events = harness.event_store.events(id);
+        let published = harness.process_stream(&events[1]).await;
 
-        assert_eq!(processed.outcome, ProcessedOutcome::Published);
+        assert_eq!(published.outcome, ProcessedOutcome::Published);
         assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
         let headers = harness.execution.headers_for(harness.subject(id).as_str()).unwrap();
         assert_eq!(
@@ -988,20 +1032,54 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rrule_occurrence_event_dispatches_advances_and_expires_at_the_end() {
+    async fn rrule_recorded_dispatches_scheduled_publishes_and_completed_expires() {
         let harness = Harness::new();
         let id = "recurring";
-        let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap();
 
-        harness
-            .process(&created(id, ScheduleEventStatus::Scheduled, rrule), id, 1)
+        // Seed the schedule into the event store so the arm command can read it.
+        let create = crate::CreateSchedule {
+            id: schedule_id(id),
+            status: ScheduleEventStatus::Scheduled,
+            schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
+            message: message(),
+        };
+        CommandExecution::new(&harness.event_store, &create)
+            .execute()
+            .await
+            .expect("seed schedule");
+
+        // Processing ScheduleCreated arms the next occurrence via the aggregate
+        // (no recurrence math in the processor) and publishes no wakeup itself.
+        let created_events = harness.event_store.events(id);
+        let armed = harness.process_stream(&created_events[0]).await;
+        assert_eq!(armed.outcome, ProcessedOutcome::Published);
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 0);
+
+        // The aggregate emitted ScheduleOccurrenceScheduled (06-03 is before the
+        // grace floor of now=06-04, so the first armed occurrence is 06-04).
+        let armed_events = harness.event_store.events(id);
+        assert_eq!(armed_events.len(), 2);
+        let published = harness.process_stream(&armed_events[1]).await;
+        assert_eq!(published.outcome, ProcessedOutcome::Published);
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
+        assert_eq!(
+            harness
+                .execution
+                .headers_for(harness.subject(id).as_str())
+                .unwrap()
+                .get("Nats-Schedule")
+                .unwrap()
+                .as_str(),
+            "@at 2026-06-04T00:00:00Z"
+        );
+
+        // A recorded occurrence only dispatches the user message; it never
+        // computes or publishes the next wakeup.
+        let dispatched = harness
+            .process(&occurrence_recorded(id, 1, "2026-06-04T00:00:00Z"), id, 3)
             .await;
-
-        let continued = harness
-            .process(&occurrence_fired(id, 1, "2026-06-04T00:00:00Z"), id, 2)
-            .await;
-
-        assert_eq!(continued.outcome, ProcessedOutcome::Published);
+        assert_eq!(dispatched.outcome, ProcessedOutcome::Published);
         assert_eq!(harness.execution.scheduled_count("agent.run"), 1);
         assert_eq!(
             harness.execution.payload_for("agent.run").unwrap().as_ref(),
@@ -1019,19 +1097,28 @@ mod tests {
             dispatch_headers.get("Trogon-Schedule-Occurrence-At").unwrap().as_str(),
             "2026-06-04T00:00:00Z"
         );
-        let headers = harness.execution.headers_for(harness.subject(id).as_str()).unwrap();
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
+
+        // A scheduled occurrence publishes exactly the planned wakeup.
+        let scheduled = harness
+            .process(&occurrence_scheduled(id, "2026-06-05T00:00:00Z"), id, 4)
+            .await;
+        assert_eq!(scheduled.outcome, ProcessedOutcome::Published);
         assert_eq!(
-            headers.get("Nats-Schedule").unwrap().as_str(),
+            harness
+                .execution
+                .headers_for(harness.subject(id).as_str())
+                .unwrap()
+                .get("Nats-Schedule")
+                .unwrap()
+                .as_str(),
             "@at 2026-06-05T00:00:00Z"
         );
 
-        let expired = harness
-            .process(&occurrence_fired(id, 2, "2026-06-05T00:00:00Z"), id, 3)
-            .await;
-
+        // Completion purges the execution subject and expires the checkpoint.
+        let expired = harness.process(&completed(id), id, 5).await;
         assert_eq!(expired.outcome, ProcessedOutcome::Expired);
         assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 0);
-        assert_eq!(harness.execution.scheduled_count("agent.run"), 2);
         let checkpoint = ScheduleCheckpointStore::new(harness.kv.clone())
             .load(&key_for_stream(id))
             .await
@@ -1074,7 +1161,7 @@ mod tests {
         let error = harness
             .processor
             .process(
-                &stream_event(&occurrence_fired("missing", 1, "2026-06-04T00:00:00Z"), "missing", 2),
+                &stream_event(&occurrence_recorded("missing", 1, "2026-06-04T00:00:00Z"), "missing", 2),
                 now(),
             )
             .await
@@ -1094,7 +1181,7 @@ mod tests {
             .unwrap();
 
         let processed = harness
-            .process(&occurrence_fired(id, 1, "2026-06-04T00:00:00Z"), id, 2)
+            .process(&occurrence_recorded(id, 1, "2026-06-04T00:00:00Z"), id, 2)
             .await;
 
         assert_eq!(processed.outcome, ProcessedOutcome::DuplicateStale);
@@ -1112,7 +1199,7 @@ mod tests {
             .unwrap();
 
         let processed = harness
-            .process(&occurrence_fired(id, 1, "2026-06-03T00:00:00Z"), id, 2)
+            .process(&occurrence_recorded(id, 1, "2026-06-03T00:00:00Z"), id, 2)
             .await;
 
         assert_eq!(processed.outcome, ProcessedOutcome::DurableFailure);

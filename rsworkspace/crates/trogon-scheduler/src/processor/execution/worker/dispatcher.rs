@@ -109,8 +109,8 @@ impl<M> DispatcherHandle<M> {
 
 /// Spawns the dispatcher loop. Returns a submission handle, a join handle for
 /// the loop, and a receiver of per-record durable outcome reports.
-pub fn spawn_dispatcher<P, U, S, M>(
-    processor: Arc<ScheduleProcessor<P, U, S>>,
+pub fn spawn_dispatcher<P, U, S, E, M>(
+    processor: Arc<ScheduleProcessor<P, U, S, E>>,
     clock: Clock,
     config: DispatcherConfig,
 ) -> (DispatcherHandle<M>, JoinHandle<()>, mpsc::Receiver<DispatchReport>)
@@ -118,6 +118,13 @@ where
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
+    E: trogon_decider_runtime::StreamRead<str>
+        + trogon_decider_runtime::StreamAppend<str>
+        + ::core::marker::Send
+        + ::core::marker::Sync
+        + 'static,
+    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     assert!(
@@ -139,8 +146,8 @@ where
     (handle, join, reports_rx)
 }
 
-async fn run<P, U, S, M>(
-    processor: Arc<ScheduleProcessor<P, U, S>>,
+async fn run<P, U, S, E, M>(
+    processor: Arc<ScheduleProcessor<P, U, S, E>>,
     clock: Clock,
     config: DispatcherConfig,
     mut submit_rx: mpsc::Receiver<(StreamEvent, M)>,
@@ -150,6 +157,13 @@ async fn run<P, U, S, M>(
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
+    E: trogon_decider_runtime::StreamRead<str>
+        + trogon_decider_runtime::StreamAppend<str>
+        + ::core::marker::Send
+        + ::core::marker::Sync
+        + 'static,
+    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     let mut pending: HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, M)>> = HashMap::new();
@@ -256,8 +270,8 @@ async fn run<P, U, S, M>(
 /// instead of occupying an ack-pending slot forever.
 const MISSING_CHECKPOINT_DELIVERY_CEILING: i64 = 120;
 
-async fn process_one<P, U, S, M>(
-    processor: Arc<ScheduleProcessor<P, U, S>>,
+async fn process_one<P, U, S, E, M>(
+    processor: Arc<ScheduleProcessor<P, U, S, E>>,
     clock: Clock,
     event: StreamEvent,
     decoded: DecodedScheduleEvent,
@@ -268,6 +282,13 @@ where
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
+    E: trogon_decider_runtime::StreamRead<str>
+        + trogon_decider_runtime::StreamAppend<str>
+        + ::core::marker::Send
+        + ::core::marker::Sync
+        + 'static,
+    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     let stream_position = event.stream_position;
@@ -333,8 +354,8 @@ fn reduce_processed(processed: Result<Processed, RetrySignal>) -> (Settle, Resul
     }
 }
 
-async fn poison_record<P, U, S, M>(
-    processor: Arc<ScheduleProcessor<P, U, S>>,
+async fn poison_record<P, U, S, E, M>(
+    processor: Arc<ScheduleProcessor<P, U, S, E>>,
     message: M,
     lane: ScheduleKey,
     stream_position: StreamPosition,
@@ -344,6 +365,13 @@ where
     P: JetStreamPublisher,
     U: JetStreamSubjectPurger,
     S: JetStreamKvEntry + JetStreamKvGet + JetStreamKvCreate + JetStreamKeyValueUpdate + JetStreamKvKeys,
+    E: trogon_decider_runtime::StreamRead<str>
+        + trogon_decider_runtime::StreamAppend<str>
+        + ::core::marker::Send
+        + ::core::marker::Sync
+        + 'static,
+    <E as trogon_decider_runtime::StreamRead<str>>::Error: ::std::error::Error + Send + Sync + 'static,
+    <E as trogon_decider_runtime::StreamAppend<str>>::Error: ::std::error::Error + Send + Sync + 'static,
     M: DeliveredMessage + Sync,
 {
     let (settlement, result) = match AssertUnwindSafe(processor.poison_failure(failure)).catch_unwind().await {
@@ -430,7 +458,9 @@ mod tests {
     use trogon_decider_runtime::Headers;
     use trogonai_proto::scheduler::schedules::v1;
 
-    use super::super::testkit::{InMemoryExecution, InMemoryKv, malformed_stream_event, recorded_at, stream_event};
+    use super::super::testkit::{
+        InMemoryExecution, InMemoryKv, MemoryEventStore, malformed_stream_event, recorded_at, stream_event,
+    };
     use super::*;
     use crate::commands::domain::MessageContent;
     use crate::commands::domain::{
@@ -547,7 +577,7 @@ mod tests {
         }
     }
 
-    type Processor = ScheduleProcessor<InMemoryExecution, InMemoryExecution, InMemoryKv>;
+    type Processor = ScheduleProcessor<InMemoryExecution, InMemoryExecution, InMemoryKv, MemoryEventStore>;
 
     fn build() -> (Arc<Processor>, InMemoryKv, InMemoryExecution) {
         let kv = InMemoryKv::new();
@@ -556,6 +586,7 @@ mod tests {
         let processor = ScheduleProcessor::new(
             writer,
             ScheduleCheckpointStore::new(kv.clone()),
+            MemoryEventStore::default(),
             "SCHEDULER_SCHEDULE_EVENTS",
             Arc::new(ProcessorMetrics::new()),
         );
@@ -585,7 +616,7 @@ mod tests {
     async fn records_for_one_schedule_are_processed_in_submission_order() {
         let (processor, kv, execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let key = key_for_stream(id);
@@ -634,7 +665,7 @@ mod tests {
     #[tokio::test]
     async fn distinct_schedules_all_make_progress_and_lanes_are_evicted() {
         let (processor, _kv, _execution) = build();
-        let (handle, join, reports) = spawn_dispatcher::<_, _, _, MockMessage>(
+        let (handle, join, reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -676,11 +707,12 @@ mod tests {
         let processor = Arc::new(ScheduleProcessor::new(
             writer,
             ScheduleCheckpointStore::new(kv.clone()),
+            MemoryEventStore::default(),
             "SCHEDULER_SCHEDULE_EVENTS",
             Arc::new(ProcessorMetrics::new()),
         ));
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -702,7 +734,7 @@ mod tests {
     async fn paused_create_does_not_publish() {
         let (processor, kv, execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let key = key_for_stream(id);
@@ -753,7 +785,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn full_report_channel_does_not_block_dispatcher_completion() {
         let (processor, _kv, _execution) = build();
-        let (handle, join, _reports) = spawn_dispatcher::<_, _, _, MockMessage>(
+        let (handle, join, _reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -784,7 +816,7 @@ mod tests {
     async fn active_lanes_is_zero_when_idle() {
         let (processor, _kv, _execution) = build();
         let (handle, join, _reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         assert_eq!(handle.active_lanes(), 0);
         drop(handle);
@@ -795,7 +827,7 @@ mod tests {
     async fn malformed_event_is_terminated() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let log = Arc::new(Mutex::new(Vec::new()));
         handle
@@ -815,7 +847,7 @@ mod tests {
     async fn redelivered_record_is_processed() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let log = Arc::new(Mutex::new(Vec::new()));
         let id = "orders/created";
@@ -844,7 +876,7 @@ mod tests {
     async fn missing_checkpoint_is_retried_below_the_delivery_ceiling() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -865,7 +897,7 @@ mod tests {
     async fn missing_checkpoint_is_poisoned_at_the_delivery_ceiling() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -927,7 +959,7 @@ mod tests {
     async fn settlement_panic_does_not_abort_dispatcher() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, PanickingMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, PanickingMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
@@ -998,7 +1030,7 @@ mod tests {
     async fn settlement_panic_on_term_does_not_abort_dispatcher() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, SelectivePanickingMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, SelectivePanickingMessage>(processor, clock(), DispatcherConfig::default());
 
         handle
             .submit(
@@ -1020,7 +1052,7 @@ mod tests {
     async fn settlement_panic_on_retry_does_not_abort_dispatcher() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, SelectivePanickingMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, SelectivePanickingMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         handle
@@ -1043,7 +1075,7 @@ mod tests {
     async fn processor_panic_is_recovered_and_settled() {
         let (processor, kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         kv.panic_on_next_entry();
@@ -1126,7 +1158,7 @@ mod tests {
     async fn settlement_error_is_reported() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, FailingMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, FailingMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         handle
@@ -1152,7 +1184,7 @@ mod tests {
     #[should_panic(expected = "max_active_lanes must be at least 1")]
     fn zero_max_active_lanes_is_rejected() {
         let (processor, _kv, _execution) = build();
-        let _ = spawn_dispatcher::<_, _, _, MockMessage>(
+        let _ = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -1165,7 +1197,7 @@ mod tests {
     #[tokio::test]
     async fn dispatcher_finishes_when_report_receiver_is_dropped() {
         let (processor, _kv, _execution) = build();
-        let (handle, join, _reports) = spawn_dispatcher::<_, _, _, MockMessage>(
+        let (handle, join, _reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -1195,7 +1227,7 @@ mod tests {
     #[tokio::test]
     async fn slow_report_consumer_still_receives_all_reports() {
         let (processor, _kv, _execution) = build();
-        let (handle, join, reports) = spawn_dispatcher::<_, _, _, MockMessage>(
+        let (handle, join, reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -1226,7 +1258,7 @@ mod tests {
     #[tokio::test]
     async fn mismatched_stream_ids_for_one_schedule_stay_on_one_lane() {
         let (processor, _kv, _execution) = build();
-        let (handle, join, reports) = spawn_dispatcher::<_, _, _, MockMessage>(
+        let (handle, join, reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -1270,7 +1302,7 @@ mod tests {
     #[tokio::test]
     async fn same_lane_resumes_after_the_first_record_finishes() {
         let (processor, _kv, _execution) = build();
-        let (handle, join, reports) = spawn_dispatcher::<_, _, _, MockMessage>(
+        let (handle, join, reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
             processor,
             clock(),
             DispatcherConfig {
@@ -1306,7 +1338,7 @@ mod tests {
     async fn dropped_report_receiver_stops_drain_early() {
         let (processor, _kv, _execution) = build();
         let (handle, join, reports) =
-            spawn_dispatcher::<_, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
+            spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
         let id = "orders/created";
         let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());

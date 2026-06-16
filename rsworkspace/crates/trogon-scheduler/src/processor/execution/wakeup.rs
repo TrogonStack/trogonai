@@ -150,7 +150,8 @@ fn wakeup_outcome_from_rejection(
         RecordScheduleOccurrenceError::SchedulePaused { .. } => Ok(RRuleWakeupOutcome::Obsolete {
             reason: RRuleWakeupObsoleteReason::Paused,
         }),
-        RecordScheduleOccurrenceError::OccurrenceAlreadyRecorded { .. } => Ok(RRuleWakeupOutcome::DuplicateStale),
+        RecordScheduleOccurrenceError::OccurrenceAlreadyRecorded { .. }
+        | RecordScheduleOccurrenceError::OccurrenceNotPending { .. } => Ok(RRuleWakeupOutcome::DuplicateStale),
         other => Err(RRuleWakeupError::CommandRejected { source: other }),
     }
 }
@@ -195,10 +196,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::commands::CreateSchedule;
     use crate::commands::domain::{
         Delivery, MessageContent, Schedule, ScheduleEventStatus, ScheduleHeaders, ScheduleMessage,
     };
+    use crate::commands::{CreateSchedule, ScheduleNextOccurrence};
     use crate::processor::execution::reconciliation::RRULE_WAKEUP_SUBJECT_PREFIX;
 
     #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -328,6 +329,14 @@ mod tests {
             .execute()
             .await
             .unwrap();
+        // Enabled schedules are armed by the execution processor reacting to
+        // ScheduleCreated; arm here so the wakeup matches the planned occurrence.
+        if status == ScheduleEventStatus::Scheduled {
+            CommandExecution::new(&store, &ScheduleNextOccurrence::new(id.clone(), occurrence_at()))
+                .execute()
+                .await
+                .unwrap();
+        }
         (store, id)
     }
 
@@ -341,24 +350,40 @@ mod tests {
             .await
             .unwrap();
 
+        // Created + the arming Scheduled precede the recording, and recording
+        // folds the next Scheduled, so the append lands at position 4.
         assert_eq!(
             outcome,
             RRuleWakeupOutcome::Recorded {
-                stream_position: trogon_decider_runtime::StreamPosition::try_new(2).unwrap(),
+                stream_position: trogon_decider_runtime::StreamPosition::try_new(4).unwrap(),
             }
         );
         let events = store.events(id.as_str());
-        assert_eq!(events.len(), 2);
-        let decoded = v1_event(&events[1]);
-        let Some(trogonai_proto::scheduler::schedules::ScheduleEventCase::ScheduleOccurrenceFired(fired)) =
+        assert_eq!(events.len(), 4);
+        let decoded = v1_event(&events[2]);
+        let Some(trogonai_proto::scheduler::schedules::ScheduleEventCase::ScheduleOccurrenceRecorded(recorded)) =
             decoded.event.as_ref()
         else {
-            panic!("expected ScheduleOccurrenceFired");
+            panic!("expected ScheduleOccurrenceRecorded");
         };
-        assert_eq!(fired.occurrence_sequence, Some(1));
+        assert_eq!(recorded.occurrence_sequence, Some(1));
         assert_eq!(
-            fired.occurrence_at.as_option(),
+            recorded.occurrence_at.as_option(),
             Some(&trogonai_proto::convert::timestamp_from_datetime(&occurrence_at()))
+        );
+
+        let decoded = v1_event(&events[3]);
+        let Some(trogonai_proto::scheduler::schedules::ScheduleEventCase::ScheduleOccurrenceScheduled(scheduled)) =
+            decoded.event.as_ref()
+        else {
+            panic!("expected ScheduleOccurrenceScheduled for the next occurrence");
+        };
+        assert_eq!(scheduled.occurrence_sequence, Some(2));
+        assert_eq!(
+            scheduled.occurrence_at.as_option(),
+            Some(&trogonai_proto::convert::timestamp_from_datetime(
+                &Utc.with_ymd_and_hms(2026, 6, 16, 18, 0, 0).unwrap()
+            ))
         );
     }
 
@@ -377,7 +402,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(duplicate, RRuleWakeupOutcome::DuplicateStale);
-        assert_eq!(store.events(id.as_str()).len(), 2);
+        assert_eq!(store.events(id.as_str()).len(), 4);
     }
 
     #[tokio::test]
@@ -469,7 +494,9 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(from_second.events.len(), 1);
+        // Created(1), Scheduled(2), Recorded(3), Scheduled(4): reading from
+        // position 2 returns the latter three.
+        assert_eq!(from_second.events.len(), 3);
 
         store
             .append_stream(AppendStreamRequest {

@@ -303,6 +303,7 @@ async fn create_command_event_is_processed_into_a_live_execution_schedule() {
     let processor = ScheduleProcessor::new(
         ExecutionScheduleWriter::new(context.clone(), execution_stream.clone()),
         ScheduleCheckpointStore::new(checkpoint_kv.clone()),
+        store.clone(),
         EVENT_STREAM,
         Arc::default(),
     );
@@ -384,15 +385,34 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     let processor = ScheduleProcessor::new(
         ExecutionScheduleWriter::new(context.clone(), execution_stream.clone()),
         checkpoints.clone(),
+        store.clone(),
         EVENT_STREAM,
         Arc::default(),
     );
 
-    let processed = processor
+    // Processing ScheduleCreated arms the first occurrence via the aggregate; no
+    // wakeup is published yet — the planned occurrence returns as an event.
+    let armed = processor
         .process(&read.events[0], Utc::now())
         .await
         .expect("process command-produced rrule event");
-    assert_eq!(processed.outcome, ProcessedOutcome::Published);
+    assert_eq!(armed.outcome, ProcessedOutcome::Published);
+
+    let read = store
+        .read_stream(ReadStreamRequest {
+            stream_id: command.id.as_str(),
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .expect("read armed occurrence event");
+    assert_eq!(read.events.len(), 2);
+
+    // Processing ScheduleOccurrenceScheduled publishes the concrete wakeup.
+    let published = processor
+        .process(&read.events[1], Utc::now())
+        .await
+        .expect("process scheduled occurrence");
+    assert_eq!(published.outcome, ProcessedOutcome::Published);
 
     let first = execution_stream
         .get_last_raw_message_by_subject(subject.as_str())
@@ -430,28 +450,32 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     assert!(matches!(wakeup_outcome, RRuleWakeupOutcome::Recorded { .. }));
     first_wakeup.ack().await.expect("ack first wakeup");
 
+    // Recording the wakeup folds the occurrence and the next plan into the
+    // schedule aggregate stream: ScheduleOccurrenceRecorded + ScheduleOccurrenceScheduled.
     let read = store
         .read_stream(ReadStreamRequest {
             stream_id: command.id.as_str(),
             from: ReadFrom::Beginning,
         })
         .await
-        .expect("read first occurrence event");
-    assert_eq!(read.events.len(), 2);
+        .expect("read first occurrence events");
+    // Created, arming Scheduled, Recorded, folded Scheduled.
+    assert_eq!(read.events.len(), 4);
 
-    let continued = processor
-        .process(&read.events[1], Utc::now())
+    // The recorded occurrence dispatches the user message.
+    let dispatched = processor
+        .process(&read.events[2], Utc::now())
         .await
-        .expect("process first occurrence event");
-    assert_eq!(continued.outcome, ProcessedOutcome::Published);
+        .expect("process recorded occurrence");
+    assert_eq!(dispatched.outcome, ProcessedOutcome::Published);
 
-    let dispatched = execution_stream
+    let dispatch = execution_stream
         .get_last_raw_message_by_subject(EXECUTION_TARGET_SUBJECT)
         .await
         .expect("first user dispatch was published");
-    assert_eq!(dispatched.payload.as_ref(), br#"{"ok":true}"#);
+    assert_eq!(dispatch.payload.as_ref(), br#"{"ok":true}"#);
     assert_eq!(
-        dispatched
+        dispatch
             .headers
             .get("Trogon-Schedule-Occurrence-Sequence")
             .unwrap()
@@ -459,21 +483,23 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
         "1"
     );
     assert_eq!(
-        dispatched
-            .headers
-            .get("Trogon-Schedule-Occurrence-At")
-            .unwrap()
-            .as_str(),
+        dispatch.headers.get("Trogon-Schedule-Occurrence-At").unwrap().as_str(),
         first_occurrence_text.as_str()
     );
+
+    // The scheduled occurrence publishes the planned second wakeup verbatim.
+    let scheduled = processor
+        .process(&read.events[3], Utc::now())
+        .await
+        .expect("process scheduled occurrence");
+    assert_eq!(scheduled.outcome, ProcessedOutcome::Published);
 
     let second = execution_stream
         .get_last_raw_message_by_subject(subject.as_str())
         .await
         .expect("second rrule execution schedule was published");
-    let headers = second.headers;
     assert_eq!(
-        headers.get("Nats-Schedule").unwrap().as_str(),
+        second.headers.get("Nats-Schedule").unwrap().as_str(),
         format!("@at {second_occurrence_text}")
     );
 
@@ -489,19 +515,27 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     assert!(matches!(wakeup_outcome, RRuleWakeupOutcome::Recorded { .. }));
     second_wakeup.ack().await.expect("ack second wakeup");
 
+    // The final occurrence records and completes: ScheduleOccurrenceRecorded + ScheduleCompleted.
     let read = store
         .read_stream(ReadStreamRequest {
             stream_id: command.id.as_str(),
             from: ReadFrom::Beginning,
         })
         .await
-        .expect("read second occurrence event");
-    assert_eq!(read.events.len(), 3);
+        .expect("read final occurrence events");
+    // ...plus the final Recorded and Completed.
+    assert_eq!(read.events.len(), 6);
+
+    let dispatched = processor
+        .process(&read.events[4], Utc::now())
+        .await
+        .expect("process final recorded occurrence");
+    assert_eq!(dispatched.outcome, ProcessedOutcome::Published);
 
     let expired = processor
-        .process(&read.events[2], Utc::now())
+        .process(&read.events[5], Utc::now())
         .await
-        .expect("process second occurrence event");
+        .expect("process completion");
     assert_eq!(expired.outcome, ProcessedOutcome::Expired);
 
     let checkpoint = checkpoints
