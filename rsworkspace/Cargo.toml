@@ -45,10 +45,10 @@ a2a-bridge = { path = "crates/a2a-bridge" }
 a2a-nats = { path = "crates/a2a-nats" }
 a2a-pack = { path = "crates/a2a-pack" }
 a2a-redaction = { path = "crates/a2a-redaction" }
-a2a-nats-agent = { path = "crates/a2a-nats-agent" }
+a2a-nats-server = { path = "crates/a2a-nats-server" }
 a2a-nats-discovery = { path = "crates/a2a-nats-discovery" }
 a2a-gateway = { path = "crates/a2a-gateway" }
-a2a-nats-server = { path = "crates/a2a-nats-server" }
+a2a-nats-http = { path = "crates/a2a-nats-http" }
 a2a-smoke-test = { path = "crates/a2a-smoke-test" }
 a2a-nats-stdio = { path = "crates/a2a-nats-stdio" }
 acp-nats = { path = "crates/acp-nats" }

@@ -35,7 +35,7 @@ cd rsworkspace
 cargo test -p a2a-nats
 ```
 
-Add `-- --nocapture` when debugging a failing integration test. Other crates (`a2a-gateway`, `a2a-nats-agent`, …) have their own `#[cfg(test)]` modules; scope with `-p <crate>` the same way.
+Add `-- --nocapture` when debugging a failing integration test. Other crates (`a2a-gateway`, `a2a-nats-server`, …) have their own `#[cfg(test)]` modules; scope with `-p <crate>` the same way.
 
 ### Lint
 
@@ -54,8 +54,8 @@ Examples (require a reachable NATS server — see env vars in [Runtime env](../r
 
 ```bash
 cargo run -p a2a-gateway
-cargo run -p a2a-nats-agent    # requires A2A_AGENT_ID
-cargo run -p a2a-nats-server   # HTTP JSON-RPC adapter; requires A2A_AGENT_ID
+cargo run -p a2a-nats-server    # requires A2A_AGENT_ID
+cargo run -p a2a-nats-http   # HTTP JSON-RPC adapter; requires A2A_AGENT_ID
 cargo run -p a2a-nats-stdio    # line-delimited JSON-RPC on stdin/stdout
 cargo run -p a2a-nats-discovery
 ```
@@ -79,8 +79,8 @@ Use this before large refactors that touch shared types in `a2a-nats` or `a2a-pa
 | **`a2a-gateway`** | NATS ingress on `{prefix}.gateway.>` — opaque forward to `{prefix}.agent.{id}.{method}` today; auth, policy, and audit per [Gateway roadmap](../explanation/gateway-roadmap.md). |
 | **`a2a-pack`** | Policy bundle skeleton — AgentCard JSON Schema, future SpiceDB tuples, redaction, and audit schema extensions consumed by the gateway. |
 | **`a2a-nats-stdio`** | MCP-style **stdio** helper — line-delimited JSON-RPC over stdin/stdout using `a2a_nats::Client` (no HTTP). Useful for editor and subprocess integrations. |
-| **`a2a-nats-agent`** | Daemon shell wrapping a user-supplied `A2aHandler`; subscribes on `{prefix}.agent.{agent_id}.*`. |
-| **`a2a-nats-server`** | Local axum HTTP/SSE adapter over `a2a_nats::Client` — narrower than the future [`a2a-bridge`](../explanation/bridge-sketch.md) HTTPS sidecar. |
+| **`a2a-nats-server`** | Daemon shell wrapping a user-supplied `A2aHandler`; subscribes on `{prefix}.agent.{agent_id}.*`. |
+| **`a2a-nats-http`** | Local axum HTTP/SSE adapter over `a2a_nats::Client` — narrower than the future [`a2a-bridge`](../explanation/bridge-sketch.md) HTTPS sidecar. |
 | **`a2a-nats-discovery`** | Catalog registrar and `{prefix}.discover.*` service; provisions `A2A_AGENT_CARDS` KV. |
 
 Shared infrastructure: **`trogon-nats`** (connection management, test mocks via `test-support`), **`a2a-types`** (generated A2A wire types).
@@ -95,15 +95,15 @@ Typical local loop:
 
 1. Start NATS (with JetStream enabled for streaming and catalog tests).
 2. Export `NATS_URL` and, when testing gateway routing, run `a2a-gateway` in one terminal.
-3. Run an agent (`a2a-nats-agent`) and a client adapter (`a2a-nats-server`, `a2a-nats-stdio`, or an embedder test harness).
+3. Run an agent (`a2a-nats-server`) and a client adapter (`a2a-nats-http`, `a2a-nats-stdio`, or an embedder test harness).
 
-Set `A2A_USE_GATEWAY=1` on **`a2a-nats-server`** to route unary traffic via `{prefix}.gateway.*` instead of direct `{prefix}.agent.*` publish.
+Set `A2A_USE_GATEWAY=1` on **`a2a-nats-http`** to route unary traffic via `{prefix}.gateway.*` instead of direct `{prefix}.agent.*` publish.
 
 ---
 
 ## Local end-to-end (Docker smoke)
 
-The opt-in compose stack at [`../devops/docker/compose/compose.a2a.smoke.yml`](../../../devops/docker/compose/compose.a2a.smoke.yml) proves auth-callout minting, gateway JWT verification, and `tasks/get` through the echo agent without cloud NATS. Service images use **cargo-chef**: each Dockerfile runs `cargo chef cook` for all A2A binaries (`a2a-auth-callout`, `a2a-gateway`, `a2a-bridge`, `a2a-nats-server`, `a2a-nats-agent`, `a2a-smoke-test`) so dependency layers stay warm across rebuilds.
+The opt-in compose stack at [`../devops/docker/compose/compose.a2a.smoke.yml`](../../../devops/docker/compose/compose.a2a.smoke.yml) proves auth-callout minting, gateway JWT verification, and `tasks/get` through the echo agent without cloud NATS. Service images use **cargo-chef**: each Dockerfile runs `cargo chef cook` for all A2A binaries (`a2a-auth-callout`, `a2a-gateway`, `a2a-bridge`, `a2a-nats-http`, `a2a-nats-server`, `a2a-smoke-test`) so dependency layers stay warm across rebuilds.
 
 ```bash
 make smoke          # up, run a2a-smoke-test, down

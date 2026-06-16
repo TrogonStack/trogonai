@@ -53,7 +53,7 @@ auth-callout, discovery).
 |---|---|---|
 | MCP authz decision | `trogon-mcp-gateway` | SpiceDB (read), `MCP_AUDIT` (write). |
 | A2A authz decision | `a2a-gateway` | SpiceDB (read), `A2A_AUDIT` (write). |
-| Push DLQ | `a2a-gateway` mirror + `a2a-nats-agent` source | `A2A_PUSH_DLQ` stream. |
+| Push DLQ | `a2a-gateway` mirror + `a2a-nats-server` source | `A2A_PUSH_DLQ` stream. |
 | AgentCard discovery | `a2a-nats-discovery` | `a2a-catalog` KV. |
 | JWT minting | `a2a-auth-callout` | Account signing key Secret. |
 | JWKS publishing | `trogon-jwks-publisher` | `mcp-jwks` KV. |

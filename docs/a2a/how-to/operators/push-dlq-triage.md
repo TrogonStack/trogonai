@@ -134,7 +134,7 @@ The LRU suppresses local restart bursts; JetStream dedupe is authoritative acros
 
 ## Embedder configuration
 
-Agents using **`Bridge`** run **`apply_timeout_overrides`** from **`a2a-nats`** (see **`a2a-nats-agent`**, **`a2a-nats-stdio`**, **`a2a-nats-server`**). Set the DLQ **`{caller_id}`** fallback segment via:
+Agents using **`Bridge`** run **`apply_timeout_overrides`** from **`a2a-nats`** (see **`a2a-nats-server`**, **`a2a-nats-stdio`**, **`a2a-nats-http`**). Set the DLQ **`{caller_id}`** fallback segment via:
 
 | Mechanism | Notes |
 |-----------|-------|
