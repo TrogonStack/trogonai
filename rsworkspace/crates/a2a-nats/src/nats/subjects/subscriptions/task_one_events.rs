@@ -20,7 +20,7 @@ impl TaskOneEventsSubject {
 
 impl std::fmt::Display for TaskOneEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.task.{}.events.*", self.prefix.as_str(), self.task_id.as_str())
+        write!(f, "{}.tasks.{}.events.*", self.prefix.as_str(), self.task_id.as_str())
     }
 }
 

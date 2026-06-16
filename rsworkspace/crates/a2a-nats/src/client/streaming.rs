@@ -193,7 +193,7 @@ mod tests {
         StreamingRequest {
             nats,
             js,
-            subject: "a2a.agent.bot.message.stream",
+            subject: "a2a.v1.agents.bot.message.stream",
             method: "message/stream",
             req_id,
             prefix,
@@ -205,7 +205,7 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_success_returns_task_and_stream() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.message.stream", bootstrap_success("task-abc"));
+        nats.set_response("a2a.v1.agents.bot.message.stream", bootstrap_success("task-abc"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -226,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_error_propagates_as_client_error() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.message.stream", bootstrap_error(-32001, "not found"));
+        nats.set_response("a2a.v1.agents.bot.message.stream", bootstrap_error(-32001, "not found"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -266,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn get_stream_failure_returns_consumer_setup_error() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.message.stream", bootstrap_success("t1"));
+        nats.set_response("a2a.v1.agents.bot.message.stream", bootstrap_success("t1"));
 
         let js = MockJetStreamConsumerFactory::new();
         js.fail_get_stream_at(1);

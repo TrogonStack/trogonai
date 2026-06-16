@@ -1,14 +1,14 @@
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
-/// `tasks/pushNotificationConfig/get` — read a single push notification configuration.
+/// `tasks/list` — list tasks known to the agent.
 #[derive(Debug)]
-pub struct PushGetSubject {
+pub struct TasksListSubject {
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
 }
 
-impl PushGetSubject {
+impl TasksListSubject {
     pub fn new(prefix: &A2aPrefix, agent_id: &A2aAgentId) -> Self {
         Self {
             prefix: prefix.clone(),
@@ -17,25 +17,25 @@ impl PushGetSubject {
     }
 }
 
-impl std::fmt::Display for PushGetSubject {
+impl std::fmt::Display for TasksListSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agent.{}.tasks.push_notification_config.get",
+            "{}.agents.{}.tasks.list",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )
     }
 }
 
-impl async_nats::subject::ToSubject for PushGetSubject {
+impl async_nats::subject::ToSubject for TasksListSubject {
     fn to_subject(&self) -> async_nats::subject::Subject {
         async_nats::subject::Subject::from(self.to_string().as_str())
     }
 }
 
-impl super::super::super::markers::Requestable for PushGetSubject {}
+impl super::super::super::markers::Requestable for TasksListSubject {}
 
-impl super::super::super::stream::StreamAssignment for PushGetSubject {
+impl super::super::super::stream::StreamAssignment for TasksListSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
 }

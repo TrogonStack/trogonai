@@ -1,14 +1,14 @@
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
-/// `tasks/get` — fetch the current state of a task.
+/// `tasks/cancel` — request cancellation of a running task.
 #[derive(Debug)]
-pub struct TasksGetSubject {
+pub struct TasksCancelSubject {
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
 }
 
-impl TasksGetSubject {
+impl TasksCancelSubject {
     pub fn new(prefix: &A2aPrefix, agent_id: &A2aAgentId) -> Self {
         Self {
             prefix: prefix.clone(),
@@ -17,20 +17,25 @@ impl TasksGetSubject {
     }
 }
 
-impl std::fmt::Display for TasksGetSubject {
+impl std::fmt::Display for TasksCancelSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.{}.tasks.get", self.prefix.as_str(), self.agent_id.as_str())
+        write!(
+            f,
+            "{}.agents.{}.tasks.cancel",
+            self.prefix.as_str(),
+            self.agent_id.as_str()
+        )
     }
 }
 
-impl async_nats::subject::ToSubject for TasksGetSubject {
+impl async_nats::subject::ToSubject for TasksCancelSubject {
     fn to_subject(&self) -> async_nats::subject::Subject {
         async_nats::subject::Subject::from(self.to_string().as_str())
     }
 }
 
-impl super::super::super::markers::Requestable for TasksGetSubject {}
+impl super::super::super::markers::Requestable for TasksCancelSubject {}
 
-impl super::super::super::stream::StreamAssignment for TasksGetSubject {
+impl super::super::super::stream::StreamAssignment for TasksCancelSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
 }

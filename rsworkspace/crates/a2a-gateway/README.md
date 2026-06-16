@@ -6,7 +6,7 @@ Pass-through ingress seam for future A2A gateway authz and policy. **Forwarding 
 
 ## Role
 
-Optional queue-group subscriber on `{prefix}.gateway.>`. Maps `{prefix}.gateway.{agent_id}.{method…}` → `{prefix}.agent.{agent_id}.{method…}` and relays payload + headers via `publish_with_reply_and_headers` (caller reply inbox preserved). Invalid ingress shapes get JSON-RPC `-32600` on the reply inbox when present; messages without a reply inbox are ignored (logged). Subject parsing is in **`a2a_nats::gateway_ingress`**.
+Optional queue-group subscriber on `{prefix}.gateway.>`. Maps `{prefix}.gateway.{agent_id}.{method…}` → `{prefix}.agents.{agent_id}.{method…}` and relays payload + headers via `publish_with_reply_and_headers` (caller reply inbox preserved). Invalid ingress shapes get JSON-RPC `-32600` on the reply inbox when present; messages without a reply inbox are ignored (logged). Subject parsing is in **`a2a_nats::gateway_ingress`**.
 
 Multi-tenancy is per **NATS Account** — no `{tenant}.{agent_id}` segment on ingress subjects.
 

@@ -16,8 +16,8 @@ One **NATS Account per tenant**. Subjects carry **no `{tenant}` segment** — th
 
 | Role | Publish (allow) | Subscribe (allow) | Typical use |
 |------|-----------------|-------------------|-------------|
-| **Caller User** | `a2a.gateway.>` | `_INBOX.{caller_id}.>` | External or bridge-originated identity; request/reply into gateway ingress; replies on caller-owned inbox. Also provision subscribe on `a2a.push.{caller_id}.>` for push read path ([pending decision](../explanation/architecture.md)). **Do not** grant `{prefix}.catalog.register.*` publish. |
-| **Gateway User** | `a2a.agent.>`, `a2a.task.>`, `a2a.push.>` | `a2a.gateway.>` | Long-lived `a2a-gateway` service; queue-group consumer on ingress; forwards to agents, task events, push envelopes. Read-only catalog (KV get/watch or `{prefix}.discover.*`); no KV put. |
+| **Caller User** | `a2a.v1.gateway.>` | `_INBOX.{caller_id}.>` | External or bridge-originated identity; request/reply into gateway ingress; replies on caller-owned inbox. Also provision subscribe on `a2a.push.{caller_id}.>` for push read path ([pending decision](../explanation/architecture.md)). **Do not** grant `{prefix}.catalog.register.*` publish. |
+| **Gateway User** | `a2a.v1.agents.>`, `a2a.v1.tasks.>`, `a2a.push.>` | `a2a.v1.gateway.>` | Long-lived `a2a-gateway` service; queue-group consumer on ingress; forwards to agents, task events, push envelopes. Read-only catalog (KV get/watch or `{prefix}.discover.*`); no KV put. |
 | **Registrar service User** | `{prefix}.catalog.register.*` | `{prefix}.discover.*` | Long-lived `a2a-nats-discovery` identity; catalog write ingress + KV-backed discover request/reply. Grant `--allow-pub-response` on both paths. |
 
 **Registrar publish note.** The ACL table lists registrar **subscribe** on `{prefix}.discover.*` and write ingress on `{prefix}.catalog.register.*`; deny `{prefix}.catalog.register.*` **publish** on caller and gateway Users ([bootstrap § Subject ACL templates](../how-to/operators/nsc-account-bootstrap.md)).

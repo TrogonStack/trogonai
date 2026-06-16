@@ -184,7 +184,7 @@ mod tests {
     #[tokio::test]
     async fn io_loop_handles_valid_request() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.tasks.get", task_response("t1"));
+        nats.set_response("a2a.v1.agents.bot.tasks.get", task_response("t1"));
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
         let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);

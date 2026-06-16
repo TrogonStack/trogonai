@@ -21,7 +21,7 @@ impl std::fmt::Display for MessageSendSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agent.{}.message.send",
+            "{}.agents.{}.message.send",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

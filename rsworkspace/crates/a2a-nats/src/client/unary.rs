@@ -93,11 +93,11 @@ mod tests {
     #[tokio::test]
     async fn success_response_deserializes_result() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agent.bot.tasks.get", success_response("hello"));
+        mock.set_response("a2a.v1.agents.bot.tasks.get", success_response("hello"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
@@ -113,11 +113,11 @@ mod tests {
     #[tokio::test]
     async fn task_not_found_error_code_maps_to_typed_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agent.bot.tasks.get", error_response(-32001, "Task not found"));
+        mock.set_response("a2a.v1.agents.bot.tasks.get", error_response(-32001, "Task not found"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
@@ -132,11 +132,11 @@ mod tests {
     #[tokio::test]
     async fn agent_unavailable_code_maps_to_typed_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agent.bot.tasks.get", error_response(-32050, "no responders"));
+        mock.set_response("a2a.v1.agents.bot.tasks.get", error_response(-32050, "no responders"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
@@ -155,7 +155,7 @@ mod tests {
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
@@ -174,7 +174,7 @@ mod tests {
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
@@ -189,11 +189,11 @@ mod tests {
     #[tokio::test]
     async fn malformed_response_returns_deserialize_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agent.bot.tasks.get", b"not json at all".as_ref().into());
+        mock.set_response("a2a.v1.agents.bot.tasks.get", b"not json at all".as_ref().into());
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
@@ -208,11 +208,11 @@ mod tests {
     #[tokio::test]
     async fn unknown_error_code_maps_to_generic_jsonrpc_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agent.bot.tasks.get", error_response(-32099, "custom"));
+        mock.set_response("a2a.v1.agents.bot.tasks.get", error_response(-32099, "custom"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agent.bot.tasks.get",
+            "a2a.v1.agents.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),

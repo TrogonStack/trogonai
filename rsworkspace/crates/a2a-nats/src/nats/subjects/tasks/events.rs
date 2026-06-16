@@ -28,7 +28,7 @@ impl std::fmt::Display for TaskEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.task.{}.events.{}",
+            "{}.tasks.{}.events.{}",
             self.prefix.as_str(),
             self.task_id.as_str(),
             self.req_id.as_str()

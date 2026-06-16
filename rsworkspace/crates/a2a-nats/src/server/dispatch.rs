@@ -1,7 +1,7 @@
 /// A2A method inferred from the last dotted tokens of a NATS subject.
 ///
-/// The agent subscribes to `{prefix}.agent.{agent_id}.>` and dispatches based on
-/// the suffix after `{prefix}.agent.{agent_id}`.
+/// The agent subscribes to `{prefix}.agents.{agent_id}.>` and dispatches based on
+/// the suffix after `{prefix}.agents.{agent_id}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum A2aMethod {
     MessageSend,
@@ -37,7 +37,7 @@ impl A2aMethod {
     /// Resolve the method from the full NATS subject string and the known prefix/agent_id
     /// component length.
     ///
-    /// `prefix_len` is the byte length of `{prefix}.agent.{agent_id}` (without trailing dot).
+    /// `prefix_len` is the byte length of `{prefix}.agents.{agent_id}` (without trailing dot).
     pub fn from_subject(subject: &str, prefix_len: usize) -> Option<Self> {
         let suffix = subject.get(prefix_len..)?.strip_prefix('.')?;
         match suffix {
@@ -47,11 +47,11 @@ impl A2aMethod {
             "tasks.list" => Some(Self::TasksList),
             "tasks.cancel" => Some(Self::TasksCancel),
             "tasks.resubscribe" => Some(Self::TasksResubscribe),
-            "tasks.push_notification_config.set" => Some(Self::PushNotificationSet),
-            "tasks.push_notification_config.get" => Some(Self::PushNotificationGet),
-            "tasks.push_notification_config.list" => Some(Self::PushNotificationList),
-            "tasks.push_notification_config.delete" => Some(Self::PushNotificationDelete),
-            "agent.card" => Some(Self::AgentCard),
+            "push.set" => Some(Self::PushNotificationSet),
+            "push.get" => Some(Self::PushNotificationGet),
+            "push.list" => Some(Self::PushNotificationList),
+            "push.delete" => Some(Self::PushNotificationDelete),
+            "card" => Some(Self::AgentCard),
             _ => None,
         }
     }
@@ -62,125 +62,125 @@ mod tests {
     use super::*;
 
     fn prefix_len(prefix: &str, agent_id: &str) -> usize {
-        format!("{prefix}.agent.{agent_id}").len()
+        format!("{prefix}.agents.{agent_id}").len()
     }
 
     #[test]
     fn message_send() {
-        let pl = prefix_len("a2a", "planner");
+        let pl = prefix_len("a2a.v1", "planner");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.planner.message.send", pl),
+            A2aMethod::from_subject("a2a.v1.agents.planner.message.send", pl),
             Some(A2aMethod::MessageSend)
         );
     }
 
     #[test]
     fn message_stream() {
-        let pl = prefix_len("a2a", "planner");
+        let pl = prefix_len("a2a.v1", "planner");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.planner.message.stream", pl),
+            A2aMethod::from_subject("a2a.v1.agents.planner.message.stream", pl),
             Some(A2aMethod::MessageStream)
         );
     }
 
     #[test]
     fn tasks_get() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.get", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.get", pl),
             Some(A2aMethod::TasksGet)
         );
     }
 
     #[test]
     fn tasks_list() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.list", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.list", pl),
             Some(A2aMethod::TasksList)
         );
     }
 
     #[test]
     fn tasks_cancel() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.cancel", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.cancel", pl),
             Some(A2aMethod::TasksCancel)
         );
     }
 
     #[test]
     fn tasks_resubscribe() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.resubscribe", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.resubscribe", pl),
             Some(A2aMethod::TasksResubscribe)
         );
     }
 
     #[test]
     fn push_set() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.push_notification_config.set", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.push.set", pl),
             Some(A2aMethod::PushNotificationSet)
         );
     }
 
     #[test]
     fn push_get() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.push_notification_config.get", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.push.get", pl),
             Some(A2aMethod::PushNotificationGet)
         );
     }
 
     #[test]
     fn push_list() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.push_notification_config.list", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.push.list", pl),
             Some(A2aMethod::PushNotificationList)
         );
     }
 
     #[test]
     fn push_delete() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.tasks.push_notification_config.delete", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.push.delete", pl),
             Some(A2aMethod::PushNotificationDelete)
         );
     }
 
     #[test]
     fn agent_card() {
-        let pl = prefix_len("a2a", "bot");
+        let pl = prefix_len("a2a.v1", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.agent.bot.agent.card", pl),
+            A2aMethod::from_subject("a2a.v1.agents.bot.card", pl),
             Some(A2aMethod::AgentCard)
         );
     }
 
     #[test]
     fn unknown_suffix_returns_none() {
-        let pl = prefix_len("a2a", "bot");
-        assert_eq!(A2aMethod::from_subject("a2a.agent.bot.unknown.method", pl), None);
+        let pl = prefix_len("a2a.v1", "bot");
+        assert_eq!(A2aMethod::from_subject("a2a.v1.agents.bot.unknown.method", pl), None);
     }
 
     #[test]
     fn too_short_subject_returns_none() {
-        let pl = prefix_len("a2a", "bot");
-        assert_eq!(A2aMethod::from_subject("a2a.agent.bot", pl), None);
+        let pl = prefix_len("a2a.v1", "bot");
+        assert_eq!(A2aMethod::from_subject("a2a.v1.agents.bot", pl), None);
     }
 
     #[test]
     fn custom_prefix_resolves() {
         let pl = prefix_len("myapp", "worker");
         assert_eq!(
-            A2aMethod::from_subject("myapp.agent.worker.message.send", pl),
+            A2aMethod::from_subject("myapp.agents.worker.message.send", pl),
             Some(A2aMethod::MessageSend)
         );
     }

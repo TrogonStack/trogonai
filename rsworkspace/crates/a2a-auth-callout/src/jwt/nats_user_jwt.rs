@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(payload["aud"], "tenant-acme");
         assert_eq!(payload["caller_id"], "caller1");
         assert_eq!(payload["nats"]["type"], "user");
-        assert_eq!(payload["nats"]["pub"]["allow"][0], "a2a.gateway.>");
+        assert_eq!(payload["nats"]["pub"]["allow"][0], "a2a.v1.gateway.>");
 
         let handle = SigningKeyHandle::new(
             material.version().clone(),

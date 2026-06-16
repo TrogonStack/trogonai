@@ -1,15 +1,14 @@
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
-/// `message/stream` — bootstrap subject. The agent responds with the task envelope
-/// (containing `task_id`) and then publishes events to `{prefix}.task.{task_id}.events.{req_id}`.
+/// `agent/getAuthenticatedExtendedCard` — fetch agent card after authentication.
 #[derive(Debug)]
-pub struct MessageStreamSubject {
+pub struct AgentCardSubject {
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
 }
 
-impl MessageStreamSubject {
+impl AgentCardSubject {
     pub fn new(prefix: &A2aPrefix, agent_id: &A2aAgentId) -> Self {
         Self {
             prefix: prefix.clone(),
@@ -18,25 +17,25 @@ impl MessageStreamSubject {
     }
 }
 
-impl std::fmt::Display for MessageStreamSubject {
+impl std::fmt::Display for AgentCardSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agent.{}.message.stream",
+            "{}.agents.{}.card",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )
     }
 }
 
-impl async_nats::subject::ToSubject for MessageStreamSubject {
+impl async_nats::subject::ToSubject for AgentCardSubject {
     fn to_subject(&self) -> async_nats::subject::Subject {
         async_nats::subject::Subject::from(self.to_string().as_str())
     }
 }
 
-impl super::super::markers::Requestable for MessageStreamSubject {}
+impl super::super::markers::Requestable for AgentCardSubject {}
 
-impl super::super::stream::StreamAssignment for MessageStreamSubject {
+impl super::super::stream::StreamAssignment for AgentCardSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
 }

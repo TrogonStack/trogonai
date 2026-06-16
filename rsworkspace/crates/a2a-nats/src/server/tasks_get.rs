@@ -4,7 +4,7 @@ use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 
-#[instrument(name = "a2a.agent.tasks_get", skip(handler, payload, reply_subject, nats))]
+#[instrument(name = "a2a.server.tasks_get", skip(handler, payload, reply_subject, nats))]
 pub async fn handle<H, N>(handler: &H, payload: &[u8], reply_subject: Option<String>, nats: &N)
 where
     H: A2aExecutor,
