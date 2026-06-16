@@ -794,6 +794,7 @@ mod tests {
                     occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
                         &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
                     )),
+                    recorded_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&recorded_at())),
                 }
                 .into(),
             ),
@@ -809,6 +810,7 @@ mod tests {
                     occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
                         &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
                     )),
+                    scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&recorded_at())),
                 }
                 .into(),
             ),

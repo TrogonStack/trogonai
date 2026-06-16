@@ -95,7 +95,7 @@ where
             .map_err(|source| RRuleWakeupError::OccurrenceAt { source })?;
         ensure_subject_matches_payload(subject, &schedule_id)?;
 
-        let command = RecordScheduleOccurrence::new(schedule_id, occurrence_at);
+        let command = RecordScheduleOccurrence::new(schedule_id, occurrence_at, chrono::Utc::now());
         match CommandExecution::new(&self.event_store, &command).execute().await {
             Ok(result) => Ok(RRuleWakeupOutcome::Recorded {
                 stream_position: result.stream_position,
