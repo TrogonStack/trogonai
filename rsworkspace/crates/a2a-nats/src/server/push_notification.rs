@@ -352,9 +352,12 @@ mod tests {
         let semantics = PushDeliverySemanticsRegistry::default();
         let handler = stub();
         handler.lock().unwrap().push_set_result = Some(Ok(a2a::types::TaskPushNotificationConfig {
-            id: "cfg1".into(),
+            id: Some("cfg1".into()),
             task_id: "t1".into(),
-            ..Default::default()
+            url: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
         }));
         handle_set(
             &handler,
@@ -395,7 +398,7 @@ mod tests {
         let semantics = PushDeliverySemanticsRegistry::default();
         let handler = stub();
         handler.lock().unwrap().push_list_result =
-            Some(Ok(a2a::types::ListTaskPushNotificationConfigsResponse::default()));
+            Some(Ok(a2a::types::ListTaskPushNotificationConfigsResponse { configs: vec![], next_page_token: None }));
         handle_list(
             &handler,
             &rpc_payload("tasks/pushNotificationConfig/list", 3),

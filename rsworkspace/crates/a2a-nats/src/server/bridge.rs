@@ -514,7 +514,7 @@ mod tests {
     async fn dispatch_message_send_routes_to_handler() {
         let nats = AdvancedMockNatsClient::new();
         let handler_stub = stub();
-        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a::types::SendMessageResponse { payload: None }));
+        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a::types::SendMessageResponse::Message(a2a::types::Message::new(a2a::types::Role::Agent, vec![]))));
         let handler = Arc::new(handler_stub);
         let in_flight = InFlightTasks::default();
         let prefix = crate::a2a_prefix::A2aPrefix::new("a2a".to_string()).unwrap();
@@ -592,7 +592,7 @@ mod tests {
                 let _permit = self.gate.acquire().await.unwrap();
                 self.in_flight_count.fetch_sub(1, Ordering::SeqCst);
                 self.completed_count.fetch_add(1, Ordering::SeqCst);
-                Ok(a2a::types::SendMessageResponse { payload: None })
+                Ok(a2a::types::SendMessageResponse::Message(a2a::types::Message::new(a2a::types::Role::Agent, vec![])))
             }
 
             async fn message_stream(
@@ -750,7 +750,7 @@ mod tests {
         let inject = nats.inject_messages();
 
         let handler_stub = stub();
-        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a::types::SendMessageResponse { payload: None }));
+        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a::types::SendMessageResponse::Message(a2a::types::Message::new(a2a::types::Role::Agent, vec![]))));
 
         let config = Config::for_test("a2a").with_max_concurrent_client_tasks(1);
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));

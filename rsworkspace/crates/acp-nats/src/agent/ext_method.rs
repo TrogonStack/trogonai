@@ -48,7 +48,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
 #[cfg(test)]
 mod tests {
-    use crate::server::test_support::{
+    use crate::agent::test_support::{
         has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use agent_client_protocol::{Agent, ErrorCode, ExtRequest, ExtResponse};

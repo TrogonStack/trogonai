@@ -32,13 +32,13 @@ pub use traits::{
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
     JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JsMessageOf,
+    JetStreamPublisher, JetStreamSubjectPurger, JsMessageOf, PurgeOutcome,
 };
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{
     AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamContext,
-    MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublishMessage, MockJetStreamPublisher,
+    MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublishMessage, MockJetStreamPublisher, MockJetStreamPurger,
     MockJetStreamStream, MockJsMessage, MockKvEntryOutcome, MockKvGetOutcome, MockObjectStore,
     MockPublishedOutboundMessage,
 };

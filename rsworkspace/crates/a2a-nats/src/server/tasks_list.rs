@@ -62,7 +62,9 @@ mod tests {
         let handler = stub();
         handler.lock().unwrap().tasks_list_result = Some(Ok(a2a::types::ListTasksResponse {
             tasks: vec![],
-            ..Default::default()
+            next_page_token: String::new(),
+            page_size: 0,
+            total_size: 0,
         }));
         handle(&handler, &rpc_payload("tasks/list", 1), Some("reply".into()), &nats).await;
         let body = parse_response(&nats.published_payloads()[0]);

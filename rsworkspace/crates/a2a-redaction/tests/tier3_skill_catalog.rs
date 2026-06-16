@@ -29,7 +29,9 @@ fn host_with_skill(skill_slug: &str, wasm_fixture: &str) -> WasmRedactorHost {
 fn text_part(text: &str) -> Part {
     Part {
         content: PartContent::Text(text.into()),
-        ..Default::default()
+        filename: None,
+        media_type: None,
+        metadata: None,
     }
 }
 
@@ -38,9 +40,13 @@ fn pii_regex_redactor_wasm_masks_email_in_message_part() {
     let host = host_with_skill("pii-regex-redactor", "pii_regex_redactor");
     let msg_in = Message {
         message_id: "m1".into(),
-        role: Role::User.into(),
+        context_id: None,
+        task_id: None,
+        role: Role::User,
         parts: vec![text_part("contact alice@example.com today")],
-        ..Default::default()
+        metadata: None,
+        extensions: None,
+        reference_task_ids: None,
     };
     let msg_out = host
         .redact_message(msg_in, &SkillId::new("pii-regex-redactor"))
@@ -59,9 +65,13 @@ fn secrets_redactor_wasm_masks_github_pat_in_message_part() {
     let host = host_with_skill("secrets-redactor", "secrets_redactor");
     let msg_in = Message {
         message_id: "m2".into(),
-        role: Role::Agent.into(),
+        context_id: None,
+        task_id: None,
+        role: Role::Agent,
         parts: vec![text_part("pat ghp_1234567890abcdefghijklmnopqrstuvwxyz")],
-        ..Default::default()
+        metadata: None,
+        extensions: None,
+        reference_task_ids: None,
     };
     let msg_out = host
         .redact_message(msg_in, &SkillId::new("secrets-redactor"))
@@ -87,9 +97,13 @@ fn json_path_sanitizer_wasm_redacts_denylisted_metadata_field() {
     .expect("part json");
     let msg_in = Message {
         message_id: "m3".into(),
-        role: Role::User.into(),
+        context_id: None,
+        task_id: None,
+        role: Role::User,
         parts: vec![part],
-        ..Default::default()
+        metadata: None,
+        extensions: None,
+        reference_task_ids: None,
     };
     let msg_out = host
         .redact_message(msg_in, &SkillId::new("json-path-sanitizer"))

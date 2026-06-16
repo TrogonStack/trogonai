@@ -175,9 +175,12 @@ mod tests {
 
     fn sample_config() -> a2a::types::TaskPushNotificationConfig {
         a2a::types::TaskPushNotificationConfig {
-            id: "pcfg-1".to_string(),
+            id: Some("pcfg-1".to_string()),
             url: "https://example.com/webhook".to_string(),
-            ..Default::default()
+            task_id: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
         }
     }
 

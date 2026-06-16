@@ -526,8 +526,17 @@ mod tests {
             name: "BotA".into(),
             description: "desc".into(),
             version: "1.0".into(),
-            capabilities: Some(a2a::agent_card::AgentCapabilities::default()),
-            ..Default::default()
+            capabilities: a2a::agent_card::AgentCapabilities::default(),
+            supported_interfaces: vec![],
+            default_input_modes: vec![],
+            default_output_modes: vec![],
+            skills: vec![],
+            provider: None,
+            documentation_url: None,
+            icon_url: None,
+            security_schemes: None,
+            security_requirements: None,
+            signatures: None,
         };
         nats.set_response(
             "a2a.v1.agents.bot.card",

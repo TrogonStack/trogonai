@@ -150,8 +150,27 @@ impl MintedUserJwt {
     }
 }
 
+enum SigningKeyInner {
+    Nkey(nkeys::KeyPair),
+    #[cfg(test)]
+    HmacSecret(Vec<u8>),
+}
+
+impl Clone for SigningKeyInner {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Nkey(kp) => {
+                let seed = kp.seed().unwrap_or_default();
+                Self::Nkey(nkeys::KeyPair::from_seed(&seed).expect("clone SigningKey"))
+            }
+            #[cfg(test)]
+            Self::HmacSecret(s) => Self::HmacSecret(s.clone()),
+        }
+    }
+}
+
 #[derive(Clone)]
-pub struct SigningKey(nkeys::KeyPair);
+pub struct SigningKey(SigningKeyInner);
 
 impl fmt::Debug for SigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -162,19 +181,34 @@ impl fmt::Debug for SigningKey {
 impl SigningKey {
     pub fn from_seed(seed: impl AsRef<str>) -> Result<Self, JwtError> {
         nkeys::KeyPair::from_seed(seed.as_ref())
-            .map(Self)
+            .map(|kp| Self(SigningKeyInner::Nkey(kp)))
             .map_err(|e| JwtError::InvalidSigningSeed(e.to_string()))
     }
 
+    #[cfg(test)]
+    pub fn from_secret(secret: &[u8]) -> Self {
+        Self(SigningKeyInner::HmacSecret(secret.to_vec()))
+    }
+
     pub(crate) fn keypair(&self) -> &nkeys::KeyPair {
-        &self.0
+        match &self.0 {
+            SigningKeyInner::Nkey(kp) => kp,
+            #[cfg(test)]
+            SigningKeyInner::HmacSecret(_) => panic!("from_secret SigningKey has no nkey keypair"),
+        }
     }
 
     /// Returns a `jsonwebtoken::EncodingKey` for HS256 signing using the raw seed bytes.
     pub fn encoding_key(&self) -> jsonwebtoken::EncodingKey {
-        // The seed bytes are used as the HMAC secret for HS256 denial JWTs.
-        let seed_bytes = self.0.seed().unwrap_or_default();
-        jsonwebtoken::EncodingKey::from_secret(seed_bytes.as_bytes())
+        match &self.0 {
+            SigningKeyInner::Nkey(kp) => {
+                // The seed bytes are used as the HMAC secret for HS256 denial JWTs.
+                let seed_bytes = kp.seed().unwrap_or_default();
+                jsonwebtoken::EncodingKey::from_secret(seed_bytes.as_bytes())
+            }
+            #[cfg(test)]
+            SigningKeyInner::HmacSecret(s) => jsonwebtoken::EncodingKey::from_secret(s),
+        }
     }
 }
 

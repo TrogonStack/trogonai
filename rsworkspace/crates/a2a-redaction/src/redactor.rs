@@ -57,8 +57,13 @@ mod tests {
         let r = DefaultRedactorByTrait;
         let msg = Message {
             message_id: "m".into(),
-            role: Role::User.into(),
-            ..Default::default()
+            context_id: None,
+            task_id: None,
+            role: Role::User,
+            parts: vec![],
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
         };
         assert_eq!(
             serde_json::to_value(r.redact_message(msg.clone(), &SkillId::new("s")).unwrap()).unwrap(),
@@ -70,12 +75,18 @@ mod tests {
     fn part_loop_identity_preserves_shapes() {
         let msg_in = Message {
             message_id: "m".into(),
-            role: Role::Agent.into(),
+            context_id: None,
+            task_id: None,
+            role: Role::Agent,
             parts: vec![a2a::types::Part {
                 content: PartContent::Text("secret".into()),
-                ..Default::default()
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
         };
         let msg_out = redact_message_parts_with(msg_in.clone(), |b| Ok(b.to_vec())).expect("identity json transform");
         assert_eq!(

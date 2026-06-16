@@ -125,10 +125,7 @@ fn backend_error_is_permanent(error: &(dyn std::error::Error + 'static)) -> bool
             }
         } else if let Some(publish) = err.downcast_ref::<async_nats::jetstream::context::PublishError>() {
             use async_nats::jetstream::context::PublishErrorKind;
-            return matches!(
-                publish.kind(),
-                PublishErrorKind::StreamNotFound | PublishErrorKind::MaxPayloadExceeded
-            );
+            return matches!(publish.kind(), PublishErrorKind::StreamNotFound);
         }
         current = err.source();
     }
@@ -575,7 +572,7 @@ mod tests {
     fn permanent_publish_errors_in_the_source_chain_are_not_transient() {
         use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
-        for kind in [PublishErrorKind::StreamNotFound, PublishErrorKind::MaxPayloadExceeded] {
+        for kind in [PublishErrorKind::StreamNotFound] {
             let update = kv::UpdateError::with_source(kv::UpdateErrorKind::Other, PublishError::new(kind));
             let error = CheckpointStoreError::backend(update);
             assert!(matches!(error, CheckpointStoreError::PermanentBackend { .. }));

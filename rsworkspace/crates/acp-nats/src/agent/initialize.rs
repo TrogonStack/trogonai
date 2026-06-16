@@ -42,7 +42,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
-    use crate::server::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
+    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
     use agent_client_protocol::{
@@ -139,7 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn handlers_use_custom_prefix() {
-        use crate::server::test_support::MockJs;
+        use crate::agent::test_support::MockJs;
         let mock = AdvancedMockNatsClient::new();
         let bridge = Bridge::new(
             mock.clone(),

@@ -592,10 +592,12 @@ pub mod tests {
 
     fn push_config(url: &str) -> a2a::types::TaskPushNotificationConfig {
         a2a::types::TaskPushNotificationConfig {
-            id: "cfg-1".to_string(),
+            id: Some("cfg-1".to_string()),
             task_id: "task-99".into(),
             url: url.to_string(),
-            ..Default::default()
+            token: None,
+            authentication: None,
+            tenant: None,
         }
     }
 
