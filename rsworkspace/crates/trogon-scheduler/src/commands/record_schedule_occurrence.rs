@@ -166,10 +166,10 @@ impl Decider for RecordScheduleOccurrence {
                 let follow_up = schedule_or_complete_event(
                     command.id.as_str(),
                     next_occurrence,
-                    occurrence_sequence.as_u64().saturating_add(1),
                     occurrence_sequence.as_u64(),
                     command.recorded_at,
-                );
+                )
+                .map_err(|source| RecordScheduleOccurrenceError::OccurrenceSequence { source })?;
 
                 Ok(Decision::events(Events::from_first(recorded, vec![follow_up])))
             }

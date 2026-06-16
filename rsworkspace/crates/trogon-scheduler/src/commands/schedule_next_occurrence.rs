@@ -3,7 +3,7 @@ use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, Frequency
 use trogonai_proto::convert::TimestampConversionError;
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
-use super::domain::ScheduleId;
+use super::domain::{ScheduleId, ScheduleOccurrenceSequenceError};
 use super::rrule::{RRuleCursor, RRuleExpansionError, next_rrule_occurrence, schedule_or_complete_event};
 
 /// Occurrences whose due instant is at most this far in the past are still armed,
@@ -43,6 +43,11 @@ pub enum ScheduleNextOccurrenceError {
     NextOccurrence {
         #[source]
         source: RRuleExpansionError,
+    },
+    #[error("schedule occurrence sequence could not advance: {source}")]
+    OccurrenceSequence {
+        #[source]
+        source: ScheduleOccurrenceSequenceError,
     },
     #[error("state value is missing")]
     MissingStateValue,
@@ -120,13 +125,8 @@ impl Decider for ScheduleNextOccurrence {
                 let next_occurrence = next_rrule_occurrence(schedule, cursor)
                     .map_err(|source| ScheduleNextOccurrenceError::NextOccurrence { source })?;
 
-                let event = schedule_or_complete_event(
-                    command.id.as_str(),
-                    next_occurrence,
-                    last_sequence.saturating_add(1),
-                    last_sequence,
-                    command.now,
-                );
+                let event = schedule_or_complete_event(command.id.as_str(), next_occurrence, last_sequence, command.now)
+                    .map_err(|source| ScheduleNextOccurrenceError::OccurrenceSequence { source })?;
 
                 Ok(Decision::event(event))
             }
@@ -291,6 +291,20 @@ mod tests {
                 }]
             );
         }
+    }
+
+    #[test]
+    fn rejects_occurrence_sequence_overflow() {
+        let id = "recurring";
+        let state = enabled_state(Some(u64::MAX), None, MessageField::some(rrule_schedule(3)));
+        let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+
+        assert_eq!(
+            ScheduleNextOccurrence::decide(&state, &command(id, now)).unwrap_err(),
+            ScheduleNextOccurrenceError::OccurrenceSequence {
+                source: ScheduleOccurrenceSequenceError::Overflow
+            }
+        );
     }
 
     #[test]

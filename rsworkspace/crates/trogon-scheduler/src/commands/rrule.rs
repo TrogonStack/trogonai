@@ -6,6 +6,8 @@ use trogonai_proto::convert::{TimestampConversionError, datetime_from_timestamp,
 use trogonai_proto::google::r#type::TimeZone;
 use trogonai_proto::scheduler::schedules::{ScheduleKind, v1};
 
+use super::domain::{ScheduleOccurrenceSequence, ScheduleOccurrenceSequenceError};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RRuleCursor {
     AtOrAfter(DateTime<Utc>),
@@ -42,8 +44,11 @@ pub enum RRuleExpansionError {
     },
     #[error("RRULE schedule timezone '{id}' is not a known IANA timezone")]
     Timezone { id: String },
-    #[error("RRULE set could not be expanded: {message}")]
-    Expansion { message: String },
+    #[error("RRULE set could not be expanded")]
+    Expansion {
+        #[source]
+        source: rrule::RRuleError,
+    },
 }
 
 /// Computes the next recurrence instant for an RRULE [`v1::Schedule`].
@@ -74,9 +79,7 @@ pub(crate) fn next_rrule_occurrence(
     .with_timezone(&tz);
     let mut set = rrule::RRuleSet::new(dtstart)
         .set_from_string(&format!("RRULE:{}", rrule.rrule))
-        .map_err(|source| RRuleExpansionError::Expansion {
-            message: source.to_string(),
-        })?;
+        .map_err(|source| RRuleExpansionError::Expansion { source })?;
 
     for date in &rrule.rdate {
         set = set.rdate(to_utc(date, "rdate")?.with_timezone(&tz));
@@ -85,12 +88,18 @@ pub(crate) fn next_rrule_occurrence(
         set = set.exdate(to_utc(date, "exdate")?.with_timezone(&tz));
     }
 
+    // `RRuleSet::after` is exclusive, so probe one nanosecond earlier for the
+    // at-or-after cursor to keep an occurrence landing exactly on the cursor.
     let instant = cursor.instant();
-    let candidates = set.after(instant.with_timezone(&tz)).all(2).dates;
-    let occurrence = match cursor {
-        RRuleCursor::AtOrAfter(_) => candidates.into_iter().next(),
-        RRuleCursor::After(_) => candidates.into_iter().find(|date| date.with_timezone(&Utc) > instant),
+    let probe = match cursor {
+        RRuleCursor::AtOrAfter(_) => instant - chrono::Duration::nanoseconds(1),
+        RRuleCursor::After(_) => instant,
     };
+    let candidates = set.after(probe.with_timezone(&tz)).all(2).dates;
+    let occurrence = candidates.into_iter().find(|date| match cursor {
+        RRuleCursor::AtOrAfter(_) => date.with_timezone(&Utc) >= instant,
+        RRuleCursor::After(_) => date.with_timezone(&Utc) > instant,
+    });
 
     Ok(occurrence.map(|date| date.with_timezone(&Utc)))
 }
@@ -98,23 +107,26 @@ pub(crate) fn next_rrule_occurrence(
 /// Builds the follow-up aggregate event for a planned recurrence step.
 ///
 /// A `Some(next_occurrence)` plans the next concrete wakeup as
-/// [`v1::ScheduleOccurrenceScheduled`]; `None` means the recurrence is exhausted
-/// and the schedule is [`v1::ScheduleCompleted`].
+/// [`v1::ScheduleOccurrenceScheduled`], advancing the gapless occurrence
+/// sequence past `last_sequence`; `None` means the recurrence is exhausted and
+/// the schedule is [`v1::ScheduleCompleted`].
 pub(crate) fn schedule_or_complete_event(
     schedule_id: &str,
     next_occurrence: Option<DateTime<Utc>>,
-    next_sequence: u64,
     last_sequence: u64,
     scheduled_at: DateTime<Utc>,
-) -> v1::ScheduleEvent {
+) -> Result<v1::ScheduleEvent, ScheduleOccurrenceSequenceError> {
     let event = match next_occurrence {
-        Some(occurrence_at) => v1::ScheduleOccurrenceScheduled {
-            schedule_id: schedule_id.to_string(),
-            occurrence_sequence: Some(next_sequence),
-            occurrence_at: MessageField::some(timestamp_from_datetime(&occurrence_at)),
-            scheduled_at: MessageField::some(timestamp_from_datetime(&scheduled_at)),
+        Some(occurrence_at) => {
+            let next_sequence = ScheduleOccurrenceSequence::next_after(last_sequence)?;
+            v1::ScheduleOccurrenceScheduled {
+                schedule_id: schedule_id.to_string(),
+                occurrence_sequence: Some(next_sequence.as_u64()),
+                occurrence_at: MessageField::some(timestamp_from_datetime(&occurrence_at)),
+                scheduled_at: MessageField::some(timestamp_from_datetime(&scheduled_at)),
+            }
+            .into()
         }
-        .into(),
         None => v1::ScheduleCompleted {
             schedule_id: schedule_id.to_string(),
             last_occurrence_sequence: Some(last_sequence),
@@ -122,7 +134,7 @@ pub(crate) fn schedule_or_complete_event(
         .into(),
     };
 
-    v1::ScheduleEvent { event: Some(event) }
+    Ok(v1::ScheduleEvent { event: Some(event) })
 }
 
 fn rrule_timezone(timezone: Option<&TimeZone>) -> Result<rrule::Tz, RRuleExpansionError> {
@@ -161,6 +173,15 @@ mod tests {
         let next = next_rrule_occurrence(&schedule, RRuleCursor::at_or_after(instant("2026-01-01T12:00:00Z"))).unwrap();
 
         assert_eq!(next, Some(instant("2026-01-02T00:00:00Z")));
+    }
+
+    #[test]
+    fn at_or_after_cursor_includes_an_occurrence_exactly_on_the_cursor() {
+        let schedule = rrule_schedule(Schedule::rrule("2026-01-01T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap());
+
+        let next = next_rrule_occurrence(&schedule, RRuleCursor::at_or_after(instant("2026-01-01T00:00:00Z"))).unwrap();
+
+        assert_eq!(next, Some(instant("2026-01-01T00:00:00Z")));
     }
 
     #[test]
