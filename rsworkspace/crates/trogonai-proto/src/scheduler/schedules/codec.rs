@@ -55,6 +55,9 @@ fn encode_schedule_event_case(event: &ScheduleEventCase) -> Vec<u8> {
         ScheduleEventCase::SchedulePaused(inner) => inner.encode_to_vec(),
         ScheduleEventCase::ScheduleResumed(inner) => inner.encode_to_vec(),
         ScheduleEventCase::ScheduleRemoved(inner) => inner.encode_to_vec(),
+        ScheduleEventCase::ScheduleOccurrenceRecorded(inner) => inner.encode_to_vec(),
+        ScheduleEventCase::ScheduleOccurrenceScheduled(inner) => inner.encode_to_vec(),
+        ScheduleEventCase::ScheduleCompleted(inner) => inner.encode_to_vec(),
     }
 }
 
@@ -63,6 +66,9 @@ fn decode_schedule_event_case(event: EventData<'_>) -> Result<Option<ScheduleEve
         .or_else(|| decode_event_case::<v1::SchedulePaused, ScheduleEventCase>(&event))
         .or_else(|| decode_event_case::<v1::ScheduleResumed, ScheduleEventCase>(&event))
         .or_else(|| decode_event_case::<v1::ScheduleRemoved, ScheduleEventCase>(&event))
+        .or_else(|| decode_event_case::<v1::ScheduleOccurrenceRecorded, ScheduleEventCase>(&event))
+        .or_else(|| decode_event_case::<v1::ScheduleOccurrenceScheduled, ScheduleEventCase>(&event))
+        .or_else(|| decode_event_case::<v1::ScheduleCompleted, ScheduleEventCase>(&event))
     else {
         return Ok(None);
     };
@@ -76,6 +82,9 @@ fn schedule_event_case_type(event: &ScheduleEventCase) -> &'static str {
         ScheduleEventCase::SchedulePaused(_) => event_type::<v1::SchedulePaused>(),
         ScheduleEventCase::ScheduleResumed(_) => event_type::<v1::ScheduleResumed>(),
         ScheduleEventCase::ScheduleRemoved(_) => event_type::<v1::ScheduleRemoved>(),
+        ScheduleEventCase::ScheduleOccurrenceRecorded(_) => event_type::<v1::ScheduleOccurrenceRecorded>(),
+        ScheduleEventCase::ScheduleOccurrenceScheduled(_) => event_type::<v1::ScheduleOccurrenceScheduled>(),
+        ScheduleEventCase::ScheduleCompleted(_) => event_type::<v1::ScheduleCompleted>(),
     }
 }
 
@@ -151,6 +160,10 @@ mod tests {
         }
     }
 
+    fn timestamp() -> buffa_types::google::protobuf::Timestamp {
+        buffa_types::google::protobuf::Timestamp::from_unix(1_451_600_400, 0)
+    }
+
     #[test]
     fn event_encode_writes_inner_event_payload() {
         let inner = schedule_created();
@@ -184,6 +197,22 @@ mod tests {
         let removed = v1::ScheduleRemoved {
             schedule_id: "backup".to_string(),
         };
+        let occurrence_recorded = v1::ScheduleOccurrenceRecorded {
+            schedule_id: "backup".to_string(),
+            occurrence_sequence: Some(1),
+            occurrence_at: MessageField::some(timestamp()),
+            recorded_at: MessageField::some(timestamp()),
+        };
+        let occurrence_scheduled = v1::ScheduleOccurrenceScheduled {
+            schedule_id: "backup".to_string(),
+            occurrence_sequence: Some(2),
+            occurrence_at: MessageField::some(timestamp()),
+            scheduled_at: MessageField::some(timestamp()),
+        };
+        let completed = v1::ScheduleCompleted {
+            schedule_id: "backup".to_string(),
+            last_occurrence_sequence: Some(2),
+        };
 
         let encoded = EventEncode::encode(&v1::ScheduleEvent {
             event: Some(paused.clone().into()),
@@ -202,6 +231,30 @@ mod tests {
         })
         .unwrap();
         assert_eq!(v1::ScheduleRemoved::decode_from_slice(&encoded).unwrap(), removed);
+
+        let encoded = EventEncode::encode(&v1::ScheduleEvent {
+            event: Some(occurrence_recorded.clone().into()),
+        })
+        .unwrap();
+        assert_eq!(
+            v1::ScheduleOccurrenceRecorded::decode_from_slice(&encoded).unwrap(),
+            occurrence_recorded
+        );
+
+        let encoded = EventEncode::encode(&v1::ScheduleEvent {
+            event: Some(occurrence_scheduled.clone().into()),
+        })
+        .unwrap();
+        assert_eq!(
+            v1::ScheduleOccurrenceScheduled::decode_from_slice(&encoded).unwrap(),
+            occurrence_scheduled
+        );
+
+        let encoded = EventEncode::encode(&v1::ScheduleEvent {
+            event: Some(completed.clone().into()),
+        })
+        .unwrap();
+        assert_eq!(v1::ScheduleCompleted::decode_from_slice(&encoded).unwrap(), completed);
     }
 
     #[test]
@@ -230,6 +283,22 @@ mod tests {
         let removed = v1::ScheduleRemoved {
             schedule_id: "backup".to_string(),
         };
+        let occurrence_recorded = v1::ScheduleOccurrenceRecorded {
+            schedule_id: "backup".to_string(),
+            occurrence_sequence: Some(1),
+            occurrence_at: MessageField::some(timestamp()),
+            recorded_at: MessageField::some(timestamp()),
+        };
+        let occurrence_scheduled = v1::ScheduleOccurrenceScheduled {
+            schedule_id: "backup".to_string(),
+            occurrence_sequence: Some(2),
+            occurrence_at: MessageField::some(timestamp()),
+            scheduled_at: MessageField::some(timestamp()),
+        };
+        let completed = v1::ScheduleCompleted {
+            schedule_id: "backup".to_string(),
+            last_occurrence_sequence: Some(2),
+        };
 
         let decoded = <v1::ScheduleEvent as EventDecode>::decode(EventData::new(
             <v1::SchedulePaused as buffa::MessageName>::FULL_NAME,
@@ -257,6 +326,39 @@ mod tests {
         .into_decoded()
         .unwrap();
         assert!(matches!(decoded.event, Some(ScheduleEventCase::ScheduleRemoved(_))));
+
+        let decoded = <v1::ScheduleEvent as EventDecode>::decode(EventData::new(
+            <v1::ScheduleOccurrenceRecorded as buffa::MessageName>::FULL_NAME,
+            &occurrence_recorded.encode_to_vec(),
+        ))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+        assert!(matches!(
+            decoded.event,
+            Some(ScheduleEventCase::ScheduleOccurrenceRecorded(_))
+        ));
+
+        let decoded = <v1::ScheduleEvent as EventDecode>::decode(EventData::new(
+            <v1::ScheduleOccurrenceScheduled as buffa::MessageName>::FULL_NAME,
+            &occurrence_scheduled.encode_to_vec(),
+        ))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+        assert!(matches!(
+            decoded.event,
+            Some(ScheduleEventCase::ScheduleOccurrenceScheduled(_))
+        ));
+
+        let decoded = <v1::ScheduleEvent as EventDecode>::decode(EventData::new(
+            <v1::ScheduleCompleted as buffa::MessageName>::FULL_NAME,
+            &completed.encode_to_vec(),
+        ))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+        assert!(matches!(decoded.event, Some(ScheduleEventCase::ScheduleCompleted(_))));
     }
 
     #[test]
@@ -336,6 +438,52 @@ mod tests {
             event.event_type().unwrap(),
             <v1::ScheduleResumed as buffa::MessageName>::FULL_NAME
         );
+
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceRecorded {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(1),
+                    occurrence_at: MessageField::some(timestamp()),
+                    recorded_at: MessageField::some(timestamp()),
+                }
+                .into(),
+            ),
+        };
+        assert_eq!(
+            event.event_type().unwrap(),
+            <v1::ScheduleOccurrenceRecorded as buffa::MessageName>::FULL_NAME
+        );
+
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(2),
+                    occurrence_at: MessageField::some(timestamp()),
+                    scheduled_at: MessageField::some(timestamp()),
+                }
+                .into(),
+            ),
+        };
+        assert_eq!(
+            event.event_type().unwrap(),
+            <v1::ScheduleOccurrenceScheduled as buffa::MessageName>::FULL_NAME
+        );
+
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCompleted {
+                    schedule_id: "backup".to_string(),
+                    last_occurrence_sequence: Some(2),
+                }
+                .into(),
+            ),
+        };
+        assert_eq!(
+            event.event_type().unwrap(),
+            <v1::ScheduleCompleted as buffa::MessageName>::FULL_NAME
+        );
     }
 
     #[test]
@@ -354,6 +502,13 @@ mod tests {
             state: Some(buffa::EnumValue::from(
                 state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED,
             )),
+            last_occurrence_at: MessageField::some(buffa_types::google::protobuf::Timestamp::from_unix(
+                1_451_600_400,
+                0,
+            )),
+            last_occurrence_sequence: Some(7),
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
         };
 
         let encoded = SnapshotPayloadEncode::encode(&state).unwrap();

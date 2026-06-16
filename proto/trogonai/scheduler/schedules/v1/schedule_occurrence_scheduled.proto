@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ScheduleOccurrenceScheduled records the next occurrence the schedule aggregate planned for execution.
+//
+// The execution layer publishes the concrete @at wakeup from this event without
+// performing any recurrence calculation of its own.
+message ScheduleOccurrenceScheduled {
+  // Stable NATS token used as the schedule stream id and schedule key.
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Gapless sequence the occurrence will receive once it is recorded.
+  uint64 occurrence_sequence = 2;
+  // Concrete recurrence instant the execution layer must wake up at.
+  google.protobuf.Timestamp occurrence_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Wall-clock instant the aggregate planned the occurrence; audit only, never
+  // an identity input.
+  google.protobuf.Timestamp scheduled_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}

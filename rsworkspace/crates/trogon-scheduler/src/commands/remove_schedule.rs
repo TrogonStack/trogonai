@@ -155,6 +155,10 @@ mod tests {
     fn state(value: state_v1::StateValue) -> state_v1::State {
         state_v1::State {
             state: Some(EnumValue::from(value)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
         }
     }
 
@@ -223,13 +227,27 @@ mod tests {
         let command = remove_job_command("backup");
 
         assert_eq!(
-            RemoveSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
+            RemoveSchedule::decide(
+                &state_v1::State {
+                    state: None,
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
+                },
+                &command
+            )
+            .unwrap_err(),
             RemoveScheduleError::MissingStateValue
         );
         assert_eq!(
             RemoveSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(123)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )
@@ -240,6 +258,10 @@ mod tests {
             RemoveSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )

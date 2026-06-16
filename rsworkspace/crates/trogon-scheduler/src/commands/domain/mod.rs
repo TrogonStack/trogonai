@@ -5,6 +5,7 @@ mod schedule_event_sampling_source;
 mod schedule_event_schedule;
 mod schedule_event_status;
 mod schedule_id;
+mod schedule_occurrence_sequence;
 
 pub use message::{
     HeaderName, HeaderValue, MessageContent, MessageContentType, MessageEnvelope, MessageHeader, MessageHeaders,
@@ -22,3 +23,4 @@ pub use schedule_event_sampling_source::ScheduleEventSamplingSource;
 pub use schedule_event_schedule::ScheduleEventSchedule;
 pub use schedule_event_status::ScheduleEventStatus;
 pub use schedule_id::{ScheduleId, ScheduleIdError};
+pub use schedule_occurrence_sequence::{ScheduleOccurrenceSequence, ScheduleOccurrenceSequenceError};

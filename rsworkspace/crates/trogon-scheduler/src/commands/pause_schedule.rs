@@ -84,7 +84,7 @@ impl CommandSnapshotPolicy for PauseSchedule {
 
 #[cfg(test)]
 mod tests {
-    use buffa::EnumValue;
+    use buffa::{EnumValue, MessageField};
     use trogon_decider::testing::TestCase;
 
     use super::*;
@@ -229,13 +229,27 @@ mod tests {
         let command = pause_job_command("backup");
 
         assert_eq!(
-            PauseSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
+            PauseSchedule::decide(
+                &state_v1::State {
+                    state: None,
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
+                },
+                &command
+            )
+            .unwrap_err(),
             PauseScheduleError::MissingStateValue
         );
         assert_eq!(
             PauseSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(123)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )
@@ -246,6 +260,10 @@ mod tests {
             PauseSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )

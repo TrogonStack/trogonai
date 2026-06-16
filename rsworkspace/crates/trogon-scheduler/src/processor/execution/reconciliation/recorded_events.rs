@@ -123,6 +123,9 @@ pub enum ScheduleEventDecodeError {
         #[source]
         source: ScheduleEventPayloadError,
     },
+    /// The event is part of the schedule aggregate but does not change delivery reconciliation.
+    #[error("schedule event does not affect execution reconciliation")]
+    NonReconciledEvent,
 }
 
 /// Decodes the schedule event payload of a [`StreamEvent`].
@@ -140,6 +143,7 @@ pub fn schedule_change_from_stream_event(
         .map_err(|source| ScheduleEventDecodeError::Payload { source })?;
 
     match outcome {
+        EventDecodeOutcome::Decoded(event) if is_non_reconciled_schedule_event(&event) => Ok(None),
         EventDecodeOutcome::Decoded(event) => decode_schedule_change(&event).map(Some),
         EventDecodeOutcome::Skipped => Ok(None),
     }
@@ -227,7 +231,21 @@ pub fn decode_schedule_change(event: &v1::ScheduleEvent) -> Result<ScheduleChang
         ScheduleEventCase::ScheduleRemoved(removed) => Ok(ScheduleChange::Removed {
             schedule_id: schedule_id_from(&removed.schedule_id)?,
         }),
+        ScheduleEventCase::ScheduleOccurrenceRecorded(_)
+        | ScheduleEventCase::ScheduleOccurrenceScheduled(_)
+        | ScheduleEventCase::ScheduleCompleted(_) => Err(ScheduleEventDecodeError::NonReconciledEvent),
     }
+}
+
+fn is_non_reconciled_schedule_event(event: &v1::ScheduleEvent) -> bool {
+    matches!(
+        event.event.as_ref(),
+        Some(
+            ScheduleEventCase::ScheduleOccurrenceRecorded(_)
+                | ScheduleEventCase::ScheduleOccurrenceScheduled(_)
+                | ScheduleEventCase::ScheduleCompleted(_)
+        )
+    )
 }
 
 fn definition_from_created(created: &v1::ScheduleCreated) -> Result<ScheduleDefinition, ScheduleEventDecodeError> {
@@ -819,6 +837,41 @@ mod tests {
             decode_schedule_change(&event).unwrap_err(),
             ScheduleEventDecodeError::MissingEvent
         ));
+    }
+
+    #[test]
+    fn occurrence_lifecycle_events_do_not_reconcile_delivery_changes() {
+        use trogon_decider_runtime::{Event, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition};
+        use uuid::Uuid;
+
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCompleted {
+                    schedule_id: "backup".to_string(),
+                    last_occurrence_sequence: Some(2),
+                }
+                .into(),
+            ),
+        };
+
+        assert!(matches!(
+            decode_schedule_change(&event).unwrap_err(),
+            ScheduleEventDecodeError::NonReconciledEvent
+        ));
+
+        let stream_event = StreamEvent {
+            stream_id: "backup".to_string(),
+            event: Event {
+                id: EventId::new(Uuid::from_u128(3)),
+                r#type: event.event_type().expect("event has a type").to_string(),
+                content: EventEncode::encode(&event).expect("event encodes"),
+                headers: Headers::empty(),
+            },
+            stream_position: StreamPosition::try_new(1).expect("position is non-zero"),
+            recorded_at: at_instant(),
+        };
+
+        assert!(schedule_change_from_stream_event(&stream_event).unwrap().is_none());
     }
 
     #[test]

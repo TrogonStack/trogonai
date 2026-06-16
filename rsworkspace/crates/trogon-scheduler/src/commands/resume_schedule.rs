@@ -238,13 +238,27 @@ mod tests {
         let command = resume_job_command("backup");
 
         assert_eq!(
-            ResumeSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
+            ResumeSchedule::decide(
+                &state_v1::State {
+                    state: None,
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
+                },
+                &command
+            )
+            .unwrap_err(),
             ResumeScheduleError::MissingStateValue
         );
         assert_eq!(
             ResumeSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(123)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )
@@ -255,6 +269,10 @@ mod tests {
             ResumeSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )

@@ -103,7 +103,7 @@ impl Decider for CreateSchedule {
 mod tests {
     use std::error::Error;
 
-    use buffa::EnumValue;
+    use buffa::{EnumValue, MessageField};
     use trogon_decider::testing::TestCase;
 
     use super::*;
@@ -278,13 +278,27 @@ mod tests {
     #[test]
     fn decide_rejects_invalid_state_values() {
         assert_eq!(
-            CreateSchedule::decide(&state_v1::State { state: None }, &create_schedule("backup")).unwrap_err(),
+            CreateSchedule::decide(
+                &state_v1::State {
+                    state: None,
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
+                },
+                &create_schedule("backup")
+            )
+            .unwrap_err(),
             CreateScheduleDecideError::MissingStateValue
         );
         assert_eq!(
             CreateSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(123)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &create_schedule("backup")
             )
@@ -295,6 +309,10 @@ mod tests {
             CreateSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &create_schedule("backup")
             )
