@@ -95,7 +95,7 @@ mod tests {
     fn gateway_events_consumer_uses_durable_full_task_filter() {
         let config = gateway_events_consumer(&p("a2a"), "A2A_GATEWAY_EVENTS", 1024);
         assert_eq!(config.durable_name.as_deref(), Some("A2A_GATEWAY_EVENTS"));
-        assert_eq!(config.filter_subject, "a2a.task.*.events.*");
+        assert_eq!(config.filter_subject, "a2a.v1.tasks.*.events.*");
         assert_eq!(config.max_ack_pending, 1024);
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
     }
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn stream_events_consumer_filter_uses_wildcard_task_id() {
         let config = stream_events_consumer(&p("a2a"), &rid("r1"));
-        assert_eq!(config.filter_subject, "a2a.task.*.events.r1");
+        assert_eq!(config.filter_subject, "a2a.v1.tasks.*.events.r1");
     }
 
     #[test]
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn resubscribe_consumer_filter_matches_all_req_ids() {
         let config = resubscribe_consumer(&p("a2a"), &tid("t1"), 100);
-        assert_eq!(config.filter_subject, "a2a.task.t1.events.*");
+        assert_eq!(config.filter_subject, "a2a.v1.tasks.t1.events.*");
     }
 
     #[test]
@@ -162,9 +162,9 @@ mod tests {
     #[test]
     fn custom_prefix_in_consumers() {
         let stream = stream_events_consumer(&p("myapp"), &rid("r1"));
-        assert_eq!(stream.filter_subject, "myapp.task.*.events.r1");
+        assert_eq!(stream.filter_subject, "myapp.tasks.*.events.r1");
         let resub = resubscribe_consumer(&p("myapp"), &tid("t1"), 5);
-        assert_eq!(resub.filter_subject, "myapp.task.t1.events.*");
+        assert_eq!(resub.filter_subject, "myapp.tasks.t1.events.*");
     }
 
     #[test]

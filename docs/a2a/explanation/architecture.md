@@ -30,9 +30,9 @@ Two namespaces separated by NATS authorization, **scoped inside each Account**:
 
 | Subject                                       | Role                                                          | Who publishes              |
 |-----------------------------------------------|---------------------------------------------------------------|----------------------------|
-| `a2a.gateway.{agent_id}.{method}`             | Client → gateway request inbox                                | Clients                    |
-| `a2a.agent.{agent_id}.{method}`               | Gateway → agent backend                                       | Gateway                    |
-| `a2a.task.{task_id}.events.{req_id}`          | Per-task event stream (JetStream)                             | Agent (via gateway)        |
+| `a2a.v1.gateway.{agent_id}.{method}`             | Client → gateway request inbox                                | Clients                    |
+| `a2a.v1.agents.{agent_id}.{method}`               | Gateway → agent backend                                       | Gateway                    |
+| `a2a.v1.tasks.{task_id}.events.{req_id}`          | Per-task event stream (JetStream)                             | Agent (via gateway)        |
 | `a2a.push.{caller_id}.{task_id}`              | Caller-owned push delivery subject                            | Gateway                    |
 | `a2a.discover.{agent_id}`                     | AgentCard catalog (KV-backed; also a service subject)         | Registrars                 |
 | `a2a.catalog.register.{agent_id}`             | AgentCard catalog **write** (registrar `request` → KV put)     | Registrars (ACL-gated)     |
@@ -55,7 +55,7 @@ Scatter-gather (the NATS Services `$SRV.PING` / `$SRV.INFO` pattern) is the refl
 - **Fan-out cost scales with fleet size.** N agents × every discovery = N replies per query, plus a dedupe layer for queue-group replicas. KV `get` is O(1).
 - **Authz shaping caches better against a stable set.** `BulkCheckPermission` on a known agent id list reuses ZedToken cache; on a dynamic gather result it doesn't, and races against agents joining/leaving mid-gather.
 - **Semantic parity with HTTPS A2A.** The spec's discovery model is *pull on demand* (`/.well-known/agent.json`). KV `get` matches one-to-one; scatter-gather is a behavior delta the HTTPS bridge would have to paper over.
-- **Liveness from PING is theatre on the discovery path.** "Agent responded to PING" ≠ "agent will accept the next message". The request/reply on `a2a.agent.{id}.message.send` is the real liveness signal — and it's the call the client was about to make anyway.
+- **Liveness from PING is theatre on the discovery path.** "Agent responded to PING" ≠ "agent will accept the next message". The request/reply on `a2a.v1.agents.{id}.message.send` is the real liveness signal — and it's the call the client was about to make anyway.
 
 AgentCards advertise NATS as a transport:
 
@@ -64,8 +64,8 @@ AgentCards advertise NATS as a transport:
   "transports": [
     {
       "kind": "nats",
-      "endpoint": "nats://a2a.gateway.acme",
-      "agent_subject": "a2a.gateway.acme.support-bot",
+      "endpoint": "nats://a2a.v1.gateway.acme",
+      "agent_subject": "a2a.v1.gateway.acme.support-bot",
       "auth_schemes": [
         { "type": "nats-callout", "issuer": "acme-trogon" },
         { "type": "nkey" }
@@ -84,7 +84,7 @@ AgentCards advertise NATS as a transport:
 ### Unary methods (request/reply)
 
 ```
-client ──PUB──▶ a2a.gateway.{agent_id}.message.send  (JSON-RPC envelope, reply_to = _INBOX.x)
+client ──PUB──▶ a2a.v1.gateway.{agent_id}.message.send  (JSON-RPC envelope, reply_to = _INBOX.x)
                         │
                         ▼
                 ┌──────────────────┐
@@ -96,7 +96,7 @@ client ──PUB──▶ a2a.gateway.{agent_id}.message.send  (JSON-RPC envelop
         3. derive resource tuple (see SpiceDB table)
         4. policy.authorize(req)
         5. policy.rewrite(req.params)
-        6. publish a2a.agent.{agent_id}.message.send
+        6. publish a2a.v1.agents.{agent_id}.message.send
         7. await reply on inbox
         8. policy.rewrite(resp.result)
         9. emit audit
@@ -109,12 +109,12 @@ A2A's SSE stream becomes a JetStream consumer:
 
 - On `message/stream`, the gateway:
   1. allocates `task_id` (or reuses the one in `params.message.taskId`),
-  2. ensures the Account's `A2A_EVENTS` JetStream stream with subject filter `a2a.task.>` exists,
-  3. forwards the request to the agent on `a2a.agent.{agent_id}.message.stream` with `events_subject = a2a.task.{task_id}.events`,
+  2. ensures the Account's `A2A_EVENTS` JetStream stream with subject filter `a2a.v1.tasks.>` exists,
+  3. forwards the request to the agent on `a2a.v1.agents.{agent_id}.message.stream` with `events_subject = a2a.v1.tasks.{task_id}.events`,
   4. creates an ephemeral pull consumer for the caller bound to that subject filter, delivering to a caller inbox,
   5. emits an immediate JSON-RPC ack containing `{task_id, stream_inbox, last_seq: 0}`.
 
-The agent publishes each `Task` / `TaskStatusUpdateEvent` / `TaskArtifactUpdateEvent` to `a2a.task.{task_id}.events`. The gateway consumer rewrites/redacts in flight and forwards to the caller inbox.
+The agent publishes each `Task` / `TaskStatusUpdateEvent` / `TaskArtifactUpdateEvent` to `a2a.v1.tasks.{task_id}.events`. The gateway consumer rewrites/redacts in flight and forwards to the caller inbox.
 
 `tasks/resubscribe` becomes a new ephemeral consumer on the same subject starting from `OptStartSeq = last_seq + 1` — the durable equivalent of SSE reconnect, but lossless within JetStream retention.
 
@@ -132,13 +132,13 @@ Push deliveries use the same JSON envelope as the SSE stream; payload semantics 
 
 | JSON-RPC method                                    | Subject (client → gateway)                                            | Direction       |
 |----------------------------------------------------|------------------------------------------------------------------------|-----------------|
-| `message/send`                                     | `a2a.gateway.{agent_id}.message.send`                                  | req/reply       |
-| `message/stream`                                   | `a2a.gateway.{agent_id}.message.stream`                                | req → stream    |
-| `tasks/get`                                        | `a2a.gateway.{agent_id}.tasks.get`                                     | req/reply       |
-| `tasks/cancel`                                     | `a2a.gateway.{agent_id}.tasks.cancel`                                  | req/reply       |
-| `tasks/resubscribe`                                | `a2a.gateway.{agent_id}.tasks.resubscribe`                             | req → stream    |
-| `tasks/pushNotificationConfig/set\|get\|list\|delete` | `a2a.gateway.{agent_id}.tasks.pushNotificationConfig.{op}`             | req/reply       |
-| `agent/getAuthenticatedExtendedCard`               | `a2a.gateway.{agent_id}.agent.getAuthenticatedExtendedCard`            | req/reply       |
+| `message/send`                                     | `a2a.v1.gateway.{agent_id}.message.send`                                  | req/reply       |
+| `message/stream`                                   | `a2a.v1.gateway.{agent_id}.message.stream`                                | req → stream    |
+| `tasks/get`                                        | `a2a.v1.gateway.{agent_id}.tasks.get`                                     | req/reply       |
+| `tasks/cancel`                                     | `a2a.v1.gateway.{agent_id}.tasks.cancel`                                  | req/reply       |
+| `tasks/resubscribe`                                | `a2a.v1.gateway.{agent_id}.tasks.resubscribe`                             | req → stream    |
+| `tasks/pushNotificationConfig/set\|get\|list\|delete` | `a2a.v1.gateway.{agent_id}.tasks.pushNotificationConfig.{op}`             | req/reply       |
+| `agent/getAuthenticatedExtendedCard`               | `a2a.v1.gateway.{agent_id}.agent.getAuthenticatedExtendedCard`            | req/reply       |
 
 ## Architecture
 
@@ -146,17 +146,17 @@ Push deliveries use the same JSON envelope as the SSE stream; payload semantics 
 
 All components run **inside the tenant's NATS Account**; cross-Account traffic is gated by operator-signed exports/imports.
 
-1. **Auth callout service** — terminates external OIDC / mTLS / API keys and mints a User JWT bound to the tenant's Account. Subject ACL inside the Account confines the caller to `a2a.gateway.>` and an `_INBOX.{caller_id}.>` reply space, plus consumer ACL on caller-owned push subjects.
-2. **A2A gateway service** — queue-group subscriber on `a2a.gateway.>` inside the Account; stateless per-message except for streaming where it owns the consumer-to-caller pipe.
+1. **Auth callout service** — terminates external OIDC / mTLS / API keys and mints a User JWT bound to the tenant's Account. Subject ACL inside the Account confines the caller to `a2a.v1.gateway.>` and an `_INBOX.{caller_id}.>` reply space, plus consumer ACL on caller-owned push subjects.
+2. **A2A gateway service** — queue-group subscriber on `a2a.v1.gateway.>` inside the Account; stateless per-message except for streaming where it owns the consumer-to-caller pipe.
 3. **Discovery / catalog service** — owns the Account's `A2A_AGENT_CARDS` KV bucket; serves `a2a.discover.>` requests. Registrars publish AgentCards; gateway validates against AgentCard JSON Schema before accepting. Federated discovery (across Accounts) requires explicit Account exports of `a2a.discover.>`.
-4. **Task stream manager** — ensures the Account's `A2A_EVENTS` JetStream stream exists with subject filter `a2a.task.>`, configures retention (default `interest` with `max_age = 24h`, per-Account override), provisions consumers.
+4. **Task stream manager** — ensures the Account's `A2A_EVENTS` JetStream stream exists with subject filter `a2a.v1.tasks.>`, configures retention (default `interest` with `max_age = 24h`, per-Account override), provisions consumers.
 5. **Policy engine** — Tier-1 SpiceDB + declarative, Tier-2 CEL, Tier-3 WASM redaction. A2A resource-tuple derivation table layered as a bundle. Policies evaluate inside the Account; cross-Account SpiceDB principals carry Account identity.
 6. **Audit emitter** — `a2a.audit.{outcome}.{method}` inside the Account (Account namespace = tenant attribution).
 7. **HTTP↔NATS bridge (`a2a-bridge`)** — accepts vanilla A2A HTTPS clients on one side, mints an Account-bound NATS User JWT, publishes inside the caller's tenant Account on the other. Lets external agents that only speak HTTP A2A participate without code change.
 
 ### Backend agents
 
-Agents subscribe to `a2a.agent.{agent_id}.>` as a queue group. An A2A SDK adapter handles:
+Agents subscribe to `a2a.v1.agents.{agent_id}.>` as a queue group. An A2A SDK adapter handles:
 
 - JSON-RPC envelope decode,
 - task state machine bookkeeping,
@@ -165,7 +165,7 @@ Agents subscribe to `a2a.agent.{agent_id}.>` as a queue group. An A2A SDK adapte
 ### Streaming flow
 
 ```
-caller ──PUB──▶ a2a.gateway.{agent}.message.stream
+caller ──PUB──▶ a2a.v1.gateway.{agent}.message.stream
                         │
                         ▼
               ┌────────────────────┐
@@ -176,14 +176,14 @@ caller ──PUB──▶ a2a.gateway.{agent}.message.stream
               │  - create consumer │
               └────────────────────┘
                         │
-        forward ──PUB──▶ a2a.agent.{agent}.message.stream
+        forward ──PUB──▶ a2a.v1.agents.{agent}.message.stream
                                         │
                                         ▼
                               ┌─────────────────┐
                               │  Agent backend  │
                               └─────────────────┘
                                         │
-                  publish events ──PUB──▶ a2a.task.{task_id}.events
+                  publish events ──PUB──▶ a2a.v1.tasks.{task_id}.events
                                         │
                 ┌───────────────────────┘
                 ▼
@@ -198,7 +198,7 @@ Caller disconnect: ephemeral consumer dies; on `tasks/resubscribe` the gateway r
 
 AgentCards declare `auth_schemes` per transport. NATS-bound schemes:
 
-- **`nats-callout`** — external OIDC / mTLS / API key terminates at a callout service that mints a User JWT bound to the tenant's Account. Subject ACL inside the Account bounds the caller to `a2a.gateway.{agent_id}.>` and an `_INBOX.{caller_id}.>` reply space.
+- **`nats-callout`** — external OIDC / mTLS / API key terminates at a callout service that mints a User JWT bound to the tenant's Account. Subject ACL inside the Account bounds the caller to `a2a.v1.gateway.{agent_id}.>` and an `_INBOX.{caller_id}.>` reply space.
 - **`nkey`** — direct NKey-based User inside the tenant's Account for service-to-service agents.
 - **`jwt-bearer`** — passthrough JWT carried in the JSON-RPC envelope `metadata`, validated by the gateway against AgentCard-declared issuers; Account membership still required at the connection layer.
 
@@ -283,7 +283,7 @@ Auth is re-minted at the bridge in both directions. AgentCards declare both tran
 ## Decisions
 
 - **Tenancy = NATS Account per tenant.** Cross-Account traffic requires explicit operator-signed exports/imports; federation is opt-in. Subject table carries no `{tenant}` segment; stream/KV names are reused across Accounts.
-- **Stream topology = shared `A2A_EVENTS` per Account, subject-filtered `a2a.task.>`**. Per-task streams rejected — JS metadata cost dominates at fleet scale.
+- **Stream topology = shared `A2A_EVENTS` per Account, subject-filtered `a2a.v1.tasks.>`**. Per-task streams rejected — JS metadata cost dominates at fleet scale.
 - **Retention default = 24h baseline, per-Account override**. JetStream `max_age = 24h`.
 - **Push delivery semantics = at-least-once default**, exactly-once as opt-in flag on `PushNotificationConfig`.
 - **AgentCard write path = central registrar (`a2a-nats-discovery`) validates against JSON-Schema, then writes KV.** Schema lives in `a2a-pack`; gateway re-validates on read.
@@ -291,11 +291,11 @@ Auth is re-minted at the bridge in both directions. AgentCards declare both tran
 - **`message/send` max blocking window = 30s.** Longer work forced onto `message/stream`. Gateway enforces this via `A2A_GATEWAY_UNARY_DEADLINE_SECS` (default `DEFAULT_OPERATION_TIMEOUT`); overrun replies JSON-RPC `-32800`.
 - **Bridge identity = auth-callout mints per-request User inside the caller's tenant Account.** Single-bridge-User rejected to preserve caller attribution in audit.
 - **Federated discovery = off by default; opt-in via operator-signed exports of `a2a.discover.>`**; SpiceDB gates the import side.
-- **Cross-process push DLQ = per-Account `A2A_PUSH_DLQ` JetStream stream** at `a2a.push.dlq.{caller_id}.{task_id}`.
+- **Cross-process push DLQ = per-Account `A2A_PUSH_DLQ` JetStream stream** at `a2a.v1.push.dlq.{caller_id}.{task_id}`.
 - **Digest webhook auth = deferred.** Currently rejected with a clear error.
 - **NATS-push auth = gateway NATS User + subject ACL on `a2a.push.>`** (gateway publish) and `a2a.push.{caller_id}.>` (caller read).
 - **Audit envelope = no `tenant` field** (Account namespace carries the attribution).
 - **Auth callout = NATS subscriber on `$SYS.REQ.USER.AUTH`**; OIDC primary, mTLS for service-to-service, API keys transitional. Mints Account-bound User JWT.
 - **Policy substrate = single Wasmtime runtime in the gateway** hosting Tier 2 (CEL compiled to WASM at bundle build) and Tier 3 (WASM redaction).
 - **SpiceDB = org-standard cluster, gateway holds the client.** Resource tuples per §Policy Engine.
-- **`a2a-bridge` = HTTPS sidecar; per-request re-mint into caller's Account; SSE↔JetStream consumer mapping** on `a2a.task.{task_id}.events.>`.
+- **`a2a-bridge` = HTTPS sidecar; per-request re-mint into caller's Account; SSE↔JetStream consumer mapping** on `a2a.v1.tasks.{task_id}.events.>`.

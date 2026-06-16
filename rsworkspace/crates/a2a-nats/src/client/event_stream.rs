@@ -121,7 +121,7 @@ mod tests {
             h
         });
         async_nats::Message {
-            subject: "a2a.task.t1.events.r1".into(),
+            subject: "a2a.v1.tasks.t1.events.r1".into(),
             reply: None,
             payload: Bytes::from(payload),
             headers,

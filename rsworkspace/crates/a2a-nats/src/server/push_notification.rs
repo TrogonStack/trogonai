@@ -53,7 +53,7 @@ async fn reply_success<N: trogon_nats::PublishClient>(
 }
 
 #[instrument(
-    name = "a2a.agent.push_notification_set",
+    name = "a2a.server.push_notification_set",
     skip(handler, payload, reply_subject, nats, semantics_registry)
 )]
 pub async fn handle_set<H, N>(
@@ -178,7 +178,7 @@ fn inject_registry_semantics(
 }
 
 #[instrument(
-    name = "a2a.agent.push_notification_get",
+    name = "a2a.server.push_notification_get",
     skip(handler, payload, reply_subject, nats, semantics_registry)
 )]
 pub async fn handle_get<H, N>(
@@ -212,7 +212,7 @@ pub async fn handle_get<H, N>(
 }
 
 #[instrument(
-    name = "a2a.agent.push_notification_list",
+    name = "a2a.server.push_notification_list",
     skip(handler, payload, reply_subject, nats, semantics_registry)
 )]
 pub async fn handle_list<H, N>(
@@ -262,7 +262,7 @@ pub async fn handle_list<H, N>(
 }
 
 #[instrument(
-    name = "a2a.agent.push_notification_delete",
+    name = "a2a.server.push_notification_delete",
     skip(handler, payload, reply_subject, nats, semantics_registry)
 )]
 pub async fn handle_delete<H, N>(

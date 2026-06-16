@@ -15,7 +15,7 @@ cargo run -p a2a-nats-server
 
 | Variable | Required | Default | Meaning |
 |----------|----------|---------|---------|
-| **`A2A_AGENT_ID`** | **yes** | — | Deployed NATS **`agent_id`** (`{prefix}.agent.{agent_id}.…`). |
+| **`A2A_AGENT_ID`** | **yes** | — | Deployed NATS **`agent_id`** (`{prefix}.agents.{agent_id}.…`). |
 | **`NATS_URL`** | no | _(NATS tooling default)_ | Comma-separated URLs (`trogon_nats::NatsConfig`). |
 | **`A2A_PREFIX`** | no | **`a2a`** | Subject prefix. |
 | **`A2A_HTTP_BIND`** | no | **`0.0.0.0:8080`** | TCP listen address. |

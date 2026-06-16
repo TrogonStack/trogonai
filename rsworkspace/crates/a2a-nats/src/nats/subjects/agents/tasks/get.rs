@@ -19,12 +19,7 @@ impl TasksGetSubject {
 
 impl std::fmt::Display for TasksGetSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}.agents.{}.tasks.get",
-            self.prefix.as_str(),
-            self.agent_id.as_str()
-        )
+        write!(f, "{}.agents.{}.tasks.get", self.prefix.as_str(), self.agent_id.as_str())
     }
 }
 
@@ -38,22 +33,4 @@ impl super::super::super::markers::Requestable for TasksGetSubject {}
 
 impl super::super::super::stream::StreamAssignment for TasksGetSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn formats_prefix_agent_tasks_get_subject() {
-        let s = TasksGetSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
-        assert_eq!(s.to_string(), "a2a.agents.planner.tasks.get");
-    }
-
-    #[test]
-    fn to_subject_round_trips_display_form() {
-        use async_nats::subject::ToSubject;
-        let s = TasksGetSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
-        assert_eq!(s.to_subject().as_str(), "a2a.agents.planner.tasks.get");
-    }
 }

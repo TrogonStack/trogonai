@@ -414,7 +414,7 @@ fn assert_discovery_operator_signatures() -> Result<(), String> {
 }
 
 async fn assert_tier1_declarative_denied(ctx: &SmokeContext) -> Result<(), String> {
-    let subject = compose_gateway_ingress_subject(&ctx.prefix, &ctx.agent, "agent.card").map_err(|e| e.to_string())?;
+    let subject = compose_gateway_ingress_subject(&ctx.prefix, &ctx.agent, "card").map_err(|e| e.to_string())?;
     let req_id = ReqId::new();
     let params = serde_json::json!({});
     let err = tokio::time::timeout(

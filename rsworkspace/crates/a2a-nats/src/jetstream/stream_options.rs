@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(config.retention, RetentionPolicy::Interest);
         assert_eq!(config.discard, DiscardPolicy::Old);
         assert_eq!(config.max_age, DEFAULT_STREAM_MAX_AGE);
-        assert_eq!(config.subjects, vec!["a2a.task.*.events.*"]);
+        assert_eq!(config.subjects, vec!["a2a.v1.tasks.*.events.*"]);
     }
 
     #[test]

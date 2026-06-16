@@ -24,10 +24,10 @@ ship in v0.1 and the fields each carries.
 | Span | Fields | Notes |
 |---|---|---|
 | `gateway.ingress.dispatch` | `method`, `caller_id`, `agent_id`, `request_id`, `decision` | Root ingress span for `message.send` and `message.stream`. |
-| `a2a.agent.agent_card` | `agent_id` | Resolved AgentCard read. |
-| `a2a.agent.message_send` | `caller_id`, `agent_id`, `task_id` | Unary RPC. |
-| `a2a.agent.tasks_get` / `tasks_list` / `tasks_cancel` / `tasks_resubscribe` | `task_id`, `caller_id` | Task lifecycle. |
-| `a2a.agent.push_notification_get` / `push_notification_list` | `caller_id`, `task_id` | Push config CRUD. |
+| `a2a.server.agent_card` | `agent_id` | Resolved AgentCard read. |
+| `a2a.server.message_send` | `caller_id`, `agent_id`, `task_id` | Unary RPC. |
+| `a2a.server.tasks_get` / `tasks_list` / `tasks_cancel` / `tasks_resubscribe` | `task_id`, `caller_id` | Task lifecycle. |
+| `a2a.server.push_notification_get` / `push_notification_list` | `caller_id`, `task_id` | Push config CRUD. |
 
 ## ACP
 

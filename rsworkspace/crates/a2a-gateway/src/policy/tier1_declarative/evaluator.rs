@@ -315,7 +315,7 @@ mod tests {
             A2aMethod::MessageSend,
             "planner",
             Some("user/alice"),
-            "a2a.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.message.send",
         ));
         assert_eq!(
             decision,
@@ -346,7 +346,7 @@ mod tests {
             A2aMethod::MessageSend,
             "planner",
             None,
-            "a2a.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.message.send",
         ));
         assert_eq!(
             decision,
@@ -377,7 +377,7 @@ mod tests {
             A2aMethod::MessageSend,
             "planner",
             None,
-            "a2a.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.message.send",
         ));
         assert_eq!(
             decision,
@@ -393,12 +393,12 @@ mod tests {
         assert!(!pattern_matches("message/send", "message/stream"));
         assert!(pattern_matches("user/*", "user/alice"));
         assert!(pattern_matches(
-            "a2a.gateway.*.message.send",
-            "a2a.gateway.planner.message.send"
+            "a2a.v1.gateway.*.message.send",
+            "a2a.v1.gateway.planner.message.send"
         ));
         assert!(!pattern_matches(
-            "a2a.gateway.*.message.send",
-            "a2a.gateway.planner.message.stream"
+            "a2a.v1.gateway.*.message.send",
+            "a2a.v1.gateway.planner.message.stream"
         ));
     }
 
@@ -419,7 +419,7 @@ mod tests {
             A2aMethod::MessageSend,
             "planner",
             Some("user/bob"),
-            "a2a.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.message.send",
         ));
         assert_eq!(
             denied,
@@ -432,7 +432,7 @@ mod tests {
             A2aMethod::MessageSend,
             "planner",
             Some("user/alice"),
-            "a2a.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.message.send",
         ));
         assert_eq!(allowed, Tier1DeclarativeDecision::Allow { rule: None });
     }
@@ -446,7 +446,7 @@ mod tests {
                 A2aMethod::MessageSend,
                 "planner",
                 None,
-                "a2a.gateway.planner.message.send",
+                "a2a.v1.gateway.planner.message.send",
             )),
             Tier1DeclarativeDecision::Allow { rule: None }
         );
