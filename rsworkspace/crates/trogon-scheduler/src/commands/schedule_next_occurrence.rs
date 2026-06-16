@@ -32,6 +32,8 @@ pub enum ScheduleNextOccurrenceError {
     SchedulePaused { id: ScheduleId },
     #[error("schedule '{id}' already has a pending occurrence")]
     AlreadyArmed { id: ScheduleId },
+    #[error("schedule '{id}' has already completed its recurrence")]
+    AlreadyCompleted { id: ScheduleId },
     #[error("schedule '{id}' is missing its recurrence definition")]
     MissingSchedule { id: ScheduleId },
     #[error("last recorded occurrence timestamp is invalid: {source}")]
@@ -98,6 +100,9 @@ impl Decider for ScheduleNextOccurrence {
                 Err(ScheduleNextOccurrenceError::SchedulePaused { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => {
+                if state.completed == Some(true) {
+                    return Err(ScheduleNextOccurrenceError::AlreadyCompleted { id: command.id.clone() });
+                }
                 if state.pending_occurrence_at.is_set() {
                     return Err(ScheduleNextOccurrenceError::AlreadyArmed { id: command.id.clone() });
                 }
@@ -125,8 +130,9 @@ impl Decider for ScheduleNextOccurrence {
                 let next_occurrence = next_rrule_occurrence(schedule, cursor)
                     .map_err(|source| ScheduleNextOccurrenceError::NextOccurrence { source })?;
 
-                let event = schedule_or_complete_event(command.id.as_str(), next_occurrence, last_sequence, command.now)
-                    .map_err(|source| ScheduleNextOccurrenceError::OccurrenceSequence { source })?;
+                let event =
+                    schedule_or_complete_event(command.id.as_str(), next_occurrence, last_sequence, command.now)
+                        .map_err(|source| ScheduleNextOccurrenceError::OccurrenceSequence { source })?;
 
                 Ok(Decision::event(event))
             }
@@ -167,6 +173,7 @@ mod tests {
         schedule: MessageField<v1::Schedule>,
     ) -> state_v1::State {
         state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::default(),
             last_occurrence_sequence,
@@ -240,6 +247,7 @@ mod tests {
         let last = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
         let now = Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap();
         let state = state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&last)),
             last_occurrence_sequence: Some(1),
@@ -321,6 +329,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_when_already_completed() {
+        let id = "recurring";
+        let mut state = enabled_state(Some(2), None, MessageField::some(rrule_schedule(2)));
+        state.completed = Some(true);
+        let now = Utc.with_ymd_and_hms(2026, 6, 10, 0, 0, 0).unwrap();
+
+        assert_eq!(
+            ScheduleNextOccurrence::decide(&state, &command(id, now)).unwrap_err(),
+            ScheduleNextOccurrenceError::AlreadyCompleted { id: schedule_id(id) }
+        );
+    }
+
+    #[test]
     fn rejects_paused_deleted_and_missing_schedules() {
         let id = "recurring";
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
@@ -340,6 +361,7 @@ mod tests {
             ),
         ] {
             let state = state_v1::State {
+                completed: None,
                 state: Some(EnumValue::from(value)),
                 last_occurrence_at: MessageField::default(),
                 last_occurrence_sequence: None,
@@ -369,6 +391,7 @@ mod tests {
     fn rejects_invalid_last_recorded_timestamp() {
         let id = "recurring";
         let state = state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::some(buffa_types::google::protobuf::Timestamp {
                 seconds: i64::MAX,
@@ -395,6 +418,7 @@ mod tests {
         assert_eq!(
             ScheduleNextOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: None,
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -409,6 +433,7 @@ mod tests {
         assert_eq!(
             ScheduleNextOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(123)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -423,6 +448,7 @@ mod tests {
         assert_eq!(
             ScheduleNextOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,

@@ -23,6 +23,11 @@ pub struct StateView<'a> {
     pub pending_occurrence_at: ::buffa::MessageFieldView<
         ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
     >,
+    /// Recurrence exhausted: the schedule emitted ScheduleCompleted and must not be
+    /// re-armed until it is re-created.
+    ///
+    /// Field 6: `completed`
+    pub completed: ::core::option::Option<bool>,
 }
 impl<'a> StateView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -157,6 +162,16 @@ impl<'a> StateView<'a> {
                         }
                     }
                 }
+                6u32 => {
+                    if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                            field_number: 6u32,
+                            expected: 0u8,
+                            actual: tag.wire_type() as u8,
+                        });
+                    }
+                    view.completed = Some(::buffa::types::decode_bool(&mut cur)?);
+                }
                 _ => {
                     ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
                 }
@@ -214,6 +229,7 @@ impl<'a> ::buffa::MessageView<'a> for StateView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            completed: self.completed,
             ..::core::default::Default::default()
         }
     }
@@ -253,6 +269,9 @@ impl<'a> ::buffa::ViewEncode<'a> for StateView<'a> {
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
+        }
+        if self.completed.is_some() {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
         size
     }
@@ -300,6 +319,11 @@ impl<'a> ::buffa::ViewEncode<'a> for StateView<'a> {
                 .encode(buf);
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             self.pending_occurrence_at.write_to(__cache, buf);
+        }
+        if let Some(v) = self.completed {
+            ::buffa::encoding::Tag::new(6u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(v, buf);
         }
     }
 }
@@ -356,6 +380,9 @@ impl<'__a> ::serde::Serialize for StateView<'__a> {
             {
                 __map.serialize_entry("pendingOccurrenceAt", __v)?;
             }
+        }
+        if let ::core::option::Option::Some(__v) = self.completed {
+            __map.serialize_entry("completed", &__v)?;
         }
         __map.end()
     }
@@ -494,6 +521,14 @@ impl StateOwnedView {
         ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
     > {
         &self.0.reborrow().pending_occurrence_at
+    }
+    /// Recurrence exhausted: the schedule emitted ScheduleCompleted and must not be
+    /// re-armed until it is re-created.
+    ///
+    /// Field 6: `completed`
+    #[must_use]
+    pub fn completed(&self) -> ::core::option::Option<bool> {
+        self.0.reborrow().completed
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<StateView<'static>>> for StateOwnedView {

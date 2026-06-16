@@ -231,6 +231,7 @@ mod tests {
         assert_eq!(
             PauseSchedule::decide(
                 &state_v1::State {
+                    completed: None,
                     state: None,
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -245,6 +246,7 @@ mod tests {
         assert_eq!(
             PauseSchedule::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(123)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -259,6 +261,7 @@ mod tests {
         assert_eq!(
             PauseSchedule::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,

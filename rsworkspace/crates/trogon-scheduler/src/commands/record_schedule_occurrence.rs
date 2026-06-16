@@ -224,6 +224,7 @@ mod tests {
         schedule: MessageField<v1::Schedule>,
     ) -> state_v1::State {
         state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(value)),
             last_occurrence_at: last_occurrence_at.map(timestamp).unwrap_or_default(),
             last_occurrence_sequence,
@@ -378,6 +379,7 @@ mod tests {
         assert_eq!(
             RecordScheduleOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -393,6 +395,7 @@ mod tests {
         assert_eq!(
             RecordScheduleOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_DELETED)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -487,6 +490,7 @@ mod tests {
         assert_eq!(
             RecordScheduleOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: None,
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -501,6 +505,7 @@ mod tests {
         assert_eq!(
             RecordScheduleOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(123)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -515,6 +520,7 @@ mod tests {
         assert_eq!(
             RecordScheduleOccurrence::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,

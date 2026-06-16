@@ -218,6 +218,15 @@ pub struct State {
     pub pending_occurrence_at: ::buffa::MessageField<
         ::buffa_types::google::protobuf::Timestamp,
     >,
+    /// Recurrence exhausted: the schedule emitted ScheduleCompleted and must not be
+    /// re-armed until it is re-created.
+    ///
+    /// Field 6: `completed`
+    #[serde(
+        rename = "completed",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub completed: ::core::option::Option<bool>,
 }
 impl ::core::fmt::Debug for State {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -227,6 +236,7 @@ impl ::core::fmt::Debug for State {
             .field("last_occurrence_sequence", &self.last_occurrence_sequence)
             .field("schedule", &self.schedule)
             .field("pending_occurrence_at", &self.pending_occurrence_at)
+            .field("completed", &self.completed)
             .finish()
     }
 }
@@ -253,6 +263,13 @@ impl State {
     ///Sets [`Self::last_occurrence_sequence`] to `Some(value)`, consuming and returning `self`.
     pub fn with_last_occurrence_sequence(mut self, value: u64) -> Self {
         self.last_occurrence_sequence = Some(value);
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::completed`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_completed(mut self, value: bool) -> Self {
+        self.completed = Some(value);
         self
     }
 }
@@ -309,6 +326,9 @@ impl ::buffa::Message for State {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        if self.completed.is_some() {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
         size
     }
     fn write_to(
@@ -354,6 +374,11 @@ impl ::buffa::Message for State {
                 .encode(buf);
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             self.pending_occurrence_at.write_to(__cache, buf);
+        }
+        if let Some(v) = self.completed {
+            ::buffa::encoding::Tag::new(6u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(v, buf);
         }
     }
     fn merge_field(
@@ -433,6 +458,18 @@ impl ::buffa::Message for State {
                     depth,
                 )?;
             }
+            6u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 6u32,
+                        expected: 0u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                self.completed = ::core::option::Option::Some(
+                    ::buffa::types::decode_bool(buf)?,
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, depth)?;
             }
@@ -445,6 +482,7 @@ impl ::buffa::Message for State {
         self.last_occurrence_sequence = ::core::option::Option::None;
         self.schedule = ::buffa::MessageField::none();
         self.pending_occurrence_at = ::buffa::MessageField::none();
+        self.completed = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for State {

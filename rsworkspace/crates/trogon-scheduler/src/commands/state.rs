@@ -22,6 +22,7 @@ pub(super) fn initial_state() -> state_v1::State {
         last_occurrence_sequence: None,
         schedule: MessageField::default(),
         pending_occurrence_at: MessageField::default(),
+        completed: None,
     }
 }
 
@@ -48,12 +49,14 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
     let mut last_occurrence_sequence = state.last_occurrence_sequence;
     let mut schedule = state.schedule.clone();
     let mut pending_occurrence_at = state.pending_occurrence_at.clone();
+    let mut completed = state.completed;
 
     let next_state = match &event.event {
         Some(ScheduleEventCase::ScheduleCreated(inner)) => {
             last_occurrence_at = MessageField::default();
             last_occurrence_sequence = None;
             pending_occurrence_at = MessageField::default();
+            completed = None;
             schedule = inner.schedule.clone();
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
@@ -111,6 +114,7 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
         }
         Some(ScheduleEventCase::ScheduleCompleted(_)) => {
             pending_occurrence_at = MessageField::default();
+            completed = Some(true);
             current_state
         }
         None => return Err(EvolveError::UnsupportedEvent),
@@ -122,6 +126,7 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
         last_occurrence_sequence,
         schedule,
         pending_occurrence_at,
+        completed,
     })
 }
 
@@ -134,6 +139,7 @@ mod tests {
 
     fn state(value: state_v1::StateValue) -> state_v1::State {
         state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(value)),
             last_occurrence_at: MessageField::default(),
             last_occurrence_sequence: None,
@@ -355,6 +361,7 @@ mod tests {
         assert_eq!(
             evolve(
                 state_v1::State {
+                    completed: None,
                     state: None,
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -397,6 +404,7 @@ mod tests {
         assert_eq!(
             evolve(
                 state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(123)),
                     last_occurrence_at: MessageField::default(),
                     last_occurrence_sequence: None,
@@ -413,6 +421,7 @@ mod tests {
     #[test]
     fn evolve_created_resets_progress_and_stashes_schedule() {
         let dirty = state_v1::State {
+            completed: Some(true),
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
             last_occurrence_sequence: Some(9),
@@ -454,12 +463,14 @@ mod tests {
         assert_eq!(next.last_occurrence_sequence, None);
         assert_eq!(next.pending_occurrence_at.as_option(), None);
         assert_eq!(next.schedule.as_option(), Some(&schedule));
+        assert_eq!(next.completed, None);
     }
 
     #[test]
     fn evolve_occurrence_recorded_advances_progress_and_clears_pending() {
         let event = occurrence_recorded();
         let pending = state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::default(),
             last_occurrence_sequence: None,
@@ -500,6 +511,7 @@ mod tests {
     #[test]
     fn evolve_completed_clears_pending() {
         let pending = state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
             last_occurrence_sequence: Some(1),
@@ -513,6 +525,7 @@ mod tests {
 
         assert_eq!(next.pending_occurrence_at.as_option(), None);
         assert_eq!(next.last_occurrence_sequence, Some(1));
+        assert_eq!(next.completed, Some(true));
         assert_eq!(
             next.state.unwrap().as_known(),
             Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
@@ -522,6 +535,7 @@ mod tests {
     #[test]
     fn evolve_paused_retains_pending_so_in_flight_recording_can_land() {
         let pending = state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             last_occurrence_at: MessageField::default(),
             last_occurrence_sequence: None,
@@ -544,6 +558,7 @@ mod tests {
     #[test]
     fn evolve_resumed_clears_unrecorded_paused_pending_so_schedule_can_rearm() {
         let pending = state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)),
             last_occurrence_at: MessageField::default(),
             last_occurrence_sequence: None,

@@ -13,6 +13,9 @@ message State {
   trogonai.scheduler.schedules.v1.Schedule schedule = 4;
   // Occurrence currently placed on a timer but not yet recorded.
   google.protobuf.Timestamp pending_occurrence_at = 5;
+  // Recurrence exhausted: the schedule emitted ScheduleCompleted and must not be
+  // re-armed until it is re-created.
+  bool completed = 6;
 }
 
 enum StateValue {

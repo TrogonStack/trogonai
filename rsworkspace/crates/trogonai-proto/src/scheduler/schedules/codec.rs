@@ -509,6 +509,7 @@ mod tests {
             last_occurrence_sequence: Some(7),
             schedule: MessageField::default(),
             pending_occurrence_at: MessageField::default(),
+            completed: Some(true),
         };
 
         let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
