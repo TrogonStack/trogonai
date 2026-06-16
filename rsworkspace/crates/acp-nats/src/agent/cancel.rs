@@ -74,7 +74,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
-    use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
+    use crate::server::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
     use crate::config::Config;
     use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
     use trogon_nats::AdvancedMockNatsClient;
@@ -83,13 +83,13 @@ mod tests {
     fn mock_bridge_with_clock() -> (
         AdvancedMockNatsClient,
         MockClock,
-        Bridge<AdvancedMockNatsClient, MockClock, crate::agent::test_support::MockJs>,
+        Bridge<AdvancedMockNatsClient, MockClock, crate::server::test_support::MockJs>,
     ) {
         let mock = AdvancedMockNatsClient::new();
         let clock = MockClock::new();
         let bridge = Bridge::new(
             mock.clone(),
-            crate::agent::test_support::MockJs::new(),
+            crate::server::test_support::MockJs::new(),
             clock.clone(),
             &opentelemetry::global::meter("acp-nats-test"),
             Config::for_test("acp"),

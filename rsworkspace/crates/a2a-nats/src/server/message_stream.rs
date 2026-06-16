@@ -6,9 +6,9 @@ use futures::StreamExt as _;
 use tokio_util::sync::CancellationToken;
 use tracing::{instrument, warn};
 
-use crate::agent::PrincipalCarrier;
-use crate::agent::handler::{A2aError, A2aHandler};
-use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::server::PrincipalCarrier;
+use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::agent_id::A2aAgentId;
 use crate::audit::emitter::AuditEmitter;
 use crate::audit::task_lifecycle::TaskLifecycleEnvelope;
@@ -175,7 +175,7 @@ where
 
 #[allow(clippy::too_many_arguments)] // internal JetStream/event pump closure — bundled refactor deferred
 async fn pump_events<J, H, D>(
-    mut stream: crate::agent::handler::TaskEventStream,
+    mut stream: crate::server::handler::TaskEventStream,
     js: J,
     subject: TaskEventsSubject,
     task_id: A2aTaskId,
@@ -433,8 +433,8 @@ mod tests {
 
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
-    use crate::agent::handler::{A2aError, A2aHandler, TaskEventStream};
-    use crate::agent::test_support::{make_task, parse_response, rpc_payload};
+    use crate::server::handler::{A2aError, A2aHandler, TaskEventStream};
+    use crate::server::test_support::{make_task, parse_response, rpc_payload};
     use crate::agent_id::A2aAgentId;
     use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
     use crate::push::dispatcher::tests::MockPushDispatcher;
@@ -962,7 +962,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_push_dlq_subject_from_nats_principal_header() {
-        use crate::agent::principal_carrier::principal_header_fixture;
+        use crate::server::principal_carrier::principal_header_fixture;
         use a2a::types::{TaskPushNotificationConfig, TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();

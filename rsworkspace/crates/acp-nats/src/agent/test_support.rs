@@ -1,4 +1,4 @@
-use crate::agent::Bridge;
+use crate::server::Bridge;
 use crate::config::Config;
 use opentelemetry::Value;
 use opentelemetry::metrics::MeterProvider;

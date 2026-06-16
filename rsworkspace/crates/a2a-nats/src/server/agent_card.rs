@@ -1,8 +1,8 @@
 use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tracing::{instrument, warn};
 
-use crate::agent::handler::{A2aError, A2aHandler};
-use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 
 #[instrument(name = "a2a.agent.agent_card", skip(handler, payload, reply_subject, nats))]
@@ -93,7 +93,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::test_support::{parse_response, rpc_payload, stub};
+    use crate::server::test_support::{parse_response, rpc_payload, stub};
     use trogon_nats::AdvancedMockNatsClient;
 
     fn minimal_valid_card(name: &str) -> a2a::agent_card::AgentCard {

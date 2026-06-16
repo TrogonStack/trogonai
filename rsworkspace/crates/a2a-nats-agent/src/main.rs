@@ -1,4 +1,4 @@
-use a2a_nats::agent::{A2aError, A2aHandler, TaskEventStream};
+use a2a_nats::server::{A2aError, A2aHandler, TaskEventStream};
 use tracing::error;
 
 struct NoopHandler;

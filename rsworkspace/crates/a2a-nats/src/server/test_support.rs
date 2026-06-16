@@ -1,4 +1,4 @@
-use crate::agent::handler::{A2aError, A2aHandler, TaskEventStream};
+use crate::server::handler::{A2aError, A2aHandler, TaskEventStream};
 
 /// A minimal handler that always returns an error for every method.
 /// Tests override only the method they care about by wrapping this.

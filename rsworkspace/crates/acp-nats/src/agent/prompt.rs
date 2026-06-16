@@ -10,7 +10,7 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::JsonSerialize;
 
-use crate::agent::Bridge;
+use crate::server::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session};
@@ -239,7 +239,7 @@ mod tests {
         }
     }
 
-    use crate::agent::test_support::MockJs;
+    use crate::server::test_support::MockJs;
 
     fn mock_bridge() -> (
         AdvancedMockNatsClient,

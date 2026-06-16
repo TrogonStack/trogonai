@@ -1,7 +1,7 @@
 use tracing::{instrument, warn};
 
-use crate::agent::handler::{A2aError, A2aHandler};
-use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 
 /// Handles `tasks/resubscribe`.
@@ -59,7 +59,7 @@ async fn parse_and_call<H: A2aHandler>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::test_support::{make_task, parse_response, rpc_payload, stub};
+    use crate::server::test_support::{make_task, parse_response, rpc_payload, stub};
     use trogon_nats::AdvancedMockNatsClient;
 
     #[tokio::test]

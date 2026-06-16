@@ -7,9 +7,9 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::agent::dispatch::A2aMethod;
-use crate::agent::handler::A2aHandler;
-use crate::agent::{
+use crate::server::dispatch::A2aMethod;
+use crate::server::handler::A2aHandler;
+use crate::server::{
     agent_card, message_send, message_stream, push_notification, tasks_cancel, tasks_get, tasks_list, tasks_resubscribe,
 };
 use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
@@ -161,7 +161,7 @@ where
                             let push_dlq_dedup = Arc::clone(&self.push_dlq_dedup);
                             let payload = msg.payload.to_vec();
                             let reply = msg.reply.map(|s| s.to_string());
-                            let principal_carrier = crate::agent::PrincipalCarrier::from_nats_headers(
+                            let principal_carrier = crate::server::PrincipalCarrier::from_nats_headers(
                                 msg.headers.as_ref(),
                                 self.config.push_dlq_caller_segment.clone(),
                             );
@@ -210,7 +210,7 @@ async fn dispatch<H, N, J>(
     audit_emitter: Arc<dyn AuditEmitter>,
     push_dispatcher: Arc<dyn PushDispatcher>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
-    principal_carrier: crate::agent::PrincipalCarrier,
+    principal_carrier: crate::server::PrincipalCarrier,
     push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) where
     H: A2aHandler,
@@ -370,8 +370,8 @@ fn extract_task_id(payload: &[u8]) -> Option<A2aTaskId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::PrincipalCarrier;
-    use crate::agent::test_support::{make_task, rpc_payload, stub};
+    use crate::server::PrincipalCarrier;
+    use crate::server::test_support::{make_task, rpc_payload, stub};
     use crate::config::Config;
     use crate::push::CallerId;
     use trogon_nats::AdvancedMockNatsClient;
@@ -379,7 +379,7 @@ mod tests {
 
     fn make_bridge(
         nats: &AdvancedMockNatsClient,
-    ) -> Bridge<std::sync::Mutex<crate::agent::test_support::StubHandler>, AdvancedMockNatsClient, MockJetStreamPublisher>
+    ) -> Bridge<std::sync::Mutex<crate::server::test_support::StubHandler>, AdvancedMockNatsClient, MockJetStreamPublisher>
     {
         Bridge::new(
             Config::for_test("a2a"),
@@ -583,11 +583,11 @@ mod tests {
         }
 
         #[async_trait::async_trait]
-        impl crate::agent::handler::A2aHandler for BlockingHandler {
+        impl crate::server::handler::A2aHandler for BlockingHandler {
             async fn message_send(
                 &self,
                 _req: a2a::types::SendMessageRequest,
-            ) -> Result<a2a::types::SendMessageResponse, crate::agent::handler::A2aError> {
+            ) -> Result<a2a::types::SendMessageResponse, crate::server::handler::A2aError> {
                 self.in_flight_count.fetch_add(1, Ordering::SeqCst);
                 let _permit = self.gate.acquire().await.unwrap();
                 self.in_flight_count.fetch_sub(1, Ordering::SeqCst);
@@ -598,73 +598,73 @@ mod tests {
             async fn message_stream(
                 &self,
                 _req: a2a::types::SendMessageRequest,
-            ) -> Result<(a2a::types::Task, crate::agent::handler::TaskEventStream), crate::agent::handler::A2aError>
+            ) -> Result<(a2a::types::Task, crate::server::handler::TaskEventStream), crate::server::handler::A2aError>
             {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_get(
                 &self,
                 _req: a2a::types::GetTaskRequest,
-            ) -> Result<a2a::types::Task, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::types::Task, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_list(
                 &self,
                 _req: a2a::types::ListTasksRequest,
-            ) -> Result<a2a::types::ListTasksResponse, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::types::ListTasksResponse, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_cancel(
                 &self,
                 _req: a2a::types::CancelTaskRequest,
-            ) -> Result<a2a::types::Task, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::types::Task, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_resubscribe(
                 &self,
                 _req: a2a::types::SubscribeToTaskRequest,
-            ) -> Result<a2a::types::Task, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::types::Task, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_set(
                 &self,
                 _req: a2a::types::TaskPushNotificationConfig,
-            ) -> Result<a2a::types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::types::TaskPushNotificationConfig, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_get(
                 &self,
                 _req: a2a::types::GetTaskPushNotificationConfigRequest,
-            ) -> Result<a2a::types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::types::TaskPushNotificationConfig, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_list(
                 &self,
                 _req: a2a::types::ListTaskPushNotificationConfigsRequest,
-            ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, crate::agent::handler::A2aError>
+            ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, crate::server::handler::A2aError>
             {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_delete(
                 &self,
                 _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
-            ) -> Result<(), crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<(), crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn agent_card(
                 &self,
                 _req: a2a::types::GetExtendedAgentCardRequest,
-            ) -> Result<a2a::agent_card::AgentCard, crate::agent::handler::A2aError> {
-                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            ) -> Result<a2a::agent_card::AgentCard, crate::server::handler::A2aError> {
+                Err(crate::server::handler::A2aError::unsupported_operation("not used"))
             }
         }
 
