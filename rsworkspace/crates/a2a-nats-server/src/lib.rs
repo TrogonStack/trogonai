@@ -1,13 +1,10 @@
-#![doc = include_str!("../README.md")]
-
-pub mod handlers;
-pub mod headers;
-pub mod rest;
-pub mod router;
 pub mod runtime;
-pub mod sse;
 
-pub use runtime::{RuntimeError, run};
+pub use runtime::RuntimeError;
 
-#[cfg(test)]
-mod tests;
+use a2a_nats::server::A2aExecutor;
+use trogon_std::env::SystemEnv;
+
+pub async fn run<H: A2aExecutor>(handler: H) -> Result<(), RuntimeError> {
+    runtime::run_with_env(handler, &SystemEnv).await
+}

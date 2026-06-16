@@ -4,7 +4,7 @@ set -euo pipefail
 BOOTSTRAP_DIR="${A2A_BOOTSTRAP_DIR:-/run/a2a-bootstrap}"
 MARKER="${BOOTSTRAP_DIR}/.bootstrap-complete"
 REPO_SCRIPTS="/opt/a2a/scripts"
-SMOKE_NATS_CONF="/opt/a2a/a2a-nats-server-smoke.conf"
+SMOKE_NATS_CONF="/opt/a2a/a2a-nats-http-smoke.conf"
 
 export A2A_BOOTSTRAP_DIR="${BOOTSTRAP_DIR}"
 export A2A_OPERATOR_NAME="${A2A_OPERATOR_NAME:-smoke-op}"

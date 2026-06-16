@@ -1,41 +1,65 @@
-// Same coverage split as `a2a-nats-server` / `a2a-nats-stdio`: env validation
-// and error types are pure; the connect-and-serve half lives behind
-// `cfg(not(coverage))` because `trogon-nats::NatsJetStreamClient` is excluded
-// during coverage builds.
+use std::fmt;
+use std::net::SocketAddr;
 
-use a2a_identity_types::JwtError;
-use a2a_nats::{A2aPrefixError, AgentIdError};
+use a2a_auth_callout::MintedUserJwt;
+use a2a_nats::client::A2aClient;
+use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, Config, NatsConfig};
+use tracing::info;
+use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_std::env::SystemEnv;
+use trogon_std::signal::shutdown_signal;
 
-#[cfg_attr(coverage, allow(dead_code))]
+use crate::router;
+
 const DEFAULT_BIND: &str = "0.0.0.0:8080";
-#[cfg_attr(coverage, allow(dead_code))]
 const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
-#[cfg_attr(coverage, allow(dead_code))]
 const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
 const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
 const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum RuntimeError {
-    #[error("{} environment variable is required", ENV_AGENT_ID)]
     MissingAgentId,
-    #[error("{} is required when {} is enabled", ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY)]
     MissingGatewayCallerJwt,
-    #[error("invalid gateway caller JWT")]
-    InvalidGatewayCallerJwt(#[source] JwtError),
-    #[error("invalid agent id")]
-    InvalidAgentId(#[source] AgentIdError),
-    #[error("invalid A2A prefix")]
-    InvalidPrefix(#[source] A2aPrefixError),
-    #[error("invalid bind address")]
-    InvalidBind(#[source] std::net::AddrParseError),
-    #[error("NATS connection failed")]
-    NatsConnect(#[source] trogon_nats::ConnectError),
-    #[error("IO error")]
-    Io(#[source] std::io::Error),
+    InvalidGatewayCallerJwt(String),
+    InvalidAgentId(AgentIdError),
+    InvalidPrefix(A2aPrefixError),
+    InvalidBind(std::net::AddrParseError),
+    NatsConnect(trogon_nats::ConnectError),
+    Io(std::io::Error),
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingAgentId => write!(f, "A2A_AGENT_ID environment variable is required"),
+            Self::MissingGatewayCallerJwt => write!(
+                f,
+                "{ENV_GATEWAY_CALLER_JWT} is required when {ENV_USE_GATEWAY} is enabled"
+            ),
+            Self::InvalidGatewayCallerJwt(msg) => write!(f, "invalid gateway caller JWT: {msg}"),
+            Self::InvalidAgentId(e) => write!(f, "invalid agent id: {e}"),
+            Self::InvalidPrefix(e) => write!(f, "invalid A2A prefix: {e}"),
+            Self::InvalidBind(e) => write!(f, "invalid bind address: {e}"),
+            Self::NatsConnect(e) => write!(f, "NATS connection failed: {e}"),
+            Self::Io(e) => write!(f, "IO error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidAgentId(e) => Some(e),
+            Self::InvalidPrefix(e) => Some(e),
+            Self::InvalidBind(e) => Some(e),
+            Self::NatsConnect(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::MissingAgentId | Self::MissingGatewayCallerJwt | Self::InvalidGatewayCallerJwt(_) => None,
+        }
+    }
+}
+
 fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
     matches!(
         trogon_std::env::ReadEnv::var(env, key).as_deref().map(str::trim),
@@ -43,20 +67,7 @@ fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
     )
 }
 
-#[cfg(not(coverage))]
 pub async fn run() -> Result<(), RuntimeError> {
-    use std::net::SocketAddr;
-
-    use a2a_identity_types::MintedUserJwt;
-    use a2a_nats::client::A2aClient;
-    use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
-    use tracing::info;
-    use trogon_nats::jetstream::NatsJetStreamClient;
-    use trogon_std::env::SystemEnv;
-    use trogon_std::signal::shutdown_signal;
-
-    use crate::router;
-
     let env = SystemEnv;
 
     let raw_prefix = trogon_std::env::ReadEnv::var(&env, a2a_nats::ENV_A2A_PREFIX)
@@ -80,18 +91,17 @@ pub async fn run() -> Result<(), RuntimeError> {
     let js_context = async_nats::jetstream::new(nats_client.clone());
     let js_client = NatsJetStreamClient::new(js_context);
 
-    let a2a_config = Config::new(prefix.clone(), nats_config);
+    let a2a_config = Config::new(prefix, nats_config);
     let a2a_config = a2a_nats::apply_timeout_overrides(a2a_config, &env);
 
-    let client =
-        A2aClient::new(prefix, agent_id, nats_client, js_client).with_operation_timeout(a2a_config.operation_timeout());
+    let client = A2aClient::new(a2a_config, agent_id, nats_client, js_client);
     let client = if env_flag(&env, ENV_USE_GATEWAY) {
         let raw_jwt = trogon_std::env::ReadEnv::var(&env, ENV_GATEWAY_CALLER_JWT)
             .map_err(|_| RuntimeError::MissingGatewayCallerJwt)?;
-        let caller_jwt = MintedUserJwt::new(raw_jwt).map_err(RuntimeError::InvalidGatewayCallerJwt)?;
+        let caller_jwt = MintedUserJwt::new(raw_jwt);
         caller_jwt
             .ensure_fresh()
-            .map_err(RuntimeError::InvalidGatewayCallerJwt)?;
+            .map_err(|e| RuntimeError::InvalidGatewayCallerJwt(e.to_string()))?;
         info!("Routing HTTP requests through a2a-gateway ingress");
         client.routing_via_gateway_ingress(caller_jwt)
     } else {
@@ -113,9 +123,4 @@ pub async fn run() -> Result<(), RuntimeError> {
         })
         .await
         .map_err(RuntimeError::Io)
-}
-
-#[cfg(coverage)]
-pub async fn run() -> Result<(), RuntimeError> {
-    Ok(())
 }

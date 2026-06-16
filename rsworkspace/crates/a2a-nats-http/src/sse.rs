@@ -1,7 +1,6 @@
 use std::convert::Infallible;
 
-use a2a_nats::client::ClientError;
-use a2a_nats::client::event_stream::TypedEventStream;
+use a2a_nats::client::{ClientError, TypedEventStream};
 use axum::response::sse::Event;
 use futures::Stream;
 use futures::StreamExt;
@@ -9,30 +8,20 @@ use futures::StreamExt;
 pub fn typed_event_stream_to_sse(
     stream: TypedEventStream,
     jsonrpc_id: serde_json::Value,
-    method: &'static str,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream.map(move |item| {
         let data = match item {
             Ok(response) => {
-                // Stream events ride as JSON-RPC notifications tagged with the
-                // originating method so callers can route incremental events,
-                // matching the a2a-nats-stdio wire shape. Errors keep the
-                // result-or-error envelope shape with the request id for
-                // correlation.
                 let envelope = serde_json::json!({
                     "jsonrpc": "2.0",
-                    "method": method,
-                    "params": response,
+                    "id": jsonrpc_id,
+                    "result": response,
                 });
                 serde_json::to_string(&envelope).unwrap_or_else(|e| {
-                    // Server-side serialization failure is `-32603` Internal,
-                    // not `-32700` Parse error (that's reserved for invalid
-                    // JSON on the way in). Echo the original id so the client
-                    // can correlate the failure with their stream subscription.
                     serde_json::json!({
                         "jsonrpc": "2.0",
-                        "id": jsonrpc_id,
-                        "error": { "code": -32603, "message": format!("serialize error: {e}") }
+                        "id": null,
+                        "error": { "code": -32700, "message": format!("serialize error: {e}") }
                     })
                     .to_string()
                 })
@@ -64,7 +53,9 @@ pub fn client_error_to_jsonrpc_code(err: &ClientError) -> (i32, String) {
         ClientError::ExtendedAgentCardNotConfigured => {
             (a2a_nats::error::EXTENDED_AGENT_CARD_NOT_CONFIGURED, err.to_string())
         }
-        ClientError::ExtensionSupportRequired(_) => (a2a_nats::error::EXTENSION_SUPPORT_REQUIRED, err.to_string()),
+        ClientError::ExtensionSupportRequired(_) => {
+            (a2a_nats::error::EXTENSION_SUPPORT_REQUIRED, err.to_string())
+        }
         ClientError::VersionNotSupported(_) => (a2a_nats::error::VERSION_NOT_SUPPORTED, err.to_string()),
         ClientError::AgentUnavailable => (a2a_nats::error::AGENT_UNAVAILABLE, err.to_string()),
         ClientError::JsonRpc { code, message } => (*code, message.clone()),

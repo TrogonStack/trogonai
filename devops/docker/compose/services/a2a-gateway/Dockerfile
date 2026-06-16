@@ -18,8 +18,8 @@ RUN cargo chef cook --release --recipe-path recipe.json \
     -p a2a-auth-callout \
     -p a2a-gateway \
     -p a2a-bridge \
+    -p a2a-nats-http \
     -p a2a-nats-server \
-    -p a2a-nats-agent \
     -p a2a-smoke-test
 
 COPY Cargo.toml Cargo.lock ./

@@ -2,9 +2,8 @@
 name = "a2a-nats-http"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
-description = "HTTP/JSON-RPC + REST + SSE binding for the A2A protocol surface"
-publish = false
+license.workspace = true
+publish.workspace = true
 readme = "README.md"
 
 [[bin]]
@@ -15,8 +14,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-a2a-identity-types = { workspace = true }
-thiserror = { workspace = true }
+a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
 a2a = { workspace = true }
 async-compat = { workspace = true }
@@ -36,8 +34,8 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
 
 [dev-dependencies]
+a2a-auth-callout = { workspace = true, features = ["test-support"] }
 axum = { workspace = true }
-base64 = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite = { workspace = true }

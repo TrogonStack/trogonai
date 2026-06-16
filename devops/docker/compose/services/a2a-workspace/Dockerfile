@@ -19,8 +19,8 @@ RUN cargo chef cook --release --recipe-path recipe.json \
     -p a2a-auth-callout \
     -p a2a-gateway \
     -p a2a-bridge \
+    -p a2a-nats-http \
     -p a2a-nats-server \
-    -p a2a-nats-agent \
     -p a2a-smoke-test \
     -p a2a-redaction
 
@@ -31,16 +31,16 @@ RUN cargo build --release \
     -p a2a-auth-callout \
     -p a2a-gateway \
     -p a2a-bridge \
+    -p a2a-nats-http \
     -p a2a-nats-server \
-    -p a2a-nats-agent \
     -p a2a-smoke-test \
     -p a2a-redaction \
     && strip target/release/a2a-auth-callout \
     && strip target/release/a2a-gateway \
     && strip target/release/a2a-bridge \
+    && strip target/release/a2a-nats-http \
     && strip target/release/a2a-nats-server \
-    && strip target/release/a2a-nats-agent \
-    && strip target/release/a2a-nats-agent-echo \
+    && strip target/release/a2a-nats-server-echo \
     && strip target/release/a2a-smoke-test \
     && strip target/release/a2a-sign-bundle
 
@@ -67,13 +67,13 @@ FROM runtime-base AS a2a-bridge
 COPY --from=builder /build/target/release/a2a-bridge /usr/local/bin/a2a-bridge
 ENTRYPOINT ["/usr/local/bin/a2a-bridge"]
 
-FROM runtime-base AS a2a-nats-server
-COPY --from=builder /build/target/release/a2a-nats-server /usr/local/bin/a2a-nats-server
-ENTRYPOINT ["/usr/local/bin/a2a-nats-server"]
+FROM runtime-base AS a2a-nats-http
+COPY --from=builder /build/target/release/a2a-nats-http /usr/local/bin/a2a-nats-http
+ENTRYPOINT ["/usr/local/bin/a2a-nats-http"]
 
-FROM runtime-base AS a2a-nats-agent
-COPY --from=builder /build/target/release/a2a-nats-agent-echo /usr/local/bin/a2a-nats-agent
-ENTRYPOINT ["/usr/local/bin/a2a-nats-agent"]
+FROM runtime-base AS a2a-nats-server
+COPY --from=builder /build/target/release/a2a-nats-server-echo /usr/local/bin/a2a-nats-server
+ENTRYPOINT ["/usr/local/bin/a2a-nats-server"]
 
 FROM runtime-base AS a2a-smoke-test
 COPY --from=builder /build/target/release/a2a-smoke-test /usr/local/bin/a2a-smoke-test

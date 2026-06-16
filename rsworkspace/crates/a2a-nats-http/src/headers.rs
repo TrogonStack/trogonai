@@ -85,29 +85,18 @@ impl RequestedExtension {
         // RFC-style optional marker: a trailing `;q=0` is treated as "optional".
         // We also accept a `?` prefix as an alternative optional marker that
         // is easy to author by hand.
-        // Skip tokens whose URI segment ends up empty after stripping the
-        // optional `?` prefix or `;q=…` params — e.g. a bare `"?"` or a `;q=0`
-        // would otherwise be implicitly negotiated as an empty-URI extension.
         if let Some(stripped) = trimmed.strip_prefix('?') {
-            let uri = stripped.trim();
-            if uri.is_empty() {
-                return None;
-            }
             Some(Self {
-                uri: uri.to_string(),
+                uri: stripped.trim().to_string(),
                 required: false,
             })
         } else if let Some((uri, params)) = trimmed.split_once(';') {
-            let uri = uri.trim();
-            if uri.is_empty() {
-                return None;
-            }
             let optional = params.split(';').any(|p| {
                 let p = p.trim().to_ascii_lowercase();
                 p == "q=0" || p == "q=0.0" || p == "optional"
             });
             Some(Self {
-                uri: uri.to_string(),
+                uri: uri.trim().to_string(),
                 required: !optional,
             })
         } else {
@@ -120,7 +109,9 @@ impl RequestedExtension {
 }
 
 fn parse_extensions(raw: &str) -> Vec<RequestedExtension> {
-    raw.split(',').filter_map(RequestedExtension::parse).collect()
+    raw.split(',')
+        .filter_map(RequestedExtension::parse)
+        .collect()
 }
 
 /// Result of header negotiation that downstream handlers can read off the request extensions.
@@ -137,14 +128,19 @@ fn json_rpc_error(code: i32, message: &str) -> Response {
         "error": { "code": code, "message": message },
     });
     let mut response = (StatusCode::BAD_REQUEST, axum::Json(body)).into_response();
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static(A2A_MEDIA_TYPE));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(A2A_MEDIA_TYPE),
+    );
     response
 }
 
 /// Axum middleware that negotiates A2A spec headers + media type on every request/response.
-pub async fn negotiate(State(config): State<Arc<SpecNegotiationConfig>>, mut request: Request, next: Next) -> Response {
+pub async fn negotiate(
+    State(config): State<Arc<SpecNegotiationConfig>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     let headers = request.headers();
 
     let requested_version = headers

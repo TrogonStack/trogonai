@@ -50,7 +50,7 @@ The verified branch (`yordis/agentgateway`) already contains transport and perim
 | `a2a-nats` | JSON-RPC client + agent `Bridge` over `{prefix}.agent.*` / `{prefix}.gateway.*` | **Transport substrate** — SDK wraps `Client` / `Bridge`, does not reimplement wire codec. |
 | `a2a-gateway` | Ingress policy, forwarding `gateway.*` → `agent.*` | SDK always targets `{prefix}.gateway.{target}.{method}`; never `agent.*` directly. |
 | `a2a-nats-discovery` | KV + `discover.*` AgentCard catalog | SDK uses for target resolution until `mcp.registry.agent.lookup` (Block 1.1) lands; then prefers registry API with AgentCard as cache. |
-| `a2a-nats-agent` | Process wrapper around agent `Bridge` | `serve()` replaces hand-rolled `a2a-nats-agent` + manual JWT handling. |
+| `a2a-nats-server` | Process wrapper around agent `Bridge` | `serve()` replaces hand-rolled `a2a-nats-server` + manual JWT handling. |
 | `a2a-bridge` | HTTPS → NATS gateway ingress | Bridge callers use the same SDK `call()` from non-NATS runtimes. |
 | `a2a-types` | Protobuf/JSON A2A message types | Typed request/response surfaces for `call()` and handler methods. |
 | `trogon-mcp-gateway` | MCP `{prefix}.gateway.request.*` ingress | SDK exposes `call_mcp(server_id, method, params, purpose)` — same identity pipeline, different subject grammar. |
@@ -143,7 +143,7 @@ Handlers return the same `TResponse` types the client expects (e.g. `SendMessage
 
 ## Method: `serve(handler)`
 
-Inbound server surface for an agent workload. Replaces manual `a2a-nats-agent` + gateway header parsing.
+Inbound server surface for an agent workload. Replaces manual `a2a-nats-server` + gateway header parsing.
 
 ### Signature
 
@@ -306,7 +306,7 @@ async fn message_send(&self, caller: &Caller, req: SendMessageRequest) -> ... {
 }
 ```
 
-Run `serve(sdk_handler)` instead of `a2a-nats-agent` + custom bridge wiring.
+Run `serve(sdk_handler)` instead of `a2a-nats-server` + custom bridge wiring.
 
 ### Phase 3 — Mesh mode
 
