@@ -30,6 +30,8 @@ fn make_agent(base_url: &str) -> AgentLoop {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -812,6 +814,8 @@ async fn run_with_extra_headers_and_tools() {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -857,6 +861,8 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -953,6 +959,8 @@ async fn run_chat_streaming_comprehensive() {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -1081,6 +1089,8 @@ async fn run_chat_streaming_permission_denied() {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -1235,6 +1245,8 @@ async fn run_uses_proxy_url_when_no_anthropic_base_url() {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -1524,6 +1536,8 @@ async fn run_chat_multiple_tool_use_blocks_all_results_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, msgs) = agent
@@ -1585,6 +1599,8 @@ async fn run_chat_tool_error_propagated_as_tool_result() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let result = agent
@@ -1644,6 +1660,8 @@ async fn run_chat_real_read_file_tool_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -1702,6 +1720,8 @@ async fn run_chat_cwd_is_propagated_to_tool_execution() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let result = agent
@@ -1793,6 +1813,8 @@ async fn run_chat_real_write_file_creates_file_on_disk() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -1858,6 +1880,8 @@ async fn run_chat_real_str_replace_modifies_file_on_disk() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -1930,6 +1954,8 @@ async fn run_chat_real_git_status_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -1986,6 +2012,8 @@ async fn run_chat_real_list_dir_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2043,6 +2071,8 @@ async fn run_chat_real_glob_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2118,6 +2148,8 @@ async fn run_chat_real_git_diff_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2192,6 +2224,8 @@ async fn run_chat_real_git_log_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2268,6 +2302,8 @@ async fn run_chat_real_notebook_edit_modifies_cell() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2324,6 +2360,8 @@ async fn run_chat_real_fetch_url_ssrf_blocked_result_sent_back() {
         proxy_url: String::new(),
         cwd: ".".to_string(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2382,6 +2420,8 @@ async fn run_chat_real_todo_write_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2462,6 +2502,8 @@ async fn run_chat_real_todo_read_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2516,6 +2558,8 @@ async fn run_chat_real_todo_read_empty_store_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2603,6 +2647,8 @@ async fn run_chat_streaming_parallel_tools_all_results_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (tx, _rx) = tokio::sync::mpsc::channel(64);
@@ -2654,6 +2700,8 @@ async fn run_chat_streaming_parallel_tools_emit_events_for_each() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
@@ -2711,6 +2759,8 @@ async fn run_chat_streaming_parallel_tools_order_preserved() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (tx, _rx) = tokio::sync::mpsc::channel(64);
@@ -2815,6 +2865,8 @@ async fn run_chat_real_todo_write_then_read_roundtrip() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
