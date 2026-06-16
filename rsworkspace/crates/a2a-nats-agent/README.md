@@ -2,7 +2,7 @@
 
 Process that connects to NATS, **provisions** per-Account **`A2A_EVENTS`** + **`A2A_PUSH_DLQ`** via [`provision_streams`](../a2a-nats/src/jetstream/provision.rs), and runs the agent-side [`Bridge`](../a2a-nats/src/agent/bridge.rs) on **`{prefix}.agent.{agent_id}.>`**.
 
-The default **`a2a-nats-agent`** binary installs a **`NoopHandler`** (every method responds *unsupported*) so you can verify connectivity before wiring your own **`A2aHandler`**.
+The default **`a2a-nats-agent`** binary installs a **`NoopHandler`** (every method responds *unsupported*) so you can verify connectivity before wiring your own **`A2aExecutor`**.
 
 ## Run
 

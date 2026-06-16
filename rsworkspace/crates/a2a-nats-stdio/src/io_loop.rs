@@ -1,4 +1,4 @@
-use a2a_nats::client::Client;
+use a2a_nats::client::A2aClient;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
@@ -11,7 +11,7 @@ use crate::wire::{InboundRequest, OutboundError, OutboundFrame, RpcId};
 const CHANNEL_CAP: usize = 128;
 
 pub async fn run_io_loop<N, J, R, W>(
-    client: Client<N, J>,
+    client: A2aClient<N, J>,
     stdin: R,
     mut stdout: W,
     shutdown: impl std::future::Future<Output = ()>,
@@ -112,7 +112,7 @@ pub async fn run_io_loop<N, J, R, W>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_nats::client::Client;
+    use a2a_nats::client::A2aClient;
     use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
     use bytes::Bytes;
     use tokio::io::AsyncReadExt;
@@ -133,9 +133,9 @@ mod tests {
     fn make_client(
         nats: AdvancedMockNatsClient,
         js: MockJetStreamConsumerFactory,
-    ) -> Client<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
+    ) -> A2aClient<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
         let agent_id = A2aAgentId::new("bot").unwrap();
-        Client::new(test_config(), agent_id, nats, js)
+        A2aClient::new(test_config(), agent_id, nats, js)
     }
 
     fn task_response(task_id: &str) -> Bytes {

@@ -1,6 +1,6 @@
 use tracing::{instrument, warn};
 
-use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 use crate::push::PushDeliverySemanticsRegistry;
@@ -17,7 +17,7 @@ async fn unary_parse_and_call<H, P, R>(
     call: impl FnOnce(&H, P) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<R, A2aError>> + Send + '_>>,
 ) -> (Option<JsonRpcId>, Result<R, A2aError>)
 where
-    H: A2aHandler,
+    H: A2aExecutor,
     P: serde::de::DeserializeOwned,
 {
     let req = match parse_request::<P>(payload) {
@@ -63,7 +63,7 @@ pub async fn handle_set<H, N>(
     nats: &N,
     semantics_registry: &PushDeliverySemanticsRegistry,
 ) where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
     let Some(reply) = reply_subject else {
@@ -188,7 +188,7 @@ pub async fn handle_get<H, N>(
     nats: &N,
     semantics_registry: &PushDeliverySemanticsRegistry,
 ) where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
     let Some(reply) = reply_subject else {
@@ -222,7 +222,7 @@ pub async fn handle_list<H, N>(
     nats: &N,
     semantics_registry: &PushDeliverySemanticsRegistry,
 ) where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
     let Some(reply) = reply_subject else {
@@ -272,7 +272,7 @@ pub async fn handle_delete<H, N>(
     nats: &N,
     semantics_registry: &PushDeliverySemanticsRegistry,
 ) where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
     let Some(reply) = reply_subject else {

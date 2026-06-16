@@ -2,7 +2,7 @@ use std::fmt;
 use std::net::SocketAddr;
 
 use a2a_auth_callout::MintedUserJwt;
-use a2a_nats::client::Client;
+use a2a_nats::client::A2aClient;
 use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, Config, NatsConfig};
 use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
@@ -94,7 +94,7 @@ pub async fn run() -> Result<(), RuntimeError> {
     let a2a_config = Config::new(prefix, nats_config);
     let a2a_config = a2a_nats::apply_timeout_overrides(a2a_config, &env);
 
-    let client = Client::new(a2a_config, agent_id, nats_client, js_client);
+    let client = A2aClient::new(a2a_config, agent_id, nats_client, js_client);
     let client = if env_flag(&env, ENV_USE_GATEWAY) {
         let raw_jwt = trogon_std::env::ReadEnv::var(&env, ENV_GATEWAY_CALLER_JWT)
             .map_err(|_| RuntimeError::MissingGatewayCallerJwt)?;

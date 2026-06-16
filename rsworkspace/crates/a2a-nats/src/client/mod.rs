@@ -1,7 +1,7 @@
-//! JSON-RPC [`Client`] facade over [`RequestClient`](trogon_nats::RequestClient) + JetStream accessors.
+//! JSON-RPC [`A2aClient`] facade over [`RequestClient`](trogon_nats::RequestClient) + JetStream accessors.
 //!
-//! By default **`Client`** publishes to **`{prefix}.agent.{agent_id}.{method}`** subjects ([`Client::new`], [`Client::routing_to_agent`]).
-//! Use [`Client::routing_via_gateway_ingress`] with a [`MintedUserJwt`] to target **`{prefix}.gateway.{agent_id}.{method}`**
+//! By default **`A2aClient`** publishes to **`{prefix}.agent.{agent_id}.{method}`** subjects ([`A2aClient::new`], [`A2aClient::routing_to_agent`]).
+//! Use [`A2aClient::routing_via_gateway_ingress`] with a [`MintedUserJwt`] to target **`{prefix}.gateway.{agent_id}.{method}`**
 //! subjects (forwarded transparently when **`a2a-gateway`** is running). Streamed **`{prefix}.task.…`** JetStream attaches are
 //! unchanged — only unary / bootstrap NATS **`request`** subjects are remapped.
 
@@ -18,7 +18,7 @@ pub use crate::catalog::{AgentCardWatchError, AgentCardWatchEvent, AgentCardWatc
 pub use a2a_auth_callout::{MintedUserJwt, caller_jwt_header::CALLER_JWT_HEADER_NAME};
 pub use error::ClientError;
 pub use event_stream::TypedEventStream;
-pub use handle::Client;
+pub use handle::A2aClient;
 
 pub use a2a::agent_card::AgentCard;
 pub use a2a::types::{

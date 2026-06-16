@@ -1,14 +1,14 @@
 use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tracing::{instrument, warn};
 
-use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 
 #[instrument(name = "a2a.agent.agent_card", skip(handler, payload, reply_subject, nats))]
 pub async fn handle<H, N>(handler: &H, payload: &[u8], reply_subject: Option<String>, nats: &N)
 where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
     let Some(reply) = reply_subject else {
@@ -57,7 +57,7 @@ where
     }
 }
 
-async fn parse_and_call<H: A2aHandler>(
+async fn parse_and_call<H: A2aExecutor>(
     handler: &H,
     payload: &[u8],
 ) -> (Option<JsonRpcId>, Result<a2a::agent_card::AgentCard, A2aError>) {

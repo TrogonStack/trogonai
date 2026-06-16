@@ -5,13 +5,13 @@
 //! JSON-RPC framing can talk to the same agent runtime without needing a
 //! JSON-RPC envelope. Each handler builds the same `a2a-types` request
 //! struct the JSON-RPC handler does and delegates to the same
-//! `a2a_nats::client::Client` method.
+//! `a2a_nats::client::A2aClient` method.
 
 use std::convert::Infallible;
 use std::sync::Arc;
 
 use a2a_nats::client::{
-    CancelTaskRequest, Client, ClientError, DeleteTaskPushNotificationConfigRequest,
+    CancelTaskRequest, A2aClient, ClientError, DeleteTaskPushNotificationConfigRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest, ListTasksRequest,
     SendMessageRequest, TaskPushNotificationConfig,
 };
@@ -31,7 +31,7 @@ use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck,
 use crate::sse::{client_error_to_jsonrpc_code, typed_event_stream_to_sse};
 
 /// Build a `Router` of REST routes that can be merged into the top-level router.
-pub fn router<N, J>() -> axum::Router<Arc<Client<N, J>>>
+pub fn router<N, J>() -> axum::Router<Arc<A2aClient<N, J>>>
 where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,
@@ -65,7 +65,7 @@ async fn noop() -> Response {
     StatusCode::NO_CONTENT.into_response()
 }
 
-async fn get_card<N, J>(State(client): State<Arc<Client<N, J>>>) -> Response
+async fn get_card<N, J>(State(client): State<Arc<A2aClient<N, J>>>) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,
@@ -82,7 +82,7 @@ where
     }
 }
 
-async fn post_message_send<N, J>(State(client): State<Arc<Client<N, J>>>, Json(req): Json<SendMessageRequest>) -> Response
+async fn post_message_send<N, J>(State(client): State<Arc<A2aClient<N, J>>>, Json(req): Json<SendMessageRequest>) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,
@@ -100,7 +100,7 @@ where
 }
 
 async fn post_message_stream<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Json(req): Json<SendMessageRequest>,
 ) -> Response
 where
@@ -130,7 +130,7 @@ struct ListTasksQuery {
 }
 
 async fn get_tasks_list<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Query(q): Query<ListTasksQuery>,
 ) -> Response
 where
@@ -168,7 +168,7 @@ struct GetTaskQuery {
 }
 
 async fn get_task<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path(id): Path<String>,
     Query(q): Query<GetTaskQuery>,
 ) -> Response
@@ -200,7 +200,7 @@ struct CancelQuery {
 }
 
 async fn post_task_cancel<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path(id): Path<String>,
     Query(q): Query<CancelQuery>,
 ) -> Response
@@ -232,7 +232,7 @@ struct SubscribeQuery {
 }
 
 async fn get_task_subscribe<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path(id): Path<String>,
     Query(q): Query<SubscribeQuery>,
 ) -> Response
@@ -265,7 +265,7 @@ where
 }
 
 async fn post_push_set<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path(_id): Path<String>,
     Json(req): Json<TaskPushNotificationConfig>,
 ) -> Response
@@ -292,7 +292,7 @@ struct PushListQuery {
 }
 
 async fn get_push_list<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path(id): Path<String>,
     Query(q): Query<PushListQuery>,
 ) -> Response
@@ -319,7 +319,7 @@ where
 }
 
 async fn get_push_config<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path((id, config_id)): Path<(String, String)>,
 ) -> Response
 where
@@ -344,7 +344,7 @@ where
 }
 
 async fn delete_push_config<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Path((id, config_id)): Path<(String, String)>,
 ) -> Response
 where

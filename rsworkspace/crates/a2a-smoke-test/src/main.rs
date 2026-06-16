@@ -8,7 +8,7 @@ use a2a_auth_callout::{
 };
 use a2a_nats::client::resubscribe::open_resubscribe_stream;
 use a2a_nats::client::unary::send_unary;
-use a2a_nats::client::{Client, ClientError};
+use a2a_nats::client::{A2aClient, ClientError};
 use a2a_nats::{A2aAgentId, A2aPrefix, A2aTaskId, Config, NatsConfig, ReqId, compose_gateway_ingress_subject};
 use a2a_nats_discovery::{
     OperatorKeyId, OperatorSignatureGate, parse_operator_keys, resolve_operator_signature_gate, sign_discovery_export,
@@ -95,7 +95,7 @@ struct AuditEnvelopeWire {
     outcome: serde_json::Value,
 }
 
-type SmokeClient = Client<async_nats::Client, trogon_nats::jetstream::NatsJetStreamClient>;
+type SmokeClient = A2aClient<async_nats::Client, trogon_nats::jetstream::NatsJetStreamClient>;
 
 struct SmokeContext {
     prefix: A2aPrefix,
@@ -284,7 +284,7 @@ async fn build_context(
         .map_err(|e| e.to_string())?;
     let js = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
     let config = Config::new(prefix.clone(), nats_config);
-    let client = Client::new(config, agent.clone(), nats.clone(), js.clone()).routing_via_gateway_ingress(jwt.clone());
+    let client = A2aClient::new(config, agent.clone(), nats.clone(), js.clone()).routing_via_gateway_ingress(jwt.clone());
 
     Ok(SmokeContext {
         prefix,

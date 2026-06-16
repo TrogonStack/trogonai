@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::server::dispatch::A2aMethod;
-use crate::server::handler::A2aHandler;
+use crate::server::handler::A2aExecutor;
 use crate::server::{
     agent_card, message_send, message_stream, push_notification, tasks_cancel, tasks_get, tasks_list, tasks_resubscribe,
 };
@@ -59,7 +59,7 @@ impl InFlightTasks {
 }
 
 /// Agent-side bridge that subscribes to the wildcard subject and dispatches
-/// inbound JSON-RPC requests to an [`A2aHandler`] implementation.
+/// inbound JSON-RPC requests to an [`A2aExecutor`] implementation.
 pub struct Bridge<H, N, J> {
     config: Config,
     handler: Arc<H>,
@@ -74,7 +74,7 @@ pub struct Bridge<H, N, J> {
 
 impl<H, N, J> Bridge<H, N, J>
 where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::SubscribeClient + trogon_nats::PublishClient + Clone + Send + Sync + 'static,
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync + 'static,
 {
@@ -213,7 +213,7 @@ async fn dispatch<H, N, J>(
     principal_carrier: crate::server::PrincipalCarrier,
     push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + 'static,
 {
@@ -583,7 +583,7 @@ mod tests {
         }
 
         #[async_trait::async_trait]
-        impl crate::server::handler::A2aHandler for BlockingHandler {
+        impl crate::server::handler::A2aExecutor for BlockingHandler {
             async fn message_send(
                 &self,
                 _req: a2a::types::SendMessageRequest,
