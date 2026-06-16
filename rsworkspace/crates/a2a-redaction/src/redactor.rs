@@ -1,4 +1,4 @@
-use a2a_types::{Artifact, Message, Part};
+use a2a::types::{Artifact, Message, Part};
 
 use crate::error::RedactionError;
 use crate::skill_id::SkillId;
@@ -46,7 +46,7 @@ pub(crate) fn redact_artifact_parts_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_types::{Role, part};
+    use a2a::types::{PartContent, Role};
 
     struct DefaultRedactorByTrait;
 
@@ -71,8 +71,8 @@ mod tests {
         let msg_in = Message {
             message_id: "m".into(),
             role: Role::Agent.into(),
-            parts: vec![a2a_types::Part {
-                content: Some(part::Content::Text("secret".into())),
+            parts: vec![a2a::types::Part {
+                content: PartContent::Text("secret".into()),
                 ..Default::default()
             }],
             ..Default::default()

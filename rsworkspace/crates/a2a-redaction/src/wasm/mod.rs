@@ -3,7 +3,7 @@ mod engine;
 use std::collections::HashMap;
 use std::sync::{Once, RwLock};
 
-use a2a_types::{Artifact, Message};
+use a2a::types::{Artifact, Message};
 use wasmtime::{Engine, Module};
 
 use crate::error::RedactionError;
@@ -147,7 +147,7 @@ mod tests {
 
     use super::*;
     use crate::signed_bundle::{Ed25519Signature, Sha256Digest, sign_bundle_digest};
-    use a2a_types::{Role, part};
+    use a2a::types::{PartContent, Role};
 
     fn fixture_path() -> &'static Path {
         Path::new(concat!(
@@ -213,8 +213,8 @@ mod tests {
         let msg_in = Message {
             message_id: "m".into(),
             role: Role::Agent.into(),
-            parts: vec![a2a_types::Part {
-                content: Some(part::Content::Text("x".into())),
+            parts: vec![a2a::types::Part {
+                content: PartContent::Text("x".into()),
                 ..Default::default()
             }],
             ..Default::default()
@@ -239,8 +239,8 @@ mod tests {
 
         let art_in = Artifact {
             artifact_id: "a".into(),
-            parts: vec![a2a_types::Part {
-                content: Some(part::Content::Text("blob".into())),
+            parts: vec![a2a::types::Part {
+                content: PartContent::Text("blob".into()),
                 ..Default::default()
             }],
             ..Default::default()

@@ -79,7 +79,7 @@ where
         return None;
     };
 
-    let req = match parse_request::<a2a_types::SendMessageRequest>(payload) {
+    let req = match parse_request::<a2a::types::SendMessageRequest>(payload) {
         Ok(r) => r,
         Err(_) => {
             send_reply_error(nats, &reply, None, A2aError::internal("parse error")).await;
@@ -117,7 +117,7 @@ where
         }
     };
 
-    let bootstrap_task_state = initial_task.status.as_ref().map(|s| s.state).unwrap_or(0);
+    let bootstrap_task_state = initial_task.status.state.clone();
 
     let json_rpc_req_id = id.as_ref().map(|jid| jid.to_string());
 
@@ -187,7 +187,7 @@ async fn pump_events<J, H, D>(
     prefix: crate::a2a_prefix::A2aPrefix,
     agent_id: Arc<A2aAgentId>,
     json_rpc_req_id: Option<String>,
-    bootstrap_task_state: i32,
+    bootstrap_task_state: a2a::types::TaskState,
     push_dlq_caller_id: CallerId,
     push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) where
@@ -221,8 +221,8 @@ async fn pump_events<J, H, D>(
                                 agent_id.as_ref(),
                                 task_id.as_str(),
                                 json_rpc_req_id.clone(),
-                                prev_task_state,
-                                new_state,
+                                prev_task_state.clone(),
+                                new_state.clone(),
                                 emitted_at,
                             );
                             audit_emitter.publish_task_lifecycle(&prefix, agent_id.as_ref(), env).await;
@@ -278,23 +278,20 @@ async fn pump_events<J, H, D>(
     }
 }
 
-fn status_update_task_state(ev: &a2a_types::StreamResponse) -> Option<i32> {
-    use a2a_types::stream_response::Payload;
-    match &ev.payload {
-        Some(Payload::StatusUpdate(update)) => update.status.as_ref().map(|s| s.state),
+fn status_update_task_state(ev: &a2a::event::StreamResponse) -> Option<a2a::types::TaskState> {
+    match ev {
+        a2a::event::StreamResponse::StatusUpdate(update) => Some(update.status.state.clone()),
         _ => None,
     }
 }
 
-fn is_terminal_status_update(ev: &a2a_types::StreamResponse) -> bool {
-    use a2a_types::TaskState;
-    use a2a_types::stream_response::Payload;
-    match &ev.payload {
-        Some(Payload::StatusUpdate(update)) => {
-            let state = update.status.as_ref().map(|s| s.state).unwrap_or(0);
+fn is_terminal_status_update(ev: &a2a::event::StreamResponse) -> bool {
+    use a2a::types::TaskState;
+    match ev {
+        a2a::event::StreamResponse::StatusUpdate(update) => {
             matches!(
-                TaskState::try_from(state),
-                Ok(TaskState::Completed) | Ok(TaskState::Failed) | Ok(TaskState::Canceled) | Ok(TaskState::Rejected)
+                update.status.state,
+                TaskState::Completed | TaskState::Failed | TaskState::Canceled | TaskState::Rejected
             )
         }
         _ => false,
@@ -307,7 +304,7 @@ async fn dispatch_push_notifications<H, D, J>(
     handler: &H,
     dispatcher: &D,
     delivery_payload_bytes: &[u8],
-    ev: &a2a_types::StreamResponse,
+    ev: &a2a::event::StreamResponse,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     js: &J,
     prefix: &crate::a2a_prefix::A2aPrefix,
@@ -327,9 +324,11 @@ async fn dispatch_push_notifications<H, D, J>(
     };
     let status_transition_id = StatusTransitionId::from_terminal(terminal_state);
 
-    let list_req = a2a_types::ListTaskPushNotificationConfigsRequest {
+    let list_req = a2a::types::ListTaskPushNotificationConfigsRequest {
         task_id: task_id.as_str().to_owned(),
-        ..Default::default()
+        page_size: None,
+        page_token: None,
+        tenant: None,
     };
     let configs = match handler.push_notification_list(list_req).await {
         Ok(resp) => resp.configs,
@@ -339,7 +338,7 @@ async fn dispatch_push_notifications<H, D, J>(
         }
     };
     for config in &configs {
-        let cfg_id_res = PushNotificationConfigId::new(config.id.clone());
+        let cfg_id_res = PushNotificationConfigId::new(config.id.clone().unwrap_or_default());
         let semantics = cfg_id_res
             .as_ref()
             .map(|cid| push_delivery_semantics.get(task_id, cid))
@@ -353,7 +352,7 @@ async fn dispatch_push_notifications<H, D, J>(
                 let dispatch_err = DispatchError::Prep(prep_err.clone());
                 warn!(
                     task_id = %task_id,
-                    config_id = %config.id,
+                    config_id = config.id.as_deref().unwrap_or(""),
                     error = %dispatch_err,
                     "push notification dispatch prep failed"
                 );
@@ -379,7 +378,7 @@ async fn dispatch_push_notifications<H, D, J>(
                 Err(e) => {
                     warn!(
                         task_id = %task_id,
-                        config_id = %config.id,
+                        config_id = config.id.as_deref().unwrap_or(""),
                         error = %e,
                         "failed to augment push notification JSON; skipping"
                     );
@@ -393,7 +392,7 @@ async fn dispatch_push_notifications<H, D, J>(
         {
             Ok(()) => {}
             Err(ref e) => {
-                warn!(task_id = %task_id, config_id = %config.id, error = %e, "push notification delivery failed");
+                warn!(task_id = %task_id, config_id = config.id.as_deref().unwrap_or(""), error = %e, "push notification delivery failed");
                 crate::push::dlq::publish_push_delivery_failure(
                     js,
                     prefix,
@@ -456,78 +455,78 @@ mod tests {
     }
 
     struct StreamingHandler {
-        task: a2a_types::Task,
-        events: Vec<a2a_types::StreamResponse>,
-        push_configs: Vec<a2a_types::TaskPushNotificationConfig>,
+        task: a2a::types::Task,
+        events: Vec<a2a::event::StreamResponse>,
+        push_configs: Vec<a2a::types::TaskPushNotificationConfig>,
     }
 
     #[async_trait::async_trait]
     impl A2aHandler for StreamingHandler {
         async fn message_send(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<a2a_types::SendMessageResponse, A2aError> {
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<a2a::types::SendMessageResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
 
         async fn message_stream(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<(a2a_types::Task, TaskEventStream), A2aError> {
-            let events: Vec<Result<a2a_types::StreamResponse, A2aError>> =
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<(a2a::types::Task, TaskEventStream), A2aError> {
+            let events: Vec<Result<a2a::event::StreamResponse, A2aError>> =
                 self.events.iter().cloned().map(Ok).collect();
             Ok((self.task.clone(), Box::pin(stream::iter(events))))
         }
 
-        async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_get(&self, _req: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_list(
             &self,
-            _req: a2a_types::ListTasksRequest,
-        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
+            _req: a2a::types::ListTasksRequest,
+        ) -> Result<a2a::types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_cancel(&self, _req: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_resubscribe(
             &self,
-            _req: a2a_types::SubscribeToTaskRequest,
-        ) -> Result<a2a_types::Task, A2aError> {
+            _req: a2a::types::SubscribeToTaskRequest,
+        ) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_set(
             &self,
-            _req: a2a_types::TaskPushNotificationConfig,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::TaskPushNotificationConfig,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_get(
             &self,
-            _req: a2a_types::GetTaskPushNotificationConfigRequest,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::GetTaskPushNotificationConfigRequest,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_list(
             &self,
-            _req: a2a_types::ListTaskPushNotificationConfigsRequest,
-        ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError> {
-            Ok(a2a_types::ListTaskPushNotificationConfigsResponse {
+            _req: a2a::types::ListTaskPushNotificationConfigsRequest,
+        ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError> {
+            Ok(a2a::types::ListTaskPushNotificationConfigsResponse {
                 configs: self.push_configs.clone(),
-                ..Default::default()
+                next_page_token: None,
             })
         }
         async fn push_notification_delete(
             &self,
-            _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+            _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
         ) -> Result<(), A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn agent_card(
             &self,
-            _req: a2a_types::GetExtendedAgentCardRequest,
-        ) -> Result<a2a_types::AgentCard, A2aError> {
+            _req: a2a::types::GetExtendedAgentCardRequest,
+        ) -> Result<a2a::agent_card::AgentCard, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
     }
@@ -538,62 +537,62 @@ mod tests {
     impl A2aHandler for FailingStreamHandler {
         async fn message_stream(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<(a2a_types::Task, TaskEventStream), A2aError> {
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<(a2a::types::Task, TaskEventStream), A2aError> {
             Err(A2aError::internal("handler failed"))
         }
         async fn message_send(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<a2a_types::SendMessageResponse, A2aError> {
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<a2a::types::SendMessageResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_get(&self, _req: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_list(
             &self,
-            _req: a2a_types::ListTasksRequest,
-        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
+            _req: a2a::types::ListTasksRequest,
+        ) -> Result<a2a::types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_cancel(&self, _req: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_resubscribe(
             &self,
-            _req: a2a_types::SubscribeToTaskRequest,
-        ) -> Result<a2a_types::Task, A2aError> {
+            _req: a2a::types::SubscribeToTaskRequest,
+        ) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_set(
             &self,
-            _req: a2a_types::TaskPushNotificationConfig,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::TaskPushNotificationConfig,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_get(
             &self,
-            _req: a2a_types::GetTaskPushNotificationConfigRequest,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::GetTaskPushNotificationConfigRequest,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_list(
             &self,
-            _req: a2a_types::ListTaskPushNotificationConfigsRequest,
-        ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError> {
+            _req: a2a::types::ListTaskPushNotificationConfigsRequest,
+        ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_delete(
             &self,
-            _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+            _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
         ) -> Result<(), A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn agent_card(
             &self,
-            _req: a2a_types::GetExtendedAgentCardRequest,
-        ) -> Result<a2a_types::AgentCard, A2aError> {
+            _req: a2a::types::GetExtendedAgentCardRequest,
+        ) -> Result<a2a::agent_card::AgentCard, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
     }
@@ -737,9 +736,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
 
-        let event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::Task(make_task("t-event"))),
-        };
+        let event = a2a::event::StreamResponse::Task(make_task("t-event"));
         let handler = Arc::new(StreamingHandler {
             task: make_task("t-event"),
             events: vec![event],
@@ -773,23 +770,21 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_status_event_triggers_push_dispatch_attempt() {
-        use a2a_types::{TaskState, TaskStatus};
+        use a2a::types::{TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
 
-        let terminal_event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                a2a_types::TaskStatusUpdateEvent {
-                    task_id: "t-push".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Completed as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-        };
+        let terminal_event = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+            task_id: "t-push".to_string(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Completed,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        });
 
         let dispatcher = Arc::new(MockPushDispatcher::new());
         let handler = Arc::new(StreamingHandler {
@@ -825,28 +820,29 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_push_delivery_failure_writes_push_dlq() {
-        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+        use a2a::types::{TaskPushNotificationConfig, TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
 
-        let terminal_event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                a2a_types::TaskStatusUpdateEvent {
-                    task_id: "dlq-task".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Completed as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-        };
+        let terminal_event = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+            task_id: "dlq-task".to_string(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Completed,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        });
 
         let push_cfg = TaskPushNotificationConfig {
-            id: "pcfg-1".to_string(),
+            id: Some("pcfg-1".to_string()),
             url: "https://example.com/webhook".to_string(),
-            ..Default::default()
+            task_id: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
         };
 
         let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
@@ -898,28 +894,29 @@ mod tests {
     #[tokio::test]
     async fn terminal_push_dlq_subject_uses_derived_principal_caller_id() {
         use a2a_auth_callout::SpiceDbPrincipal;
-        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+        use a2a::types::{TaskPushNotificationConfig, TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
 
-        let terminal_event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                a2a_types::TaskStatusUpdateEvent {
-                    task_id: "dlq-task".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Completed as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-        };
+        let terminal_event = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+            task_id: "dlq-task".to_string(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Completed,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        });
 
         let push_cfg = TaskPushNotificationConfig {
-            id: "pcfg-1".to_string(),
+            id: Some("pcfg-1".to_string()),
             url: "https://example.com/webhook".to_string(),
-            ..Default::default()
+            task_id: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
         };
 
         let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
@@ -966,28 +963,29 @@ mod tests {
     #[tokio::test]
     async fn terminal_push_dlq_subject_from_nats_principal_header() {
         use crate::agent::principal_carrier::principal_header_fixture;
-        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+        use a2a::types::{TaskPushNotificationConfig, TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
 
-        let terminal_event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                a2a_types::TaskStatusUpdateEvent {
-                    task_id: "dlq-task".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Completed as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-        };
+        let terminal_event = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+            task_id: "dlq-task".to_string(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Completed,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        });
 
         let push_cfg = TaskPushNotificationConfig {
-            id: "pcfg-1".to_string(),
+            id: Some("pcfg-1".to_string()),
             url: "https://example.com/webhook".to_string(),
-            ..Default::default()
+            task_id: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
         };
 
         let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
@@ -1030,28 +1028,29 @@ mod tests {
     #[tokio::test]
     async fn terminal_push_dlq_falls_back_when_principal_lacks_spicedb_subject() {
         use a2a_auth_callout::SpiceDbPrincipal;
-        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+        use a2a::types::{TaskPushNotificationConfig, TaskState, TaskStatus};
 
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
 
-        let terminal_event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                a2a_types::TaskStatusUpdateEvent {
-                    task_id: "dlq-task".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Completed as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-        };
+        let terminal_event = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+            task_id: "dlq-task".to_string(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Completed,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        });
 
         let push_cfg = TaskPushNotificationConfig {
-            id: "pcfg-1".to_string(),
+            id: Some("pcfg-1".to_string()),
             url: "https://example.com/webhook".to_string(),
-            ..Default::default()
+            task_id: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
         };
 
         let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
@@ -1092,26 +1091,24 @@ mod tests {
 
     #[test]
     fn non_terminal_states_do_not_trigger_dispatch() {
-        use a2a_types::{TaskState, TaskStatus};
+        use a2a::types::{TaskState, TaskStatus};
 
-        let working_event = a2a_types::StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                a2a_types::TaskStatusUpdateEvent {
-                    task_id: "t".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Working as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-        };
+        let working_event = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+            task_id: "t".to_string(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Working,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        });
         assert!(!is_terminal_status_update(&working_event));
     }
 
     #[test]
     fn terminal_states_detected_correctly() {
-        use a2a_types::{TaskState, TaskStatus};
+        use a2a::types::{TaskState, TaskStatus};
 
         for state in [
             TaskState::Completed,
@@ -1119,18 +1116,16 @@ mod tests {
             TaskState::Canceled,
             TaskState::Rejected,
         ] {
-            let ev = a2a_types::StreamResponse {
-                payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                    a2a_types::TaskStatusUpdateEvent {
-                        task_id: "t".to_string(),
-                        status: Some(TaskStatus {
-                            state: state as i32,
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                )),
-            };
+            let ev = a2a::event::StreamResponse::StatusUpdate(a2a::event::TaskStatusUpdateEvent {
+                task_id: "t".to_string(),
+                context_id: String::new(),
+                status: TaskStatus {
+                    state,
+                    message: None,
+                    timestamp: None,
+                },
+                metadata: None,
+            });
             assert!(is_terminal_status_update(&ev), "expected terminal for state {state:?}");
         }
     }

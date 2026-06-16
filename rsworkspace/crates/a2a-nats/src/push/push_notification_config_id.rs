@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// Resource id for a [`a2a_types::TaskPushNotificationConfig`] (the `id` field).
+/// Resource id for a [`a2a::types::TaskPushNotificationConfig`] (the `id` field).
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct PushNotificationConfigId(String);
 

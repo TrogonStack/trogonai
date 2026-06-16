@@ -7,7 +7,7 @@
 //! the AgentCard **with the `signatures` field omitted**.
 //!
 //! The implementation works on `serde_json::Value` so it composes with both
-//! the prost-generated `a2a_types::AgentCard` (after `serde_json::to_value`)
+//! the prost-generated `a2a::agent_card::AgentCard` (after `serde_json::to_value`)
 //! and any other JSON-shaped card.
 
 use std::fmt;

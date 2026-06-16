@@ -44,22 +44,22 @@ impl std::error::Error for CatalogStoreError {
     }
 }
 
-fn deserialize_validated_agent_card(parsed: Value) -> Result<a2a_types::AgentCard, CatalogStoreError> {
+fn deserialize_validated_agent_card(parsed: Value) -> Result<a2a::agent_card::AgentCard, CatalogStoreError> {
     a2a_pack::validate_agent_card_value(&parsed).map_err(CatalogStoreError::AgentCardSchema)?;
-    serde_json::from_value::<a2a_types::AgentCard>(parsed).map_err(CatalogStoreError::Deserialize)
+    serde_json::from_value::<a2a::agent_card::AgentCard>(parsed).map_err(CatalogStoreError::Deserialize)
 }
 
 pub trait CatalogStore: Send + Sync + 'static {
     fn put_card(
         &self,
         agent_id: &A2aAgentId,
-        card: &a2a_types::AgentCard,
+        card: &a2a::agent_card::AgentCard,
     ) -> impl std::future::Future<Output = Result<(), CatalogStoreError>> + Send;
 
     fn get_card(
         &self,
         agent_id: &A2aAgentId,
-    ) -> impl std::future::Future<Output = Result<Option<a2a_types::AgentCard>, CatalogStoreError>> + Send;
+    ) -> impl std::future::Future<Output = Result<Option<a2a::agent_card::AgentCard>, CatalogStoreError>> + Send;
 }
 
 #[derive(Clone)]
@@ -85,7 +85,7 @@ where
         + Clone
         + 'static,
 {
-    pub async fn list_cards(&self) -> Result<Vec<(A2aAgentId, a2a_types::AgentCard)>, CatalogStoreError> {
+    pub async fn list_cards(&self) -> Result<Vec<(A2aAgentId, a2a::agent_card::AgentCard)>, CatalogStoreError> {
         let keys: Vec<String> = self
             .store
             .keys()
@@ -115,10 +115,10 @@ where
         gate: &G,
         principal: &SpiceDbPrincipal,
         imported_source: F,
-    ) -> Result<Vec<a2a_types::AgentCard>, CatalogStoreError>
+    ) -> Result<Vec<a2a::agent_card::AgentCard>, CatalogStoreError>
     where
         G: ImportGate + Sync,
-        F: Fn(&A2aAgentId, &a2a_types::AgentCard) -> Option<ImportedAccountName> + Send + Sync,
+        F: Fn(&A2aAgentId, &a2a::agent_card::AgentCard) -> Option<ImportedAccountName> + Send + Sync,
     {
         let pairs = self.list_cards().await?;
 
@@ -149,7 +149,7 @@ impl<K> CatalogStore for KvCatalogStore<K>
 where
     K: JetStreamKvGet + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate + Send + Sync + Clone + 'static,
 {
-    async fn put_card(&self, agent_id: &A2aAgentId, card: &a2a_types::AgentCard) -> Result<(), CatalogStoreError> {
+    async fn put_card(&self, agent_id: &A2aAgentId, card: &a2a::agent_card::AgentCard) -> Result<(), CatalogStoreError> {
         let value_json: Value = serde_json::to_value(card).map_err(CatalogStoreError::Serialize)?;
         a2a_pack::validate_agent_card_value(&value_json).map_err(CatalogStoreError::AgentCardSchema)?;
         let value: Bytes = serde_json::to_vec(&value_json)
@@ -181,7 +181,7 @@ where
         Ok(())
     }
 
-    async fn get_card(&self, agent_id: &A2aAgentId) -> Result<Option<a2a_types::AgentCard>, CatalogStoreError> {
+    async fn get_card(&self, agent_id: &A2aAgentId) -> Result<Option<a2a::agent_card::AgentCard>, CatalogStoreError> {
         let key = agent_id.as_str().to_owned();
         match self
             .store
@@ -208,10 +208,10 @@ mod tests {
         A2aAgentId::new(s).unwrap()
     }
 
-    fn card(name: &str) -> a2a_types::AgentCard {
-        a2a_types::AgentCard {
+    fn card(name: &str) -> a2a::agent_card::AgentCard {
+        a2a::agent_card::AgentCard {
             name: name.to_string(),
-            supported_interfaces: vec![a2a_types::AgentInterface {
+            supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),

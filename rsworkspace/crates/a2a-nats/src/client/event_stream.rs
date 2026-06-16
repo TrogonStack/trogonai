@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use a2a_types::StreamResponse;
+use a2a::event::StreamResponse;
 use futures::channel::mpsc;
 use futures::{Stream, StreamExt};
 use trogon_nats::jetstream::{JetStreamConsumer, JsAck, JsMessageRef};
@@ -96,25 +96,22 @@ fn extract_sequence(msg: &async_nats::Message) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_types::{TaskState, TaskStatus, TaskStatusUpdateEvent};
+    use a2a::event::TaskStatusUpdateEvent;
+    use a2a::types::{TaskState, TaskStatus};
     use bytes::Bytes;
     use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJsMessage};
 
     fn make_status_event(task_id: &str) -> StreamResponse {
-        StreamResponse {
-            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
-                TaskStatusUpdateEvent {
-                    task_id: task_id.to_string(),
-                    context_id: "ctx".to_string(),
-                    status: Some(TaskStatus {
-                        state: TaskState::Working.into(),
-                        message: None,
-                        timestamp: None,
-                    }),
-                    metadata: None,
-                },
-            )),
-        }
+        StreamResponse::StatusUpdate(TaskStatusUpdateEvent {
+            task_id: task_id.to_string(),
+            context_id: "ctx".to_string(),
+            status: TaskStatus {
+                state: TaskState::Working,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        })
     }
 
     fn nats_msg_with_seq(payload: Vec<u8>, seq: Option<u64>) -> async_nats::Message {

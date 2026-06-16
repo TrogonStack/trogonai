@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use a2a_types::SendMessageResponse;
+use a2a::types::SendMessageResponse;
 use bytes::Bytes;
 use serde::Serialize;
 use tokio::time::timeout;
@@ -135,7 +135,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_types::{SendMessageResponse, Task, TaskState, TaskStatus};
+    use a2a::types::{SendMessageResponse, Task, TaskState, TaskStatus};
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
@@ -150,16 +150,17 @@ mod tests {
     fn bootstrap_success(task_id: &str) -> bytes::Bytes {
         let task = Task {
             id: task_id.to_string(),
-            status: Some(TaskStatus {
-                state: TaskState::Working.into(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Working,
                 message: None,
                 timestamp: None,
-            }),
-            ..Default::default()
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
         };
-        let response = SendMessageResponse {
-            payload: Some(a2a_types::send_message_response::Payload::Task(task)),
-        };
+        let response = SendMessageResponse::Task(task);
         let json = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "req-stream-1",
@@ -219,7 +220,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(envelope.payload.is_some());
+        assert!(matches!(envelope, SendMessageResponse::Task(_)));
     }
 
     #[tokio::test]

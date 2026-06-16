@@ -4,7 +4,7 @@ use a2a_nats::client::{
     SendMessageRequest, TaskPushNotificationConfig,
 };
 use a2a_nats::task_id::A2aTaskId;
-use a2a_types::StreamResponse;
+use a2a::event::StreamResponse;
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -346,14 +346,17 @@ mod tests {
     }
 
     fn task_response(task_id: &str) -> Bytes {
-        let task = a2a_types::Task {
+        let task = a2a::types::Task {
             id: task_id.to_string(),
-            status: Some(a2a_types::TaskStatus {
-                state: a2a_types::TaskState::Completed.into(),
+            context_id: String::new(),
+            status: a2a::types::TaskStatus {
+                state: a2a::types::TaskState::Completed,
                 message: None,
                 timestamp: None,
-            }),
-            ..Default::default()
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
         };
         serde_json::to_vec(&serde_json::json!({
             "jsonrpc": "2.0",
@@ -365,13 +368,19 @@ mod tests {
     }
 
     fn send_message_response_bytes(task_id: &str) -> Bytes {
-        let task = a2a_types::Task {
+        let task = a2a::types::Task {
             id: task_id.to_string(),
-            ..Default::default()
+            context_id: String::new(),
+            status: a2a::types::TaskStatus {
+                state: a2a::types::TaskState::Unspecified,
+                message: None,
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
         };
-        let response = a2a_types::SendMessageResponse {
-            payload: Some(a2a_types::send_message_response::Payload::Task(task)),
-        };
+        let response = a2a::types::SendMessageResponse::Task(task);
         serde_json::to_vec(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": "x",
@@ -513,11 +522,11 @@ mod tests {
     #[tokio::test]
     async fn agent_card_success() {
         let nats = AdvancedMockNatsClient::new();
-        let card = a2a_types::AgentCard {
+        let card = a2a::agent_card::AgentCard {
             name: "BotA".into(),
             description: "desc".into(),
             version: "1.0".into(),
-            capabilities: Some(a2a_types::AgentCapabilities::default()),
+            capabilities: Some(a2a::agent_card::AgentCapabilities::default()),
             ..Default::default()
         };
         nats.set_response(

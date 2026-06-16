@@ -143,16 +143,16 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
-    let mut req = ListTasksRequest {
-        tenant: q.tenant.unwrap_or_default(),
-        ..Default::default()
+    let req = ListTasksRequest {
+        tenant: q.tenant,
+        context_id: None,
+        status: None,
+        page_size: q.page_size,
+        page_token: q.page_token,
+        history_length: None,
+        status_timestamp_after: None,
+        include_artifacts: None,
     };
-    if let Some(size) = q.page_size {
-        req.page_size = Some(size);
-    }
-    if let Some(tok) = q.page_token {
-        req.page_token = tok;
-    }
     match client.tasks_list(&req).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(e) => rest_error_response(&e),
@@ -184,7 +184,7 @@ where
 {
     let req = GetTaskRequest {
         id,
-        tenant: q.tenant.unwrap_or_default(),
+        tenant: q.tenant,
         history_length: q.history_length,
     };
     match client.tasks_get(&req).await {
@@ -216,7 +216,7 @@ where
 {
     let req = CancelTaskRequest {
         id,
-        tenant: q.tenant.unwrap_or_default(),
+        tenant: q.tenant,
         metadata: None,
     };
     match client.tasks_cancel(&req).await {
@@ -308,8 +308,9 @@ where
 {
     let req = ListTaskPushNotificationConfigsRequest {
         task_id: id,
-        tenant: q.tenant.unwrap_or_default(),
-        ..Default::default()
+        tenant: q.tenant,
+        page_size: None,
+        page_token: None,
     };
     match client.push_list(&req).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
@@ -334,7 +335,7 @@ where
     let req = GetTaskPushNotificationConfigRequest {
         task_id: id,
         id: config_id,
-        tenant: String::new(),
+        tenant: None,
     };
     match client.push_get(&req).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
@@ -359,7 +360,7 @@ where
     let req = DeleteTaskPushNotificationConfigRequest {
         task_id: id,
         id: config_id,
-        tenant: String::new(),
+        tenant: None,
     };
     match client.push_delete(&req).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),

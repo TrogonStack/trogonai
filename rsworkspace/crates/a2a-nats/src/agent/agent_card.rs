@@ -60,13 +60,13 @@ where
 async fn parse_and_call<H: A2aHandler>(
     handler: &H,
     payload: &[u8],
-) -> (Option<JsonRpcId>, Result<a2a_types::AgentCard, A2aError>) {
-    let req = match parse_request::<a2a_types::GetExtendedAgentCardRequest>(payload) {
+) -> (Option<JsonRpcId>, Result<a2a::agent_card::AgentCard, A2aError>) {
+    let req = match parse_request::<a2a::types::GetExtendedAgentCardRequest>(payload) {
         Ok(r) => r,
         Err(_) => return (None, Err(A2aError::internal("parse error"))),
     };
     let id = req.id;
-    let params = req.params.unwrap_or_default();
+    let params = req.params.unwrap_or_else(|| a2a::types::GetExtendedAgentCardRequest { tenant: None });
     (id, handler.agent_card(params).await)
 }
 
@@ -96,10 +96,10 @@ mod tests {
     use crate::agent::test_support::{parse_response, rpc_payload, stub};
     use trogon_nats::AdvancedMockNatsClient;
 
-    fn minimal_valid_card(name: &str) -> a2a_types::AgentCard {
-        a2a_types::AgentCard {
+    fn minimal_valid_card(name: &str) -> a2a::agent_card::AgentCard {
+        a2a::agent_card::AgentCard {
             name: name.to_string(),
-            supported_interfaces: vec![a2a_types::AgentInterface {
+            supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),
@@ -159,7 +159,7 @@ mod tests {
     async fn invalid_card_publishes_validation_error() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
-        handler.lock().unwrap().agent_card_result = Some(Ok(a2a_types::AgentCard {
+        handler.lock().unwrap().agent_card_result = Some(Ok(a2a::agent_card::AgentCard {
             name: String::new(),
             ..Default::default()
         }));

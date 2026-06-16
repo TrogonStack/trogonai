@@ -20,8 +20,9 @@ pub use error::ClientError;
 pub use event_stream::TypedEventStream;
 pub use handle::Client;
 
-pub use a2a_types::{
-    AgentCard, CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
+pub use a2a::agent_card::AgentCard;
+pub use a2a::types::{
+    CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest,
     ListTaskPushNotificationConfigsResponse, ListTasksRequest, ListTasksResponse, SendMessageRequest,
     SendMessageResponse, Task, TaskPushNotificationConfig,

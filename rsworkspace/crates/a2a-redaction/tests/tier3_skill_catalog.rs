@@ -1,5 +1,5 @@
 use a2a_redaction::{Redactor, SkillId, WasmBundlePath, WasmRedactorHost};
-use a2a_types::{Message, Part, Role, part};
+use a2a::types::{Message, Part, PartContent, Role};
 
 fn bundled_wasm(name: &str) -> &'static [u8] {
     match name {
@@ -28,7 +28,7 @@ fn host_with_skill(skill_slug: &str, wasm_fixture: &str) -> WasmRedactorHost {
 
 fn text_part(text: &str) -> Part {
     Part {
-        content: Some(part::Content::Text(text.into())),
+        content: PartContent::Text(text.into()),
         ..Default::default()
     }
 }
