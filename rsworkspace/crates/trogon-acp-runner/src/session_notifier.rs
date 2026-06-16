@@ -385,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn subscribe_cancel_and_trigger_fires_receiver() {
         let notifier = MockSessionNotifier::new();
-        let mut sub = notifier.subscribe_cancel("cancel.subj".into()).await;
+        let sub = notifier.subscribe_cancel("cancel.subj".into()).await;
         assert!(sub.is_some(), "subscribe_cancel must return Some");
         let mut sub = sub.unwrap();
         notifier.trigger_cancel();
@@ -396,7 +396,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn cancel_subscription_abort_on_drop() {
-        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+        let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
         let task = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
             let _ = done_tx.send(());

@@ -1850,6 +1850,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 struct HeartbeatGuard(tokio::task::JoinHandle<()>);
 
 impl HeartbeatGuard {
+    #[cfg(test)]
     fn is_finished(&self) -> bool {
         self.0.is_finished()
     }

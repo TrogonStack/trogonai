@@ -2016,7 +2016,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         // has been delivered (don't wait on a possibly-absent
                         // trailing [DONE]).
                         if finished {
-                            drop(stream);
+                            // `stream` is dropped right after the inner loop (and the
+                            // `continue 'outer` paths reinitialize it); no early drop here.
                             if !assembled_calls.is_empty() {
                                 // Tool round: usage consumed; proceed to dispatch.
                                 break;
@@ -2048,7 +2049,6 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     }
                     OpenRouterEvent::Finished { .. } => {}
                     OpenRouterEvent::Done => {
-                        drop(stream);
                         if !assembled_calls.is_empty() {
                             break;
                         }

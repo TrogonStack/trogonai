@@ -3196,7 +3196,7 @@ mod tests {
     /// retrying the run — deterministic errors produce the same outcome on every
     /// attempt, so retrying wastes Anthropic credits without any benefit.
     #[tokio::test]
-    async fn max_tokens_stop_reason_marks_promise_permanent_failed() {
+    async fn max_tokens_continues_generation_instead_of_permanent_fail() {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use crate::tools::mock::MockToolDispatcher;
@@ -3205,13 +3205,19 @@ mod tests {
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("p1"));
 
-        // `max_tokens` is deterministic: the same history will always exhaust
-        // the context window, so the run must be PermanentFailed.
-        let resp = serde_json::json!({
+        // `max_tokens` means the OUTPUT hit the per-request token cap, NOT context
+        // exhaustion. The loop must append the partial assistant turn and CONTINUE
+        // generating (here the continuation finishes with `end_turn`) rather than
+        // PermanentFail, which would silently discard a legitimate long-output run.
+        let truncated = serde_json::json!({
             "stop_reason": "max_tokens",
-            "content": [{"type": "text", "text": "truncated"}]
+            "content": [{"type": "text", "text": "part one"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![resp]));
+        let finished = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "part two"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![truncated, finished]));
         let dispatcher = Arc::new(MockToolDispatcher::new("should not run"));
 
         let agent = make_durable_agent(
@@ -3223,15 +3229,15 @@ mod tests {
 
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
         assert!(
-            matches!(result, Err(AgentError::UnexpectedStopReason(_))),
-            "expected UnexpectedStopReason error"
+            result.is_ok(),
+            "max_tokens must continue generation and complete, not fail; got: {result:?}"
         );
 
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
-        assert_eq!(
+        assert_ne!(
             p.status,
             PromiseStatus::PermanentFailed,
-            "max_tokens must be PermanentFailed — same history always hits the limit"
+            "max_tokens (output-cap truncation) must NOT PermanentFail the run"
         );
     }
 
@@ -5434,10 +5440,11 @@ mod tests {
         let store = Arc::new(HangingUpdateStore::new());
         store.inner.insert_promise(make_test_promise("p1"));
 
-        // "max_tokens" is an unrecognised stop_reason that goes directly to the
-        // `write_promise_terminal` path without any prior checkpoint write.
+        // An unrecognised stop_reason goes directly to the `write_promise_terminal`
+        // path (transient Failed) without any prior checkpoint write. (`max_tokens`
+        // no longer terminates here — it now triggers output continuation instead.)
         let bad_resp = serde_json::json!({
-            "stop_reason": "max_tokens",
+            "stop_reason": "stop_sequence",
             "content": [{"type": "text", "text": "truncated"}]
         });
         let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![bad_resp]));

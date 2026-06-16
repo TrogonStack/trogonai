@@ -479,7 +479,7 @@ impl Scope {
 /// Field grammars:
 /// - `network`: `off` | `on` | `allow:host1,host2,...` (absent => denied)
 /// - `on_exceed`: `escalate` | `deny` (absent => escalate)
-#[derive(Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct ScopeWire {
     #[serde(default)]
     pub write: Vec<String>,

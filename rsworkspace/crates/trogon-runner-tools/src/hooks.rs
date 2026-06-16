@@ -177,7 +177,7 @@ async fn run_one(cmd: &HookCommand, stdin_json: &str) -> HookCmdResult {
                     .await
                     .map_err(|e| format!("hook stdin write error: {e}"))?;
                 drop(stdin);
-                Ok(())
+                Ok::<(), String>(())
             };
             let (write_res, output_res) = tokio::join!(write, child.wait_with_output());
             write_res?;

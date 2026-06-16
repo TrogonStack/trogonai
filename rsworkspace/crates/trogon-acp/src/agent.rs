@@ -1217,6 +1217,7 @@ where
             parent_session_id: Some(src_id.clone()),
             branched_at_index: branch_at,
             tool_policies: src_state.tool_policies.clone(),
+            scope: src_state.scope.clone(),
             egress_policy: src_state.egress_policy.clone(),
             audit_log: vec![],
             terminal_id: None,

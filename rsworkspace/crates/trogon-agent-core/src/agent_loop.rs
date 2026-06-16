@@ -1340,7 +1340,7 @@ fn append_drained_steer_to_content(
     rx: &mut Option<tokio::sync::mpsc::Receiver<String>>,
     content: &mut Vec<ContentBlock>,
 ) {
-    if let Some(ref mut rx) = rx {
+    if let Some(rx) = rx {
         while let Ok(text) = rx.try_recv() {
             content.push(ContentBlock::Text { text });
         }
@@ -1575,6 +1575,12 @@ mod tests {
 
     #[test]
     fn response_has_visible_text_detects_silent_endings() {
+        let tu = |id: &str, name: &str, arg: &str| ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input: serde_json::json!({ "path": arg }),
+            parent_tool_use_id: None,
+        };
         // A response with only tool calls (or only whitespace) is "silent".
         assert!(!response_has_visible_text(&[tu("id1", "bash", "x")]));
         assert!(!response_has_visible_text(&[ContentBlock::Text { text: "   ".into() }]));

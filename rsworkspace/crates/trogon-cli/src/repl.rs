@@ -1309,7 +1309,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             // the model addresses it on its next step. Other runners
                                             // don't subscribe yet, so fall back to front-of-queue so
                                             // the side question is never lost.
-                                            if crate::app::display::runner_label(&prefix) == "claude" {
+                                            if crate::app::runner_label(&prefix) == "claude" {
                                                 eprintln!("\x1b[2m↪ steering: {q}\x1b[0m");
                                                 session.steer(q).await;
                                             } else {
