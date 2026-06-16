@@ -52,7 +52,7 @@ pub(crate) async fn publish_push_delivery_failure<J>(
     prefix: &A2aPrefix,
     caller_id: &CallerId,
     task_id: &A2aTaskId,
-    config: &a2a_types::TaskPushNotificationConfig,
+    config: &a2a::types::TaskPushNotificationConfig,
     notification_payload: &[u8],
     dispatch_error: &DispatchError,
     status_transition_id: StatusTransitionId,
@@ -62,10 +62,11 @@ pub(crate) async fn publish_push_delivery_failure<J>(
 {
     let idempotency_key = PushIdempotencyKey::derive_dlq(task_id, &status_transition_id, config.url.as_str());
 
+    let config_id_str = config.id.as_deref().unwrap_or("");
     if !dedup.try_acquire(&idempotency_key) {
         tracing::info!(
             task_id = %task_id,
-            push_config_id = %config.id,
+            push_config_id = config_id_str,
             idempotency_key = %idempotency_key,
             "push DLQ publish suppressed by in-process dedup gate"
         );
@@ -77,7 +78,7 @@ pub(crate) async fn publish_push_delivery_failure<J>(
     let body = PushDlqMessageV1 {
         schema: PUSH_DLQ_SCHEMA_V1,
         task_id: task_id.as_str(),
-        push_config_id: config.id.as_str(),
+        push_config_id: config_id_str,
         target_url: config.url.as_str(),
         error: dispatch_error.to_string(),
         idempotency_key: idempotency_key.as_str(),
@@ -88,7 +89,7 @@ pub(crate) async fn publish_push_delivery_failure<J>(
         tracing::warn!(
             subject = subject.as_str(),
             task_id = %task_id,
-            push_config_id = %config.id,
+            push_config_id = config_id_str,
             "failed to serialize push DLQ envelope; skipping publish"
         );
         return;
@@ -172,8 +173,8 @@ mod tests {
         A2aPrefix::new("a2a".to_string()).unwrap()
     }
 
-    fn sample_config() -> a2a_types::TaskPushNotificationConfig {
-        a2a_types::TaskPushNotificationConfig {
+    fn sample_config() -> a2a::types::TaskPushNotificationConfig {
+        a2a::types::TaskPushNotificationConfig {
             id: "pcfg-1".to_string(),
             url: "https://example.com/webhook".to_string(),
             ..Default::default()

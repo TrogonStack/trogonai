@@ -13,7 +13,7 @@ use a2a_nats::{A2aAgentId, A2aPrefix, A2aTaskId, Config, NatsConfig, ReqId, comp
 use a2a_nats_discovery::{
     OperatorKeyId, OperatorSignatureGate, parse_operator_keys, resolve_operator_signature_gate, sign_discovery_export,
 };
-use a2a_types::{GetTaskRequest, Message, Part, Role, SendMessageRequest, TaskPushNotificationConfig, TaskState};
+use a2a::types::{GetTaskRequest, Message, Part, Role, SendMessageRequest, TaskPushNotificationConfig, TaskState};
 use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use futures::StreamExt;
@@ -300,24 +300,32 @@ async fn build_context(
 
 async fn run_smoke_jwt_path(ctx: &SmokeContext) -> Result<(), String> {
     let send_req = SendMessageRequest {
-        message: Some(Message {
+        message: Message {
             message_id: uuid::Uuid::new_v4().to_string(),
-            role: Role::User as i32,
+            context_id: None,
+            task_id: None,
+            role: Role::User,
             parts: vec![Part {
-                content: Some(a2a_types::part::Content::Text("smoke".into())),
-                ..Default::default()
+                content: a2a::types::PartContent::Text("smoke".into()),
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
-        }),
-        ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
+        },
+        configuration: None,
+        metadata: None,
+        tenant: None,
     };
 
     let send_resp = tokio::time::timeout(ctx.op_timeout, ctx.client.message_send(&send_req))
         .await
         .map_err(|_| "message/send timed out".to_string())?
         .map_err(|e| e.to_string())?;
-    let task_id = match send_resp.payload {
-        Some(a2a_types::send_message_response::Payload::Task(task)) => task.id,
+    let task_id = match send_resp {
+        a2a::types::SendMessageResponse::Task(task) => task.id,
         _ => return Err("message/send did not return a task".into()),
     };
     info!(%task_id, "message/send completed");
@@ -331,13 +339,14 @@ async fn run_smoke_jwt_path(ctx: &SmokeContext) -> Result<(), String> {
 
     let get_req = GetTaskRequest {
         id: task_id.clone(),
-        ..Default::default()
+        history_length: None,
+        tenant: None,
     };
     let task = tokio::time::timeout(ctx.op_timeout, ctx.client.tasks_get(&get_req))
         .await
         .map_err(|_| "tasks/get timed out".to_string())?
         .map_err(|e| e.to_string())?;
-    if task.status.as_ref().map(|s| s.state) != Some(TaskState::Completed as i32) {
+    if task.status.state != TaskState::Completed {
         return Err(format!("tasks/get task not completed: {:?}", task.status));
     }
     info!(%task_id, "tasks/get completed");
@@ -441,16 +450,24 @@ async fn assert_tier3_refusal(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     let send_req = SendMessageRequest {
-        message: Some(Message {
+        message: Message {
             message_id: uuid::Uuid::new_v4().to_string(),
-            role: Role::User as i32,
+            context_id: None,
+            task_id: None,
+            role: Role::User,
             parts: vec![Part {
-                content: Some(a2a_types::part::Content::Text(TIER3_REFUSE_TRIGGER.into())),
-                ..Default::default()
+                content: a2a::types::PartContent::Text(TIER3_REFUSE_TRIGGER.into()),
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
-        }),
-        ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
+        },
+        configuration: None,
+        metadata: None,
+        tenant: None,
     };
 
     let err = tokio::time::timeout(ctx.op_timeout, ctx.client.message_send(&send_req))
@@ -499,16 +516,24 @@ async fn assert_policy_allow_path(ctx: &SmokeContext) -> Result<(String, String,
         .map_err(|e| e.to_string())?;
 
     let send_req = SendMessageRequest {
-        message: Some(Message {
+        message: Message {
             message_id: uuid::Uuid::new_v4().to_string(),
-            role: Role::User as i32,
+            context_id: None,
+            task_id: None,
+            role: Role::User,
             parts: vec![Part {
-                content: Some(a2a_types::part::Content::Text("smoke-full-ok".into())),
-                ..Default::default()
+                content: a2a::types::PartContent::Text("smoke-full-ok".into()),
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
-        }),
-        ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
+        },
+        configuration: None,
+        metadata: None,
+        tenant: None,
     };
 
     tokio::time::timeout(ctx.op_timeout, ctx.client.message_send(&send_req))
@@ -568,9 +593,11 @@ async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
 
     let push_cfg = TaskPushNotificationConfig {
         task_id: task_id.as_str().to_owned(),
-        id: config_id.clone(),
+        id: Some(config_id.clone()),
         url: target_url.clone(),
-        ..Default::default()
+        token: None,
+        authentication: None,
+        tenant: None,
     };
     tokio::time::timeout(ctx.op_timeout, ctx.client.push_set(&push_cfg))
         .await
@@ -578,16 +605,24 @@ async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|e| format!("push_set: {e}"))?;
 
     let send_req = SendMessageRequest {
-        message: Some(Message {
+        message: Message {
             message_id: format!("{ECHO_TASK_ID_PREFIX}{}", task_id.as_str()),
-            role: Role::User as i32,
+            context_id: None,
+            task_id: None,
+            role: Role::User,
             parts: vec![Part {
-                content: Some(a2a_types::part::Content::Text("smoke-dlq".into())),
-                ..Default::default()
+                content: a2a::types::PartContent::Text("smoke-dlq".into()),
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
-        }),
-        ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
+        },
+        configuration: None,
+        metadata: None,
+        tenant: None,
     };
 
     let (_bootstrap, mut event_stream) = tokio::time::timeout(ctx.op_timeout, ctx.client.message_stream(&send_req))
@@ -642,16 +677,24 @@ async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
 
 async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
     let send_req = SendMessageRequest {
-        message: Some(Message {
+        message: Message {
             message_id: uuid::Uuid::new_v4().to_string(),
-            role: Role::User as i32,
+            context_id: None,
+            task_id: None,
+            role: Role::User,
             parts: vec![Part {
-                content: Some(a2a_types::part::Content::Text("smoke-resubscribe".into())),
-                ..Default::default()
+                content: a2a::types::PartContent::Text("smoke-resubscribe".into()),
+                filename: None,
+                media_type: None,
+                metadata: None,
             }],
-            ..Default::default()
-        }),
-        ..Default::default()
+            metadata: None,
+            extensions: None,
+            reference_task_ids: None,
+        },
+        configuration: None,
+        metadata: None,
+        tenant: None,
     };
 
     let (bootstrap, mut event_stream) = tokio::time::timeout(ctx.op_timeout, ctx.client.message_stream(&send_req))
@@ -659,8 +702,8 @@ async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|_| "message/stream timed out".to_string())?
         .map_err(|e| e.to_string())?;
 
-    let task_id_str = match bootstrap.payload {
-        Some(a2a_types::send_message_response::Payload::Task(task)) => task.id,
+    let task_id_str = match bootstrap {
+        a2a::types::SendMessageResponse::Task(task) => task.id,
         other => return Err(format!("message/stream bootstrap did not return a Task: {other:?}")),
     };
     let task_id = A2aTaskId::new(&task_id_str).map_err(|e| e.to_string())?;
@@ -670,11 +713,8 @@ async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
         .map_err(|_| "timed out waiting for first stream event".to_string())?
         .ok_or("event stream ended before first event".to_string())?
         .map_err(|e| format!("first event error: {e}"))?;
-    if !matches!(
-        first.payload,
-        Some(a2a_types::stream_response::Payload::StatusUpdate(_))
-    ) {
-        return Err(format!("expected StatusUpdate as first event, got {:?}", first.payload));
+    if !matches!(first, a2a::event::StreamResponse::StatusUpdate(_)) {
+        return Err(format!("expected StatusUpdate as first event, got {:?}", first));
     }
 
     let last_seq = event_stream.last_seq();
@@ -694,8 +734,8 @@ async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
         .ok_or("replay stream ended without yielding an event".to_string())?
         .map_err(|e| format!("replay event error: {e}"))?;
 
-    match replayed.payload {
-        Some(a2a_types::stream_response::Payload::Task(task)) => {
+    match replayed {
+        a2a::event::StreamResponse::Task(task) => {
             if task.id != task_id_str {
                 return Err(format!("replayed Task id {} != original {task_id_str}", task.id));
             }
@@ -756,22 +796,29 @@ fn unix_epoch_ms() -> u64 {
 
 #[cfg(test)]
 mod wire_json_shape {
-    use a2a_types::part::Content;
-    use a2a_types::{Message, Part, Role, SendMessageRequest};
+    use a2a::types::{Message, Part, PartContent, Role, SendMessageRequest};
 
     #[test]
     fn message_send_params_json_shape() {
         let req = SendMessageRequest {
-            message: Some(Message {
+            message: Message {
                 message_id: "m1".into(),
-                role: Role::User as i32,
+                context_id: None,
+                task_id: None,
+                role: Role::User,
                 parts: vec![Part {
-                    content: Some(Content::Text("SMOKE_T3_REFUSE_ME".into())),
-                    ..Default::default()
+                    content: PartContent::Text("SMOKE_T3_REFUSE_ME".into()),
+                    filename: None,
+                    media_type: None,
+                    metadata: None,
                 }],
-                ..Default::default()
-            }),
-            ..Default::default()
+                metadata: None,
+                extensions: None,
+                reference_task_ids: None,
+            },
+            configuration: None,
+            metadata: None,
+            tenant: None,
         };
         let params = serde_json::to_value(&req).expect("params");
         eprintln!("params={}", serde_json::to_string_pretty(&params).unwrap());

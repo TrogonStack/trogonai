@@ -1,8 +1,8 @@
-use a2a_types::TaskPushNotificationConfig;
+use a2a::types::TaskPushNotificationConfig;
 
 use crate::push::delivery_semantics::DeliverySemantics;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PushNotificationConfig {
     pub delivery_semantics: DeliverySemantics,
     pub task_push: TaskPushNotificationConfig,

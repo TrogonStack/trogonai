@@ -10,6 +10,7 @@ pub enum AuthCalloutError {
     CredentialVerification(String),
     JwtMint(String),
     WireFormat(String),
+    Internal(String),
 }
 
 impl fmt::Display for AuthCalloutError {
@@ -23,6 +24,7 @@ impl fmt::Display for AuthCalloutError {
             Self::CredentialVerification(msg) => write!(f, "credential verification failed: {msg}"),
             Self::JwtMint(msg) => write!(f, "JWT mint failed: {msg}"),
             Self::WireFormat(msg) => write!(f, "auth callout wire format error: {msg}"),
+            Self::Internal(msg) => write!(f, "internal error: {msg}"),
         }
     }
 }

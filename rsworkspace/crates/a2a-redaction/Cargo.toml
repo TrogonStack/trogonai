@@ -17,7 +17,7 @@ path = "src/bin/sign-bundle.rs"
 workspace = true
 
 [dependencies]
-a2a-types = { workspace = true }
+a2a = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
@@ -29,5 +29,5 @@ tracing = { workspace = true }
 wasmtime = { workspace = true }
 
 [dev-dependencies]
-a2a-types = { workspace = true }
+a2a = { workspace = true }
 tempfile = { workspace = true }

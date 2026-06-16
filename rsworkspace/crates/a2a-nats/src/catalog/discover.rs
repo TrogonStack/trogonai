@@ -39,7 +39,7 @@ impl std::fmt::Display for DiscoverSubject {
     }
 }
 
-fn success_reply(card: &a2a_types::AgentCard) -> Option<Bytes> {
+fn success_reply(card: &a2a::agent_card::AgentCard) -> Option<Bytes> {
     let value = serde_json::to_value(card).ok()?;
     if !accept_agent_card_on_read(&value, AgentCardSource::DiscoverResponse) {
         return None;
@@ -330,10 +330,10 @@ mod tests {
         assert!(e.to_string().contains("x"));
     }
 
-    fn minimal_valid_card(name: &str) -> a2a_types::AgentCard {
-        a2a_types::AgentCard {
+    fn minimal_valid_card(name: &str) -> a2a::agent_card::AgentCard {
+        a2a::agent_card::AgentCard {
             name: name.to_string(),
-            supported_interfaces: vec![a2a_types::AgentInterface {
+            supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn success_reply_none_when_card_fails_read_validation() {
-        let card = a2a_types::AgentCard {
+        let card = a2a::agent_card::AgentCard {
             name: String::new(),
             ..Default::default()
         };

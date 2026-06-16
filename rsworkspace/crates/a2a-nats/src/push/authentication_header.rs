@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use a2a_types::AuthenticationInfo;
+use a2a::types::AuthenticationInfo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthenticationHeaderBuildError {
@@ -43,7 +43,7 @@ pub fn authorization_header_value(
         return Err(AuthenticationHeaderBuildError::MissingScheme);
     }
 
-    let credentials = auth.credentials.trim();
+    let credentials = auth.credentials.as_deref().unwrap_or("").trim();
     let scheme_lc = scheme_raw.to_ascii_lowercase();
 
     match scheme_lc.as_str() {

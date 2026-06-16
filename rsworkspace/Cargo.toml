@@ -76,9 +76,20 @@ k8s-openapi = { version = "=0.24.0", features = ["v1_30"] }
 schemars = { version = "=0.8.22", features = ["derive"] }
 
 # A2A
-a2a-types = { version = "=0.2.0" }
+a2a = { package = "a2a-lf", version = "=0.3.0" }
 
 wasmtime = "=45.0.0"
+
+# Buffa (proto serialization used by trogon-scheduler and trogon-proto)
+buffa = { version = "=0.7.0", features = ["json"] }
+buffa-types = { version = "=0.7.0", features = ["json"] }
+
+# Error handling
+anyhow = "=1.0.102"
+thiserror = "=2.0.18"
+
+# Internal crates also used by trogon-scheduler / trogonai-proto
+trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }

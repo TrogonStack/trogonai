@@ -22,8 +22,8 @@ where
 async fn parse_and_call<H: A2aHandler>(
     handler: &H,
     payload: &[u8],
-) -> (Option<JsonRpcId>, Result<a2a_types::Task, A2aError>) {
-    let req = match parse_request::<a2a_types::GetTaskRequest>(payload) {
+) -> (Option<JsonRpcId>, Result<a2a::types::Task, A2aError>) {
+    let req = match parse_request::<a2a::types::GetTaskRequest>(payload) {
         Ok(r) => r,
         Err(_) => return (None, Err(A2aError::internal("parse error"))),
     };
@@ -39,7 +39,7 @@ async fn send_reply<N: trogon_nats::PublishClient>(
     nats: &N,
     reply: &str,
     id: Option<JsonRpcId>,
-    result: Result<a2a_types::Task, A2aError>,
+    result: Result<a2a::types::Task, A2aError>,
 ) {
     let bytes = match result {
         Ok(resp) => JsonRpcResponse::new(id, resp).to_bytes(),

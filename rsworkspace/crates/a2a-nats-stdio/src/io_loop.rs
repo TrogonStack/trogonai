@@ -139,14 +139,17 @@ mod tests {
     }
 
     fn task_response(task_id: &str) -> Bytes {
-        let task = a2a_types::Task {
+        let task = a2a::types::Task {
             id: task_id.to_string(),
-            status: Some(a2a_types::TaskStatus {
-                state: a2a_types::TaskState::Completed.into(),
+            context_id: String::new(),
+            status: a2a::types::TaskStatus {
+                state: a2a::types::TaskState::Completed,
                 message: None,
                 timestamp: None,
-            }),
-            ..Default::default()
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
         };
         serde_json::to_vec(&serde_json::json!({
             "jsonrpc": "2.0", "id": "x", "result": task

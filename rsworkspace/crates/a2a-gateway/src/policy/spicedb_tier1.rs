@@ -12,7 +12,6 @@ use a2a_nats::catalog::import_gate::{
 use a2a_nats::catalog::spicedb_permission::{
     AgentViewCheckOutcome, AgentViewGate, LiveAgentViewGate, SpiceDbSessionCache, SpiceDbSessionKey,
 };
-use a2a_pack::resource_tuples::{Tier1A2aMethodSlug, Tier1ResourceTupleTable};
 use async_trait::async_trait;
 use authzed::v1::check_bulk_permissions_pair;
 use authzed::v1::check_permission_response::Permissionship;
@@ -32,7 +31,6 @@ pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SE
 
 const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
 
-static TIER1_RESOURCE_TUPLE_TABLE: LazyLock<Tier1ResourceTupleTable> = LazyLock::new(Tier1ResourceTupleTable::bundled);
 
 pub use a2a_pack::resource_tuples::{
     Tier1DeriveError, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple, Tier1ResourceType,
@@ -78,20 +76,6 @@ pub fn a2a_method_from_dots(method_dots: &str) -> Option<A2aMethod> {
         "agent.card" => Some(A2aMethod::AgentCard),
         _ => None,
     }
-}
-
-pub fn derive_tuple(
-    method: &A2aMethod,
-    agent_id: &A2aAgentId,
-    publisher_account: &str,
-    params: &Value,
-) -> Result<Tier1ResourceTuple, Tier1DeriveError> {
-    TIER1_RESOURCE_TUPLE_TABLE.derive(
-        &Tier1A2aMethodSlug::new(method.as_str()),
-        agent_id.as_str(),
-        publisher_account,
-        params,
-    )
 }
 
 fn task_id_from_params(params: &Value) -> Option<String> {

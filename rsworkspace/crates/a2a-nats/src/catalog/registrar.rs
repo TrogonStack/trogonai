@@ -75,10 +75,10 @@ impl RegisterPayloadError {
     }
 }
 
-fn parse_register_payload(payload: &[u8]) -> Result<a2a_types::AgentCard, RegisterPayloadError> {
+fn parse_register_payload(payload: &[u8]) -> Result<a2a::agent_card::AgentCard, RegisterPayloadError> {
     let value: serde_json::Value = serde_json::from_slice(payload).map_err(RegisterPayloadError::JsonParse)?;
     a2a_pack::validate_agent_card_value(&value).map_err(RegisterPayloadError::Schema)?;
-    serde_json::from_value::<a2a_types::AgentCard>(value).map_err(RegisterPayloadError::ValueParse)
+    serde_json::from_value::<a2a::agent_card::AgentCard>(value).map_err(RegisterPayloadError::ValueParse)
 }
 
 fn catalog_store_json_rpc(error: CatalogStoreError) -> (i32, String) {
@@ -240,10 +240,10 @@ mod tests {
         A2aAgentId::new(s).unwrap()
     }
 
-    fn card(name: &str) -> a2a_types::AgentCard {
-        a2a_types::AgentCard {
+    fn card(name: &str) -> a2a::agent_card::AgentCard {
+        a2a::agent_card::AgentCard {
             name: name.to_string(),
-            supported_interfaces: vec![a2a_types::AgentInterface {
+            supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),

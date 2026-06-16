@@ -221,6 +221,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
                             &config,
                             tier1_layer.gate.as_ref(),
                             tier1_layer.owner_emitter.as_ref(),
+                            tier1_declarative_layer.gate.as_ref(),
                             &policy_stack,
                             &message_caller_identity,
                             caller_identity_policy,
@@ -253,6 +254,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
     config: &Config,
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
+    tier1_declarative: &dyn Tier1DeclarativeGate,
     policy: &GatewayPolicyStack,
     message_caller_identity: &JwtHeaderCallerIdentitySource,
     caller_identity_policy: crate::jwt_caller_identity::GatewayCallerIdentityPolicy,
@@ -323,14 +325,18 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
 
                 let mut tier1_zed_token: Option<String> = None;
+                let caller_slug: Option<String> = Some(
+                    audit_caller_id
+                        .split_once('/')
+                        .map(|(_, id)| id)
+                        .unwrap_or(audit_caller_id.as_str())
+                        .to_owned(),
+                );
                 if tier1.is_enabled() {
                     let publisher_account = std::env::var("A2A_GATEWAY_JWT_AUDIENCE")
                         .unwrap_or_else(|_| config.a2a_prefix.as_str().to_owned());
-                    let caller_slug = audit_caller_id
-                        .split_once('/')
-                        .map(|(_, id)| id)
-                        .unwrap_or(audit_caller_id.as_str());
-                    let principal = tier1_principal_from_caller(caller_slug, publisher_account.as_str());
+                    let caller_slug_str = caller_slug.as_deref().unwrap_or("");
+                    let principal = tier1_principal_from_caller(caller_slug_str, publisher_account.as_str());
                     let Some(session) = tier1_session_from_principal(&principal, publisher_account.as_str()) else {
                         tracing::Span::current().record("routing_outcome", "tier1_denied");
                         deny_tier1(
@@ -467,7 +473,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     }
                 }
 
-                let mut tier1_declarative_audit: Option<String> = None;
+                let mut _tier1_declarative_audit: Option<String> = None;
                 if tier1_declarative.is_enabled()
                     && let Some(declarative_ctx) = tier1_declarative_context_from_ingress(
                         method_dots.as_str(),
@@ -478,7 +484,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     )
                 {
                     let decision = tier1_declarative.evaluate(&declarative_ctx);
-                    tier1_declarative_audit = Some(tier1_declarative_audit_rule_fired(&decision));
+                    _tier1_declarative_audit = Some(tier1_declarative_audit_rule_fired(&decision));
                     if let Tier1DeclarativeDecision::Deny { rule } = decision {
                         let rule_fired = format!("gateway.tier1.declarative.denied.{}", rule.as_str());
                         tracing::Span::current().record("routing_outcome", "policy_denied");
@@ -684,7 +690,6 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     trace_id: Some(trace_id.clone()),
                                     rules_fired: Some(vec![format!("gateway.tier3.refused.{}", rule.as_str())]),
                                     rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
-                                    refusal_skill: Some(rule.as_str().to_owned()),
                                     tier3_decision: Some(Tier3Decision::Refuse),
                                     ..Default::default()
                                 },

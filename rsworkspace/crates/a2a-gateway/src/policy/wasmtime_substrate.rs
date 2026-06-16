@@ -1,5 +1,5 @@
 use a2a_redaction::{Ed25519PublicKey, Redactor, SkillId, WasmBundlePath, wasm::WasmRedactorHost};
-use a2a_types::{Artifact, Message};
+use a2a::types::{Artifact, Message};
 
 use crate::policy::error::PolicyError;
 use crate::policy::tier2::{NoopTier2Evaluator, Tier2CelEvaluator};
@@ -52,9 +52,8 @@ mod tests {
 
     use super::*;
     use crate::policy::tier2::{Tier2Decision, Tier2EvaluationContext};
+    use a2a::types::{Artifact, PartContent, Role};
     use a2a_redaction::{SkillId, WasmBundlePath};
-    use a2a_types::part;
-    use a2a_types::{Artifact, Role};
 
     fn fixture_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../a2a-redaction/tests/fixtures/identity_redact_part.wasm")
@@ -73,8 +72,8 @@ mod tests {
         let msg_in = Message {
             message_id: "m".into(),
             role: Role::Agent.into(),
-            parts: vec![a2a_types::Part {
-                content: Some(part::Content::Text("x".into())),
+            parts: vec![a2a::types::Part {
+                content: PartContent::Text("x".into()),
                 ..Default::default()
             }],
             ..Default::default()
@@ -89,8 +88,8 @@ mod tests {
 
         let art_in = Artifact {
             artifact_id: "a".into(),
-            parts: vec![a2a_types::Part {
-                content: Some(part::Content::Text("blob".into())),
+            parts: vec![a2a::types::Part {
+                content: PartContent::Text("blob".into()),
                 ..Default::default()
             }],
             ..Default::default()

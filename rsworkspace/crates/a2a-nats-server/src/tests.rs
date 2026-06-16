@@ -218,12 +218,21 @@ async fn tasks_list_returns_jsonrpc_result() {
 #[tokio::test]
 async fn agent_card_endpoint_returns_json() {
     let nats = AdvancedMockNatsClient::new();
-    let card = a2a_types::AgentCard {
+    let card = a2a::agent_card::AgentCard {
         name: "TestBot".into(),
         description: "A test agent".into(),
         version: "1.0.0".into(),
-        capabilities: Some(a2a_types::AgentCapabilities::default()),
-        ..Default::default()
+        supported_interfaces: vec![],
+        capabilities: a2a::agent_card::AgentCapabilities::default(),
+        default_input_modes: vec![],
+        default_output_modes: vec![],
+        skills: vec![],
+        provider: None,
+        documentation_url: None,
+        icon_url: None,
+        security_schemes: None,
+        security_requirements: None,
+        signatures: None,
     };
     let envelope = serde_json::json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
     nats.set_response(

@@ -167,7 +167,7 @@ fn push_transport_retryable(error: &reqwest::Error) -> bool {
 }
 
 pub(crate) fn maybe_terminal_push_idempotency_key(
-    config: &a2a_types::TaskPushNotificationConfig,
+    config: &a2a::types::TaskPushNotificationConfig,
     task_id: &A2aTaskId,
     semantics: &DeliverySemantics,
     terminal_state: TerminalPushTaskState,
@@ -175,7 +175,7 @@ pub(crate) fn maybe_terminal_push_idempotency_key(
     if !semantics.idempotency_key_required() {
         return Ok(None);
     }
-    let cid = PushNotificationConfigId::new(config.id.clone()).map_err(DispatchPrepError::PushConfigId)?;
+    let cid = PushNotificationConfigId::new(config.id.clone().unwrap_or_default()).map_err(DispatchPrepError::PushConfigId)?;
     Ok(Some(PushIdempotencyKey::derive_terminal(task_id, &cid, terminal_state)))
 }
 
@@ -184,7 +184,7 @@ pub trait PushDispatcher: Send + Sync + 'static {
     async fn dispatch(
         &self,
         task_id: &A2aTaskId,
-        config: &a2a_types::TaskPushNotificationConfig,
+        config: &a2a::types::TaskPushNotificationConfig,
         delivery_semantics: DeliverySemantics,
         terminal_task_state: TerminalPushTaskState,
         payload: &[u8],
@@ -206,7 +206,7 @@ impl PushDispatcher for HttpPushDispatcher {
     async fn dispatch(
         &self,
         task_id: &A2aTaskId,
-        config: &a2a_types::TaskPushNotificationConfig,
+        config: &a2a::types::TaskPushNotificationConfig,
         delivery_semantics: DeliverySemantics,
         terminal_task_state: TerminalPushTaskState,
         payload: &[u8],
@@ -302,7 +302,7 @@ where
     async fn dispatch(
         &self,
         task_id: &A2aTaskId,
-        config: &a2a_types::TaskPushNotificationConfig,
+        config: &a2a::types::TaskPushNotificationConfig,
         delivery_semantics: DeliverySemantics,
         terminal_task_state: TerminalPushTaskState,
         payload: &[u8],
@@ -357,7 +357,7 @@ where
     async fn dispatch(
         &self,
         task_id: &A2aTaskId,
-        config: &a2a_types::TaskPushNotificationConfig,
+        config: &a2a::types::TaskPushNotificationConfig,
         delivery_semantics: DeliverySemantics,
         terminal_task_state: TerminalPushTaskState,
         payload: &[u8],
@@ -411,7 +411,7 @@ impl PushDispatcher for CompositePushDispatcher {
     async fn dispatch(
         &self,
         task_id: &A2aTaskId,
-        config: &a2a_types::TaskPushNotificationConfig,
+        config: &a2a::types::TaskPushNotificationConfig,
         delivery_semantics: DeliverySemantics,
         terminal_task_state: TerminalPushTaskState,
         payload: &[u8],
@@ -524,7 +524,7 @@ pub mod tests {
                     A2aTaskId,
                     DeliverySemantics,
                     TerminalPushTaskState,
-                    a2a_types::TaskPushNotificationConfig,
+                    a2a::types::TaskPushNotificationConfig,
                     Vec<u8>,
                 )>,
             >,
@@ -559,7 +559,7 @@ pub mod tests {
             A2aTaskId,
             DeliverySemantics,
             TerminalPushTaskState,
-            a2a_types::TaskPushNotificationConfig,
+            a2a::types::TaskPushNotificationConfig,
             Vec<u8>,
         )> {
             self.calls.lock().unwrap().clone()
@@ -571,7 +571,7 @@ pub mod tests {
         async fn dispatch(
             &self,
             task_id: &A2aTaskId,
-            config: &a2a_types::TaskPushNotificationConfig,
+            config: &a2a::types::TaskPushNotificationConfig,
             delivery_semantics: DeliverySemantics,
             terminal_task_state: TerminalPushTaskState,
             payload: &[u8],
@@ -590,8 +590,8 @@ pub mod tests {
         }
     }
 
-    fn push_config(url: &str) -> a2a_types::TaskPushNotificationConfig {
-        a2a_types::TaskPushNotificationConfig {
+    fn push_config(url: &str) -> a2a::types::TaskPushNotificationConfig {
+        a2a::types::TaskPushNotificationConfig {
             id: "cfg-1".to_string(),
             task_id: "task-99".into(),
             url: url.to_string(),

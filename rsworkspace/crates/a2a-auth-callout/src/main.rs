@@ -11,8 +11,8 @@ use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
 use a2a_auth_callout::{
     AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
 };
-use a2a_auth_callout::{AccountResolver, StaticAccountResolver, Subscriber};
 
+#[allow(dead_code)]
 const DEFAULT_CALLOUT_ISSUER: &str = "AUTH_CALLOUT_DEV_ISSUER";
 
 const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;

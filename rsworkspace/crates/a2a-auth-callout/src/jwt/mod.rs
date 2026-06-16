@@ -169,6 +169,13 @@ impl SigningKey {
     pub(crate) fn keypair(&self) -> &nkeys::KeyPair {
         &self.0
     }
+
+    /// Returns a `jsonwebtoken::EncodingKey` for HS256 signing using the raw seed bytes.
+    pub fn encoding_key(&self) -> jsonwebtoken::EncodingKey {
+        // The seed bytes are used as the HMAC secret for HS256 denial JWTs.
+        let seed_bytes = self.0.seed().unwrap_or_default();
+        jsonwebtoken::EncodingKey::from_secret(seed_bytes.as_bytes())
+    }
 }
 
 #[derive(Debug)]
