@@ -52,7 +52,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
+    use crate::server::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
     };
     use agent_client_protocol::{Agent, ErrorCode, LoadSessionRequest, LoadSessionResponse};
@@ -83,7 +83,7 @@ mod tests {
     #[tokio::test]
     async fn load_session_returns_error_when_response_is_invalid_json() {
         let (_mock, js, bridge) = mock_bridge();
-        crate::agent::test_support::set_js_raw_response(&js, b"not json");
+        crate::server::test_support::set_js_raw_response(&js, b"not json");
 
         let request = LoadSessionRequest::new("s1", ".");
         let err = bridge.load_session(request).await.unwrap_err();

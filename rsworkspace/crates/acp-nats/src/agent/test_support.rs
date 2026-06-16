@@ -1,4 +1,4 @@
-use crate::agent::Bridge;
+use crate::server::Bridge;
 use crate::config::Config;
 use jsonrpc_nats::{Message, ResponseId};
 use opentelemetry::Value;

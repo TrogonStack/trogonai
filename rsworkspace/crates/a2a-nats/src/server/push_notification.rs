@@ -1,7 +1,7 @@
 use tracing::{instrument, warn};
 
-use crate::agent::handler::{A2aError, A2aHandler};
-use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 use crate::push::PushDeliverySemanticsRegistry;
 use crate::push::delivery_semantics::{
@@ -341,7 +341,7 @@ async fn send_error<N: trogon_nats::PublishClient>(nats: &N, reply: &str, id: Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::test_support::{parse_response, rpc_payload, stub};
+    use crate::server::test_support::{parse_response, rpc_payload, stub};
     use crate::push::delivery_semantics::DeliverySemantics;
     use crate::task_id::A2aTaskId;
     use trogon_nats::AdvancedMockNatsClient;

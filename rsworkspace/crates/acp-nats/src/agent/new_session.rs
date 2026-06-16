@@ -47,7 +47,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::test_support::{
+    use crate::server::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use crate::error::AGENT_UNAVAILABLE;

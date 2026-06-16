@@ -108,7 +108,7 @@ mod tests {
     use agent_client_protocol::PromptResponse;
     use trogon_nats::jetstream::mocks::*;
 
-    use crate::agent::test_support::MockJs;
+    use crate::server::test_support::MockJs;
     use crate::req_id::ReqId;
     use crate::session_id::AcpSessionId;
 
