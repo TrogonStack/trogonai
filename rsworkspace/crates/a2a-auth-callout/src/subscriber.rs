@@ -1,11 +1,13 @@
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use futures::StreamExt as _;
 use tracing::{error, info, warn};
 
+use crate::denial_claims::CalloutIssuer;
 use crate::dispatcher::AuthDispatcher;
 use crate::error::AuthCalloutError;
+use crate::jwt::SigningKey;
 use crate::wire::AuthCalloutWireCodec;
 
 /// NATS subject the server uses for auth callout requests.

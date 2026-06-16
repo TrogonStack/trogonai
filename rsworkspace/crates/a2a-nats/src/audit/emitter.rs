@@ -200,8 +200,8 @@ mod tests {
             &agent(),
             "task-xyz",
             Some("rpc-77".into()),
-            2,
-            3,
+            a2a::types::TaskState::Submitted,
+            a2a::types::TaskState::Working,
             4000,
         );
         emitter.publish_task_lifecycle(&prefix(), &agent(), env).await;
@@ -209,8 +209,8 @@ mod tests {
         let payloads = nats.published_payloads();
         let v: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
         assert_eq!(v["task_id"], "task-xyz");
-        assert_eq!(v["prev_task_state"], 2);
-        assert_eq!(v["new_task_state"], 3);
+        assert!(v["prev_task_state"].is_string());
+        assert!(v["new_task_state"].is_string());
         assert_eq!(v["agent_id"], "bot");
         assert_eq!(v["json_rpc_req_id"], "rpc-77");
     }

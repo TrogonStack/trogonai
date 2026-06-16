@@ -514,7 +514,7 @@ mod tests {
     async fn dispatch_message_send_routes_to_handler() {
         let nats = AdvancedMockNatsClient::new();
         let handler_stub = stub();
-        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a_types::SendMessageResponse { payload: None }));
+        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a::types::SendMessageResponse { payload: None }));
         let handler = Arc::new(handler_stub);
         let in_flight = InFlightTasks::default();
         let prefix = crate::a2a_prefix::A2aPrefix::new("a2a".to_string()).unwrap();
@@ -586,84 +586,84 @@ mod tests {
         impl crate::agent::handler::A2aHandler for BlockingHandler {
             async fn message_send(
                 &self,
-                _req: a2a_types::SendMessageRequest,
-            ) -> Result<a2a_types::SendMessageResponse, crate::agent::handler::A2aError> {
+                _req: a2a::types::SendMessageRequest,
+            ) -> Result<a2a::types::SendMessageResponse, crate::agent::handler::A2aError> {
                 self.in_flight_count.fetch_add(1, Ordering::SeqCst);
                 let _permit = self.gate.acquire().await.unwrap();
                 self.in_flight_count.fetch_sub(1, Ordering::SeqCst);
                 self.completed_count.fetch_add(1, Ordering::SeqCst);
-                Ok(a2a_types::SendMessageResponse { payload: None })
+                Ok(a2a::types::SendMessageResponse { payload: None })
             }
 
             async fn message_stream(
                 &self,
-                _req: a2a_types::SendMessageRequest,
-            ) -> Result<(a2a_types::Task, crate::agent::handler::TaskEventStream), crate::agent::handler::A2aError>
+                _req: a2a::types::SendMessageRequest,
+            ) -> Result<(a2a::types::Task, crate::agent::handler::TaskEventStream), crate::agent::handler::A2aError>
             {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_get(
                 &self,
-                _req: a2a_types::GetTaskRequest,
-            ) -> Result<a2a_types::Task, crate::agent::handler::A2aError> {
+                _req: a2a::types::GetTaskRequest,
+            ) -> Result<a2a::types::Task, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_list(
                 &self,
-                _req: a2a_types::ListTasksRequest,
-            ) -> Result<a2a_types::ListTasksResponse, crate::agent::handler::A2aError> {
+                _req: a2a::types::ListTasksRequest,
+            ) -> Result<a2a::types::ListTasksResponse, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_cancel(
                 &self,
-                _req: a2a_types::CancelTaskRequest,
-            ) -> Result<a2a_types::Task, crate::agent::handler::A2aError> {
+                _req: a2a::types::CancelTaskRequest,
+            ) -> Result<a2a::types::Task, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn tasks_resubscribe(
                 &self,
-                _req: a2a_types::SubscribeToTaskRequest,
-            ) -> Result<a2a_types::Task, crate::agent::handler::A2aError> {
+                _req: a2a::types::SubscribeToTaskRequest,
+            ) -> Result<a2a::types::Task, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_set(
                 &self,
-                _req: a2a_types::TaskPushNotificationConfig,
-            ) -> Result<a2a_types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
+                _req: a2a::types::TaskPushNotificationConfig,
+            ) -> Result<a2a::types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_get(
                 &self,
-                _req: a2a_types::GetTaskPushNotificationConfigRequest,
-            ) -> Result<a2a_types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
+                _req: a2a::types::GetTaskPushNotificationConfigRequest,
+            ) -> Result<a2a::types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_list(
                 &self,
-                _req: a2a_types::ListTaskPushNotificationConfigsRequest,
-            ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, crate::agent::handler::A2aError>
+                _req: a2a::types::ListTaskPushNotificationConfigsRequest,
+            ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, crate::agent::handler::A2aError>
             {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn push_notification_delete(
                 &self,
-                _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+                _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
             ) -> Result<(), crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
             async fn agent_card(
                 &self,
-                _req: a2a_types::GetExtendedAgentCardRequest,
-            ) -> Result<a2a_types::AgentCard, crate::agent::handler::A2aError> {
+                _req: a2a::types::GetExtendedAgentCardRequest,
+            ) -> Result<a2a::agent_card::AgentCard, crate::agent::handler::A2aError> {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
         }
@@ -750,7 +750,7 @@ mod tests {
         let inject = nats.inject_messages();
 
         let handler_stub = stub();
-        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a_types::SendMessageResponse { payload: None }));
+        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a::types::SendMessageResponse { payload: None }));
 
         let config = Config::for_test("a2a").with_max_concurrent_client_tasks(1);
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));

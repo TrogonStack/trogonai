@@ -81,7 +81,7 @@ pub async fn list_cards_federated_gated<K, G, S, F, B>(
     principal: &SpiceDbPrincipal,
     imported_source: F,
     export_binding: B,
-) -> Result<Vec<a2a_types::AgentCard>, CatalogStoreError>
+) -> Result<Vec<a2a::agent_card::AgentCard>, CatalogStoreError>
 where
     K: trogon_nats::jetstream::JetStreamKvGet
         + trogon_nats::jetstream::JetStreamKvEntry
@@ -94,7 +94,7 @@ where
         + 'static,
     G: ImportGate + Sync,
     S: OperatorSignatureGate + Sync,
-    F: Fn(&A2aAgentId, &a2a_types::AgentCard) -> Option<ImportedAccountName> + Send + Sync,
+    F: Fn(&A2aAgentId, &a2a::agent_card::AgentCard) -> Option<ImportedAccountName> + Send + Sync,
     B: Fn(&ImportedAccountName) -> Option<FederatedExportBinding> + Send + Sync,
 {
     let pairs = store.list_cards().await?;
@@ -156,10 +156,10 @@ mod tests {
         sign_discovery_export,
     };
 
-    fn minimal_card(display_name: &str) -> a2a_types::AgentCard {
-        a2a_types::AgentCard {
+    fn minimal_card(display_name: &str) -> a2a::agent_card::AgentCard {
+        a2a::agent_card::AgentCard {
             name: display_name.to_string(),
-            supported_interfaces: vec![a2a_types::AgentInterface {
+            supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),

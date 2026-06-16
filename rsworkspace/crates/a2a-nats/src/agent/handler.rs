@@ -8,7 +8,7 @@ use crate::error::{
     UNSUPPORTED_OPERATION, VERSION_NOT_SUPPORTED,
 };
 
-pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a_types::StreamResponse, A2aError>> + Send + 'static>>;
+pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a::event::StreamResponse, A2aError>> + Send + 'static>>;
 
 /// Error returned by an [`A2aHandler`] implementation and mapped to a JSON-RPC error response.
 #[derive(Debug)]
@@ -81,7 +81,7 @@ impl std::error::Error for A2aError {}
 /// Handler trait implemented by agent authors.
 ///
 /// Every method maps 1-to-1 to an A2A JSON-RPC operation. For `message/stream`, the handler
-/// returns a stream of [`a2a_types::StreamResponse`] items; the bridge consumes that stream,
+/// returns a stream of [`a2a::event::StreamResponse`] items; the bridge consumes that stream,
 /// publishes each item to `TaskEventsSubject` via JetStream, and sends the initial bootstrap
 /// reply once the task ID is known (first item that contains a task or status must carry it).
 ///
@@ -91,48 +91,48 @@ impl std::error::Error for A2aError {}
 pub trait A2aHandler: Send + Sync + 'static {
     async fn message_send(
         &self,
-        request: a2a_types::SendMessageRequest,
-    ) -> Result<a2a_types::SendMessageResponse, A2aError>;
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<a2a::types::SendMessageResponse, A2aError>;
 
     /// Bootstrap a streaming task. Returns the initial task envelope immediately and then
-    /// yields [`a2a_types::StreamResponse`] events until the task reaches a terminal state.
+    /// yields [`a2a::event::StreamResponse`] events until the task reaches a terminal state.
     async fn message_stream(
         &self,
-        request: a2a_types::SendMessageRequest,
-    ) -> Result<(a2a_types::Task, TaskEventStream), A2aError>;
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError>;
 
-    async fn tasks_get(&self, request: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError>;
+    async fn tasks_get(&self, request: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError>;
 
-    async fn tasks_list(&self, request: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError>;
+    async fn tasks_list(&self, request: a2a::types::ListTasksRequest) -> Result<a2a::types::ListTasksResponse, A2aError>;
 
-    async fn tasks_cancel(&self, request: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError>;
+    async fn tasks_cancel(&self, request: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError>;
 
-    async fn tasks_resubscribe(&self, request: a2a_types::SubscribeToTaskRequest) -> Result<a2a_types::Task, A2aError>;
+    async fn tasks_resubscribe(&self, request: a2a::types::SubscribeToTaskRequest) -> Result<a2a::types::Task, A2aError>;
 
     async fn push_notification_set(
         &self,
-        request: a2a_types::TaskPushNotificationConfig,
-    ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError>;
+        request: a2a::types::TaskPushNotificationConfig,
+    ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError>;
 
     async fn push_notification_get(
         &self,
-        request: a2a_types::GetTaskPushNotificationConfigRequest,
-    ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError>;
+        request: a2a::types::GetTaskPushNotificationConfigRequest,
+    ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError>;
 
     async fn push_notification_list(
         &self,
-        request: a2a_types::ListTaskPushNotificationConfigsRequest,
-    ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError>;
+        request: a2a::types::ListTaskPushNotificationConfigsRequest,
+    ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError>;
 
     async fn push_notification_delete(
         &self,
-        request: a2a_types::DeleteTaskPushNotificationConfigRequest,
+        request: a2a::types::DeleteTaskPushNotificationConfigRequest,
     ) -> Result<(), A2aError>;
 
     async fn agent_card(
         &self,
-        request: a2a_types::GetExtendedAgentCardRequest,
-    ) -> Result<a2a_types::AgentCard, A2aError>;
+        request: a2a::types::GetExtendedAgentCardRequest,
+    ) -> Result<a2a::agent_card::AgentCard, A2aError>;
 }
 
 #[cfg(test)]

@@ -66,10 +66,10 @@ mod catalog_list_tests {
         }
     }
 
-    fn minimal_card(display_name: &str) -> a2a_types::AgentCard {
-        a2a_types::AgentCard {
+    fn minimal_card(display_name: &str) -> a2a::agent_card::AgentCard {
+        a2a::agent_card::AgentCard {
             name: display_name.to_string(),
-            supported_interfaces: vec![a2a_types::AgentInterface {
+            supported_interfaces: vec![a2a::agent_card::AgentInterface {
                 url: "https://example.com/a2a".to_string(),
                 protocol_binding: "JSONRPC".to_string(),
                 protocol_version: "0.2.0".to_string(),

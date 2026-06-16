@@ -1,5 +1,5 @@
-use a2a_types::stream_response::Payload;
-use a2a_types::{StreamResponse, TaskState};
+use a2a::event::StreamResponse;
+use a2a::types::TaskState;
 
 /// Terminal task state emitted on the `message/stream` status update path (`PushDispatcher` eligibility).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,11 +21,10 @@ impl TerminalPushTaskState {
     }
 
     pub fn from_stream_terminal_response(ev: &StreamResponse) -> Option<Self> {
-        let Payload::StatusUpdate(update) = ev.payload.as_ref()? else {
+        let StreamResponse::StatusUpdate(update) = ev else {
             return None;
         };
-        let state = update.status.as_ref().map(|s| s.state).unwrap_or(0);
-        match TaskState::try_from(state).ok()? {
+        match update.status.state {
             TaskState::Completed => Some(Self::Completed),
             TaskState::Failed => Some(Self::Failed),
             TaskState::Canceled => Some(Self::Canceled),

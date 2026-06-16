@@ -35,7 +35,6 @@ pub use signing_key_source::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
     SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, signing_key_source_from_process_env,
 };
-pub use permissions::{IssuedPermissions, SubjectPattern, SubjectPatternError};
 pub use subscriber::Subscriber;
 pub use wire::{
     AUTH_REQUEST_AUDIENCE, AUTH_REQUEST_XKEY_HEADER, AuthCalloutWireCodec, CalloutAuthResponseClaims, NkeyPublic,

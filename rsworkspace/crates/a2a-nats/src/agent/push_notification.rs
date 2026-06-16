@@ -112,7 +112,7 @@ pub async fn handle_set<H, N>(
         }
     };
 
-    let proto_cfg: a2a_types::TaskPushNotificationConfig = match serde_json::from_value(serde_json::Value::Object(map))
+    let proto_cfg: a2a::types::TaskPushNotificationConfig = match serde_json::from_value(serde_json::Value::Object(map))
     {
         Ok(c) => c,
         Err(e) => {
@@ -134,14 +134,15 @@ pub async fn handle_set<H, N>(
                 upsert_delivery_semantics_on_push_config_json_object(o, &requested_semantics);
             }
 
+            let cfg_id_opt = resp.id.as_deref().unwrap_or("");
             match (
                 A2aTaskId::new(resp.task_id.clone()),
-                PushNotificationConfigId::new(resp.id.clone()),
+                PushNotificationConfigId::new(cfg_id_opt),
             ) {
                 (Ok(tid), Ok(cid)) => semantics_registry.set(tid, cid, requested_semantics),
                 _ => warn!(
                     task_id = resp.task_id,
-                    cfg_id = resp.id.as_str(),
+                    cfg_id = cfg_id_opt,
                     "push semantics registry skipped due to malformed ids after successful set",
                 ),
             }
@@ -279,7 +280,7 @@ pub async fn handle_delete<H, N>(
         return;
     };
 
-    let req = match parse_request::<a2a_types::DeleteTaskPushNotificationConfigRequest>(payload) {
+    let req = match parse_request::<a2a::types::DeleteTaskPushNotificationConfigRequest>(payload) {
         Ok(r) => r,
         Err(_) => {
             send_error(nats, &reply, None, A2aError::internal("parse error")).await;
@@ -350,7 +351,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let semantics = PushDeliverySemanticsRegistry::default();
         let handler = stub();
-        handler.lock().unwrap().push_set_result = Some(Ok(a2a_types::TaskPushNotificationConfig {
+        handler.lock().unwrap().push_set_result = Some(Ok(a2a::types::TaskPushNotificationConfig {
             id: "cfg1".into(),
             task_id: "t1".into(),
             ..Default::default()
@@ -394,7 +395,7 @@ mod tests {
         let semantics = PushDeliverySemanticsRegistry::default();
         let handler = stub();
         handler.lock().unwrap().push_list_result =
-            Some(Ok(a2a_types::ListTaskPushNotificationConfigsResponse::default()));
+            Some(Ok(a2a::types::ListTaskPushNotificationConfigsResponse::default()));
         handle_list(
             &handler,
             &rpc_payload("tasks/pushNotificationConfig/list", 3),

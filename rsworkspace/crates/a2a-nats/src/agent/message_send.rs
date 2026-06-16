@@ -29,8 +29,8 @@ where
 async fn parse_and_call<H: A2aHandler>(
     handler: &H,
     payload: &[u8],
-) -> (Option<JsonRpcId>, Result<a2a_types::SendMessageResponse, A2aError>) {
-    let req = match parse_request::<a2a_types::SendMessageRequest>(payload) {
+) -> (Option<JsonRpcId>, Result<a2a::types::SendMessageResponse, A2aError>) {
+    let req = match parse_request::<a2a::types::SendMessageRequest>(payload) {
         Ok(r) => r,
         Err(_) => return (None, Err(A2aError::internal("parse error"))),
     };
@@ -64,62 +64,62 @@ mod tests {
     impl A2aHandler for OkHandler {
         async fn message_send(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<a2a_types::SendMessageResponse, A2aError> {
-            Ok(a2a_types::SendMessageResponse { payload: None })
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<a2a::types::SendMessageResponse, A2aError> {
+            Ok(a2a::types::SendMessageResponse { payload: None })
         }
         async fn message_stream(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<(a2a_types::Task, crate::agent::handler::TaskEventStream), A2aError> {
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<(a2a::types::Task, crate::agent::handler::TaskEventStream), A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_get(&self, _req: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_list(
             &self,
-            _req: a2a_types::ListTasksRequest,
-        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
+            _req: a2a::types::ListTasksRequest,
+        ) -> Result<a2a::types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_cancel(&self, _req: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_resubscribe(
             &self,
-            _req: a2a_types::SubscribeToTaskRequest,
-        ) -> Result<a2a_types::Task, A2aError> {
+            _req: a2a::types::SubscribeToTaskRequest,
+        ) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_set(
             &self,
-            _req: a2a_types::TaskPushNotificationConfig,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::TaskPushNotificationConfig,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_get(
             &self,
-            _req: a2a_types::GetTaskPushNotificationConfigRequest,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::GetTaskPushNotificationConfigRequest,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_list(
             &self,
-            _req: a2a_types::ListTaskPushNotificationConfigsRequest,
-        ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError> {
+            _req: a2a::types::ListTaskPushNotificationConfigsRequest,
+        ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_delete(
             &self,
-            _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+            _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
         ) -> Result<(), A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn agent_card(
             &self,
-            _req: a2a_types::GetExtendedAgentCardRequest,
-        ) -> Result<a2a_types::AgentCard, A2aError> {
+            _req: a2a::types::GetExtendedAgentCardRequest,
+        ) -> Result<a2a::agent_card::AgentCard, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
     }
@@ -128,62 +128,62 @@ mod tests {
     impl A2aHandler for ErrHandler {
         async fn message_send(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<a2a_types::SendMessageResponse, A2aError> {
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<a2a::types::SendMessageResponse, A2aError> {
             Err(A2aError::task_not_found("no task"))
         }
         async fn message_stream(
             &self,
-            _req: a2a_types::SendMessageRequest,
-        ) -> Result<(a2a_types::Task, crate::agent::handler::TaskEventStream), A2aError> {
+            _req: a2a::types::SendMessageRequest,
+        ) -> Result<(a2a::types::Task, crate::agent::handler::TaskEventStream), A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_get(&self, _req: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_list(
             &self,
-            _req: a2a_types::ListTasksRequest,
-        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
+            _req: a2a::types::ListTasksRequest,
+        ) -> Result<a2a::types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
+        async fn tasks_cancel(&self, _req: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_resubscribe(
             &self,
-            _req: a2a_types::SubscribeToTaskRequest,
-        ) -> Result<a2a_types::Task, A2aError> {
+            _req: a2a::types::SubscribeToTaskRequest,
+        ) -> Result<a2a::types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_set(
             &self,
-            _req: a2a_types::TaskPushNotificationConfig,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::TaskPushNotificationConfig,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_get(
             &self,
-            _req: a2a_types::GetTaskPushNotificationConfigRequest,
-        ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
+            _req: a2a::types::GetTaskPushNotificationConfigRequest,
+        ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_list(
             &self,
-            _req: a2a_types::ListTaskPushNotificationConfigsRequest,
-        ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError> {
+            _req: a2a::types::ListTaskPushNotificationConfigsRequest,
+        ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn push_notification_delete(
             &self,
-            _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+            _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
         ) -> Result<(), A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn agent_card(
             &self,
-            _req: a2a_types::GetExtendedAgentCardRequest,
-        ) -> Result<a2a_types::AgentCard, A2aError> {
+            _req: a2a::types::GetExtendedAgentCardRequest,
+        ) -> Result<a2a::agent_card::AgentCard, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
     }

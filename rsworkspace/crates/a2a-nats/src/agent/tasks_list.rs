@@ -37,8 +37,8 @@ where
 async fn parse_and_call<H: A2aHandler>(
     handler: &H,
     payload: &[u8],
-) -> (Option<JsonRpcId>, Result<a2a_types::ListTasksResponse, A2aError>) {
-    let req = match parse_request::<a2a_types::ListTasksRequest>(payload) {
+) -> (Option<JsonRpcId>, Result<a2a::types::ListTasksResponse, A2aError>) {
+    let req = match parse_request::<a2a::types::ListTasksRequest>(payload) {
         Ok(r) => r,
         Err(_) => return (None, Err(A2aError::internal("parse error"))),
     };
@@ -60,7 +60,7 @@ mod tests {
     async fn success_publishes_result() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
-        handler.lock().unwrap().tasks_list_result = Some(Ok(a2a_types::ListTasksResponse {
+        handler.lock().unwrap().tasks_list_result = Some(Ok(a2a::types::ListTasksResponse {
             tasks: vec![],
             ..Default::default()
         }));

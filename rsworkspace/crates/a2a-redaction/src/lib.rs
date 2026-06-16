@@ -4,6 +4,7 @@ pub mod noop;
 pub mod redactor;
 pub mod signed_bundle;
 pub mod skill_id;
+pub mod skill_manifest;
 pub mod tier3_sentinel;
 pub mod wasm;
 pub mod wasm_bundle_path;

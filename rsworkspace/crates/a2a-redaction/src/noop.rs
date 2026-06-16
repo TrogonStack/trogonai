@@ -7,7 +7,7 @@ impl Redactor for NoopRedactor {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_types::{Artifact, Message, Role};
+    use a2a::types::{Artifact, Message, Role};
 
     use crate::skill_id::SkillId;
 
@@ -17,8 +17,8 @@ mod tests {
         let msg = Message {
             message_id: "mid".into(),
             role: Role::User.into(),
-            parts: vec![a2a_types::Part {
-                content: Some(a2a_types::part::Content::Text("hello".into())),
+            parts: vec![a2a::types::Part {
+                content: a2a::types::PartContent::Text("hello".into()),
                 ..Default::default()
             }],
             ..Default::default()

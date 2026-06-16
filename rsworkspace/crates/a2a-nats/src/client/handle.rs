@@ -1,6 +1,7 @@
 use a2a_auth_callout::MintedUserJwt;
-use a2a_types::{
-    AgentCard, CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
+use a2a::agent_card::AgentCard;
+use a2a::types::{
+    CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest,
     ListTaskPushNotificationConfigsResponse, ListTasksRequest, ListTasksResponse, SendMessageRequest,
     SendMessageResponse, SubscribeToTaskRequest, Task, TaskPushNotificationConfig,
@@ -202,7 +203,7 @@ where
         let subject =
             self.outbound_rpc_subject(TasksResubscribeSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        let req = SubscribeToTaskRequest { id: task_id.as_str().to_owned(), tenant: String::new() };
+        let req = SubscribeToTaskRequest { id: task_id.as_str().to_owned(), tenant: None };
         let snapshot: Task =
             send_unary(
                 &self.nats,
@@ -287,7 +288,7 @@ where
     pub async fn agent_card(&self) -> Result<AgentCard, ClientError> {
         let subject = self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        let req = GetExtendedAgentCardRequest { tenant: String::new() };
+        let req = GetExtendedAgentCardRequest { tenant: None };
         send_unary(
             &self.nats,
             &subject,
@@ -315,7 +316,7 @@ mod tests {
 
     use super::*;
     use a2a_auth_callout::test_support::mint_test_user_jwt;
-    use a2a_types::{Task, TaskState, TaskStatus};
+    use a2a::types::{Task, TaskState, TaskStatus};
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
@@ -337,12 +338,15 @@ mod tests {
     fn task_response(task_id: &str) -> bytes::Bytes {
         let task = Task {
             id: task_id.to_string(),
-            status: Some(TaskStatus {
-                state: TaskState::Completed.into(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Completed,
                 message: None,
                 timestamp: None,
-            }),
-            ..Default::default()
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
         };
         let json = serde_json::json!({
             "jsonrpc": "2.0",
@@ -355,16 +359,17 @@ mod tests {
     fn send_message_response_bytes(task_id: &str) -> bytes::Bytes {
         let task = Task {
             id: task_id.to_string(),
-            status: Some(TaskStatus {
-                state: TaskState::Working.into(),
+            context_id: String::new(),
+            status: TaskStatus {
+                state: TaskState::Working,
                 message: None,
                 timestamp: None,
-            }),
-            ..Default::default()
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
         };
-        let response = SendMessageResponse {
-            payload: Some(a2a_types::send_message_response::Payload::Task(task)),
-        };
+        let response = SendMessageResponse::Task(task);
         let json = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "ignored",
@@ -455,9 +460,9 @@ mod tests {
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = SendMessageRequest {
-            message: Some(a2a_types::Message {
+            message: Some(a2a::types::Message {
                 message_id: "msg-1".into(),
-                role: a2a_types::Role::User.into(),
+                role: a2a::types::Role::User,
                 parts: vec![],
                 ..Default::default()
             }),
@@ -479,9 +484,9 @@ mod tests {
 
         let client = make_client(nats, js);
         let req = SendMessageRequest {
-            message: Some(a2a_types::Message {
+            message: Some(a2a::types::Message {
                 message_id: "msg-2".into(),
-                role: a2a_types::Role::User.into(),
+                role: a2a::types::Role::User,
                 parts: vec![],
                 ..Default::default()
             }),
@@ -532,7 +537,7 @@ mod tests {
             name: "TestBot".into(),
             description: "A test bot".into(),
             version: "1.0.0".into(),
-            capabilities: Some(a2a_types::AgentCapabilities::default()),
+            capabilities: Some(a2a::agent_card::AgentCapabilities::default()),
             ..Default::default()
         };
         let json = serde_json::json!({
@@ -572,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_list_success() {
         let nats = AdvancedMockNatsClient::new();
-        let list_response = a2a_types::ListTasksResponse {
+        let list_response = a2a::types::ListTasksResponse {
             tasks: vec![],
             next_page_token: String::new(),
             page_size: 0,

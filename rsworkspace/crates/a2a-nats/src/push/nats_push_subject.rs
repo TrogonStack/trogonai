@@ -4,7 +4,7 @@ use trogon_nats::{DottedNatsToken, SubjectTokenViolation};
 
 /// Validated NATS subject for push notification delivery.
 ///
-/// Wire form: `subject:{subject}` in [`TaskPushNotificationConfig`](a2a_types::TaskPushNotificationConfig)::url.
+/// Wire form: `subject:{subject}` in [`TaskPushNotificationConfig`](a2a::types::TaskPushNotificationConfig)::url.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NatsPushSubject(DottedNatsToken);
 
