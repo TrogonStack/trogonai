@@ -9,11 +9,11 @@
 use std::fmt;
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::agent::wire::JsonRpcErrorResponse;
+use crate::server::wire::JsonRpcErrorResponse;
 use crate::agent_id::A2aAgentId;
 
 /// Recognized dotted method suffix tokens after `{prefix}.agent.{agent_id}.` /
-/// ingress remainder (same spelling as [`crate::agent::dispatch::A2aMethod`] mapping).
+/// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
 ///
 /// Listed longest-first so `tasks.push_notification_config.*` wins over `tasks.*`.
 pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[

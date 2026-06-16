@@ -1,9 +1,3 @@
-//! Server-side error surface for A2A handler implementations.
-//!
-//! The `A2aExecutor` trait that handler implementations satisfy grows method-by-method
-//! as each operation lands in its own PR. This file ships the error type those methods
-//! return and the streaming alias `message/stream` and `tasks/resubscribe` reach for.
-
 use std::pin::Pin;
 
 use futures::Stream;
@@ -16,21 +10,14 @@ use crate::error::{
 
 pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a::event::StreamResponse, A2aError>> + Send + 'static>>;
 
-/// Error returned by an `A2aExecutor` implementation and mapped to a JSON-RPC error response.
-#[derive(Debug, thiserror::Error)]
-#[error("[{code}] {message}")]
+/// Error returned by an [`A2aHandler`] implementation and mapped to a JSON-RPC error response.
+#[derive(Debug)]
 pub struct A2aError {
     pub code: i32,
     pub message: String,
 }
 
 impl A2aError {
-    /// Construct an error with an arbitrary JSON-RPC code.
-    ///
-    /// Prefer the typed helpers below (`task_not_found`, `task_not_cancelable`, …) for
-    /// spec-defined codes. This constructor is the escape hatch for codes the protocol
-    /// adds before this crate ships matching helpers; tracked for a typed `A2aErrorCode`
-    /// value object in a follow-up that restricts construction to known codes.
     pub fn new(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -83,37 +70,44 @@ impl A2aError {
     }
 }
 
+impl std::fmt::Display for A2aError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for A2aError {}
+
 /// Handler trait implemented by agent authors.
 ///
-/// Methods land per operation in their own PR so each operation's request/response
-/// contract is reviewed on its own. `#[async_trait]` is applied so handler objects can be
-/// stored as `Box<dyn A2aExecutor>` or referenced generically without hand-rolling the
-/// trait bounds.
+/// Every method maps 1-to-1 to an A2A JSON-RPC operation. For `message/stream`, the handler
+/// returns a stream of [`a2a::event::StreamResponse`] items; the bridge consumes that stream,
+/// publishes each item to `TaskEventsSubject` via JetStream, and sends the initial bootstrap
+/// reply once the task ID is known (first item that contains a task or status must carry it).
+///
+/// `#[async_trait]` is applied so handler objects can be stored as `Box<dyn A2aHandler>` or
+/// referenced generically without hand-rolling the trait bounds.
 #[async_trait::async_trait]
-pub trait A2aExecutor: Send + Sync + 'static {
-    async fn agent_card(
-        &self,
-        request: a2a::types::GetExtendedAgentCardRequest,
-    ) -> Result<a2a::agent_card::AgentCard, A2aError>;
-
+pub trait A2aHandler: Send + Sync + 'static {
     async fn message_send(
         &self,
         request: a2a::types::SendMessageRequest,
     ) -> Result<a2a::types::SendMessageResponse, A2aError>;
 
+    /// Bootstrap a streaming task. Returns the initial task envelope immediately and then
+    /// yields [`a2a::event::StreamResponse`] events until the task reaches a terminal state.
+    async fn message_stream(
+        &self,
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError>;
+
     async fn tasks_get(&self, request: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError>;
 
-    async fn tasks_list(
-        &self,
-        request: a2a::types::ListTasksRequest,
-    ) -> Result<a2a::types::ListTasksResponse, A2aError>;
+    async fn tasks_list(&self, request: a2a::types::ListTasksRequest) -> Result<a2a::types::ListTasksResponse, A2aError>;
 
     async fn tasks_cancel(&self, request: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError>;
 
-    async fn tasks_resubscribe(
-        &self,
-        request: a2a::types::SubscribeToTaskRequest,
-    ) -> Result<a2a::types::Task, A2aError>;
+    async fn tasks_resubscribe(&self, request: a2a::types::SubscribeToTaskRequest) -> Result<a2a::types::Task, A2aError>;
 
     async fn push_notification_set(
         &self,
@@ -135,14 +129,10 @@ pub trait A2aExecutor: Send + Sync + 'static {
         request: a2a::types::DeleteTaskPushNotificationConfigRequest,
     ) -> Result<(), A2aError>;
 
-    /// Bootstrap a streaming task. Returns the initial task envelope (used as the
-    /// JSON-RPC bootstrap reply) and a stream of [`a2a::event::StreamResponse`] items;
-    /// the dispatch handler publishes each item on the JetStream task-events subject
-    /// until the task reaches a terminal state.
-    async fn message_stream(
+    async fn agent_card(
         &self,
-        request: a2a::types::SendMessageRequest,
-    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError>;
+        request: a2a::types::GetExtendedAgentCardRequest,
+    ) -> Result<a2a::agent_card::AgentCard, A2aError>;
 }
 
 #[cfg(test)]
@@ -150,14 +140,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_carries_code_and_message() {
-        let e = A2aError::new(-32000, "boom");
-        assert_eq!(e.code, -32000);
-        assert_eq!(e.message, "boom");
+    fn a2a_error_new() {
+        let e = A2aError::new(-32001, "task not found");
+        assert_eq!(e.code, -32001);
+        assert_eq!(e.message, "task not found");
     }
 
     #[test]
-    fn helpers_use_their_spec_codes() {
+    fn a2a_error_display() {
+        let e = A2aError::new(-32001, "msg");
+        assert_eq!(e.to_string(), "[-32001] msg");
+    }
+
+    #[test]
+    fn a2a_error_constructors() {
         assert_eq!(A2aError::task_not_found("x").code, TASK_NOT_FOUND);
         assert_eq!(A2aError::task_not_cancelable("x").code, TASK_NOT_CANCELABLE);
         assert_eq!(
@@ -184,16 +180,8 @@ mod tests {
     }
 
     #[test]
-    fn display_includes_code_and_message() {
-        assert_eq!(
-            format!("{}", A2aError::task_not_found("missing")),
-            format!("[{TASK_NOT_FOUND}] missing")
-        );
-    }
-
-    #[test]
-    fn implements_std_error() {
-        let e: Box<dyn std::error::Error> = Box::new(A2aError::internal("oops"));
+    fn a2a_error_implements_std_error() {
+        let e: Box<dyn std::error::Error> = Box::new(A2aError::new(-32001, "oops"));
         assert!(e.to_string().contains("oops"));
     }
 }

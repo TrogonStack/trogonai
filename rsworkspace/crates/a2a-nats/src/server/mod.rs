@@ -1,27 +1,21 @@
-//! Server-side scaffolding for A2A handlers.
-//!
-//! Operations land in later PRs; this slice ships the wire framing and error
-//! surface every handler will reach for.
+mod agent_card;
+mod bridge;
+mod dispatch;
+mod handler;
+mod message_send;
+mod message_stream;
+mod principal_carrier;
+mod push_notification;
+mod tasks_cancel;
+mod tasks_get;
+mod tasks_list;
+mod tasks_resubscribe;
+pub(crate) mod wire;
 
-pub mod agent_card;
-pub mod bridge;
-pub mod dispatch;
-pub mod handler;
-pub mod message_send;
-pub mod message_stream;
-pub mod push_delete;
-pub mod push_get;
-pub mod push_list;
-pub mod push_set;
-pub mod tasks_cancel;
-pub mod tasks_get;
-pub mod tasks_list;
-pub mod tasks_resubscribe;
 #[cfg(test)]
-pub mod test_support;
-pub mod wire;
+pub(crate) mod test_support;
 
 pub use bridge::{Bridge, BridgeError};
 pub use dispatch::A2aMethod;
-pub use handler::{A2aError, A2aExecutor, TaskEventStream};
-pub use wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+pub use handler::{A2aError, A2aHandler, TaskEventStream};
+pub use principal_carrier::PrincipalCarrier;

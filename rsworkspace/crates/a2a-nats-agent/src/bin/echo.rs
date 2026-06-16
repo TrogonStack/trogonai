@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use a2a_nats::agent::{A2aError, A2aHandler, TaskEventStream};
+use a2a_nats::server::{A2aError, A2aHandler, TaskEventStream};
 use a2a::event::{StreamResponse, TaskStatusUpdateEvent};
 use a2a::types::{
     GetTaskRequest, Message, Part, PartContent, Role, SendMessageResponse, Task, TaskPushNotificationConfig,

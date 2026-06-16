@@ -1,22 +1,19 @@
-//! Shared test scaffolding for `server/<op>.rs` modules.
-//!
-//! `StubHandler` grows a result slot per operation as each per-op PR lands.
+use crate::server::handler::{A2aError, A2aHandler, TaskEventStream};
 
-use crate::server::handler::{A2aError, A2aExecutor, TaskEventStream};
-
+/// A minimal handler that always returns an error for every method.
+/// Tests override only the method they care about by wrapping this.
 #[derive(Default)]
 pub struct StubHandler {
-    pub agent_card_result: Option<Result<a2a::agent_card::AgentCard, A2aError>>,
     pub message_send_result: Option<Result<a2a::types::SendMessageResponse, A2aError>>,
     pub tasks_get_result: Option<Result<a2a::types::Task, A2aError>>,
     pub tasks_list_result: Option<Result<a2a::types::ListTasksResponse, A2aError>>,
     pub tasks_cancel_result: Option<Result<a2a::types::Task, A2aError>>,
     pub tasks_resubscribe_result: Option<Result<a2a::types::Task, A2aError>>,
+    pub agent_card_result: Option<Result<a2a::agent_card::AgentCard, A2aError>>,
     pub push_set_result: Option<Result<a2a::types::TaskPushNotificationConfig, A2aError>>,
     pub push_get_result: Option<Result<a2a::types::TaskPushNotificationConfig, A2aError>>,
     pub push_list_result: Option<Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError>>,
     pub push_delete_result: Option<Result<(), A2aError>>,
-    pub message_stream_result: Option<Result<(a2a::types::Task, TaskEventStream), A2aError>>,
 }
 
 fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T, A2aError> {
@@ -25,19 +22,19 @@ fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T,
 }
 
 #[async_trait::async_trait]
-impl A2aExecutor for std::sync::Mutex<StubHandler> {
-    async fn agent_card(
-        &self,
-        _req: a2a::types::GetExtendedAgentCardRequest,
-    ) -> Result<a2a::agent_card::AgentCard, A2aError> {
-        take_or_unimplemented(&mut self.lock().unwrap().agent_card_result)
-    }
-
+impl A2aHandler for std::sync::Mutex<StubHandler> {
     async fn message_send(
         &self,
         _req: a2a::types::SendMessageRequest,
     ) -> Result<a2a::types::SendMessageResponse, A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().message_send_result)
+    }
+
+    async fn message_stream(
+        &self,
+        _req: a2a::types::SendMessageRequest,
+    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError> {
+        Err(A2aError::unsupported_operation("stub not configured"))
     }
 
     async fn tasks_get(&self, _req: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError> {
@@ -84,16 +81,28 @@ impl A2aExecutor for std::sync::Mutex<StubHandler> {
         take_or_unimplemented(&mut self.lock().unwrap().push_delete_result)
     }
 
-    async fn message_stream(
-        &self,
-        _req: a2a::types::SendMessageRequest,
-    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError> {
-        take_or_unimplemented(&mut self.lock().unwrap().message_stream_result)
+    async fn agent_card(&self, _req: a2a::types::GetExtendedAgentCardRequest) -> Result<a2a::agent_card::AgentCard, A2aError> {
+        take_or_unimplemented(&mut self.lock().unwrap().agent_card_result)
     }
 }
 
 pub fn stub() -> std::sync::Mutex<StubHandler> {
     std::sync::Mutex::new(StubHandler::default())
+}
+
+pub fn make_task(id: &str) -> a2a::types::Task {
+    a2a::types::Task {
+        id: id.to_string(),
+        context_id: String::new(),
+        status: a2a::types::TaskStatus {
+            state: a2a::types::TaskState::Unspecified,
+            message: None,
+            timestamp: None,
+        },
+        artifacts: None,
+        history: None,
+        metadata: None,
+    }
 }
 
 pub fn rpc_payload(method: &str, id: i64) -> Vec<u8> {
