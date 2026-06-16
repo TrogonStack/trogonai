@@ -1,10 +1,10 @@
-use a2a_nats::server::{A2aError, A2aHandler, TaskEventStream};
+use a2a_nats::server::{A2aError, A2aExecutor, TaskEventStream};
 use tracing::error;
 
 struct NoopHandler;
 
 #[async_trait::async_trait]
-impl A2aHandler for NoopHandler {
+impl A2aExecutor for NoopHandler {
     async fn message_send(
         &self,
         _req: a2a::types::SendMessageRequest,

@@ -1,4 +1,4 @@
-use crate::server::handler::{A2aError, A2aHandler, TaskEventStream};
+use crate::server::handler::{A2aError, A2aExecutor, TaskEventStream};
 
 /// A minimal handler that always returns an error for every method.
 /// Tests override only the method they care about by wrapping this.
@@ -22,7 +22,7 @@ fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T,
 }
 
 #[async_trait::async_trait]
-impl A2aHandler for std::sync::Mutex<StubHandler> {
+impl A2aExecutor for std::sync::Mutex<StubHandler> {
     async fn message_send(
         &self,
         _req: a2a::types::SendMessageRequest,

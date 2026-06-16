@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use a2a_nats::client::Client;
+use a2a_nats::client::A2aClient;
 use axum::Router;
 use axum::extract::Request;
 use axum::http::Uri;
@@ -15,7 +15,7 @@ use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck,
 use crate::headers::{SpecNegotiationConfig, negotiate};
 use crate::{handlers, rest};
 
-pub fn build<N, J>(client: Client<N, J>) -> Router
+pub fn build<N, J>(client: A2aClient<N, J>) -> Router
 where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,
@@ -29,7 +29,7 @@ where
     build_with_negotiation(client, Arc::new(SpecNegotiationConfig::default()))
 }
 
-pub fn build_with_negotiation<N, J>(client: Client<N, J>, negotiation: Arc<SpecNegotiationConfig>) -> Router
+pub fn build_with_negotiation<N, J>(client: A2aClient<N, J>, negotiation: Arc<SpecNegotiationConfig>) -> Router
 where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,

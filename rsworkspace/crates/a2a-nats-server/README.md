@@ -1,6 +1,6 @@
 # a2a-nats-server
 
-Axum HTTP adapter that exposes A2A JSON-RPC (and SSE for streaming) via the in-tree **`a2a_nats::Client`**. Targets local agents behind NATS; this is **not** the future HTTPS cross-binding bridge (**`a2a-bridge`**, see [A2A architecture](../../../docs/a2a/explanation/architecture.md)).
+Axum HTTP adapter that exposes A2A JSON-RPC (and SSE for streaming) via the in-tree **`a2a_nats::A2aClient`**. Targets local agents behind NATS; this is **not** the future HTTPS cross-binding bridge (**`a2a-bridge`**, see [A2A architecture](../../../docs/a2a/explanation/architecture.md)).
 
 ## Run
 

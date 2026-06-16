@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{instrument, warn};
 
 use crate::server::PrincipalCarrier;
-use crate::server::handler::{A2aError, A2aHandler};
+use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::agent_id::A2aAgentId;
 use crate::audit::emitter::AuditEmitter;
@@ -69,7 +69,7 @@ pub async fn handle<H, N, J, D>(
     push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) -> Option<(A2aTaskId, tokio::task::JoinHandle<()>)>
 where
-    H: A2aHandler,
+    H: A2aExecutor,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + 'static,
     D: PushDispatcher + ?Sized,
@@ -192,7 +192,7 @@ async fn pump_events<J, H, D>(
     push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
-    H: A2aHandler,
+    H: A2aExecutor,
     D: PushDispatcher + ?Sized,
 {
     let mut prev_task_state = bootstrap_task_state;
@@ -311,7 +311,7 @@ async fn dispatch_push_notifications<H, D, J>(
     push_dlq_caller_id: &CallerId,
     push_dlq_dedup: &PushDlqDedupGate,
 ) where
-    H: A2aHandler,
+    H: A2aExecutor,
     D: PushDispatcher + ?Sized,
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
@@ -433,7 +433,7 @@ mod tests {
 
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
-    use crate::server::handler::{A2aError, A2aHandler, TaskEventStream};
+    use crate::server::handler::{A2aError, A2aExecutor, TaskEventStream};
     use crate::server::test_support::{make_task, parse_response, rpc_payload};
     use crate::agent_id::A2aAgentId;
     use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl A2aHandler for StreamingHandler {
+    impl A2aExecutor for StreamingHandler {
         async fn message_send(
             &self,
             _req: a2a::types::SendMessageRequest,
@@ -534,7 +534,7 @@ mod tests {
     struct FailingStreamHandler;
 
     #[async_trait::async_trait]
-    impl A2aHandler for FailingStreamHandler {
+    impl A2aExecutor for FailingStreamHandler {
         async fn message_stream(
             &self,
             _req: a2a::types::SendMessageRequest,
