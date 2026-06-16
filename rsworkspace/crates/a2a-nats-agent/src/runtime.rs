@@ -1,4 +1,4 @@
-use a2a_nats::server::{A2aHandler, Bridge};
+use a2a_nats::server::{A2aExecutor, Bridge};
 use a2a_nats::jetstream::{StreamProvisionOptions, provision_streams_with_options};
 use a2a_nats::{
     A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,
@@ -38,7 +38,7 @@ impl std::error::Error for RuntimeError {}
 
 pub async fn run_with_env<H, E>(handler: H, env: &E) -> Result<(), RuntimeError>
 where
-    H: A2aHandler,
+    H: A2aExecutor,
     E: ReadEnv,
 {
     let prefix_raw = env
@@ -171,7 +171,7 @@ mod tests {
     struct StubHandler;
 
     #[async_trait::async_trait]
-    impl A2aHandler for StubHandler {
+    impl A2aExecutor for StubHandler {
         async fn message_send(
             &self,
             _req: a2a::types::SendMessageRequest,

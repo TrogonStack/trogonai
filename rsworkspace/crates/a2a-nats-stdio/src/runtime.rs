@@ -1,6 +1,6 @@
 use std::fmt;
 
-use a2a_nats::client::Client;
+use a2a_nats::client::A2aClient;
 use a2a_nats::{
     A2aAgentId, A2aPrefixError, AgentIdError, Config, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout,
 };
@@ -80,7 +80,7 @@ pub async fn run() -> Result<(), RuntimeError> {
     let config = Config::new(prefix, nats_config);
     let config = apply_timeout_overrides(config, &env);
 
-    let client = Client::new(config, agent_id, nats_client, js_client);
+    let client = A2aClient::new(config, agent_id, nats_client, js_client);
 
     run_io_loop(client, tokio::io::stdin(), tokio::io::stdout(), shutdown_signal()).await;
 

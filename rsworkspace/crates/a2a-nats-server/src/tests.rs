@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use a2a_auth_callout::test_support::mint_test_user_jwt;
-use a2a_nats::client::Client;
+use a2a_nats::client::A2aClient;
 use a2a_nats::{A2aAgentId, Config, NatsConfig};
 use axum::body::{Body, to_bytes};
 use axum::http::header::CONTENT_TYPE;
@@ -33,7 +33,7 @@ fn gateway_test_caller_jwt() -> a2a_nats::client::MintedUserJwt {
 
 fn build_app(nats: AdvancedMockNatsClient) -> axum::Router {
     let js = MockJetStreamConsumerFactory::new();
-    let client = Client::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
     router::build(client)
 }
 
@@ -241,7 +241,7 @@ async fn agent_card_endpoint_returns_json() {
     );
 
     let js = MockJetStreamConsumerFactory::new();
-    let client = Client::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
     let app = router::build(client);
 
     let response = app
@@ -272,7 +272,7 @@ async fn message_stream_returns_sse_content_type() {
     let (consumer, _tx) = trogon_nats::jetstream::mocks::MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let client = Client::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
     let app = router::build(client);
 
     let response = app
@@ -301,7 +301,7 @@ async fn agent_card_unavailable_returns_503() {
     );
 
     let js = MockJetStreamConsumerFactory::new();
-    let client = Client::new(test_config(), test_agent_id(), nats, js);
+    let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
     let app = router::build(client);
 
     let response = app
@@ -372,7 +372,7 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
 
     let js = MockJetStreamConsumerFactory::new();
     let client =
-        Client::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress(gateway_test_caller_jwt());
+        A2aClient::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress(gateway_test_caller_jwt());
     let app = router::build(client);
 
     let response = app
@@ -397,7 +397,7 @@ async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
 
     let js = MockJetStreamConsumerFactory::new();
     let client =
-        Client::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress(gateway_test_caller_jwt());
+        A2aClient::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress(gateway_test_caller_jwt());
     let app = router::build(client);
 
     let response = app
@@ -441,7 +441,7 @@ fn client_error_to_jsonrpc_code_maps_known_errors() {
 mod spec_negotiation {
     use std::sync::Arc;
 
-    use a2a_nats::client::Client;
+    use a2a_nats::client::A2aClient;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use serde_json::Value;
@@ -458,7 +458,7 @@ mod spec_negotiation {
         let nats = AdvancedMockNatsClient::new();
         nats.set_response("a2a.agent.test-agent.message.send", send_message_response_bytes("t1"));
         let js = MockJetStreamConsumerFactory::new();
-        let client = Client::new(test_config(), test_agent_id(), nats, js);
+        let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
         router::build_with_negotiation(client, Arc::new(config))
     }
 

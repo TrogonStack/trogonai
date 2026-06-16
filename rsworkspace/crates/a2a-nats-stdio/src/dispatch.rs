@@ -1,5 +1,5 @@
 use a2a_nats::client::{
-    CancelTaskRequest, Client, ClientError, DeleteTaskPushNotificationConfigRequest,
+    CancelTaskRequest, A2aClient, ClientError, DeleteTaskPushNotificationConfigRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest, ListTasksRequest,
     SendMessageRequest, TaskPushNotificationConfig,
 };
@@ -51,7 +51,7 @@ fn stream_event_to_frame(id: &RpcId, event: &StreamResponse) -> OutboundFrame {
 }
 
 pub async fn dispatch_request<N, J>(
-    client: &Client<N, J>,
+    client: &A2aClient<N, J>,
     id: RpcId,
     method: &str,
     params: Value,
@@ -318,7 +318,7 @@ fn make_with_id(frame: OutboundFrame, id: &RpcId) -> OutboundFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2a_nats::client::Client;
+    use a2a_nats::client::A2aClient;
     use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
     use bytes::Bytes;
     use serde_json::json;
@@ -340,9 +340,9 @@ mod tests {
     fn make_client(
         nats: AdvancedMockNatsClient,
         js: MockJetStreamConsumerFactory,
-    ) -> Client<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
+    ) -> A2aClient<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
         let agent_id = A2aAgentId::new("bot").unwrap();
-        Client::new(test_config(), agent_id, nats, js)
+        A2aClient::new(test_config(), agent_id, nats, js)
     }
 
     fn task_response(task_id: &str) -> Bytes {
@@ -391,7 +391,7 @@ mod tests {
     }
 
     async fn dispatch(
-        client: &Client<AdvancedMockNatsClient, MockJetStreamConsumerFactory>,
+        client: &A2aClient<AdvancedMockNatsClient, MockJetStreamConsumerFactory>,
         id: RpcId,
         method: &str,
         params: Value,

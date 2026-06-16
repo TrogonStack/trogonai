@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use a2a_nats::server::{A2aError, A2aHandler, TaskEventStream};
+use a2a_nats::server::{A2aError, A2aExecutor, TaskEventStream};
 use a2a::event::{StreamResponse, TaskStatusUpdateEvent};
 use a2a::types::{
     GetTaskRequest, Message, Part, PartContent, Role, SendMessageResponse, Task, TaskPushNotificationConfig,
@@ -93,7 +93,7 @@ fn completed_task(task_id: &str, context_id: &str, input: &Message) -> Task {
 }
 
 #[async_trait::async_trait]
-impl A2aHandler for EchoHandler {
+impl A2aExecutor for EchoHandler {
     async fn message_send(&self, req: a2a::types::SendMessageRequest) -> Result<SendMessageResponse, A2aError> {
         let input = req.message;
         let task_id = task_id_from_message_id(&input.message_id);

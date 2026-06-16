@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use a2a_nats::client::{
-    CancelTaskRequest, Client, ClientError, DeleteTaskPushNotificationConfigRequest,
+    CancelTaskRequest, A2aClient, ClientError, DeleteTaskPushNotificationConfigRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest, ListTasksRequest,
     SendMessageRequest, TaskPushNotificationConfig,
 };
@@ -29,7 +29,7 @@ pub struct JsonRpcEnvelope {
 }
 
 pub async fn handle_jsonrpc<N, J>(
-    State(client): State<Arc<Client<N, J>>>,
+    State(client): State<Arc<A2aClient<N, J>>>,
     Json(envelope): Json<JsonRpcEnvelope>,
 ) -> Response
 where
@@ -197,7 +197,7 @@ where
     }
 }
 
-pub async fn agent_card<N, J>(State(client): State<Arc<Client<N, J>>>) -> Response
+pub async fn agent_card<N, J>(State(client): State<Arc<A2aClient<N, J>>>) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,

@@ -10,7 +10,7 @@ use crate::error::{
 
 pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a::event::StreamResponse, A2aError>> + Send + 'static>>;
 
-/// Error returned by an [`A2aHandler`] implementation and mapped to a JSON-RPC error response.
+/// Error returned by an [`A2aExecutor`] implementation and mapped to a JSON-RPC error response.
 #[derive(Debug)]
 pub struct A2aError {
     pub code: i32,
@@ -85,10 +85,10 @@ impl std::error::Error for A2aError {}
 /// publishes each item to `TaskEventsSubject` via JetStream, and sends the initial bootstrap
 /// reply once the task ID is known (first item that contains a task or status must carry it).
 ///
-/// `#[async_trait]` is applied so handler objects can be stored as `Box<dyn A2aHandler>` or
+/// `#[async_trait]` is applied so handler objects can be stored as `Box<dyn A2aExecutor>` or
 /// referenced generically without hand-rolling the trait bounds.
 #[async_trait::async_trait]
-pub trait A2aHandler: Send + Sync + 'static {
+pub trait A2aExecutor: Send + Sync + 'static {
     async fn message_send(
         &self,
         request: a2a::types::SendMessageRequest,

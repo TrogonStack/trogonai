@@ -29,14 +29,14 @@ use super::resubscribe::open_resubscribe_stream;
 use super::streaming::send_streaming;
 use super::unary::send_unary;
 
-/// Where [`Client`] sends JSON-RPC unary/stream bootstrap requests (`{prefix}.agent…` vs `{prefix}.gateway…`).
+/// Where [`A2aClient`] sends JSON-RPC unary/stream bootstrap requests (`{prefix}.agent…` vs `{prefix}.gateway…`).
 #[derive(Clone, Debug)]
 enum ClientIngressTarget {
     AgentSubjects,
     GatewayIngress(MintedUserJwt),
 }
 
-pub struct Client<N, J> {
+pub struct A2aClient<N, J> {
     config: Config,
     agent_id: A2aAgentId,
     nats: N,
@@ -44,7 +44,7 @@ pub struct Client<N, J> {
     ingress: ClientIngressTarget,
 }
 
-impl<N, J> Client<N, J> {
+impl<N, J> A2aClient<N, J> {
     pub fn new(config: Config, agent_id: A2aAgentId, nats: N, js: J) -> Self {
         Self {
             config,
@@ -105,7 +105,7 @@ impl<N, J> Client<N, J> {
     }
 }
 
-impl<N, J> Client<N, J>
+impl<N, J> A2aClient<N, J>
 where
     N: RequestClient,
     J: JetStreamGetStream,
@@ -331,8 +331,8 @@ mod tests {
     fn make_client(
         nats: AdvancedMockNatsClient,
         js: MockJetStreamConsumerFactory,
-    ) -> Client<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
-        Client::new(test_config(), test_agent_id(), nats, js)
+    ) -> A2aClient<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
+        A2aClient::new(test_config(), test_agent_id(), nats, js)
     }
 
     fn task_response(task_id: &str) -> bytes::Bytes {

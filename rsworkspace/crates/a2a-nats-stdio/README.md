@@ -1,6 +1,6 @@
 # a2a-nats-stdio
 
-Line-delimited **JSON-RPC 2.0** over **stdin/stdout**, forwarding A2A methods to a NATS agent via [`a2a_nats::Client`](../a2a-nats/src/client/mod.rs). Useful for MCP-style host processes, scripts, and other embedders that want A2A without HTTP.
+Line-delimited **JSON-RPC 2.0** over **stdin/stdout**, forwarding A2A methods to a NATS agent via [`a2a_nats::A2aClient`](../a2a-nats/src/client/mod.rs). Useful for MCP-style host processes, scripts, and other embedders that want A2A without HTTP.
 
 The **`a2a-nats-stdio`** binary reads one JSON-RPC request per line, dispatches through [`dispatch`](../a2a-nats-stdio/src/dispatch.rs) (`message/send`, `tasks/*`, push-notification config, and related streaming notifications), and writes one JSON line per response or stream event to stdout.
 
