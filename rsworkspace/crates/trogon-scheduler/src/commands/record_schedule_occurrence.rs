@@ -153,16 +153,20 @@ impl Decider for RecordScheduleOccurrence {
                         .into(),
                     ),
                 };
-                if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED {
-                    return Ok(Decision::event(recorded));
-                }
-
                 let schedule = state
                     .schedule
                     .as_option()
                     .ok_or_else(|| RecordScheduleOccurrenceError::MissingSchedule { id: command.id.clone() })?;
                 let next_occurrence = next_rrule_occurrence(schedule, RRuleCursor::after(command.occurrence_at))
                     .map_err(|source| RecordScheduleOccurrenceError::NextOccurrence { source })?;
+
+                // A paused schedule never arms the next wakeup, but an exhausted
+                // recurrence is still finished: it must still complete, just without
+                // planning a follow-up occurrence.
+                if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED && next_occurrence.is_some() {
+                    return Ok(Decision::event(recorded));
+                }
+
                 let follow_up = schedule_or_complete_event(
                     command.id.as_str(),
                     next_occurrence,
@@ -369,6 +373,23 @@ mod tests {
         assert!(matches!(&decision, Decision::Events(_)));
         if let Decision::Events(events) = decision {
             assert_eq!(events.as_slice(), &[recorded(id, 1, occurrence_at())]);
+        }
+    }
+
+    #[test]
+    fn records_final_occurrence_while_paused_completes() {
+        let id = "recurring";
+        let state = disabled_state(
+            Some(Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
+            Some(1),
+            Some(occurrence_at()),
+            MessageField::some(rrule_schedule(2)),
+        );
+
+        let decision = RecordScheduleOccurrence::decide(&state, &record(id)).unwrap();
+        assert!(matches!(&decision, Decision::Events(_)));
+        if let Decision::Events(events) = decision {
+            assert_eq!(events.as_slice(), &[recorded(id, 2, occurrence_at()), completed(id, 2)]);
         }
     }
 
