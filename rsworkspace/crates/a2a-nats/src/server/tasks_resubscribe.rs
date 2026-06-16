@@ -10,7 +10,7 @@ use crate::jsonrpc::JsonRpcId;
 /// task snapshot), then replies with that snapshot. The client is then responsible for
 /// creating a JetStream consumer via `resubscribe_consumer()` to replay missed events
 /// from the `last_seq` it supplies. The agent does not replay events itself.
-#[instrument(name = "a2a.agent.tasks_resubscribe", skip(handler, payload, reply_subject, nats))]
+#[instrument(name = "a2a.server.tasks_resubscribe", skip(handler, payload, reply_subject, nats))]
 pub async fn handle<H, N>(handler: &H, payload: &[u8], reply_subject: Option<String>, nats: &N)
 where
     H: A2aExecutor,

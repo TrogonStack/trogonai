@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn parse_task_events_subject_extracts_ids() {
-        let (task_id, req_id) = parse_task_events_subject("a2a", "a2a.task.t1.events.r1").expect("parsed");
+        let (task_id, req_id) = parse_task_events_subject("a2a", "a2a.v1.tasks.t1.events.r1").expect("parsed");
         assert_eq!(task_id.as_str(), "t1");
         assert_eq!(req_id.as_str(), "r1");
     }
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn gateway_egress_subject_includes_req_id() {
         let req_id = ReqId::from_header("req-1");
-        assert_eq!(gateway_egress_subject(&prefix(), &req_id), "a2a.gateway.egress.req-1");
+        assert_eq!(gateway_egress_subject(&prefix(), &req_id), "a2a.v1.gateway.egress.req-1");
     }
 
     #[test]

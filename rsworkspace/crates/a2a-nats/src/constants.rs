@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const DEFAULT_A2A_PREFIX: &str = "a2a";
+pub const DEFAULT_A2A_PREFIX: &str = "a2a.v1";
 pub const ENV_A2A_PREFIX: &str = "A2A_PREFIX";
 
 pub const ENV_OPERATION_TIMEOUT_SECS: &str = "A2A_OPERATION_TIMEOUT_SECS";
@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn default_prefix_is_a2a() {
-        assert_eq!(DEFAULT_A2A_PREFIX, "a2a");
+        assert_eq!(DEFAULT_A2A_PREFIX, "a2a.v1");
     }
 
     #[test]

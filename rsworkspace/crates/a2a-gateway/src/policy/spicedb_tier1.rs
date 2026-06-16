@@ -69,11 +69,11 @@ pub fn a2a_method_from_dots(method_dots: &str) -> Option<A2aMethod> {
         "tasks.list" => Some(A2aMethod::TasksList),
         "tasks.cancel" => Some(A2aMethod::TasksCancel),
         "tasks.resubscribe" => Some(A2aMethod::TasksResubscribe),
-        "tasks.push_notification_config.set" => Some(A2aMethod::PushNotificationSet),
-        "tasks.push_notification_config.get" => Some(A2aMethod::PushNotificationGet),
-        "tasks.push_notification_config.list" => Some(A2aMethod::PushNotificationList),
-        "tasks.push_notification_config.delete" => Some(A2aMethod::PushNotificationDelete),
-        "agent.card" => Some(A2aMethod::AgentCard),
+        "push.set" => Some(A2aMethod::PushNotificationSet),
+        "push.get" => Some(A2aMethod::PushNotificationGet),
+        "push.list" => Some(A2aMethod::PushNotificationList),
+        "push.delete" => Some(A2aMethod::PushNotificationDelete),
+        "card" => Some(A2aMethod::AgentCard),
         _ => None,
     }
 }

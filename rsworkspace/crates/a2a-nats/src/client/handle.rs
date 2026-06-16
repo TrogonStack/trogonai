@@ -14,7 +14,7 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 use crate::config::Config;
 use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
-use crate::nats::subjects::agent::{
+use crate::nats::subjects::agents::{
     AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushDeleteSubject, PushGetSubject, PushListSubject,
     PushSetSubject, TasksCancelSubject, TasksGetSubject, TasksListSubject, TasksResubscribeSubject,
 };
@@ -57,7 +57,7 @@ impl<N, J> A2aClient<N, J> {
 
     /// Routes requests through **`a2a-gateway`**: unary / bootstrap NATS **`request`** subjects become
     /// **`{prefix}.gateway.{agent_id}.{method…}`** (`gateway_ingress_subject_from_agent_subject`), then the
-    /// gateway forwards to **`{prefix}.agent.{agent_id}.{method…}`**.
+    /// gateway forwards to **`{prefix}.agents.{agent_id}.{method…}`**.
     ///
     /// Tenancy is the caller's **NATS Account** (see [`docs/a2a/explanation/architecture.md`](../../../../../docs/a2a/explanation/architecture.md) §Decisions), not an extra subject token.
     ///
@@ -73,7 +73,7 @@ impl<N, J> A2aClient<N, J> {
         self
     }
 
-    /// Default (direct) routing to `{prefix}.agent.{agent_id}.{{method}}` subjects.
+    /// Default (direct) routing to `{prefix}.agents.{agent_id}.{{method}}` subjects.
     pub fn routing_to_agent(mut self) -> Self {
         self.ingress = ClientIngressTarget::AgentSubjects;
         self
@@ -390,7 +390,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_get_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.tasks.get", task_response("task-1"));
+        nats.set_response("a2a.v1.agents.bot.tasks.get", task_response("task-1"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = GetTaskRequest {
@@ -407,7 +407,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_get_not_found_error() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.tasks.get", error_response(-32001, "not found"));
+        nats.set_response("a2a.v1.agents.bot.tasks.get", error_response(-32001, "not found"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = GetTaskRequest {
@@ -422,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_cancel_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.tasks.cancel", task_response("task-c"));
+        nats.set_response("a2a.v1.agents.bot.tasks.cancel", task_response("task-c"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = CancelTaskRequest {
@@ -438,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_cancel_not_cancelable_error() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.tasks.cancel", error_response(-32002, "not cancelable"));
+        nats.set_response("a2a.v1.agents.bot.tasks.cancel", error_response(-32002, "not cancelable"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = CancelTaskRequest {
@@ -456,7 +456,7 @@ mod tests {
     #[tokio::test]
     async fn message_send_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.message.send", send_message_response_bytes("task-s"));
+        nats.set_response("a2a.v1.agents.bot.message.send", send_message_response_bytes("task-s"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = SendMessageRequest {
@@ -476,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn message_stream_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.message.stream", send_message_response_bytes("task-ss"));
+        nats.set_response("a2a.v1.agents.bot.message.stream", send_message_response_bytes("task-ss"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -500,7 +500,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_resubscribe_returns_snapshot_and_stream() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agent.bot.tasks.resubscribe", task_response("task-r"));
+        nats.set_response("a2a.v1.agents.bot.tasks.resubscribe", task_response("task-r"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -545,7 +545,7 @@ mod tests {
             "id": "ignored",
             "result": card
         });
-        nats.set_response("a2a.agent.bot.agent.card", serde_json::to_vec(&json).unwrap().into());
+        nats.set_response("a2a.v1.agents.bot.card", serde_json::to_vec(&json).unwrap().into());
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let result = client.agent_card().await;
@@ -557,7 +557,7 @@ mod tests {
     async fn push_set_unsupported_error() {
         let nats = AdvancedMockNatsClient::new();
         nats.set_response(
-            "a2a.agent.bot.tasks.push_notification_config.set",
+            "a2a.v1.agents.bot.push.set",
             error_response(-32003, "not supported"),
         );
 
@@ -588,7 +588,7 @@ mod tests {
             "id": "ignored",
             "result": list_response
         });
-        nats.set_response("a2a.agent.bot.tasks.list", serde_json::to_vec(&json).unwrap().into());
+        nats.set_response("a2a.v1.agents.bot.tasks.list", serde_json::to_vec(&json).unwrap().into());
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let req = ListTasksRequest::default();
@@ -616,8 +616,8 @@ mod tests {
     async fn tasks_get_via_gateway_uses_account_scoped_gateway_subject_not_legacy_tenant_segment() {
         let nats = AdvancedMockNatsClient::new();
         // If the client mistakenly prefixed `acme.`, this mock would answer — it should remain idle.
-        nats.set_response("a2a.gateway.acme.bot.tasks.get", task_response("wrong-shape"));
-        nats.set_response("a2a.gateway.bot.tasks.get", task_response("task-gw"));
+        nats.set_response("a2a.v1.gateway.acme.bot.tasks.get", task_response("wrong-shape"));
+        nats.set_response("a2a.v1.gateway.bot.tasks.get", task_response("task-gw"));
 
         let jwt = mint_test_user_jwt("gw-caller", "a2a", Duration::from_secs(3600));
         let client = make_client(nats, MockJetStreamConsumerFactory::new()).routing_via_gateway_ingress(jwt);

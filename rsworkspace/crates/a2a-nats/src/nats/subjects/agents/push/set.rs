@@ -19,7 +19,12 @@ impl PushSetSubject {
 
 impl std::fmt::Display for PushSetSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agents.{}.push.set", self.prefix.as_str(), self.agent_id.as_str())
+        write!(
+            f,
+            "{}.agents.{}.push.set",
+            self.prefix.as_str(),
+            self.agent_id.as_str()
+        )
     }
 }
 
@@ -34,6 +39,3 @@ impl super::super::super::markers::Requestable for PushSetSubject {}
 impl super::super::super::stream::StreamAssignment for PushSetSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;

@@ -15,7 +15,7 @@ impl TaskAllEventsSubject {
 
 impl std::fmt::Display for TaskAllEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.task.*.events.*", self.prefix.as_str())
+        write!(f, "{}.tasks.*.events.*", self.prefix.as_str())
     }
 }
 

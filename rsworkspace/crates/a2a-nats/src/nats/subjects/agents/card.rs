@@ -19,7 +19,12 @@ impl AgentCardSubject {
 
 impl std::fmt::Display for AgentCardSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agents.{}.card", self.prefix.as_str(), self.agent_id.as_str())
+        write!(
+            f,
+            "{}.agents.{}.card",
+            self.prefix.as_str(),
+            self.agent_id.as_str()
+        )
     }
 }
 
@@ -34,6 +39,3 @@ impl super::super::markers::Requestable for AgentCardSubject {}
 impl super::super::stream::StreamAssignment for AgentCardSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;

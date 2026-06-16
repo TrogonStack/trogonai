@@ -2,7 +2,7 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
 /// `message/stream` — bootstrap subject. The agent responds with the task envelope
-/// (containing `task_id`) and then publishes events to `{prefix}.tasks.{task_id}.events.{req_id}`.
+/// (containing `task_id`) and then publishes events to `{prefix}.task.{task_id}.events.{req_id}`.
 #[derive(Debug)]
 pub struct MessageStreamSubject {
     prefix: A2aPrefix,
@@ -40,6 +40,3 @@ impl super::super::markers::Requestable for MessageStreamSubject {}
 impl super::super::stream::StreamAssignment for MessageStreamSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;

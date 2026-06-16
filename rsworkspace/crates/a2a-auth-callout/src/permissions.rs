@@ -56,7 +56,7 @@ impl IssuedPermissions {
         let inbox = format!("_INBOX.{}.>", caller_id.as_str());
         let push = format!("a2a.push.{}.>", caller_id.as_str());
         Self {
-            publish_allow: vec![SubjectPattern::new("a2a.gateway.>").expect("static literal")],
+            publish_allow: vec![SubjectPattern::new("a2a.v1.gateway.>").expect("static literal")],
             subscribe_allow: vec![
                 SubjectPattern::new(inbox).expect("derived from validated caller_id"),
                 SubjectPattern::new(push).expect("derived from validated caller_id"),
@@ -200,7 +200,7 @@ mod tests {
         let caller = CallerId::new("usr1").unwrap();
         let perms = IssuedPermissions::default_for_caller(&caller);
         assert_eq!(perms.publish_allow.len(), 1);
-        assert_eq!(perms.publish_allow[0].as_str(), "a2a.gateway.>");
+        assert_eq!(perms.publish_allow[0].as_str(), "a2a.v1.gateway.>");
     }
 
     #[test]

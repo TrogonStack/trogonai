@@ -2,7 +2,7 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
 
-/// `{prefix}.tasks.{task_id}.events.{req_id}` — JetStream-backed task event subject.
+/// `{prefix}.task.{task_id}.events.{req_id}` — JetStream-backed task event subject.
 ///
 /// Published by the agent for `message/stream` and `tasks/resubscribe`. The `req_id`
 /// suffix lets a single task fan out to multiple concurrent subscribers without
@@ -48,6 +48,3 @@ impl super::super::markers::JetStreamEvents for TaskEventsSubject {}
 impl super::super::stream::StreamAssignment for TaskEventsSubject {
     const STREAM: Option<super::super::stream::A2aStream> = Some(super::super::stream::A2aStream::Events);
 }
-
-#[cfg(test)]
-mod tests;

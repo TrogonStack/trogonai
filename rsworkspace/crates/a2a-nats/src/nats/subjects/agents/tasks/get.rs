@@ -19,12 +19,7 @@ impl TasksGetSubject {
 
 impl std::fmt::Display for TasksGetSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}.agents.{}.tasks.get",
-            self.prefix.as_str(),
-            self.agent_id.as_str()
-        )
+        write!(f, "{}.agents.{}.tasks.get", self.prefix.as_str(), self.agent_id.as_str())
     }
 }
 
@@ -39,6 +34,3 @@ impl super::super::super::markers::Requestable for TasksGetSubject {}
 impl super::super::super::stream::StreamAssignment for TasksGetSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;

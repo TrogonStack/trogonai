@@ -187,7 +187,7 @@ mod tests {
         let tid = A2aTaskId::new("task7").unwrap();
         assert_eq!(
             push_dlq_publish_subject(&prefix, &CallerId::default(), &tid),
-            "a2a.push.dlq._.task7"
+            "a2a.v1.push.dlq._.task7"
         );
     }
 
@@ -200,7 +200,7 @@ mod tests {
         ));
         assert_eq!(
             push_dlq_publish_subject(&prefix, &cid, &tid),
-            "a2a.push.dlq.c1_d2.task7"
+            "a2a.v1.push.dlq.c1_d2.task7"
         );
     }
 
@@ -242,7 +242,7 @@ mod tests {
         let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
         assert_eq!(
             push_dlq_publish_subject(&prefix, &cid, &tid),
-            "a2a.push.dlq.c1_d2.task7"
+            "a2a.v1.push.dlq.c1_d2.task7"
         );
     }
 
@@ -252,7 +252,7 @@ mod tests {
         let tid = A2aTaskId::new("task7").unwrap();
         let p = a2a_auth_callout::SpiceDbPrincipal(serde_json::json!({}));
         let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-        assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.push.dlq._.task7");
+        assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.v1.push.dlq._.task7");
     }
 
     #[tokio::test]

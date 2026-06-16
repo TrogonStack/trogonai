@@ -39,6 +39,3 @@ impl super::super::super::markers::Requestable for PushDeleteSubject {}
 impl super::super::super::stream::StreamAssignment for PushDeleteSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;

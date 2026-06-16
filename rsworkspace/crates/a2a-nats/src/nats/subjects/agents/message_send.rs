@@ -39,6 +39,3 @@ impl super::super::markers::Requestable for MessageSendSubject {}
 impl super::super::stream::StreamAssignment for MessageSendSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;

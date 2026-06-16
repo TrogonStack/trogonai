@@ -267,15 +267,15 @@ mod tests {
 
     #[test]
     fn audit_subject_rewrite_formats_ingress_to_agent() {
-        let rewrite = AuditSubjectRewrite::new("a2a.gateway.bot.message.send", "a2a.agent.bot.message.send");
+        let rewrite = AuditSubjectRewrite::new("a2a.v1.gateway.bot.message.send", "a2a.v1.agents.bot.message.send");
         assert_eq!(
             rewrite.as_str(),
-            "ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"
+            "ingress:a2a.v1.gateway.bot.message.send -> agent:a2a.v1.agents.bot.message.send"
         );
         let json = rewrite.into_audit_json();
         assert_eq!(
             json,
-            serde_json::json!(["ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"])
+            serde_json::json!(["ingress:a2a.v1.gateway.bot.message.send -> agent:a2a.v1.agents.bot.message.send"])
         );
     }
 
@@ -302,15 +302,15 @@ mod tests {
     fn gateway_forward_audit_extras_populates_rewrite_and_sse_consumer() {
         let agent = agent();
         let (rewrites, stream_consumer) = gateway_forward_audit_extras(
-            "a2a.gateway.bot.message.stream",
-            "a2a.agent.bot.message.stream",
+            "a2a.v1.gateway.bot.message.stream",
+            "a2a.v1.agents.bot.message.stream",
             &agent,
             "message.stream",
         );
         assert_eq!(
             rewrites,
             Some(serde_json::json!([
-                "ingress:a2a.gateway.bot.message.stream -> agent:a2a.agent.bot.message.stream"
+                "ingress:a2a.v1.gateway.bot.message.stream -> agent:a2a.v1.agents.bot.message.stream"
             ]))
         );
         assert_eq!(stream_consumer.as_deref(), Some("gateway.test-agent.message.stream"));
@@ -320,15 +320,15 @@ mod tests {
     fn gateway_forward_audit_extras_omits_stream_consumer_for_unary() {
         let agent = agent();
         let (rewrites, stream_consumer) = gateway_forward_audit_extras(
-            "a2a.gateway.bot.message.send",
-            "a2a.agent.bot.message.send",
+            "a2a.v1.gateway.bot.message.send",
+            "a2a.v1.agents.bot.message.send",
             &agent,
             "message.send",
         );
         assert_eq!(
             rewrites,
             Some(serde_json::json!([
-                "ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"
+                "ingress:a2a.v1.gateway.bot.message.send -> agent:a2a.v1.agents.bot.message.send"
             ]))
         );
         assert!(stream_consumer.is_none());

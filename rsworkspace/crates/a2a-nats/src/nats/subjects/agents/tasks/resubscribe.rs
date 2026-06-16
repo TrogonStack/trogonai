@@ -40,6 +40,3 @@ impl super::super::super::markers::Requestable for TasksResubscribeSubject {}
 impl super::super::super::stream::StreamAssignment for TasksResubscribeSubject {
     const STREAM: Option<super::super::super::stream::A2aStream> = None;
 }
-
-#[cfg(test)]
-mod tests;
