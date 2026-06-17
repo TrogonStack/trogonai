@@ -8,5 +8,8 @@
 
 pub mod agents;
 pub mod markers;
+pub mod stream;
 pub mod subscriptions;
 pub mod tasks;
+
+pub use stream::{A2aStream, StreamAssignment};
