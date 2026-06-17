@@ -20,8 +20,8 @@ use crate::commands::domain::{
     CronExpression, CronExpressionError, Delivery, DeliveryRoute, DeliveryRouteError, EveryDuration,
     EveryDurationError, MessageContent, RRuleDateTime, RRuleDateTimeError, RRuleExpression, RRuleExpressionError,
     SamplingSource, SamplingSubjectError, Schedule, ScheduleEventStatus, ScheduleHeaders, ScheduleHeadersError,
-    ScheduleId, ScheduleIdError, ScheduleMessage, ScheduleTimezone, TimeZoneError, TtlDuration, TtlDurationError,
-    TzdbVersion, TzdbVersionError,
+    ScheduleId, ScheduleIdError, ScheduleMessage, ScheduleOccurrenceSequence, ScheduleOccurrenceSequenceError,
+    ScheduleTimezone, TimeZoneError, TtlDuration, TtlDurationError, TzdbVersion, TzdbVersionError,
 };
 
 use super::reconcile::{ScheduleChange, ScheduleDefinition};
@@ -123,9 +123,12 @@ pub enum ScheduleEventDecodeError {
         #[source]
         source: ScheduleEventPayloadError,
     },
-    /// The event is part of the schedule aggregate but does not change delivery reconciliation.
-    #[error("schedule event does not affect execution reconciliation")]
-    NonReconciledEvent,
+    /// The persisted occurrence sequence is no longer valid.
+    #[error("schedule occurrence sequence is invalid: {source}")]
+    OccurrenceSequence {
+        #[source]
+        source: ScheduleOccurrenceSequenceError,
+    },
 }
 
 /// Decodes the schedule event payload of a [`StreamEvent`].
@@ -143,7 +146,6 @@ pub fn schedule_change_from_stream_event(
         .map_err(|source| ScheduleEventDecodeError::Payload { source })?;
 
     match outcome {
-        EventDecodeOutcome::Decoded(event) if is_non_reconciled_schedule_event(&event) => Ok(None),
         EventDecodeOutcome::Decoded(event) => decode_schedule_change(&event).map(Some),
         EventDecodeOutcome::Skipped => Ok(None),
     }
@@ -231,21 +233,45 @@ pub fn decode_schedule_change(event: &v1::ScheduleEvent) -> Result<ScheduleChang
         ScheduleEventCase::ScheduleRemoved(removed) => Ok(ScheduleChange::Removed {
             schedule_id: schedule_id_from(&removed.schedule_id)?,
         }),
-        ScheduleEventCase::ScheduleOccurrenceRecorded(_)
-        | ScheduleEventCase::ScheduleOccurrenceScheduled(_)
-        | ScheduleEventCase::ScheduleCompleted(_) => Err(ScheduleEventDecodeError::NonReconciledEvent),
+        ScheduleEventCase::ScheduleOccurrenceRecorded(recorded) => {
+            let schedule_id = schedule_id_from(&recorded.schedule_id)?;
+            let occurrence_sequence = ScheduleOccurrenceSequence::try_new(recorded.occurrence_sequence.ok_or(
+                ScheduleEventDecodeError::MissingField {
+                    field: "occurrence_sequence",
+                },
+            )?)
+            .map_err(|source| ScheduleEventDecodeError::OccurrenceSequence { source })?;
+            let occurrence_at = timestamp_to_datetime(
+                recorded
+                    .occurrence_at
+                    .as_option()
+                    .ok_or(ScheduleEventDecodeError::MissingField { field: "occurrence_at" })?,
+                "occurrence_at",
+            )?;
+            Ok(ScheduleChange::OccurrenceRecorded {
+                schedule_id,
+                occurrence_sequence,
+                occurrence_at,
+            })
+        }
+        ScheduleEventCase::ScheduleOccurrenceScheduled(scheduled) => {
+            let schedule_id = schedule_id_from(&scheduled.schedule_id)?;
+            let occurrence_at = timestamp_to_datetime(
+                scheduled
+                    .occurrence_at
+                    .as_option()
+                    .ok_or(ScheduleEventDecodeError::MissingField { field: "occurrence_at" })?,
+                "occurrence_at",
+            )?;
+            Ok(ScheduleChange::OccurrenceScheduled {
+                schedule_id,
+                occurrence_at,
+            })
+        }
+        ScheduleEventCase::ScheduleCompleted(completed) => Ok(ScheduleChange::Completed {
+            schedule_id: schedule_id_from(&completed.schedule_id)?,
+        }),
     }
-}
-
-fn is_non_reconciled_schedule_event(event: &v1::ScheduleEvent) -> bool {
-    matches!(
-        event.event.as_ref(),
-        Some(
-            ScheduleEventCase::ScheduleOccurrenceRecorded(_)
-                | ScheduleEventCase::ScheduleOccurrenceScheduled(_)
-                | ScheduleEventCase::ScheduleCompleted(_)
-        )
-    )
 }
 
 fn definition_from_created(created: &v1::ScheduleCreated) -> Result<ScheduleDefinition, ScheduleEventDecodeError> {
@@ -840,23 +866,33 @@ mod tests {
     }
 
     #[test]
-    fn occurrence_lifecycle_events_do_not_reconcile_delivery_changes() {
+    fn occurrence_lifecycle_events_decode_into_schedule_changes() {
         use trogon_decider_runtime::{Event, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition};
         use uuid::Uuid;
 
+        let occurrence_at = at_instant();
         let event = v1::ScheduleEvent {
             event: Some(
-                v1::ScheduleCompleted {
+                v1::ScheduleOccurrenceRecorded {
                     schedule_id: "backup".to_string(),
-                    last_occurrence_sequence: Some(2),
+                    occurrence_sequence: Some(2),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
+                    recorded_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
                 }
                 .into(),
             ),
         };
 
+        let change = decode_schedule_change(&event).unwrap();
         assert!(matches!(
-            decode_schedule_change(&event).unwrap_err(),
-            ScheduleEventDecodeError::NonReconciledEvent
+            change,
+            ScheduleChange::OccurrenceRecorded {
+                ref schedule_id,
+                ref occurrence_sequence,
+                occurrence_at: decoded_at,
+            } if schedule_id.as_str() == "backup"
+                && occurrence_sequence.as_u64() == 2
+                && decoded_at == occurrence_at
         ));
 
         let stream_event = StreamEvent {
@@ -871,7 +907,10 @@ mod tests {
             recorded_at: at_instant(),
         };
 
-        assert!(schedule_change_from_stream_event(&stream_event).unwrap().is_none());
+        assert!(matches!(
+            schedule_change_from_stream_event(&stream_event).unwrap(),
+            Some(ScheduleChange::OccurrenceRecorded { .. })
+        ));
     }
 
     #[test]

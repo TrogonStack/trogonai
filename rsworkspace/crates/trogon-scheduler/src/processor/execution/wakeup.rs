@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wakeup_for_paused_schedule_is_obsolete() {
+    async fn wakeup_for_paused_schedule_without_pending_occurrence_is_duplicate_stale() {
         let (store, id) = store_with_schedule(ScheduleEventStatus::Paused).await;
         let processor = RRuleWakeupProcessor::new(store.clone());
 
@@ -412,12 +412,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            outcome,
-            RRuleWakeupOutcome::Obsolete {
-                reason: RRuleWakeupObsoleteReason::Paused,
-            }
-        );
+        assert_eq!(outcome, RRuleWakeupOutcome::DuplicateStale);
         assert_eq!(store.events(id.as_str()).len(), 1);
     }
 
