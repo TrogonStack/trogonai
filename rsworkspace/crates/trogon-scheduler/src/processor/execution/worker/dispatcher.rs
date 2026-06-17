@@ -1176,6 +1176,34 @@ mod tests {
         assert!(reports[0].result.as_ref().unwrap_err().contains("ack failed"));
     }
 
+    #[tokio::test]
+    async fn term_settlement_error_is_reported() {
+        let error = finalize_report(
+            FailingMessage,
+            Settle::Term,
+            StreamPosition::try_new(1).unwrap(),
+            Ok(ProcessedOutcome::DurableFailure),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("term failed"));
+    }
+
+    #[tokio::test]
+    async fn retry_settlement_error_is_reported() {
+        let error = finalize_report(
+            FailingMessage,
+            Settle::Retry,
+            StreamPosition::try_new(1).unwrap(),
+            Ok(ProcessedOutcome::DurableFailure),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("retry failed"));
+    }
+
     #[test]
     #[should_panic(expected = "max_active_lanes must be at least 1")]
     fn zero_max_active_lanes_is_rejected() {

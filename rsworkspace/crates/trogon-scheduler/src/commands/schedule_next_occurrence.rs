@@ -347,75 +347,35 @@ mod tests {
         let id = "recurring";
         let last = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
         let now = Utc.with_ymd_and_hms(2026, 6, 10, 0, 0, 0).unwrap();
-        let state = state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
-            last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&last)),
-            last_occurrence_sequence: Some(1),
-            schedule: MessageField::some(rrule_schedule(10)),
-            pending_occurrence_at: MessageField::default(),
-        };
 
-        let decision = ScheduleNextOccurrence::decide(&state, &command(id, now)).unwrap();
-        let Decision::Events(events) = decision else {
-            panic!("expected an arming decision");
-        };
-
-        assert_eq!(
-            events.as_slice(),
-            &[v1::ScheduleEvent {
-                event: Some(
-                    v1::ScheduleOccurrenceScheduled {
-                        schedule_id: id.to_string(),
-                        occurrence_sequence: Some(2),
-                        occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
-                            &Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap()
-                        )),
-                        scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&now)),
-                    }
-                    .into(),
-                ),
-            }]
-        );
+        TestCase::<ScheduleNextOccurrence>::new()
+            .given([created(id, true, rrule_schedule(10)), recorded(id, 1, last)])
+            .when(command(id, now))
+            .then([occurrence_scheduled(
+                id,
+                2,
+                Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap(),
+                now,
+            )]);
     }
 
     #[test]
     fn arms_the_occurrence_strictly_after_the_last_recorded_one() {
         let id = "recurring";
         let last = Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap();
-        let state = state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
-            last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&last)),
-            last_occurrence_sequence: Some(2),
-            schedule: MessageField::some(rrule_schedule(3)),
-            pending_occurrence_at: MessageField::default(),
-        };
         // Resume shortly after the last recorded occurrence: the cursor must skip
         // it and arm the next one, not re-arm the one already recorded.
         let now = Utc.with_ymd_and_hms(2026, 6, 4, 0, 1, 0).unwrap();
 
-        let decision = ScheduleNextOccurrence::decide(&state, &command(id, now)).unwrap();
-        let Decision::Events(events) = decision else {
-            panic!("expected an arming decision");
-        };
-
-        assert_eq!(
-            events.as_slice(),
-            &[v1::ScheduleEvent {
-                event: Some(
-                    v1::ScheduleOccurrenceScheduled {
-                        schedule_id: id.to_string(),
-                        occurrence_sequence: Some(3),
-                        occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
-                            &Utc.with_ymd_and_hms(2026, 6, 5, 0, 0, 0).unwrap()
-                        )),
-                        scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&now)),
-                    }
-                    .into(),
-                ),
-            }]
-        );
+        TestCase::<ScheduleNextOccurrence>::new()
+            .given([created(id, true, rrule_schedule(3)), recorded(id, 2, last)])
+            .when(command(id, now))
+            .then([occurrence_scheduled(
+                id,
+                3,
+                Utc.with_ymd_and_hms(2026, 6, 5, 0, 0, 0).unwrap(),
+                now,
+            )]);
     }
 
     #[test]
