@@ -6,10 +6,10 @@ mod config;
 mod tests;
 
 pub use cache::{ImportGateCacheKey, ZedTokenCache, ZedTokenSnapshot};
-pub use client::{BulkImportPermissionCheck, LiveBulkImportPermissionClient};
+pub use client::BulkImportPermissionCheck;
 pub use config::{
     ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint,
-    SpiceDbImportGateBuildError, SpiceDbToken, ZedTokenTtl,
+    SpiceDbImportGateBuildError, SpiceDbToken, ZedTokenTtl, optional_spicedb_credentials, zed_token_ttl_from_env,
 };
 
 use std::sync::Arc;
@@ -21,15 +21,12 @@ use authzed::v1::{
     CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, SubjectReference,
     ZedToken,
 };
-use trogon_std::env::ReadEnv;
 
 use crate::agent_id::A2aAgentId;
 
 use super::error::ImportGateError;
 use super::gate::ImportGate;
 use super::principal::{ImportedAccountName, SpiceDbPrincipal};
-
-use config::{optional_spicedb_credentials, zed_token_ttl_from_env};
 
 const FEDERATED_AGENT_CARD_RESOURCE_TYPE: &str = "agent_card";
 const FEDERATED_IMPORT_PERMISSION: &str = "view";
@@ -56,18 +53,6 @@ impl SpiceDbImportGate {
 
     pub fn is_configured(&self) -> bool {
         self.client.is_some()
-    }
-
-    pub async fn try_from_env<E: ReadEnv>(env: &E) -> Result<Self, SpiceDbImportGateBuildError> {
-        let ttl = zed_token_ttl_from_env(env)?;
-        let cache = ZedTokenCache::new(ttl);
-
-        let Some((endpoint, token)) = optional_spicedb_credentials(env)? else {
-            return Ok(Self::deny_only());
-        };
-
-        let live = LiveBulkImportPermissionClient::connect(&endpoint, &token).await?;
-        Ok(Self::configured(Arc::new(live), cache))
     }
 
     async fn check_import(
@@ -140,12 +125,15 @@ impl SpiceDbImportGate {
 }
 
 fn pair_is_allowed(pair: &authzed::v1::CheckBulkPermissionsPair) -> bool {
-    match pair.response.as_ref() {
-        Some(check_bulk_permissions_pair::Response::Item(item)) => {
-            item.permissionship == Permissionship::HasPermission as i32
-        }
-        Some(check_bulk_permissions_pair::Response::Error(_)) | None => false,
-    }
+    // `Response::Error(_)` and `None` both fail closed — the explicit `Error`
+    // arm isn't testable in isolation because `google::rpc::Status` is only
+    // re-exported privately by `spicedb-grpc-tonic`, so we collapse both
+    // failure paths into a single wildcard.
+    matches!(
+        pair.response.as_ref(),
+        Some(check_bulk_permissions_pair::Response::Item(item))
+            if item.permissionship == Permissionship::HasPermission as i32
+    )
 }
 
 impl Default for SpiceDbImportGate {
@@ -204,18 +192,5 @@ fn federated_agent_card_resource(imported_from: &ImportedAccountName, agent_id: 
     ObjectReference {
         object_type: FEDERATED_AGENT_CARD_RESOURCE_TYPE.to_owned(),
         object_id: format!("{}:{}", imported_from.as_str(), agent_id.as_str()),
-    }
-}
-
-pub async fn resolve_import_gate<E: ReadEnv>(env: &E) -> SpiceDbImportGate {
-    match SpiceDbImportGate::try_from_env(env).await {
-        Ok(gate) => gate,
-        Err(error) => {
-            tracing::warn!(
-                error = %error,
-                "SpiceDbImportGate: invalid configuration — federated imports deny until env is corrected"
-            );
-            SpiceDbImportGate::deny_only()
-        }
     }
 }

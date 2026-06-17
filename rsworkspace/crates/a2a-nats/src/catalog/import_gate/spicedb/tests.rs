@@ -17,10 +17,10 @@ use crate::catalog::import_gate::spicedb::config::{
     ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS,
 };
 
-use super::SpiceDbImportGate;
 use super::cache::{ImportGateCacheKey, ZedTokenCache};
 use super::client::BulkImportPermissionCheck;
-use super::config::ZedTokenTtl;
+use super::config::{SpiceDbEndpoint, SpiceDbImportGateBuildError, ZedTokenTtl};
+use super::{SpiceDbImportGate, parse_subject_reference, spicedb_subject_from_principal};
 
 struct MockBulkImportClient {
     responses: Mutex<Vec<Result<CheckBulkPermissionsResponse, Status>>>,
@@ -128,19 +128,11 @@ async fn unconfigured_gate_denies() {
     assert!(!gate.is_configured());
 }
 
-#[tokio::test]
-async fn try_from_env_without_knobs_builds_deny_only_gate() {
+#[test]
+fn optional_credentials_unset_env_returns_none() {
+    use super::config::optional_spicedb_credentials;
     let env = InMemoryEnv::new();
-    let gate = SpiceDbImportGate::try_from_env(&env)
-        .await
-        .expect("unset env should succeed with deny-only gate");
-    assert!(!gate.is_configured());
-    assert!(
-        !gate
-            .permit(&principal("user/alice"), &imported("peer"), &agent_id("bot"))
-            .await
-            .expect("must not error")
-    );
+    assert!(optional_spicedb_credentials(&env).unwrap().is_none());
 }
 
 #[tokio::test]
@@ -226,15 +218,33 @@ async fn principal_account_claim_is_used_as_import_subject() {
     assert_eq!(subject.object_id, "consumer-acct");
 }
 
-#[tokio::test]
-async fn partial_env_configuration_is_rejected() {
+#[test]
+fn optional_credentials_rejects_partial_configuration() {
+    use super::config::optional_spicedb_credentials;
     let env = InMemoryEnv::new();
     env.set(ENV_SPICEDB_ENDPOINT, "https://spicedb.example.com:443");
+    let err = optional_spicedb_credentials(&env).unwrap_err();
+    assert!(err.to_string().contains(ENV_SPICEDB_TOKEN));
+}
 
-    match SpiceDbImportGate::try_from_env(&env).await {
-        Err(error) => assert!(error.to_string().contains(ENV_SPICEDB_TOKEN)),
-        Ok(_) => panic!("token must be required with endpoint"),
-    }
+#[test]
+fn optional_credentials_rejects_partial_configuration_token_only() {
+    use super::config::optional_spicedb_credentials;
+    let env = InMemoryEnv::new();
+    env.set(ENV_SPICEDB_TOKEN, "tk");
+    let err = optional_spicedb_credentials(&env).unwrap_err();
+    assert!(err.to_string().contains(ENV_SPICEDB_ENDPOINT));
+}
+
+#[test]
+fn optional_credentials_returns_parsed_pair_when_both_set() {
+    use super::config::optional_spicedb_credentials;
+    let env = InMemoryEnv::new();
+    env.set(ENV_SPICEDB_ENDPOINT, "https://spicedb.example.com:443");
+    env.set(ENV_SPICEDB_TOKEN, "tk");
+    let (endpoint, token) = optional_spicedb_credentials(&env).unwrap().unwrap();
+    assert_eq!(endpoint.as_str(), "https://spicedb.example.com:443");
+    assert_eq!(token.expose_secret(), "tk");
 }
 
 #[test]
@@ -258,13 +268,249 @@ fn zed_token_cache_evicts_expired_entries() {
     });
 }
 
-#[tokio::test]
-async fn resolve_import_gate_honors_zedtoken_ttl_env() {
+#[test]
+fn zed_token_ttl_from_env_uses_default_when_unset() {
+    use super::config::zed_token_ttl_from_env;
+    let env = InMemoryEnv::new();
+    let ttl = zed_token_ttl_from_env(&env).unwrap();
+    assert_eq!(ttl.as_duration(), std::time::Duration::from_secs(30));
+}
+
+#[test]
+fn zed_token_ttl_from_env_parses_valid_value() {
+    use super::config::zed_token_ttl_from_env;
     let env = InMemoryEnv::new();
     env.set(ENV_SPICEDB_ZEDTOKEN_TTL_SECS, "45");
+    let ttl = zed_token_ttl_from_env(&env).unwrap();
+    assert_eq!(ttl.as_duration(), std::time::Duration::from_secs(45));
+}
 
-    let gate = SpiceDbImportGate::try_from_env(&env)
-        .await
-        .expect("ttl-only env should build deny-only gate");
+#[test]
+fn zed_token_ttl_from_env_rejects_non_numeric_value() {
+    use super::config::zed_token_ttl_from_env;
+    let env = InMemoryEnv::new();
+    env.set(ENV_SPICEDB_ZEDTOKEN_TTL_SECS, "abc");
+    let err = zed_token_ttl_from_env(&env).unwrap_err();
+    assert!(err.to_string().contains("invalid SpiceDB ZedToken TTL"));
+}
+
+#[test]
+fn endpoint_parse_rejects_blank_string() {
+    let err = SpiceDbEndpoint::parse("   ").unwrap_err();
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidEndpoint(_)));
+}
+
+#[test]
+fn token_parse_rejects_blank_string() {
+    use super::config::SpiceDbToken;
+    let err = SpiceDbToken::parse("   ").unwrap_err();
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidToken(_)));
+}
+
+#[test]
+fn token_debug_redacts_secret() {
+    use super::config::SpiceDbToken;
+    let token = SpiceDbToken::parse("super-secret").unwrap();
+    assert_eq!(format!("{token:?}"), "SpiceDbToken(***)");
+}
+
+#[test]
+fn build_error_display_covers_every_variant() {
+    assert!(
+        SpiceDbImportGateBuildError::InvalidEndpoint("e".into())
+            .to_string()
+            .contains("endpoint")
+    );
+    assert!(
+        SpiceDbImportGateBuildError::InvalidToken("t".into())
+            .to_string()
+            .contains("token")
+    );
+    assert!(
+        SpiceDbImportGateBuildError::InvalidZedTokenTtl("ttl".into())
+            .to_string()
+            .contains("TTL")
+    );
+    assert!(
+        SpiceDbImportGateBuildError::Connect("down".into())
+            .to_string()
+            .contains("connect failed")
+    );
+}
+
+#[test]
+fn cache_ttl_accessor_returns_configured_ttl() {
+    let cache = ZedTokenCache::new(ZedTokenTtl::from_secs(42));
+    assert_eq!(cache.ttl().as_duration(), std::time::Duration::from_secs(42));
+}
+
+#[test]
+fn parse_subject_reference_accepts_slash_and_colon_separators() {
+    assert_eq!(
+        parse_subject_reference("user/alice"),
+        Some(("user".into(), "alice".into()))
+    );
+    assert_eq!(
+        parse_subject_reference("user:alice"),
+        Some(("user".into(), "alice".into()))
+    );
+}
+
+#[test]
+fn parse_subject_reference_rejects_empty_segments() {
+    assert_eq!(parse_subject_reference(""), None);
+    assert_eq!(parse_subject_reference("user/"), None);
+    assert_eq!(parse_subject_reference("/alice"), None);
+    assert_eq!(parse_subject_reference("user:"), None);
+    assert_eq!(parse_subject_reference(":alice"), None);
+    assert_eq!(parse_subject_reference("only-segment"), None);
+}
+
+#[test]
+fn spicedb_subject_from_principal_prefers_account_then_aud_then_subject() {
+    let account = SpiceDbPrincipal(serde_json::json!({"account": "tenant-1"}));
+    assert_eq!(
+        spicedb_subject_from_principal(&account),
+        Some(("account".into(), "tenant-1".into()))
+    );
+
+    let aud = SpiceDbPrincipal(serde_json::json!({"aud": "tenant-2"}));
+    assert_eq!(
+        spicedb_subject_from_principal(&aud),
+        Some(("account".into(), "tenant-2".into()))
+    );
+
+    let subject = SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "user/alice"}));
+    assert_eq!(
+        spicedb_subject_from_principal(&subject),
+        Some(("user".into(), "alice".into()))
+    );
+}
+
+#[test]
+fn spicedb_subject_from_principal_returns_none_when_no_claim_maps() {
+    let principal = SpiceDbPrincipal(serde_json::json!({"sub": "no-match"}));
+    assert_eq!(spicedb_subject_from_principal(&principal), None);
+}
+
+#[tokio::test]
+async fn configured_gate_denies_when_principal_lacks_subject_mapping() {
+    let mock = Arc::new(MockBulkImportClient::new(vec![]));
+    let gate = SpiceDbImportGate::configured(mock.clone(), ZedTokenCache::new(ZedTokenTtl::from_secs(30)));
+    let principal = SpiceDbPrincipal(serde_json::json!({"sub": "no-mapping"}));
+    assert!(
+        !gate
+            .permit(&principal, &imported("peer"), &agent_id("bot"))
+            .await
+            .expect("must not error")
+    );
+    assert!(
+        mock.recorded_requests().is_empty(),
+        "principal without subject must short-circuit before contacting Authzed"
+    );
+}
+
+#[test]
+fn default_returns_deny_only_gate() {
+    let gate = SpiceDbImportGate::default();
     assert!(!gate.is_configured());
+}
+
+#[tokio::test]
+async fn configured_gate_denies_when_per_pair_response_is_absent() {
+    use authzed::v1::CheckBulkPermissionsPair;
+
+    let response = CheckBulkPermissionsResponse {
+        checked_at: Some(ZedToken {
+            token: "zed-empty".into(),
+        }),
+        pairs: vec![CheckBulkPermissionsPair {
+            request: None,
+            response: None,
+        }],
+    };
+    let mock = Arc::new(MockBulkImportClient::new(vec![Ok(response)]));
+    let gate = SpiceDbImportGate::configured(mock, ZedTokenCache::new(ZedTokenTtl::from_secs(30)));
+    assert!(
+        !gate
+            .permit(&principal("user/alice"), &imported("peer"), &agent_id("bot"))
+            .await
+            .expect("missing per-pair response must fail closed")
+    );
+}
+
+/// Env adapter that returns `NotUnicode` for designated keys — `InMemoryEnv`
+/// can't simulate this directly because its backing store is `String`-keyed.
+#[derive(Default)]
+struct NotUnicodeEnv {
+    keys: std::collections::HashSet<String>,
+}
+
+impl NotUnicodeEnv {
+    fn flag(mut self, key: impl Into<String>) -> Self {
+        self.keys.insert(key.into());
+        self
+    }
+}
+
+impl trogon_std::env::ReadEnv for NotUnicodeEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        if self.keys.contains(key) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStringExt;
+                Err(std::env::VarError::NotUnicode(std::ffi::OsString::from_vec(vec![
+                    0xC3, 0x28,
+                ])))
+            }
+            #[cfg(not(unix))]
+            Err(std::env::VarError::NotPresent)
+        } else {
+            Err(std::env::VarError::NotPresent)
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn zed_token_ttl_from_env_reports_invalid_unicode() {
+    use super::config::zed_token_ttl_from_env;
+    let env = NotUnicodeEnv::default().flag(ENV_SPICEDB_ZEDTOKEN_TTL_SECS);
+    let err = zed_token_ttl_from_env(&env).unwrap_err();
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidZedTokenTtl(_)));
+}
+
+#[test]
+#[cfg(unix)]
+fn optional_credentials_reports_invalid_unicode_endpoint() {
+    use super::config::optional_spicedb_credentials;
+    let env = NotUnicodeEnv::default().flag(ENV_SPICEDB_ENDPOINT);
+    let err = optional_spicedb_credentials(&env).unwrap_err();
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidEndpoint(_)));
+}
+
+struct EndpointOkTokenNotUnicodeEnv;
+
+impl trogon_std::env::ReadEnv for EndpointOkTokenNotUnicodeEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        match key {
+            ENV_SPICEDB_ENDPOINT => Ok("https://spicedb.example.com:443".into()),
+            #[cfg(unix)]
+            ENV_SPICEDB_TOKEN => {
+                use std::os::unix::ffi::OsStringExt;
+                Err(std::env::VarError::NotUnicode(std::ffi::OsString::from_vec(vec![
+                    0xC3, 0x28,
+                ])))
+            }
+            _ => Err(std::env::VarError::NotPresent),
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn optional_credentials_reports_invalid_unicode_token() {
+    use super::config::optional_spicedb_credentials;
+    let err = optional_spicedb_credentials(&EndpointOkTokenNotUnicodeEnv).unwrap_err();
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidToken(_)));
 }
