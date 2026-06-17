@@ -1,0 +1,19 @@
+name: Setup Rust
+description: Install the mise-pinned Rust toolchain and optional rustup components
+
+inputs:
+  components:
+    description: Comma-separated rustup components to ensure are installed (e.g. llvm-tools-preview)
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+
+    - if: inputs.components != ''
+      shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+      run: rustup component add ${COMPONENTS//,/ }
