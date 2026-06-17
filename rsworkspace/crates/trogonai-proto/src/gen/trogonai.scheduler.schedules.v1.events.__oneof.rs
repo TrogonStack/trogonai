@@ -16,6 +16,15 @@ pub mod schedule_event {
         ScheduleRemoved(
             ::buffa::alloc::boxed::Box<super::super::super::ScheduleRemoved>,
         ),
+        ScheduleOccurrenceRecorded(
+            ::buffa::alloc::boxed::Box<super::super::super::ScheduleOccurrenceRecorded>,
+        ),
+        ScheduleOccurrenceScheduled(
+            ::buffa::alloc::boxed::Box<super::super::super::ScheduleOccurrenceScheduled>,
+        ),
+        ScheduleCompleted(
+            ::buffa::alloc::boxed::Box<super::super::super::ScheduleCompleted>,
+        ),
     }
     impl ::buffa::Oneof for Event {}
     impl From<super::super::super::ScheduleCreated> for Event {
@@ -58,6 +67,38 @@ pub mod schedule_event {
             Self::Some(Event::from(v))
         }
     }
+    impl From<super::super::super::ScheduleOccurrenceRecorded> for Event {
+        fn from(v: super::super::super::ScheduleOccurrenceRecorded) -> Self {
+            Self::ScheduleOccurrenceRecorded(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ScheduleOccurrenceRecorded>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ScheduleOccurrenceRecorded) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::ScheduleOccurrenceScheduled> for Event {
+        fn from(v: super::super::super::ScheduleOccurrenceScheduled) -> Self {
+            Self::ScheduleOccurrenceScheduled(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ScheduleOccurrenceScheduled>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ScheduleOccurrenceScheduled) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::ScheduleCompleted> for Event {
+        fn from(v: super::super::super::ScheduleCompleted) -> Self {
+            Self::ScheduleCompleted(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ScheduleCompleted> for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ScheduleCompleted) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
     impl serde::Serialize for Event {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -77,6 +118,15 @@ pub mod schedule_event {
                 }
                 Self::ScheduleRemoved(v) => {
                     map.serialize_entry("scheduleRemoved", v)?;
+                }
+                Self::ScheduleOccurrenceRecorded(v) => {
+                    map.serialize_entry("scheduleOccurrenceRecorded", v)?;
+                }
+                Self::ScheduleOccurrenceScheduled(v) => {
+                    map.serialize_entry("scheduleOccurrenceScheduled", v)?;
+                }
+                Self::ScheduleCompleted(v) => {
+                    map.serialize_entry("scheduleCompleted", v)?;
                 }
             }
             map.end()

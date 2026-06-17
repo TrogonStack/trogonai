@@ -16,6 +16,8 @@ pub enum ResumeScheduleError {
     ScheduleDeleted { id: ScheduleId },
     #[error("schedule '{id}' is already active")]
     AlreadyActive { id: ScheduleId },
+    #[error("schedule '{id}' has already completed its recurrence")]
+    AlreadyCompleted { id: ScheduleId },
     #[error("state value is missing")]
     MissingStateValue,
     #[error("unknown state value: {value}")]
@@ -64,14 +66,19 @@ impl Decider for ResumeSchedule {
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => {
                 Err(ResumeScheduleError::AlreadyActive { id: command.id.clone() })
             }
-            state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => Ok(Decision::event(v1::ScheduleEvent {
-                event: Some(
-                    v1::ScheduleResumed {
-                        schedule_id: command.id.as_str().to_string(),
-                    }
-                    .into(),
-                ),
-            })),
+            state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
+                if state.completed == Some(true) {
+                    return Err(ResumeScheduleError::AlreadyCompleted { id: command.id.clone() });
+                }
+                Ok(Decision::event(v1::ScheduleEvent {
+                    event: Some(
+                        v1::ScheduleResumed {
+                            schedule_id: command.id.as_str().to_string(),
+                        }
+                        .into(),
+                    ),
+                }))
+            }
             state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(ResumeScheduleError::UnknownStateValue { value: 0 }),
         }
     }
@@ -166,6 +173,18 @@ mod tests {
         }
     }
 
+    fn completed(id: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCompleted {
+                    schedule_id: id.to_string(),
+                    last_occurrence_sequence: Some(0),
+                }
+                .into(),
+            ),
+        }
+    }
+
     #[test]
     fn given_when_then_supports_resume_job_decider() {
         TestCase::<ResumeSchedule>::new()
@@ -181,6 +200,18 @@ mod tests {
             .given([added("backup")])
             .when(resume_job_command("backup"))
             .then_error(ResumeScheduleError::AlreadyActive {
+                id: ScheduleId::parse("backup").unwrap(),
+            });
+    }
+
+    #[test]
+    fn given_when_then_rejects_resuming_completed_jobs() {
+        TestCase::<ResumeSchedule>::new()
+            .given([added("backup")])
+            .given([completed("backup")])
+            .given([paused("backup")])
+            .when(resume_job_command("backup"))
+            .then_error(ResumeScheduleError::AlreadyCompleted {
                 id: ScheduleId::parse("backup").unwrap(),
             });
     }
@@ -220,8 +251,12 @@ mod tests {
             "schedule 'backup' was deleted"
         );
         assert_eq!(
-            ResumeScheduleError::AlreadyActive { id }.to_string(),
+            ResumeScheduleError::AlreadyActive { id: id.clone() }.to_string(),
             "schedule 'backup' is already active"
+        );
+        assert_eq!(
+            ResumeScheduleError::AlreadyCompleted { id }.to_string(),
+            "schedule 'backup' has already completed its recurrence"
         );
         assert_eq!(
             ResumeScheduleError::MissingStateValue.to_string(),
@@ -238,13 +273,29 @@ mod tests {
         let command = resume_job_command("backup");
 
         assert_eq!(
-            ResumeSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
+            ResumeSchedule::decide(
+                &state_v1::State {
+                    completed: None,
+                    state: None,
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
+                },
+                &command
+            )
+            .unwrap_err(),
             ResumeScheduleError::MissingStateValue
         );
         assert_eq!(
             ResumeSchedule::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(123)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )
@@ -254,7 +305,12 @@ mod tests {
         assert_eq!(
             ResumeSchedule::decide(
                 &state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &command,
             )
