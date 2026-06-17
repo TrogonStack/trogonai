@@ -12,6 +12,7 @@ workspace = true
 a2a-auth-callout = { workspace = true }
 a2a-pack = { workspace = true }
 a2a = { workspace = true }
+a2a-identity-types = { workspace = true }
 opentelemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
