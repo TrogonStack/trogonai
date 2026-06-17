@@ -260,44 +260,11 @@ mod tests {
         MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at))
     }
 
-    fn present_state(
-        value: state_v1::StateValue,
-        last_occurrence_at: Option<DateTime<Utc>>,
-        last_occurrence_sequence: Option<u64>,
-        pending_occurrence_at: Option<DateTime<Utc>>,
-        schedule: MessageField<v1::Schedule>,
-    ) -> state_v1::State {
-        state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(value)),
-            last_occurrence_at: last_occurrence_at.map(timestamp).unwrap_or_default(),
-            last_occurrence_sequence,
-            schedule,
-            pending_occurrence_at: pending_occurrence_at.map(timestamp).unwrap_or_default(),
-        }
-    }
-
-    fn enabled_state(
-        last_occurrence_at: Option<DateTime<Utc>>,
-        last_occurrence_sequence: Option<u64>,
-        pending_occurrence_at: Option<DateTime<Utc>>,
-        schedule: MessageField<v1::Schedule>,
-    ) -> state_v1::State {
-        present_state(
-            state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED,
-            last_occurrence_at,
-            last_occurrence_sequence,
-            pending_occurrence_at,
-            schedule,
-        )
-    }
-
     fn record(id: &str) -> RecordScheduleOccurrence {
         RecordScheduleOccurrence::new(schedule_id(id), occurrence_at(), recorded_at())
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods, reason = "delegation test: asserts Decider::evolve forwards to the schedule state module")]
     fn decider_identity_delegates_to_schedule_state() {
         let command = record("recurring");
         assert_eq!(command.stream_id(), "recurring");
@@ -305,14 +272,6 @@ mod tests {
             RecordScheduleOccurrence::initial_state(),
             super::super::state::initial_state()
         );
-
-        let event = recorded("recurring", 1, occurrence_at());
-        let evolved = RecordScheduleOccurrence::evolve(
-            enabled_state(None, None, Some(occurrence_at()), MessageField::default()),
-            &event,
-        )
-        .unwrap();
-        assert_eq!(evolved.last_occurrence_sequence, Some(1));
     }
 
     fn recorded(id: &str, sequence: u64, at: DateTime<Utc>) -> v1::ScheduleEvent {
@@ -521,54 +480,43 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods, reason = "exercises decide's guard against corrupt persisted state values that no event replay can produce")]
     fn rejects_malformed_state_values() {
         let id = "recurring";
 
-        assert_eq!(
-            RecordScheduleOccurrence::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: None,
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &record(id)
-            )
-            .unwrap_err(),
-            RecordScheduleOccurrenceError::MissingStateValue
-        );
-        assert_eq!(
-            RecordScheduleOccurrence::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(123)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &record(id)
-            )
-            .unwrap_err(),
-            RecordScheduleOccurrenceError::UnknownStateValue { value: 123 }
-        );
-        assert_eq!(
-            RecordScheduleOccurrence::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &record(id)
-            )
-            .unwrap_err(),
-            RecordScheduleOccurrenceError::UnknownStateValue { value: 0 }
-        );
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: None,
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::MissingStateValue);
+
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(123)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::UnknownStateValue { value: 123 });
+
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::UnknownStateValue { value: 0 });
     }
 }

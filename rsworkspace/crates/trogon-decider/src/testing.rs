@@ -324,6 +324,11 @@ pub struct Given<Event> {
 pub struct NoHistory;
 
 #[doc(hidden)]
+pub struct GivenState<State> {
+    state: State,
+}
+
+#[doc(hidden)]
 pub struct When<Event, State, Command> {
     history: History<Event>,
     state: State,
@@ -395,6 +400,42 @@ where
             marker: PhantomData,
             stage: Given {
                 history: History::from_events(events),
+            },
+            completed: false,
+        }
+    }
+
+    /// Starts from an explicit prebuilt state instead of replayed events.
+    ///
+    /// Reserved for decide guards that defend against states no event history
+    /// can produce, such as corrupted persisted protobuf or a degenerate
+    /// sequence value. Prefer [`given`](Self::given) or
+    /// [`given_no_history`](Self::given_no_history) for any behavior reachable
+    /// through real events.
+    pub fn given_state(mut self, state: C::State) -> TestCase<C, GivenState<C::State>> {
+        self.completed = true;
+        TestCase {
+            marker: PhantomData,
+            stage: GivenState { state },
+            completed: false,
+        }
+    }
+}
+
+impl<C> TestCase<C, GivenState<C::State>>
+where
+    C: Decider,
+{
+    /// Provides the command under test against the seeded state.
+    pub fn when(self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
+        let GivenState { state } = self.complete_into_stage();
+        TestCase {
+            marker: PhantomData,
+            stage: When {
+                history: History::new(),
+                state,
+                expected_state: None,
+                command,
             },
             completed: false,
         }

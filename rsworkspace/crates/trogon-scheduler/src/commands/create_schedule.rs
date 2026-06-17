@@ -276,52 +276,41 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods, reason = "exercises decide's guard against corrupt persisted state values that no event replay can produce")]
     fn decide_rejects_invalid_state_values() {
-        assert_eq!(
-            CreateSchedule::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: None,
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &create_schedule("backup")
-            )
-            .unwrap_err(),
-            CreateScheduleDecideError::MissingStateValue
-        );
-        assert_eq!(
-            CreateSchedule::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(123)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &create_schedule("backup")
-            )
-            .unwrap_err(),
-            CreateScheduleDecideError::UnknownStateValue { value: 123 }
-        );
-        assert_eq!(
-            CreateSchedule::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &create_schedule("backup")
-            )
-            .unwrap_err(),
-            CreateScheduleDecideError::UnknownStateValue { value: 0 }
-        );
+        TestCase::<CreateSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: None,
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(create_schedule("backup"))
+            .then_error(CreateScheduleDecideError::MissingStateValue);
+
+        TestCase::<CreateSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(123)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(create_schedule("backup"))
+            .then_error(CreateScheduleDecideError::UnknownStateValue { value: 123 });
+
+        TestCase::<CreateSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(create_schedule("backup"))
+            .then_error(CreateScheduleDecideError::UnknownStateValue { value: 0 });
     }
 }
