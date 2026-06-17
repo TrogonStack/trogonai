@@ -83,13 +83,13 @@ jobs:
           cache-on-failure: true
           cache-workspace-crates: true
 
-      - name: Install cargo-llvm-cov
+      - name: Install coverage tools
         uses: taiki-e/install-action@25435dc8dd3baed7417e0c96d3fe89013a5b2e09 # v2.81.3
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,nextest
 
       - name: Run tests with coverage
-        run: cargo cov --cobertura --output-path coverage.xml
+        run: cargo cov nextest --cobertura --output-path coverage.xml
         working-directory: rsworkspace
 
       - name: Coverage report and gate
