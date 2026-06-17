@@ -182,9 +182,14 @@ async fn run<P, U, S, E, M>(
         while in_flight.len() < config.max_active_lanes {
             let Some(key) = ready.pop_front() else { break };
             queued_ready.remove(&key);
-            match resolve_ready_key(key, &in_flight, &mut pending) {
-                ReadyOutcome::AlreadyInFlight => continue,
-                ReadyOutcome::EmptyQueue => continue,
+            // Both ReadyOutcome::AlreadyInFlight and ReadyOutcome::EmptyQueue
+            // are defensive arms that `queued_ready` + the submission flow
+            // make unreachable through the public API. `resolve_ready_key` is
+            // unit-tested for each, so the loop here just drops both into a
+            // single `continue` and exits the wildcard arm without needing
+            // separate uncovered branches.
+            let outcome = resolve_ready_key(key, &in_flight, &mut pending);
+            match outcome {
                 ReadyOutcome::Dispatch(event, decoded, message) => {
                     in_flight.insert(key);
                     active_lanes.store(in_flight.len(), Ordering::SeqCst);
@@ -196,6 +201,7 @@ async fn run<P, U, S, E, M>(
                         (key, report)
                     });
                 }
+                _ => continue,
             }
         }
 
@@ -1446,6 +1452,66 @@ mod tests {
         assert!(
             pending_reports.is_empty(),
             "flush_pending_reports must clear the queue when the channel receiver is dropped"
+        );
+    }
+
+    /// `flush_pending_reports`: `Ok(())` success arm drains every report into
+    /// the channel and leaves the queue empty.
+    #[test]
+    fn flush_pending_reports_drains_every_report_when_channel_has_capacity() {
+        use trogon_decider_runtime::StreamPosition;
+
+        let (tx, mut rx) = mpsc::channel::<DispatchReport>(8);
+        let lane = key_for_stream("flush-ok");
+        let mut pending_reports = std::collections::VecDeque::new();
+        for stream_position in 1..=4 {
+            pending_reports.push_back(DispatchReport {
+                stream_position: StreamPosition::try_new(stream_position).unwrap(),
+                lane,
+                result: Ok(ProcessedOutcome::Published),
+            });
+        }
+
+        super::flush_pending_reports(&mut pending_reports, &tx);
+
+        assert!(pending_reports.is_empty(), "every report must be drained on success");
+        let mut drained = 0;
+        while rx.try_recv().is_ok() {
+            drained += 1;
+        }
+        assert_eq!(drained, 4);
+    }
+
+    /// `flush_pending_reports`: `TrySendError::Full` arm leaves the report
+    /// queued for the next select tick instead of dropping or clearing it.
+    #[test]
+    fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
+        use trogon_decider_runtime::StreamPosition;
+
+        let (tx, _rx) = mpsc::channel::<DispatchReport>(1);
+        let lane = key_for_stream("flush-full");
+        let blocker = DispatchReport {
+            stream_position: StreamPosition::try_new(1).unwrap(),
+            lane,
+            result: Ok(ProcessedOutcome::Published),
+        };
+        // Saturate the channel before the helper runs so the next try_send
+        // returns Full immediately.
+        tx.try_send(blocker).expect("seeded send must fit");
+
+        let mut pending_reports = std::collections::VecDeque::new();
+        pending_reports.push_back(DispatchReport {
+            stream_position: StreamPosition::try_new(2).unwrap(),
+            lane,
+            result: Ok(ProcessedOutcome::Published),
+        });
+
+        super::flush_pending_reports(&mut pending_reports, &tx);
+
+        assert_eq!(
+            pending_reports.len(),
+            1,
+            "Full must stop the drain without consuming the still-pending report"
         );
     }
 
