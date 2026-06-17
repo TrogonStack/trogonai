@@ -455,7 +455,6 @@ mod tests {
     use std::sync::Mutex;
 
     use buffa::MessageField;
-    use trogon_decider_runtime::Headers;
     use trogonai_proto::scheduler::schedules::v1;
 
     use super::super::testkit::{
@@ -468,7 +467,6 @@ mod tests {
         ScheduleHeaders, ScheduleMessage,
     };
     use crate::processor::execution::checkpoints::ScheduleCheckpointStore;
-    use crate::processor::execution::checkpoints::ScheduleStatus;
     use crate::processor::execution::execution_schedules::ExecutionScheduleWriter;
     use crate::processor::execution::reconciliation::ScheduleSubject;
     use crate::processor::execution::reconciliation::{ScheduleKey, StreamRoutingId};
@@ -778,8 +776,6 @@ mod tests {
         assert_eq!(reports[0].result.clone().unwrap(), ProcessedOutcome::StoredPaused);
         assert_eq!(execution.scheduled_count(subject.as_str()), 0);
         assert!(kv.contains(&format!("v1.{}", key.simple())));
-        let _ = ScheduleStatus::Paused;
-        let _ = Headers::empty();
     }
 
     #[tokio::test(start_paused = true)]

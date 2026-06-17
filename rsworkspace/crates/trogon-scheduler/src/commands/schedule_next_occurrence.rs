@@ -126,8 +126,8 @@ impl Decider for ScheduleNextOccurrence {
 
                 let floor = command.now - PAST_OCCURRENCE_GRACE;
                 let cursor = match last_occurrence_at {
-                    Some(last) if last >= floor => RRuleCursor::after(last),
-                    _ => RRuleCursor::at_or_after(floor),
+                    Some(last) => RRuleCursor::after(last),
+                    None => RRuleCursor::at_or_after(floor),
                 };
 
                 let recurrence = Recurrence::try_from(schedule)
@@ -309,6 +309,43 @@ mod tests {
                 }]
             );
         }
+    }
+
+    #[test]
+    fn arms_after_old_recorded_occurrence_without_grace_skip() {
+        let id = "recurring";
+        let last = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 6, 10, 0, 0, 0).unwrap();
+        let state = state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
+            last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&last)),
+            last_occurrence_sequence: Some(1),
+            schedule: MessageField::some(rrule_schedule(10)),
+            pending_occurrence_at: MessageField::default(),
+        };
+
+        let decision = ScheduleNextOccurrence::decide(&state, &command(id, now)).unwrap();
+        let Decision::Events(events) = decision else {
+            panic!("expected an arming decision");
+        };
+
+        assert_eq!(
+            events.as_slice(),
+            &[v1::ScheduleEvent {
+                event: Some(
+                    v1::ScheduleOccurrenceScheduled {
+                        schedule_id: id.to_string(),
+                        occurrence_sequence: Some(2),
+                        occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                            &Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap()
+                        )),
+                        scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&now)),
+                    }
+                    .into(),
+                ),
+            }]
+        );
     }
 
     #[test]
