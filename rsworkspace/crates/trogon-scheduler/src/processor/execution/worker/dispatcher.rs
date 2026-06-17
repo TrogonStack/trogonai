@@ -239,14 +239,7 @@ async fn run<P, U, S, E, M>(
                 }
             }
             permit = reports_tx.reserve(), if !pending_reports.is_empty() => {
-                match permit {
-                    Ok(permit) => {
-                        if let Some(report) = pending_reports.pop_front() {
-                            permit.send(report);
-                        }
-                    }
-                    Err(_) => pending_reports.clear(),
-                }
+                drain_one_reserved_report(permit, &mut pending_reports);
             }
         }
     }
@@ -420,6 +413,24 @@ async fn settle_message<M: DeliveredMessage>(
             );
             Err("message settlement panicked".to_string())
         }
+    }
+}
+
+/// Pops one report and sends it via the reserved permit, or clears the queue if
+/// the channel has closed. Extracted so the success + closed-channel branches
+/// can be exercised deterministically by unit tests instead of relying on the
+/// tokio scheduler to drive the live `select!` arm at coverage time.
+fn drain_one_reserved_report(
+    permit: Result<mpsc::Permit<'_, DispatchReport>, mpsc::error::SendError<()>>,
+    pending_reports: &mut VecDeque<DispatchReport>,
+) {
+    match permit {
+        Ok(permit) => {
+            if let Some(report) = pending_reports.pop_front() {
+                permit.send(report);
+            }
+        }
+        Err(_) => pending_reports.clear(),
     }
 }
 
@@ -1475,6 +1486,47 @@ mod tests {
             drained += 1;
         }
         assert_eq!(drained, 4);
+    }
+
+    /// `drain_one_reserved_report`: success arm pops one report and sends it.
+    #[tokio::test]
+    async fn drain_one_reserved_report_sends_front_report_through_permit() {
+        use trogon_decider_runtime::StreamPosition;
+
+        let (tx, mut rx) = mpsc::channel::<DispatchReport>(4);
+        let permit = tx.reserve().await.expect("permit must reserve");
+
+        let lane = key_for_stream("drain-ok");
+        let mut pending_reports = std::collections::VecDeque::new();
+        pending_reports.push_back(DispatchReport {
+            stream_position: StreamPosition::try_new(1).unwrap(),
+            lane,
+            result: Ok(ProcessedOutcome::Published),
+        });
+
+        super::drain_one_reserved_report(Ok(permit), &mut pending_reports);
+
+        assert!(pending_reports.is_empty(), "front report must be consumed");
+        assert!(rx.try_recv().is_ok(), "channel must have received the report");
+    }
+
+    /// `drain_one_reserved_report`: closed-channel arm clears the queue so the
+    /// loop doesn't keep replaying reports against a receiver that's gone.
+    #[test]
+    fn drain_one_reserved_report_clears_queue_when_channel_closed() {
+        use trogon_decider_runtime::StreamPosition;
+
+        let lane = key_for_stream("drain-closed");
+        let mut pending_reports = std::collections::VecDeque::new();
+        pending_reports.push_back(DispatchReport {
+            stream_position: StreamPosition::try_new(1).unwrap(),
+            lane,
+            result: Ok(ProcessedOutcome::Published),
+        });
+
+        super::drain_one_reserved_report(Err(mpsc::error::SendError(())), &mut pending_reports);
+
+        assert!(pending_reports.is_empty(), "queue must be cleared on channel close");
     }
 
     /// `flush_pending_reports`: `TrySendError::Full` arm leaves the report
