@@ -87,4 +87,11 @@ mod tests {
         let back: JsonRpcId = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(id, back);
     }
+
+    #[test]
+    fn display_covers_every_variant() {
+        assert_eq!(format!("{}", JsonRpcId::Number(42)), "42");
+        assert_eq!(format!("{}", JsonRpcId::String("abc".into())), "abc");
+        assert_eq!(format!("{}", JsonRpcId::Null), "null");
+    }
 }
