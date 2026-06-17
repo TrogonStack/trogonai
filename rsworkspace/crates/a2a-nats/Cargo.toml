@@ -6,6 +6,14 @@ license = "Apache-2.0"
 description = "A2A protocol bindings over NATS"
 publish = false
 
+[features]
+default = []
+# Opt in to the SpiceDB-backed import gate (federated-import authorisation
+# against an external SpiceDB Permissions API over gRPC). Off by default so
+# deployments without an external authoriser don't pay the authzed/tonic/moka
+# compile cost.
+spicedb = ["dep:authzed", "dep:moka", "dep:tonic", "dep:trogon-std"]
+
 [lints]
 workspace = true
 
@@ -15,16 +23,21 @@ a2a-identity-types = { workspace = true }
 a2a-pack = { workspace = true }
 async-nats = { workspace = true }
 async-trait = { workspace = true }
+authzed = { workspace = true, optional = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+moka = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-std = { workspace = true, optional = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
