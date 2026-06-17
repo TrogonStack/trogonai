@@ -12,9 +12,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-lf"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb24275cca126dc3301d272eef07bd4cefd87f9a7dd5d6f27200fe87e8a83d0"
+dependencies = [
+ "base64",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "a2a-nats"
 version = "0.1.0"
 dependencies = [
+ "a2a-lf",
+ "bytes",
+ "futures",
  "serde",
  "serde_json",
  "trogon-nats",

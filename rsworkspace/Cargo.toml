@@ -27,6 +27,9 @@ trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
 
+# A2A
+a2a = { package = "a2a-lf", version = "=0.3.0" }
+
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
 

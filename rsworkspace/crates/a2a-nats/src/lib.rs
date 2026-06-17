@@ -13,6 +13,7 @@ pub mod context_id;
 pub mod error;
 pub mod jsonrpc;
 pub mod req_id;
+pub mod server;
 pub mod task_id;
 
 pub use a2a_prefix::{A2aPrefix, A2aPrefixError};
