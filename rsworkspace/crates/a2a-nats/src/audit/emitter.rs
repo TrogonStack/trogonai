@@ -58,13 +58,7 @@ where
                 outcome_token,
                 envelope.method.replace('/', ".")
             );
-            let payload = match serde_json::to_vec(&envelope) {
-                Ok(b) => Bytes::from(b),
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to serialize audit envelope");
-                    return;
-                }
-            };
+            let payload = Bytes::from(serde_json::to_vec(&envelope).unwrap_or_default());
             if let Err(e) = self
                 .nats
                 .publish_with_headers(async_nats::Subject::from(subject.as_str()), HeaderMap::new(), payload)
@@ -84,13 +78,7 @@ where
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let subject = format!("{}.audit.lifecycle", prefix.as_str());
-            let payload = match serde_json::to_vec(&envelope) {
-                Ok(b) => Bytes::from(b),
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to serialize task lifecycle audit envelope");
-                    return;
-                }
-            };
+            let payload = Bytes::from(serde_json::to_vec(&envelope).unwrap_or_default());
             if let Err(e) = self
                 .nats
                 .publish_with_headers(async_nats::Subject::from(subject.as_str()), HeaderMap::new(), payload)
