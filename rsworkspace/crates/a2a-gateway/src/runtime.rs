@@ -1397,22 +1397,22 @@ mod gateway_dispatch_tests {
     fn dispatch_builds_publish_args_from_valid_ingress_subject() {
         let cfg = test_config("a2a");
         assert_eq!(
-            resolve_gateway_ingress_subject("a2a.v1.gateway.planner.message.send", &cfg.a2a_prefix).unwrap(),
-            "a2a.v1.agents.planner.message.send"
+            resolve_gateway_ingress_subject("a2a.gateway.planner.message.send", &cfg.a2a_prefix).unwrap(),
+            "a2a.agents.planner.message.send"
         );
     }
 
     #[test]
     fn forward_ok_audit_includes_rewrite_and_omits_stream_consumer_for_unary() {
         let agent = test_agent();
-        let ingress = "a2a.v1.gateway.planner.message.send";
-        let agent_subject = "a2a.v1.agents.planner.message.send";
+        let ingress = "a2a.gateway.planner.message.send";
+        let agent_subject = "a2a.agents.planner.message.send";
         let extras = forward_audit_fields(ingress, agent_subject, &agent, "message.send");
         let envelope = AuditEnvelope::new(&agent, "message/send", None, 0, 0, AuditOutcome::Ok, None, extras);
         let json = serde_json::to_value(envelope).unwrap();
         assert_eq!(
             json["rewrites"],
-            serde_json::json!(["ingress:a2a.v1.gateway.planner.message.send -> agent:a2a.v1.agents.planner.message.send"])
+            serde_json::json!(["ingress:a2a.gateway.planner.message.send -> agent:a2a.agents.planner.message.send"])
         );
         assert!(json.get("stream_consumer").is_none());
     }
@@ -1420,8 +1420,8 @@ mod gateway_dispatch_tests {
     #[test]
     fn forward_ok_audit_includes_stream_consumer_for_message_stream() {
         let agent = test_agent();
-        let ingress = "a2a.v1.gateway.planner.message.stream";
-        let agent_subject = "a2a.v1.agents.planner.message.stream";
+        let ingress = "a2a.gateway.planner.message.stream";
+        let agent_subject = "a2a.agents.planner.message.stream";
         let extras = forward_audit_fields(ingress, agent_subject, &agent, "message.stream");
         let envelope = AuditEnvelope::new(&agent, "message/stream", None, 0, 0, AuditOutcome::Ok, None, extras);
         let json = serde_json::to_value(envelope).unwrap();
@@ -1432,8 +1432,8 @@ mod gateway_dispatch_tests {
     #[test]
     fn forward_err_audit_includes_rewrite_for_resubscribe() {
         let agent = test_agent();
-        let ingress = "a2a.v1.gateway.planner.tasks.resubscribe";
-        let agent_subject = "a2a.v1.agents.planner.tasks.resubscribe";
+        let ingress = "a2a.gateway.planner.tasks.resubscribe";
+        let agent_subject = "a2a.agents.planner.tasks.resubscribe";
         let extras = forward_audit_fields(ingress, agent_subject, &agent, "tasks.resubscribe");
         let envelope = AuditEnvelope::new(
             &agent,
@@ -1453,7 +1453,7 @@ mod gateway_dispatch_tests {
         assert_eq!(
             json["rewrites"],
             serde_json::json!([
-                "ingress:a2a.v1.gateway.planner.tasks.resubscribe -> agent:a2a.v1.agents.planner.tasks.resubscribe"
+                "ingress:a2a.gateway.planner.tasks.resubscribe -> agent:a2a.agents.planner.tasks.resubscribe"
             ])
         );
     }
@@ -1558,7 +1558,7 @@ pattern = "planner"
             &agent,
             Some("alice"),
             "a2a",
-            "a2a.v1.gateway.planner.message.send",
+            "a2a.gateway.planner.message.send",
         )
         .expect("declarative context");
         let decision = gate.evaluate(&ctx);
@@ -1605,7 +1605,7 @@ pattern = "planner"
             &agent,
             Some("alice"),
             "a2a",
-            "a2a.v1.gateway.planner.message.send",
+            "a2a.gateway.planner.message.send",
         )
         .expect("declarative context");
         let decision = gate.evaluate(&ctx);

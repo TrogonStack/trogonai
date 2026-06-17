@@ -226,7 +226,7 @@ mod tests {
         assert!(harness.last_caller_jwt_present());
         assert_eq!(
             harness.last_subject().as_deref(),
-            Some("a2a.v1.gateway.planner.message.send")
+            Some("a2a.gateway.planner.message.send")
         );
 
         let audit_subject = nats
@@ -263,7 +263,7 @@ mod tests {
         assert!(harness.last_caller_jwt_present());
         assert_eq!(
             harness.last_subject().as_deref(),
-            Some("a2a.v1.gateway.planner.tasks.resubscribe")
+            Some("a2a.gateway.planner.tasks.resubscribe")
         );
 
         let mut stream = response.into_body().into_data_stream();

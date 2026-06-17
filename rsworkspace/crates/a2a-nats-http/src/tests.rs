@@ -76,7 +76,7 @@ fn error_response_bytes(code: i32, msg: &str) -> bytes::Bytes {
 #[tokio::test]
 async fn message_send_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.v1.agents.test-agent.message.send", send_message_response_bytes("t1"));
+    nats.set_response("a2a.agents.test-agent.message.send", send_message_response_bytes("t1"));
 
     let app = build_app(nats);
     let response = app
@@ -95,7 +95,7 @@ async fn message_send_returns_jsonrpc_result() {
 #[tokio::test]
 async fn tasks_get_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.v1.agents.test-agent.tasks.get", task_response_bytes("task-1"));
+    nats.set_response("a2a.agents.test-agent.tasks.get", task_response_bytes("task-1"));
 
     let app = build_app(nats);
     let response = app
@@ -115,7 +115,7 @@ async fn tasks_get_returns_jsonrpc_result() {
 async fn tasks_get_not_found_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
-        "a2a.v1.agents.test-agent.tasks.get",
+        "a2a.agents.test-agent.tasks.get",
         error_response_bytes(-32001, "not found"),
     );
 
@@ -136,7 +136,7 @@ async fn tasks_get_not_found_returns_jsonrpc_error() {
 #[tokio::test]
 async fn tasks_cancel_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.v1.agents.test-agent.tasks.cancel", task_response_bytes("task-c"));
+    nats.set_response("a2a.agents.test-agent.tasks.cancel", task_response_bytes("task-c"));
 
     let app = build_app(nats);
     let response = app
@@ -197,7 +197,7 @@ async fn tasks_list_returns_jsonrpc_result() {
     });
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
     nats.set_response(
-        "a2a.v1.agents.test-agent.tasks.list",
+        "a2a.agents.test-agent.tasks.list",
         serde_json::to_vec(&envelope).unwrap().into(),
     );
 
@@ -236,7 +236,7 @@ async fn agent_card_endpoint_returns_json() {
     };
     let envelope = serde_json::json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
     nats.set_response(
-        "a2a.v1.agents.test-agent.card",
+        "a2a.agents.test-agent.card",
         serde_json::to_vec(&envelope).unwrap().into(),
     );
 
@@ -264,7 +264,7 @@ async fn agent_card_endpoint_returns_json() {
 async fn message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
-        "a2a.v1.agents.test-agent.message.stream",
+        "a2a.agents.test-agent.message.stream",
         send_message_response_bytes("ts1"),
     );
 
@@ -296,7 +296,7 @@ async fn agent_card_unavailable_returns_503() {
         "error": { "code": -32050, "message": "unavailable" }
     });
     nats.set_response(
-        "a2a.v1.agents.test-agent.card",
+        "a2a.agents.test-agent.card",
         serde_json::to_vec(&envelope).unwrap().into(),
     );
 
@@ -321,7 +321,7 @@ async fn agent_card_unavailable_returns_503() {
 #[tokio::test]
 async fn jsonrpc_string_id_is_forwarded() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.v1.agents.test-agent.tasks.get", task_response_bytes("t99"));
+    nats.set_response("a2a.agents.test-agent.tasks.get", task_response_bytes("t99"));
 
     let app = build_app(nats);
     let response = app
@@ -339,7 +339,7 @@ async fn jsonrpc_string_id_is_forwarded() {
 async fn push_set_not_supported_maps_to_correct_error_code() {
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
-        "a2a.v1.agents.test-agent.push.set",
+        "a2a.agents.test-agent.push.set",
         error_response_bytes(-32003, "not supported"),
     );
 
@@ -366,7 +366,7 @@ fn runtime_error_display_shows_env_var_name() {
 async fn gateway_routed_message_send_targets_gateway_subject() {
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
-        "a2a.v1.gateway.test-agent.message.send",
+        "a2a.gateway.test-agent.message.send",
         send_message_response_bytes("t-gw"),
     );
 
@@ -391,7 +391,7 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
 async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
-        "a2a.v1.agents.test-agent.tasks.get",
+        "a2a.agents.test-agent.tasks.get",
         task_response_bytes("should-not-be-hit"),
     );
 
@@ -456,7 +456,7 @@ mod spec_negotiation {
 
     fn build_app_with_negotiation(config: SpecNegotiationConfig) -> axum::Router {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.v1.agents.test-agent.message.send", send_message_response_bytes("t1"));
+        nats.set_response("a2a.agents.test-agent.message.send", send_message_response_bytes("t1"));
         let js = MockJetStreamConsumerFactory::new();
         let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
         router::build_with_negotiation(client, Arc::new(config))

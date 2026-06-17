@@ -694,7 +694,7 @@ mod tests {
 
         let bridge_handle = tokio::spawn(async move { bridge.run_with_agent_id(&agent_id, shutdown_clone).await });
 
-        let msg_subject = "a2a.v1.agents.bot.message.send";
+        let msg_subject = "a2a.agents.bot.message.send";
         let payload = bytes::Bytes::from(rpc_payload("message/send", 1));
 
         for _ in 0..3 {
@@ -777,7 +777,7 @@ mod tests {
         let payload = bytes::Bytes::from(rpc_payload("message/send", 10));
         inject
             .unbounded_send(async_nats::Message {
-                subject: "a2a.v1.agents.bot.message.send".into(),
+                subject: "a2a.agents.bot.message.send".into(),
                 reply: None,
                 payload: payload.clone(),
                 headers: None,

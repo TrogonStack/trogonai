@@ -112,7 +112,7 @@ mod tests {
 
         let (config, _) = config_from_args(args, &env).unwrap();
 
-        assert_eq!(config.gateway_subscribe_subject(), "a2a.v1.gateway.>");
+        assert_eq!(config.gateway_subscribe_subject(), "a2a.gateway.>");
         assert_eq!(config.queue_group.as_deref(), Some("gateways"));
     }
 }

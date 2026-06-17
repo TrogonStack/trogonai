@@ -1,7 +1,7 @@
 {
   "name": "A2A_EVENTS",
   "description": "A2A task lifecycle event stream (status, working, message, artifact). Auto-provisioned by a2a-nats-server::provision_streams; this manifest is for operators pre-provisioning with custom replicas/retention.",
-  "subjects": ["a2a.v1.tasks.*.events.*"],
+  "subjects": ["a2a.tasks.*.events.*"],
   "retention": "interest",
   "storage": "file",
   "max_age": 86400000000000,

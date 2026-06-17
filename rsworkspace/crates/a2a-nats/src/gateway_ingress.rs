@@ -92,14 +92,14 @@ pub fn compose_gateway_ingress_subject(
     Ok(format!("{}.gateway.{}.{}", prefix.as_str(), agent_id.as_str(), trimmed))
 }
 
-/// Maps `{prefix}.agent.{remainder}` → `{prefix}.gateway.{remainder}`.
+/// Maps `{prefix}.agents.{remainder}` → `{prefix}.gateway.{remainder}`.
 ///
-/// Returns `None` when `agent_subject` is not prefixed with `{prefix}.agent.`.
+/// Returns `None` when `agent_subject` is not prefixed with `{prefix}.agents.`.
 ///
 /// Passing the result through [`resolve_gateway_ingress_subject`] yields the original `agent_subject`
 /// exactly when the trailing tokens match [`GATEWAY_INGRESS_METHOD_SUFFIXES`].
 pub fn gateway_ingress_subject_from_agent_subject(agent_subject: &str, prefix: &A2aPrefix) -> Option<String> {
-    let leader = format!("{}.agent.", prefix.as_str());
+    let leader = format!("{}.agents.", prefix.as_str());
     let remainder = agent_subject.strip_prefix(&leader)?;
     (!remainder.is_empty()).then(|| format!("{}.gateway.{remainder}", prefix.as_str()))
 }
@@ -112,7 +112,7 @@ pub fn gateway_ingress_agent_and_method_dots(
     prefix: &A2aPrefix,
 ) -> Result<(A2aAgentId, String), GatewayIngressError> {
     let agent_subject = resolve_gateway_ingress_subject(subject, prefix)?;
-    let leader = format!("{}.agent.", prefix.as_str());
+    let leader = format!("{}.agents.", prefix.as_str());
     let remainder = agent_subject
         .strip_prefix(&leader)
         .ok_or(GatewayIngressError::BadSubjectShape)?;
@@ -232,15 +232,15 @@ mod tests {
     #[test]
     fn message_send() {
         assert_eq!(
-            resolve_gateway_ingress_subject("a2a.v1.gateway.bot.message.send", &pfx()).unwrap(),
-            "a2a.v1.agents.bot.message.send"
+            resolve_gateway_ingress_subject("a2a.gateway.bot.message.send", &pfx()).unwrap(),
+            "a2a.agents.bot.message.send"
         );
     }
 
     #[test]
     fn legacy_two_segment_identity_area_rejected() {
         assert!(matches!(
-            resolve_gateway_ingress_subject("a2a.v1.gateway.acme.bot.message.send", &pfx()),
+            resolve_gateway_ingress_subject("a2a.gateway.acme.bot.message.send", &pfx()),
             Err(GatewayIngressError::UnknownMethodSuffix)
         ));
     }
@@ -248,8 +248,8 @@ mod tests {
     #[test]
     fn push_set_two_token_suffix() {
         assert_eq!(
-            resolve_gateway_ingress_subject("a2a.v1.gateway.planner.push.set", &pfx()).unwrap(),
-            "a2a.v1.agents.planner.push.set"
+            resolve_gateway_ingress_subject("a2a.gateway.planner.push.set", &pfx()).unwrap(),
+            "a2a.agents.planner.push.set"
         );
     }
 
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn invalid_agent_id_rejected_instead_of_silent_typo_subject() {
         assert!(matches!(
-            resolve_gateway_ingress_subject("a2a.v1.gateway.bad*agent.message.send", &pfx()),
+            resolve_gateway_ingress_subject("a2a.gateway.bad*agent.message.send", &pfx()),
             Err(GatewayIngressError::InvalidAgentId)
         ));
     }
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn too_many_segments_before_suffix_rejected() {
         assert!(matches!(
-            resolve_gateway_ingress_subject("a2a.v1.gateway.t1.t2.bot.message.send", &pfx()),
+            resolve_gateway_ingress_subject("a2a.gateway.t1.t2.bot.message.send", &pfx()),
             Err(GatewayIngressError::UnknownMethodSuffix)
         ));
     }
@@ -291,10 +291,10 @@ mod tests {
         let p = pfx();
         let aid = A2aAgentId::new("planner").unwrap();
         let g = compose_gateway_ingress_subject(&p, &aid, "message.send").unwrap();
-        assert_eq!(g, "a2a.v1.gateway.planner.message.send");
+        assert_eq!(g, "a2a.gateway.planner.message.send");
         assert_eq!(
             resolve_gateway_ingress_subject(&g, &p).unwrap(),
-            "a2a.v1.agents.planner.message.send"
+            "a2a.agents.planner.message.send"
         );
     }
 
@@ -302,27 +302,27 @@ mod tests {
     fn ingress_from_agent_subject_transform() {
         let p = pfx();
         assert_eq!(
-            gateway_ingress_subject_from_agent_subject("a2a.v1.agents.planner.message.stream", &p).unwrap(),
-            "a2a.v1.gateway.planner.message.stream"
+            gateway_ingress_subject_from_agent_subject("a2a.agents.planner.message.stream", &p).unwrap(),
+            "a2a.gateway.planner.message.stream"
         );
     }
 
     #[test]
     fn ingress_from_agent_wrong_leader_returns_none() {
-        assert!(gateway_ingress_subject_from_agent_subject("a2a.v1.gateway.x.message.send", &pfx()).is_none());
+        assert!(gateway_ingress_subject_from_agent_subject("a2a.gateway.x.message.send", &pfx()).is_none());
         assert!(gateway_ingress_subject_from_agent_subject("wrong.agent.x.message.send", &pfx()).is_none());
     }
 
     #[test]
     fn ingress_agent_method_matches_resolve_subject() {
         let p = pfx();
-        let subject = "a2a.v1.gateway.planner.message.send";
+        let subject = "a2a.gateway.planner.message.send";
         let (agent, method_dots) = gateway_ingress_agent_and_method_dots(subject, &p).unwrap();
         assert_eq!(agent.as_str(), "planner");
         assert_eq!(method_dots, "message.send");
         assert_eq!(
             resolve_gateway_ingress_subject(subject, &p).unwrap(),
-            "a2a.v1.agents.planner.message.send"
+            "a2a.agents.planner.message.send"
         );
     }
 

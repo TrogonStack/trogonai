@@ -405,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_get_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.v1.agents.bot.tasks.get", task_response("t1"));
+        nats.set_response("a2a.agents.bot.tasks.get", task_response("t1"));
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(
             &client,
@@ -435,7 +435,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_cancel_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.v1.agents.bot.tasks.cancel", task_response("tc"));
+        nats.set_response("a2a.agents.bot.tasks.cancel", task_response("tc"));
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(
             &client,
@@ -450,7 +450,7 @@ mod tests {
     #[tokio::test]
     async fn message_send_success() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.v1.agents.bot.message.send", send_message_response_bytes("ms"));
+        nats.set_response("a2a.agents.bot.message.send", send_message_response_bytes("ms"));
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(
             &client,
@@ -469,7 +469,7 @@ mod tests {
     #[tokio::test]
     async fn message_stream_emits_bootstrap_then_events() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.v1.agents.bot.message.stream", send_message_response_bytes("ms2"));
+        nats.set_response("a2a.agents.bot.message.stream", send_message_response_bytes("ms2"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, tx) = MockJetStreamConsumer::new();
@@ -495,7 +495,7 @@ mod tests {
     #[tokio::test]
     async fn tasks_resubscribe_emits_snapshot_then_empty_stream() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.v1.agents.bot.tasks.resubscribe", task_response("task1"));
+        nats.set_response("a2a.agents.bot.tasks.resubscribe", task_response("task1"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, tx) = MockJetStreamConsumer::new();
@@ -539,7 +539,7 @@ mod tests {
             signatures: None,
         };
         nats.set_response(
-            "a2a.v1.agents.bot.card",
+            "a2a.agents.bot.card",
             serde_json::to_vec(&serde_json::json!({
                 "jsonrpc": "2.0", "id": "x", "result": card
             }))

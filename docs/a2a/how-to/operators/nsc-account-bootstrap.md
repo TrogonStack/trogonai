@@ -40,8 +40,8 @@ Additional service Users (agent runtime, push consumers) are provisioned with ti
 [OPERATOR]
     └── signs Account JWT
             └── [TENANT_ACCOUNT]  (tenant boundary)
-                    ├── Caller User JWT     → a2a.v1.gateway.>, _INBOX.{caller_id}.>
-                    ├── Gateway User JWT    → a2a.v1.agents.>, a2a.v1.tasks.>, a2a.push.>
+                    ├── Caller User JWT     → a2a.gateway.>, _INBOX.{caller_id}.>
+                    ├── Gateway User JWT    → a2a.agents.>, a2a.tasks.>, a2a.push.>
                     ├── Registrar User JWT  → a2a.catalog.register.>, a2a.discover.>
                     └── (other service Users — agents, …)
 ```
@@ -52,16 +52,16 @@ Additional service Users (agent runtime, push consumers) are provisioned with ti
 
 Phase 0 requires **subject ACL inside each Account** ([A2A TODO](../../explanation/architecture.md)):
 
-- Bound **caller User** to `a2a.v1.gateway.>` and `_INBOX.{caller_id}.>`.
-- Bound **gateway User** to `a2a.v1.agents.>` + `a2a.v1.tasks.>` + `a2a.push.>`.
+- Bound **caller User** to `a2a.gateway.>` and `_INBOX.{caller_id}.>`.
+- Bound **gateway User** to `a2a.agents.>` + `a2a.tasks.>` + `a2a.push.>`.
 - Bound **registrar service User** to `{prefix}.catalog.register.*` (write ingress) and `{prefix}.discover.*` (KV-backed discover replies); KV puts on **`A2A_AGENT_CARDS`** are registrar-only ([A2A TODO](../../explanation/architecture.md)).
 
 Replace `{caller_id}` with the stable caller identifier encoded in the minted User JWT (auth callout maps external identity → caller id). The gateway User is a fixed service principal per tenant Account.
 
 | NATS JWT role | Publish (allow) | Subscribe (allow) | Notes |
 |---------------|-----------------|-------------------|-------|
-| **Caller User** | `a2a.v1.gateway.>` | `_INBOX.{caller_id}.>` | Request/reply to the gateway namespace; replies arrive on the caller-owned inbox prefix. Use [`--allow-pub-response`](https://nats-io.github.io/nsc/nsc_add_user.html) if the client library relies on dynamic reply subjects beyond the explicit inbox ACL. **Do not** grant publish on `{prefix}.catalog.register.*` — catalog KV writes are registrar-only in production ([A2A TODO](../../explanation/architecture.md)); callers read AgentCards via `{prefix}.discover.{agent_id}` or KV get/watch. |
-| **Gateway User** | `a2a.v1.agents.>`, `a2a.v1.tasks.>`, `a2a.push.>` | `a2a.v1.gateway.>` | Queue-group consumer on ingress; forwards to agent subjects, publishes task events and push envelopes. Deny all other publish paths not required by your gateway build. Read-only catalog access (KV get/watch or `{prefix}.discover.*`); no KV put. |
+| **Caller User** | `a2a.gateway.>` | `_INBOX.{caller_id}.>` | Request/reply to the gateway namespace; replies arrive on the caller-owned inbox prefix. Use [`--allow-pub-response`](https://nats-io.github.io/nsc/nsc_add_user.html) if the client library relies on dynamic reply subjects beyond the explicit inbox ACL. **Do not** grant publish on `{prefix}.catalog.register.*` — catalog KV writes are registrar-only in production ([A2A TODO](../../explanation/architecture.md)); callers read AgentCards via `{prefix}.discover.{agent_id}` or KV get/watch. |
+| **Gateway User** | `a2a.agents.>`, `a2a.tasks.>`, `a2a.push.>` | `a2a.gateway.>` | Queue-group consumer on ingress; forwards to agent subjects, publishes task events and push envelopes. Deny all other publish paths not required by your gateway build. Read-only catalog access (KV get/watch or `{prefix}.discover.*`); no KV put. |
 | **Registrar service User** | `{prefix}.catalog.register.*` | `{prefix}.discover.*` | Long-lived `a2a-nats-discovery` identity. **`CatalogRegistrarService`** subscribes `{prefix}.catalog.register.*` (grant **`--allow-sub`** on that pattern in `nsc`; publish column reflects the registrar-owned write ingress — deny `{prefix}.catalog.register.*` publish on caller/gateway Users). **`DiscoverService`** subscribes `{prefix}.discover.*` and replies from KV ([A2A plan](../../explanation/architecture.md)). Grant [`--allow-pub-response`](https://nats-io.github.io/nsc/nsc_add_user.html) for request/reply on both paths. **JetStream KV:** create/update keys in bucket **`A2A_AGENT_CARDS`** (registrar-only writes in production; callers use the discover read path — [A2A TODO](../../explanation/architecture.md)). Optional JetStream **read** on **`A2A_EVENTS`** / **`A2A_PUSH_DLQ`** for ops. AgentCard write subject: [KV watch](../catalog/kv-watch.md). |
 
 **Default prefix.** Examples use the in-tree default prefix `a2a`. If the tenant uses a custom `A2A_PREFIX`, substitute consistently (e.g. `myapp.gateway.>`). Stream names derive from the uppercased prefix (`MYAPP_EVENTS`); with the default prefix the names below apply verbatim.
@@ -76,9 +76,9 @@ Mirror **in-tree names** (default prefix `a2a`). Each tenant Account gets its **
 
 | Asset | Kind | Name | Subject / key space | Operator notes |
 |-------|------|------|---------------------|----------------|
-| Task events | JetStream stream | `A2A_EVENTS` | `a2a.v1.tasks.*.events.*` | Shared per-Account stream for all task event traffic ([pending decision §1](../../explanation/architecture.md)). In-tree provisioner: `rsworkspace/crates/a2a-nats/src/jetstream/provision.rs`, config in `nats/subjects/stream.rs`. Default `max_age` = 24h ([pending decision §2](../../explanation/architecture.md)). Target retention policy: `interest` + `discard=old` ([pending decision §5](../../explanation/architecture.md)); in-tree code currently uses `limits` retention — align server-side config with the landed decision when provisioning. |
+| Task events | JetStream stream | `A2A_EVENTS` | `a2a.tasks.*.events.*` | Shared per-Account stream for all task event traffic ([pending decision §1](../../explanation/architecture.md)). In-tree provisioner: `rsworkspace/crates/a2a-nats/src/jetstream/provision.rs`, config in `nats/subjects/stream.rs`. Default `max_age` = 24h ([pending decision §2](../../explanation/architecture.md)). Target retention policy: `interest` + `discard=old` ([pending decision §5](../../explanation/architecture.md)); in-tree code currently uses `limits` retention — align server-side config with the landed decision when provisioning. |
 | AgentCard catalog | JetStream KV bucket | `A2A_AGENT_CARDS` | Keys: `{agent_id}` | One bucket per Account ([A2A TODO](../../explanation/architecture.md)). In-tree config: `history = 1`, `max_value_size = 65536` (`rsworkspace/crates/a2a-nats/src/catalog/nats_kv.rs`). Only the registrar service User should hold **write** ACL; gateway and callers read via discover/KV watch. |
-| Push dead-letter | JetStream stream | `A2A_PUSH_DLQ` | `a2a.v1.push.dlq.{caller_id}.{task_id}` | Per-Account DLQ for terminal push failures ([A2A TODO](../../explanation/architecture.md), [pending decision](../../explanation/architecture.md)). `a2a-nats` `provision_streams` creates this alongside `A2A_EVENTS` (subject filter `{prefix}.push.dlq.*.*`); **`a2a-nats`** agent `Bridge` publishes JSON failures from `message/stream` (see **[push DLQ ops](push-dlq-triage.md)**); **`a2a-gateway`** does not emit DLQ. |
+| Push dead-letter | JetStream stream | `A2A_PUSH_DLQ` | `a2a.push.dlq.{caller_id}.{task_id}` | Per-Account DLQ for terminal push failures ([A2A TODO](../../explanation/architecture.md), [pending decision](../../explanation/architecture.md)). `a2a-nats` `provision_streams` creates this alongside `A2A_EVENTS` (subject filter `{prefix}.push.dlq.*.*`); **`a2a-nats`** agent `Bridge` publishes JSON failures from `message/stream` (see **[push DLQ ops](push-dlq-triage.md)**); **`a2a-gateway`** does not emit DLQ. |
 
 **Provisioning mechanism.** `nsc` configures JWT limits and User permissions; it does **not** create JetStream streams or KV buckets. After the Account JWT is pushed to the cluster, create streams/KV with:
 
@@ -119,9 +119,9 @@ Use placeholders **`[OPERATOR]`** and **`[TENANT_ACCOUNT]`**. Adjust directory f
 
    ```bash
    nsc add user -a [TENANT_ACCOUNT] -n a2a-gateway \
-     --allow-sub "a2a.v1.gateway.>" \
-     --allow-pub "a2a.v1.agents.>" \
-     --allow-pub "a2a.v1.tasks.>" \
+     --allow-sub "a2a.gateway.>" \
+     --allow-pub "a2a.agents.>" \
+     --allow-pub "a2a.tasks.>" \
      --allow-pub "a2a.push.>"
    ```
 
@@ -131,7 +131,7 @@ Use placeholders **`[OPERATOR]`** and **`[TENANT_ACCOUNT]`**. Adjust directory f
 
    ```bash
    nsc add user -a [TENANT_ACCOUNT] -n a2a-caller-template \
-     --allow-pub "a2a.v1.gateway.>" \
+     --allow-pub "a2a.gateway.>" \
      --allow-sub "_INBOX.{caller_id}.>" \
      --allow-pub-response
    ```
@@ -149,7 +149,7 @@ Use placeholders **`[OPERATOR]`** and **`[TENANT_ACCOUNT]`**. Adjust directory f
 
    Also grant JetStream KV **put/update** on bucket **`A2A_AGENT_CARDS`** to this User only (Account admin or platform IAM). Deny KV write to gateway and caller Users. Reference: [`nsc add user`](https://nats-io.github.io/nsc/nsc_add_user.html).
 
-7. **Create additional service Users** (agents) with least-privilege ACLs — e.g. agent subscribe on `a2a.v1.agents.{agent_id}.>` and publish on assigned task event subjects.
+7. **Create additional service Users** (agents) with least-privilege ACLs — e.g. agent subscribe on `a2a.agents.{agent_id}.>` and publish on assigned task event subjects.
 
 8. **Push Account and User JWTs to the operator**:
 
@@ -159,11 +159,11 @@ Use placeholders **`[OPERATOR]`** and **`[TENANT_ACCOUNT]`**. Adjust directory f
 
    Reference: [NSC basics — publishing JWTs](https://docs.nats.io/using-nats/nats-tools/nsc/basics).
 
-9. **Bootstrap JetStream stream `A2A_EVENTS`** inside `[TENANT_ACCOUNT]` (subject filter `a2a.v1.tasks.*.events.*`, file storage, `max_age` 24h unless overridden per tenant).
+9. **Bootstrap JetStream stream `A2A_EVENTS`** inside `[TENANT_ACCOUNT]` (subject filter `a2a.tasks.*.events.*`, file storage, `max_age` 24h unless overridden per tenant).
 
 10. **Bootstrap JetStream KV bucket `A2A_AGENT_CARDS`** (`history = 1`, `max_value_size = 65536`).
 
-11. **Bootstrap JetStream stream `A2A_PUSH_DLQ`** (subject filter `{prefix}.push.dlq.*.*`, e.g. `a2a.v1.push.dlq.*.*`, or `{prefix}.push.dlq.>` if your tooling prefers a trailing wildcard).
+11. **Bootstrap JetStream stream `A2A_PUSH_DLQ`** (subject filter `{prefix}.push.dlq.*.*`, e.g. `a2a.push.dlq.*.*`, or `{prefix}.push.dlq.>` if your tooling prefers a trailing wildcard).
 
 12. **Verify connectivity** — connect as gateway, registrar, and caller Users; confirm publish/subscribe succeeds only within the ACL rows above and fails across Account boundaries (caller cannot publish `{prefix}.catalog.register.*`; registrar can write KV; caller can `{prefix}.discover.{agent_id}` request/reply).
 
@@ -175,7 +175,7 @@ Use placeholders **`[OPERATOR]`** and **`[TENANT_ACCOUNT]`**. Adjust directory f
 
 The following Phase 0+ items are **intentionally out of scope** for this bootstrap outline. Track implementation in [A2A TODO](../../explanation/architecture.md):
 
-- **Auth callout service** — NATS subscriber on `$SYS.REQ.USER.AUTH`; OIDC primary, mTLS for service-to-service, API keys transitional. Mints Account-bound User JWT (`sub` external, `aud` = Account, SpiceDB principal in `data`). Subject ACL inside the Account bounds the User to `a2a.v1.gateway.>` and `_INBOX.{caller_id}.>`.
+- **Auth callout service** — NATS subscriber on `$SYS.REQ.USER.AUTH`; OIDC primary, mTLS for service-to-service, API keys transitional. Mints Account-bound User JWT (`sub` external, `aud` = Account, SpiceDB principal in `data`). Subject ACL inside the Account bounds the User to `a2a.gateway.>` and `_INBOX.{caller_id}.>`.
 - **SpiceDB integration** — gateway client to org-standard cluster; `BulkCheckPermission` for catalog shaping; per-method resource tuples; owner tuples on task lifecycle; ZedToken cache per session (Phase 1).
 - **AgentCard JSON-Schema validation** on registrar write and gateway read (`a2a-pack` canonical schema).
 - **Tier 1 declarative policies**, gateway audit decision sites, and full audit envelope parity.

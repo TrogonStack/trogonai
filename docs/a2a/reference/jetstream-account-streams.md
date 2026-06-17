@@ -26,7 +26,7 @@ Each tenant Account needs its own copies of the assets below. Examples use the i
 
 **Kind:** JetStream stream  
 **Name:** `A2A_EVENTS` (with default prefix `a2a`)  
-**Subject filter:** `{prefix}.task.*.events.*` — e.g. `a2a.v1.tasks.*.events.*`
+**Subject filter:** `{prefix}.task.*.events.*` — e.g. `a2a.tasks.*.events.*`
 
 This is the shared per-Account stream for all task event traffic. It backs `message/stream` delivery and `tasks/resubscribe` replay. One stream per Account with subject filtering is the landed topology (not per-task streams).
 
@@ -68,13 +68,13 @@ For client-side watch ergonomics, see [KV watch](../how-to/catalog/kv-watch.md).
 
 **Kind:** JetStream stream  
 **Name:** `A2A_PUSH_DLQ`  
-**Subject shape:** `{prefix}.push.dlq.{caller_id}.{task_id}` — e.g. `a2a.v1.push.dlq.{caller_id}.{task_id}`
+**Subject shape:** `{prefix}.push.dlq.{caller_id}.{task_id}` — e.g. `a2a.push.dlq.{caller_id}.{task_id}`
 
 Per-Account DLQ for terminal push delivery failures. After HTTPS in-process retries exhaust (`HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS`), the agent **`Bridge`** publishes a structured JSON envelope (see **[push DLQ operator playbook](../how-to/operators/push-dlq-triage.md)**) onto `{prefix}.push.dlq.{caller_id}.{task_id}` via JetStream. The `{caller_id}` segment defaults to **`_`** (`Config::push_dlq_caller_segment` / **`DEFAULT_PUSH_DLQ_CALLER_SEGMENT`**) until auth-callout or gateway propagation supplies a minted caller identity token-safe segment. Operators consume the DLQ to remediate.
 
 **Provisioning & publish status:** `provision_streams` creates `A2A_PUSH_DLQ` alongside `A2A_EVENTS`. Agent-side publish is active on the `message/stream` terminal push path (`a2a-nats`). The **`a2a-gateway`** forwarder does not emit DLQ messages (see **`rsworkspace/crates/a2a-gateway/src/lib.rs`** crate-level Rustdoc).
 
-In-tree subject filter: `{prefix}.push.dlq.*.*` (wildcard tokens match `caller_id`, `task_id`). **Operator check:** when `a2a-nats` provisions this stream, verify `nats stream info A2A_PUSH_DLQ` shows that filter (e.g. `a2a.v1.push.dlq.*.*` with the default prefix).
+In-tree subject filter: `{prefix}.push.dlq.*.*` (wildcard tokens match `caller_id`, `task_id`). **Operator check:** when `a2a-nats` provisions this stream, verify `nats stream info A2A_PUSH_DLQ` shows that filter (e.g. `a2a.push.dlq.*.*` with the default prefix).
 
 ---
 
@@ -112,7 +112,7 @@ Run these checks after bootstrap, connected with a User that has JetStream manag
 ### Stream `A2A_EVENTS`
 
 - [ ] Stream exists: `nats stream info A2A_EVENTS`
-- [ ] Subject filter includes `{prefix}.task.*.events.*` (e.g. `a2a.v1.tasks.*.events.*`)
+- [ ] Subject filter includes `{prefix}.task.*.events.*` (e.g. `a2a.tasks.*.events.*`)
 - [ ] Retention is `interest` (or documented tenant override); discard is `old`
 - [ ] `max_age` matches tenant policy (default 24h)
 - [ ] Storage is `file`
