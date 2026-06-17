@@ -38,7 +38,7 @@ where
     }
     JsonRpcId::deserialize(value.into_deserializer())
         .map(Some)
-        .map_err(|e: serde_json::Error| <D::Error as serde::de::Error>::custom(e.to_string()))
+        .map_err(<D::Error as serde::de::Error>::custom)
 }
 
 /// Outbound JSON-RPC 2.0 success response.
