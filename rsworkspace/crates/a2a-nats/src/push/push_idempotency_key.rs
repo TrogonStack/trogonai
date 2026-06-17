@@ -22,6 +22,7 @@ impl PushIdempotencyKey {
         terminal: TerminalPushTaskState,
     ) -> Self {
         Self(encode_components([
+            TERMINAL_KIND,
             task_id.as_str(),
             cfg_id.as_str(),
             terminal.idempotency_segment(),
@@ -29,10 +30,11 @@ impl PushIdempotencyKey {
     }
 
     /// Stable DLQ dedup key: same length-prefixed encoding as `derive_terminal`
-    /// so the `push_target_url` (which often contains `:`) can't collide with
-    /// a different transition-id boundary.
+    /// with a distinct kind discriminant so a terminal key and a DLQ key with
+    /// equal-length components can't collide inside a shared dedupe store.
     pub fn derive_dlq(task_id: &A2aTaskId, transition_id: &StatusTransitionId, push_target_url: &str) -> Self {
         Self(encode_components([
+            DLQ_KIND,
             task_id.as_str(),
             transition_id.as_str(),
             push_target_url,
@@ -47,6 +49,9 @@ impl PushIdempotencyKey {
         Self(raw.into())
     }
 }
+
+const TERMINAL_KIND: &str = "terminal";
+const DLQ_KIND: &str = "dlq";
 
 /// `{len(comp[0])}:{comp[0]}|{len(comp[1])}:{comp[1]}|…` — injective because
 /// every component starts with its byte length, so the parser can recover
@@ -91,15 +96,15 @@ mod tests {
     #[test]
     fn derive_terminal_uses_length_prefixed_components() {
         let key = PushIdempotencyKey::derive_terminal(&task(), &cfg(), TerminalPushTaskState::Completed);
-        assert_eq!(key.as_str(), "6:task-1|5:cfg-1|9:completed");
-        assert_eq!(key.to_string(), "6:task-1|5:cfg-1|9:completed");
+        assert_eq!(key.as_str(), "8:terminal|6:task-1|5:cfg-1|9:completed");
+        assert_eq!(key.to_string(), "8:terminal|6:task-1|5:cfg-1|9:completed");
     }
 
     #[test]
     fn derive_dlq_uses_length_prefixed_components() {
         let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
         let key = PushIdempotencyKey::derive_dlq(&task(), &transition, "https://example.com/push");
-        assert_eq!(key.as_str(), "6:task-1|6:failed|24:https://example.com/push");
+        assert_eq!(key.as_str(), "3:dlq|6:task-1|6:failed|24:https://example.com/push");
     }
 
     #[test]
@@ -117,6 +122,18 @@ mod tests {
     }
 
     #[test]
+    fn terminal_and_dlq_keys_dont_collide_even_with_aligned_components() {
+        // Without the kind discriminant a terminal (task, cfg="failed", "completed")
+        // would encode identically to a dlq (task, transition="failed", "completed").
+        let task = A2aTaskId::new("task-x").unwrap();
+        let cfg = PushNotificationConfigId::new("failed").unwrap();
+        let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
+        let terminal_key = PushIdempotencyKey::derive_terminal(&task, &cfg, TerminalPushTaskState::Completed);
+        let dlq_key = PushIdempotencyKey::derive_dlq(&task, &transition, "completed");
+        assert_ne!(terminal_key.as_str(), dlq_key.as_str());
+    }
+
+    #[test]
     fn from_dedupe_wire_passes_through_raw_value() {
         let key = PushIdempotencyKey::from_dedupe_wire("opaque-wire-token");
         assert_eq!(key.as_str(), "opaque-wire-token");
@@ -125,6 +142,6 @@ mod tests {
     #[test]
     fn debug_exposes_inner_value() {
         let key = PushIdempotencyKey::derive_terminal(&task(), &cfg(), TerminalPushTaskState::Rejected);
-        assert!(format!("{key:?}").contains("6:task-1|5:cfg-1|8:rejected"));
+        assert!(format!("{key:?}").contains("8:terminal|6:task-1|5:cfg-1|8:rejected"));
     }
 }
