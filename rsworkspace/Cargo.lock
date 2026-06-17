@@ -12,6 +12,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-nats"
+version = "0.1.0"
+dependencies = [
+ "trogon-nats",
+ "uuid",
+]
+
+[[package]]
 name = "a2a-pack"
 version = "0.1.0"
 dependencies = [
