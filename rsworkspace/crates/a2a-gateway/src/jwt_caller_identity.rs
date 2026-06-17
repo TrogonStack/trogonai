@@ -274,7 +274,7 @@ mod tests {
 
     fn empty_message() -> async_nats::Message {
         async_nats::Message {
-            subject: "a2a.v1.gateway.bot.message.send".into(),
+            subject: "a2a.gateway.bot.message.send".into(),
             reply: Some("_INBOX.reply".into()),
             payload: vec![].into(),
             headers: None,

@@ -428,29 +428,29 @@ mod tests {
     #[test]
     fn mirror_subject_maps_agent_dlq_shape() {
         assert_eq!(
-            push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.c1.task-9"),
-            Some("a2a.v1.push.dlq.mirror.c1.task-9".to_string())
+            push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.c1.task-9"),
+            Some("a2a.push.dlq.mirror.c1.task-9".to_string())
         );
     }
 
     #[test]
     fn mirror_subject_rejects_existing_mirror_and_extra_tokens() {
-        assert!(push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.mirror.c1.task-9").is_none());
-        assert!(push_dlq_mirror_subject(&prefix(), "a2a.v1.push.dlq.c1.task-9.extra").is_none());
+        assert!(push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.mirror.c1.task-9").is_none());
+        assert!(push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.c1.task-9.extra").is_none());
     }
 
     #[test]
     fn skip_mirror_loop_markers() {
-        assert!(should_skip_push_dlq_mirror("a2a.v1.push.dlq.mirror.c1.task-9", None));
+        assert!(should_skip_push_dlq_mirror("a2a.push.dlq.mirror.c1.task-9", None));
         let mut headers = HeaderMap::new();
         headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
-        assert!(should_skip_push_dlq_mirror("a2a.v1.push.dlq.c1.task-9", Some(&headers)));
+        assert!(should_skip_push_dlq_mirror("a2a.push.dlq.c1.task-9", Some(&headers)));
     }
 
     #[test]
     fn pull_consumer_filter_uses_prefix_wildcard() {
         let config = push_dlq_mirror_pull_config(&prefix(), &PushDlqMirrorDurable::default_durable());
-        assert_eq!(config.filter_subject, "a2a.v1.push.dlq.>");
+        assert_eq!(config.filter_subject, "a2a.push.dlq.>");
         assert_eq!(config.durable_name.as_deref(), Some(PushDlqMirrorDurable::DEFAULT));
     }
 
@@ -461,11 +461,11 @@ mod tests {
         let dedup = PushDlqDedupGate::with_capacity(32);
         let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
         let outcome =
-            mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup).await;
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup).await;
         assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
         let published = js.publishes.lock().unwrap();
         assert_eq!(published.len(), 1);
-        assert_eq!(published[0].0, "a2a.v1.push.dlq.mirror.alice.task-1");
+        assert_eq!(published[0].0, "a2a.push.dlq.mirror.alice.task-1");
         assert!(published[0].1.get(PUSH_DLQ_MIRROR_HEADER).is_some());
         assert_eq!(
             published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
@@ -480,7 +480,7 @@ mod tests {
         let outcome = mirror_push_dlq_envelope(
             &js,
             &prefix(),
-            "a2a.v1.push.dlq.mirror.alice.task-1",
+            "a2a.push.dlq.mirror.alice.task-1",
             None,
             br#"{"idempotency_key":"k1"}"#,
             &dedup,
@@ -497,11 +497,11 @@ mod tests {
         let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
 
         assert_eq!(
-            mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup,).await,
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup,).await,
             MirrorDispatchOutcome::Mirrored
         );
         assert_eq!(
-            mirror_push_dlq_envelope(&js, &prefix(), "a2a.v1.push.dlq.alice.task-1", None, payload, &dedup,).await,
+            mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-1", None, payload, &dedup,).await,
             MirrorDispatchOutcome::Skipped
         );
         assert_eq!(js.publishes.lock().unwrap().len(), 1);

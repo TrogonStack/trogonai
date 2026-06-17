@@ -37,120 +37,120 @@ mod tests {
     #[test]
     fn agent_message_send() {
         assert_eq!(
-            agents::MessageSendSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.message.send"
+            agents::MessageSendSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.message.send"
         );
     }
 
     #[test]
     fn agent_message_stream() {
         assert_eq!(
-            agents::MessageStreamSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.message.stream"
+            agents::MessageStreamSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.message.stream"
         );
     }
 
     #[test]
     fn agent_tasks_get() {
         assert_eq!(
-            agents::TasksGetSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.tasks.get"
+            agents::TasksGetSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.tasks.get"
         );
     }
 
     #[test]
     fn agent_tasks_list() {
         assert_eq!(
-            agents::TasksListSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.tasks.list"
+            agents::TasksListSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.tasks.list"
         );
     }
 
     #[test]
     fn agent_tasks_cancel() {
         assert_eq!(
-            agents::TasksCancelSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.tasks.cancel"
+            agents::TasksCancelSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.tasks.cancel"
         );
     }
 
     #[test]
     fn agent_tasks_resubscribe() {
         assert_eq!(
-            agents::TasksResubscribeSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.tasks.resubscribe"
+            agents::TasksResubscribeSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.tasks.resubscribe"
         );
     }
 
     #[test]
     fn agent_push_set() {
         assert_eq!(
-            agents::PushSetSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.push.set"
+            agents::PushSetSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.push.set"
         );
     }
 
     #[test]
     fn agent_push_get() {
         assert_eq!(
-            agents::PushGetSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.push.get"
+            agents::PushGetSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.push.get"
         );
     }
 
     #[test]
     fn agent_push_list() {
         assert_eq!(
-            agents::PushListSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.push.list"
+            agents::PushListSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.push.list"
         );
     }
 
     #[test]
     fn agent_push_delete() {
         assert_eq!(
-            agents::PushDeleteSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.push.delete"
+            agents::PushDeleteSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.push.delete"
         );
     }
 
     #[test]
     fn agent_card() {
         assert_eq!(
-            agents::AgentCardSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.card"
+            agents::AgentCardSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.card"
         );
     }
 
     #[test]
     fn task_events_full_subject() {
         assert_eq!(
-            tasks::TaskEventsSubject::new(&p("a2a.v1"), &tid("t1"), &rid("r1")).to_string(),
-            "a2a.v1.tasks.t1.events.r1"
+            tasks::TaskEventsSubject::new(&p("a2a"), &tid("t1"), &rid("r1")).to_string(),
+            "a2a.tasks.t1.events.r1"
         );
     }
 
     #[test]
     fn wildcard_agent_all() {
         assert_eq!(
-            wildcards::AgentAllSubject::new(&p("a2a.v1"), &aid("planner")).to_string(),
-            "a2a.v1.agents.planner.>"
+            wildcards::AgentAllSubject::new(&p("a2a"), &aid("planner")).to_string(),
+            "a2a.agents.planner.>"
         );
     }
 
     #[test]
     fn wildcard_task_one_events() {
         assert_eq!(
-            wildcards::TaskOneEventsSubject::new(&p("a2a.v1"), &tid("t1")).to_string(),
-            "a2a.v1.tasks.t1.events.*"
+            wildcards::TaskOneEventsSubject::new(&p("a2a"), &tid("t1")).to_string(),
+            "a2a.tasks.t1.events.*"
         );
     }
 
     #[test]
     fn wildcard_task_all_events() {
         assert_eq!(
-            wildcards::TaskAllEventsSubject::new(&p("a2a.v1")).to_string(),
-            "a2a.v1.tasks.*.events.*"
+            wildcards::TaskAllEventsSubject::new(&p("a2a")).to_string(),
+            "a2a.tasks.*.events.*"
         );
     }
 
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn a2a_stream_name_uses_prefix() {
-        assert_eq!(A2aStream::Events.stream_name(&p("a2a.v1")), "A2A_EVENTS");
+        assert_eq!(A2aStream::Events.stream_name(&p("a2a")), "A2A_EVENTS");
         assert_eq!(A2aStream::Events.stream_name(&p("myapp")), "MYAPP_EVENTS");
     }
 
@@ -204,15 +204,15 @@ mod tests {
 
     #[test]
     fn a2a_stream_subjects() {
-        let patterns = A2aStream::Events.subject_patterns(&p("a2a.v1"));
-        assert_eq!(patterns, vec!["a2a.v1.tasks.*.events.*"]);
-        let dlq_patterns = A2aStream::PushDlq.subject_patterns(&p("a2a.v1"));
-        assert_eq!(dlq_patterns, vec!["a2a.v1.push.dlq.*.*", "a2a.v1.push.dlq.mirror.*.*"]);
+        let patterns = A2aStream::Events.subject_patterns(&p("a2a"));
+        assert_eq!(patterns, vec!["a2a.tasks.*.events.*"]);
+        let dlq_patterns = A2aStream::PushDlq.subject_patterns(&p("a2a"));
+        assert_eq!(dlq_patterns, vec!["a2a.push.dlq.*.*", "a2a.push.dlq.mirror.*.*"]);
     }
 
     #[test]
     fn a2a_stream_all_configs_covers_every_variant() {
-        let configs = A2aStream::all_configs(&p("a2a.v1"));
+        let configs = A2aStream::all_configs(&p("a2a"));
         assert_eq!(configs.len(), A2aStream::ALL.len());
         let names: Vec<String> = configs.iter().map(|c| c.name.clone()).collect();
         assert!(names.contains(&"A2A_EVENTS".to_string()));
@@ -229,23 +229,23 @@ mod tests {
 
         assert_eq!(
             agents::MessageSendSubject::new(&prefix, &agent_id).to_subject().as_str(),
-            "a2a.v1.agents.planner.message.send"
+            "a2a.agents.planner.message.send"
         );
         assert_eq!(
             agents::TasksGetSubject::new(&prefix, &agent_id).to_subject().as_str(),
-            "a2a.v1.agents.planner.tasks.get"
+            "a2a.agents.planner.tasks.get"
         );
         assert_eq!(
             tasks::TaskEventsSubject::new(&prefix, &task_id, &req_id)
                 .to_subject()
                 .as_str(),
-            "a2a.v1.tasks.t1.events.r1"
+            "a2a.tasks.t1.events.r1"
         );
         assert_eq!(
             wildcards::AgentAllSubject::new(&prefix, &agent_id)
                 .to_subject()
                 .as_str(),
-            "a2a.v1.agents.planner.>"
+            "a2a.agents.planner.>"
         );
     }
 }
