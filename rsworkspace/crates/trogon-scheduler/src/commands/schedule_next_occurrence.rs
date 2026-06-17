@@ -343,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn arms_after_old_recorded_occurrence_without_grace_skip() {
         let id = "recurring";
         let last = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
@@ -360,6 +361,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn arms_the_occurrence_strictly_after_the_last_recorded_one() {
         let id = "recurring";
         let last = Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap();
