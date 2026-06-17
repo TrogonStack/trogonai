@@ -8,6 +8,7 @@
 
 pub mod a2a_prefix;
 pub mod agent_id;
+pub mod audit;
 pub mod client;
 pub mod constants;
 pub mod context_id;
