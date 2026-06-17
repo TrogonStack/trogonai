@@ -175,41 +175,28 @@ async fn run<P, U, S, E, M>(
     let mut pending_reports = VecDeque::new();
 
     loop {
-        while let Some(report) = pending_reports.front().cloned() {
-            match reports_tx.try_send(report) {
-                Ok(()) => {
-                    pending_reports.pop_front();
-                }
-                Err(TrySendError::Full(_)) => break,
-                Err(TrySendError::Closed(_)) => {
-                    pending_reports.clear();
-                    break;
-                }
-            }
-        }
+        flush_pending_reports(&mut pending_reports, &reports_tx);
 
         // Dispatch as many ready lanes as the concurrency bound allows. A lane
         // is ready when it has queued records and is not already in flight.
         while in_flight.len() < config.max_active_lanes {
             let Some(key) = ready.pop_front() else { break };
             queued_ready.remove(&key);
-            if in_flight.contains(&key) {
-                continue;
+            match resolve_ready_key(key, &in_flight, &mut pending) {
+                ReadyOutcome::AlreadyInFlight => continue,
+                ReadyOutcome::EmptyQueue => continue,
+                ReadyOutcome::Dispatch(event, decoded, message) => {
+                    in_flight.insert(key);
+                    active_lanes.store(in_flight.len(), Ordering::SeqCst);
+
+                    let processor = processor.clone();
+                    let clock = clock.clone();
+                    workers.push(async move {
+                        let report = process_one(processor, clock, event, decoded, message, key).await;
+                        (key, report)
+                    });
+                }
             }
-
-            let Some((event, decoded, message)) = pending.get_mut(&key).and_then(VecDeque::pop_front) else {
-                pending.remove(&key);
-                continue;
-            };
-            in_flight.insert(key);
-            active_lanes.store(in_flight.len(), Ordering::SeqCst);
-
-            let processor = processor.clone();
-            let clock = clock.clone();
-            workers.push(async move {
-                let report = process_one(processor, clock, event, decoded, message, key).await;
-                (key, report)
-            });
         }
 
         let idle = !submit_open && pending.values().all(VecDeque::is_empty) && workers.is_empty();
@@ -432,6 +419,56 @@ async fn settle_message<M: DeliveredMessage>(
             );
             Err("message settlement panicked".to_string())
         }
+    }
+}
+
+/// Drains `pending_reports` into `reports_tx` using non-blocking sends.
+///
+/// Stops when the queue empties, the channel is full (caller will retry via
+/// `select!`), or the channel receiver has been dropped.
+fn flush_pending_reports(pending_reports: &mut VecDeque<DispatchReport>, reports_tx: &mpsc::Sender<DispatchReport>) {
+    while let Some(report) = pending_reports.front().cloned() {
+        match reports_tx.try_send(report) {
+            Ok(()) => {
+                pending_reports.pop_front();
+            }
+            Err(TrySendError::Full(_)) => break,
+            Err(TrySendError::Closed(_)) => {
+                pending_reports.clear();
+                break;
+            }
+        }
+    }
+}
+
+/// The outcome of evaluating one key popped from the ready queue.
+enum ReadyOutcome<M> {
+    /// The key is already being processed on an active worker; skip it.
+    AlreadyInFlight,
+    /// The pending queue for the key is empty or absent; evict the entry.
+    EmptyQueue,
+    /// The key has work ready to dispatch.
+    Dispatch(StreamEvent, DecodedScheduleEvent, M),
+}
+
+/// Looks up `key` in `in_flight` and `pending`, returning the dispatch decision.
+///
+/// Removes the pending entry if the queue turns out to be empty, keeping the
+/// map from accumulating tombstone entries.
+fn resolve_ready_key<M>(
+    key: ScheduleKey,
+    in_flight: &std::collections::HashSet<ScheduleKey>,
+    pending: &mut HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, M)>>,
+) -> ReadyOutcome<M> {
+    if in_flight.contains(&key) {
+        return ReadyOutcome::AlreadyInFlight;
+    }
+    match pending.get_mut(&key).and_then(VecDeque::pop_front) {
+        None => {
+            pending.remove(&key);
+            ReadyOutcome::EmptyQueue
+        }
+        Some((event, decoded, message)) => ReadyOutcome::Dispatch(event, decoded, message),
     }
 }
 
@@ -1377,5 +1414,127 @@ mod tests {
         drop(reports);
 
         join.await.unwrap();
+    }
+
+    // -------------------------------------------------------------------------
+    // Deterministic coverage for four concurrency-edge-case branches
+    // -------------------------------------------------------------------------
+
+    /// Branch 1 — `flush_pending_reports`: `TrySendError::Closed` arm (lines
+    /// 184-186 in the original, now inside `flush_pending_reports`).
+    ///
+    /// Directly exercises the extracted helper with a pre-populated queue and a
+    /// closed channel, confirming the queue is cleared and the function returns.
+    #[test]
+    fn flush_pending_reports_clears_queue_when_channel_is_closed() {
+        use trogon_decider_runtime::StreamPosition;
+
+        let (tx, rx) = mpsc::channel::<DispatchReport>(4);
+        drop(rx);
+
+        let report = DispatchReport {
+            stream_position: StreamPosition::try_new(1).unwrap(),
+            lane: key_for_stream("flush-closed"),
+            result: Ok(ProcessedOutcome::Published),
+        };
+
+        let mut pending_reports = std::collections::VecDeque::new();
+        pending_reports.push_back(report);
+
+        super::flush_pending_reports(&mut pending_reports, &tx);
+
+        assert!(
+            pending_reports.is_empty(),
+            "flush_pending_reports must clear the queue when the channel receiver is dropped"
+        );
+    }
+
+    /// Branch 2 — `resolve_ready_key`: `AlreadyInFlight` arm (lines 196-198).
+    ///
+    /// Constructs the dispatcher's internal state directly (key present in both
+    /// `ready` and `in_flight`) and calls the extracted helper, which would be
+    /// unreachable via the public submission API because `queued_ready` prevents
+    /// duplicates.
+    #[test]
+    fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
+        use std::collections::{HashMap, HashSet, VecDeque};
+        use trogon_decider_runtime::StreamEvent;
+
+        use super::{ReadyOutcome, resolve_ready_key};
+        use crate::processor::execution::reconciliation::DecodedScheduleEvent;
+
+        let key = key_for_stream("in-flight-key");
+
+        let mut in_flight = HashSet::new();
+        in_flight.insert(key);
+
+        let event = super::super::testkit::malformed_stream_event(1);
+        let mut pending: HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, MockMessage)>> =
+            HashMap::new();
+        pending.entry(key).or_default().push_back((
+            event,
+            DecodedScheduleEvent::Undecoded,
+            mock_message(Arc::new(Mutex::new(Vec::new()))),
+        ));
+
+        let outcome = resolve_ready_key(key, &in_flight, &mut pending);
+
+        assert!(
+            matches!(outcome, ReadyOutcome::AlreadyInFlight),
+            "a key already in flight must be skipped without touching pending"
+        );
+        assert!(
+            pending.contains_key(&key),
+            "pending entry must be untouched when key is in flight"
+        );
+    }
+
+    /// Branch 3 — `resolve_ready_key`: `EmptyQueue` arm (lines 200-203).
+    ///
+    /// Constructs state where `ready` contains a key whose `pending` queue is
+    /// absent, exercising the defensive eviction branch that is an invariant
+    /// guard against internal state corruption.
+    #[test]
+    fn resolve_ready_key_returns_empty_queue_when_pending_entry_is_absent() {
+        use std::collections::{HashMap, HashSet, VecDeque};
+        use trogon_decider_runtime::StreamEvent;
+
+        use super::{ReadyOutcome, resolve_ready_key};
+        use crate::processor::execution::reconciliation::DecodedScheduleEvent;
+
+        let key = key_for_stream("no-pending-key");
+
+        let in_flight: HashSet<ScheduleKey> = HashSet::new();
+        let mut pending: HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, MockMessage)>> =
+            HashMap::new();
+
+        let outcome = resolve_ready_key(key, &in_flight, &mut pending);
+
+        assert!(
+            matches!(outcome, ReadyOutcome::EmptyQueue),
+            "a key with no pending entries must be evicted"
+        );
+        assert!(
+            !pending.contains_key(&key),
+            "evicted key must not be present in pending after eviction"
+        );
+    }
+
+    /// Branch 4 — `drain`: `None` arm (line 607).
+    ///
+    /// Calls the test-local `drain` helper with a channel whose sender has
+    /// already been dropped, so `recv()` immediately returns `None` and the
+    /// helper stops before collecting `expected` items.
+    #[tokio::test]
+    async fn drain_stops_early_when_channel_closes_before_expected_count() {
+        let (tx, rx) = mpsc::channel::<DispatchReport>(4);
+        drop(tx);
+
+        let collected = drain(rx, usize::MAX).await;
+
+        assert!(
+            collected.is_empty(),
+            "drain must return immediately when the sender is dropped before any items are sent"
+        );
     }
 }
