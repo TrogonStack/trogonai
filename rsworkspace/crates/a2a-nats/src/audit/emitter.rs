@@ -222,4 +222,46 @@ mod tests {
             .publish(&prefix(), &agent(), make_envelope(AuditOutcome::Ok))
             .await;
     }
+
+    #[tokio::test]
+    async fn noop_emitter_task_lifecycle_does_not_publish() {
+        let emitter = NoopAuditEmitter;
+        let env = crate::audit::task_lifecycle::TaskLifecycleEnvelope::new(
+            &agent(),
+            "task-xyz",
+            None,
+            a2a::types::TaskState::Submitted,
+            a2a::types::TaskState::Working,
+            1,
+        );
+        emitter.publish_task_lifecycle(&prefix(), &agent(), env).await;
+    }
+
+    #[tokio::test]
+    async fn nats_emitter_swallows_publish_failure() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_publish();
+        let emitter = NatsAuditEmitter::new(nats.clone());
+        emitter
+            .publish(&prefix(), &agent(), make_envelope(AuditOutcome::Ok))
+            .await;
+        assert!(nats.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn nats_emitter_swallows_task_lifecycle_publish_failure() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_publish();
+        let emitter = NatsAuditEmitter::new(nats.clone());
+        let env = crate::audit::task_lifecycle::TaskLifecycleEnvelope::new(
+            &agent(),
+            "task-xyz",
+            None,
+            a2a::types::TaskState::Submitted,
+            a2a::types::TaskState::Working,
+            1,
+        );
+        emitter.publish_task_lifecycle(&prefix(), &agent(), env).await;
+        assert!(nats.published_messages().is_empty());
+    }
 }
