@@ -46,6 +46,7 @@ pub enum ScheduleChange {
     },
     OccurrenceScheduled {
         schedule_id: ScheduleId,
+        occurrence_sequence: ScheduleOccurrenceSequence,
         occurrence_at: DateTime<Utc>,
     },
     Completed {
@@ -176,6 +177,7 @@ pub fn reconcile(
         ),
         ScheduleChange::OccurrenceScheduled {
             schedule_id,
+            occurrence_sequence: _,
             occurrence_at,
         } => reconcile_occurrence_scheduled(current, schedule_id, *occurrence_at, stream_position, event_id),
         ScheduleChange::Completed { schedule_id } => {
@@ -280,6 +282,18 @@ fn reconcile_completed(
     event_id: Option<&str>,
 ) -> Result<Reconciliation, ReconcileError> {
     let current = checkpoint_for(current, schedule_id)?;
+    if current.status != ScheduleStatus::Scheduled || !matches!(current.schedule, Schedule::RRule { .. }) {
+        return Ok(Reconciliation {
+            action: ReconcileAction::CheckpointOnly,
+            next_checkpoint: advanced(
+                current,
+                current.status,
+                ReconcileOutcome::DuplicateStale,
+                stream_position,
+                event_id,
+            ),
+        });
+    }
 
     Ok(Reconciliation {
         action: ReconcileAction::Purge(current.subject()),
@@ -496,6 +510,7 @@ mod tests {
     fn occurrence_scheduled(id: &str, occurrence_at: &str) -> ScheduleChange {
         ScheduleChange::OccurrenceScheduled {
             schedule_id: schedule_id(id),
+            occurrence_sequence: ScheduleOccurrenceSequence::try_new(2).unwrap(),
             occurrence_at: instant(occurrence_at),
         }
     }
@@ -712,6 +727,52 @@ mod tests {
         assert_eq!(completion.action, ReconcileAction::Purge(current.subject()));
         assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Expired);
         assert_eq!(completion.next_checkpoint.last_outcome, ReconcileOutcome::Expired);
+    }
+
+    #[test]
+    fn completed_event_noops_for_non_rrule_checkpoints() {
+        let current = scheduled_record("recurring", Schedule::every(Duration::from_secs(30)).unwrap());
+
+        let completion = reconcile(
+            Some(&current),
+            &completed("recurring"),
+            position(3),
+            Some("event-3"),
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(completion.action, ReconcileAction::CheckpointOnly);
+        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Scheduled);
+        assert_eq!(
+            completion.next_checkpoint.last_outcome,
+            ReconcileOutcome::DuplicateStale
+        );
+    }
+
+    #[test]
+    fn completed_event_noops_for_paused_rrule_checkpoints() {
+        let mut current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
+        );
+        current.status = ScheduleStatus::Paused;
+
+        let completion = reconcile(
+            Some(&current),
+            &completed("recurring"),
+            position(3),
+            Some("event-3"),
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(completion.action, ReconcileAction::CheckpointOnly);
+        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Paused);
+        assert_eq!(
+            completion.next_checkpoint.last_outcome,
+            ReconcileOutcome::DuplicateStale
+        );
     }
 
     #[test]

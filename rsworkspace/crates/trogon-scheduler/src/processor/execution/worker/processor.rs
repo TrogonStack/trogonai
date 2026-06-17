@@ -485,18 +485,15 @@ where
     }
 
     /// Asks the schedule aggregate to plan the next occurrence. Rejections that
-    /// mean "nothing to arm" (already armed, paused, missing, deleted) are
-    /// idempotent no-ops; transient store failures and unexpected rejections
-    /// surface for redelivery.
+    /// mean "nothing to arm" (already armed or paused) are idempotent no-ops;
+    /// transient store failures and unexpected rejections surface for redelivery.
     async fn arm_next_occurrence(&self, schedule_id: &ScheduleId, now: DateTime<Utc>) -> Result<(), RetrySignal> {
         let command = ScheduleNextOccurrence::new(schedule_id.clone(), now);
         match CommandExecution::new(&self.event_store, &command).execute().await {
             Ok(_) => Ok(()),
             Err(CommandError::Decide(rejection)) => match rejection {
                 ScheduleNextOccurrenceError::AlreadyArmed { .. }
-                | ScheduleNextOccurrenceError::SchedulePaused { .. }
-                | ScheduleNextOccurrenceError::ScheduleNotFound { .. }
-                | ScheduleNextOccurrenceError::ScheduleDeleted { .. } => Ok(()),
+                | ScheduleNextOccurrenceError::SchedulePaused { .. } => Ok(()),
                 other => Err(RetrySignal::ArmSchedule {
                     source: Box::new(other),
                 }),
@@ -1161,6 +1158,61 @@ mod tests {
         let processed = harness.process_stream(&created[0]).await;
         assert_eq!(processed.outcome, ProcessedOutcome::Published);
         assert_eq!(harness.event_store.events(id).len(), armed_len);
+    }
+
+    #[tokio::test]
+    async fn arm_reports_missing_or_deleted_schedules_for_retry() {
+        let harness = Harness::new();
+        let trace_headers = HeaderMap::new();
+
+        let missing = harness
+            .processor
+            .apply_action(
+                &ReconcileAction::ArmNext {
+                    schedule_id: schedule_id("missing"),
+                    now: recorded_at(),
+                },
+                "event-missing",
+                &trace_headers,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(missing, RetrySignal::ArmSchedule { .. }));
+
+        CommandExecution::new(
+            &harness.event_store,
+            &crate::CreateSchedule {
+                id: schedule_id("deleted"),
+                status: ScheduleEventStatus::Scheduled,
+                schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap(),
+                delivery: Delivery::nats_event("agent.run").unwrap(),
+                message: message(),
+            },
+        )
+        .execute()
+        .await
+        .expect("seed schedule");
+        CommandExecution::new(
+            &harness.event_store,
+            &crate::RemoveSchedule::new(schedule_id("deleted")),
+        )
+        .execute()
+        .await
+        .expect("delete schedule");
+
+        let deleted = harness
+            .processor
+            .apply_action(
+                &ReconcileAction::ArmNext {
+                    schedule_id: schedule_id("deleted"),
+                    now: recorded_at(),
+                },
+                "event-deleted",
+                &trace_headers,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(deleted, RetrySignal::ArmSchedule { .. }));
     }
 
     #[tokio::test]

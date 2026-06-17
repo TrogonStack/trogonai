@@ -127,7 +127,7 @@ impl ScheduleRequest {
         let key = ScheduleKey::derive(schedule_id);
         let subject = ScheduleSubject::execution(&key);
         let target = ScheduleSubject::rrule_wakeup(&key);
-        let payload = RRuleWakeupPayload::new(schedule_id.as_str(), at).encode();
+        let payload = RRuleWakeupPayload::new(schedule_id.clone(), at).encode();
 
         let mut headers = Vec::new();
         push_header(&mut headers, NATS_SCHEDULE_HEADER, at_schedule_value(at))?;

@@ -3893,6 +3893,7 @@ dependencies = [
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]

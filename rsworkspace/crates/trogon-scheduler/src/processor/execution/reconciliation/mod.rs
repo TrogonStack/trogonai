@@ -17,7 +17,7 @@ pub(crate) use recorded_events::{
     stream_routing_matches_payload,
 };
 pub(crate) use request::{DispatchRequest, ScheduleRequest, ScheduleRequestError};
-pub(crate) use rrule_wakeup_payload::RRuleWakeupPayload;
+pub(crate) use rrule_wakeup_payload::{RRuleWakeupPayload, RRuleWakeupPayloadDecodeError};
 pub(crate) use schedule_key::{ScheduleKey, StreamRoutingId};
 #[cfg(test)]
 pub(crate) use schedule_subject::EVENT_SUBJECT_PREFIX;

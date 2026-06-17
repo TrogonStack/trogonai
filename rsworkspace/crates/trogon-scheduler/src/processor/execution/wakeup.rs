@@ -3,11 +3,15 @@ use std::time::Duration;
 
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
+use chrono::{DateTime, Utc};
 use trogon_decider_runtime::{CommandError, CommandExecution, StreamAppend, StreamPosition, StreamRead};
+use trogon_std::time::{EpochClock, SystemClock};
 
-use crate::commands::domain::{ScheduleId, ScheduleIdError};
+use crate::commands::domain::ScheduleId;
 use crate::commands::{EvolveError, RecordScheduleOccurrence, RecordScheduleOccurrenceError};
-use crate::processor::execution::reconciliation::{RRuleWakeupPayload, ScheduleKey, ScheduleSubject};
+use crate::processor::execution::reconciliation::{
+    RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, ScheduleKey, ScheduleSubject,
+};
 use trogonai_proto::scheduler::schedules::ScheduleEventPayloadError;
 
 pub const RRULE_WAKEUP_FILTER: &str = "scheduler.schedules.execution.v1.rrule.>";
@@ -29,23 +33,16 @@ pub enum RRuleWakeupOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RRuleWakeupError {
-    #[error("RRULE wakeup payload is invalid JSON: {source}")]
-    PayloadJson {
+    #[error("RRULE wakeup payload is invalid: {source}")]
+    Payload {
         #[source]
-        source: serde_json::Error,
-    },
-    #[error("RRULE wakeup schedule id is invalid: {source}")]
-    ScheduleId {
-        #[source]
-        source: ScheduleIdError,
-    },
-    #[error("RRULE wakeup occurrence_at is invalid: {source}")]
-    OccurrenceAt {
-        #[source]
-        source: chrono::ParseError,
+        source: RRuleWakeupPayloadDecodeError,
     },
     #[error("RRULE wakeup subject '{actual}' does not match expected subject '{expected}'")]
-    SubjectMismatch { expected: String, actual: String },
+    SubjectMismatch {
+        expected: ScheduleSubject,
+        actual: RRuleWakeupSubjectInput,
+    },
     #[error("RRULE wakeup command was rejected: {source}")]
     CommandRejected {
         #[source]
@@ -69,33 +66,59 @@ impl RRuleWakeupError {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RRuleWakeupProcessor<E> {
-    event_store: E,
-}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RRuleWakeupSubjectInput(String);
 
-impl<E> RRuleWakeupProcessor<E> {
-    pub fn new(event_store: E) -> Self {
-        Self { event_store }
+impl RRuleWakeupSubjectInput {
+    fn new(subject: impl Into<String>) -> Self {
+        Self(subject.into())
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-impl<E> RRuleWakeupProcessor<E>
+impl std::fmt::Display for RRuleWakeupSubjectInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RRuleWakeupProcessor<E, C = SystemClock> {
+    event_store: E,
+    clock: C,
+}
+
+impl<E> RRuleWakeupProcessor<E, SystemClock> {
+    pub fn new(event_store: E) -> Self {
+        Self::with_clock(event_store, SystemClock)
+    }
+}
+
+impl<E, C> RRuleWakeupProcessor<E, C> {
+    pub fn with_clock(event_store: E, clock: C) -> Self {
+        Self { event_store, clock }
+    }
+}
+
+impl<E, C> RRuleWakeupProcessor<E, C>
 where
     E: StreamRead<str> + StreamAppend<str>,
     <E as StreamRead<str>>::Error: std::error::Error + Send + Sync + 'static,
     <E as StreamAppend<str>>::Error: std::error::Error + Send + Sync + 'static,
+    C: EpochClock,
 {
     pub async fn process(&self, subject: &str, payload: &[u8]) -> Result<RRuleWakeupOutcome, RRuleWakeupError> {
-        let wakeup = RRuleWakeupPayload::decode(payload).map_err(|source| RRuleWakeupError::PayloadJson { source })?;
-        let schedule_id =
-            ScheduleId::parse(wakeup.schedule_id()).map_err(|source| RRuleWakeupError::ScheduleId { source })?;
-        let occurrence_at = wakeup
-            .occurrence_at()
-            .map_err(|source| RRuleWakeupError::OccurrenceAt { source })?;
-        ensure_subject_matches_payload(subject, &schedule_id)?;
+        let subject = RRuleWakeupSubjectInput::new(subject);
+        let wakeup = RRuleWakeupPayload::decode(payload).map_err(|source| RRuleWakeupError::Payload { source })?;
+        let schedule_id = wakeup.schedule_id().clone();
+        let occurrence_at = wakeup.occurrence_at();
+        ensure_subject_matches_payload(&subject, &schedule_id)?;
 
-        let command = RecordScheduleOccurrence::new(schedule_id, occurrence_at, chrono::Utc::now());
+        let recorded_at = DateTime::<Utc>::from(self.clock.system_time());
+        let command = RecordScheduleOccurrence::new(schedule_id, occurrence_at, recorded_at);
         match CommandExecution::new(&self.event_store, &command).execute().await {
             Ok(result) => Ok(RRuleWakeupOutcome::Recorded {
                 stream_position: result.stream_position,
@@ -125,15 +148,18 @@ pub fn rrule_wakeup_consumer_config() -> pull::Config {
     }
 }
 
-fn ensure_subject_matches_payload(subject: &str, schedule_id: &ScheduleId) -> Result<(), RRuleWakeupError> {
+fn ensure_subject_matches_payload(
+    subject: &RRuleWakeupSubjectInput,
+    schedule_id: &ScheduleId,
+) -> Result<(), RRuleWakeupError> {
     let expected = ScheduleSubject::rrule_wakeup(&ScheduleKey::derive(schedule_id));
-    if subject == expected.as_str() {
+    if subject.as_str() == expected.as_str() {
         return Ok(());
     }
 
     Err(RRuleWakeupError::SubjectMismatch {
-        expected: expected.as_str().to_string(),
-        actual: subject.to_string(),
+        expected,
+        actual: subject.clone(),
     })
 }
 
@@ -185,12 +211,14 @@ where
 mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration as StdDuration, UNIX_EPOCH};
 
     use chrono::{DateTime, TimeZone, Utc};
     use trogon_decider_runtime::{
         AppendStreamRequest, AppendStreamResponse, Event, EventData, EventDecode, EventDecodeOutcome, ReadFrom,
         ReadStreamRequest, ReadStreamResponse, StreamEvent, StreamWritePrecondition,
     };
+    use trogon_std::time::FixedEpochClock;
 
     use super::*;
     use crate::commands::domain::{
@@ -296,8 +324,16 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 6, 15, 18, 0, 0).unwrap()
     }
 
+    fn recorded_at() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 6, 15, 18, 0, 7).unwrap()
+    }
+
+    fn fixed_clock() -> FixedEpochClock {
+        FixedEpochClock(UNIX_EPOCH + StdDuration::from_secs(recorded_at().timestamp().try_into().unwrap()))
+    }
+
     fn wakeup_payload(id: &ScheduleId) -> Vec<u8> {
-        RRuleWakeupPayload::new(id.as_str(), occurrence_at()).encode()
+        RRuleWakeupPayload::new(id.clone(), occurrence_at()).encode()
     }
 
     fn wakeup_subject(id: &ScheduleId) -> String {
@@ -340,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn wakeup_records_occurrence_into_the_schedule_stream() {
         let (store, id) = store_with_schedule(ScheduleEventStatus::Scheduled).await;
-        let processor = RRuleWakeupProcessor::new(store.clone());
+        let processor = RRuleWakeupProcessor::with_clock(store.clone(), fixed_clock());
 
         let outcome = processor
             .process(&wakeup_subject(&id), &wakeup_payload(&id))
@@ -367,6 +403,10 @@ mod tests {
         assert_eq!(
             recorded.occurrence_at.as_option(),
             Some(&trogonai_proto::convert::timestamp_from_datetime(&occurrence_at()))
+        );
+        assert_eq!(
+            recorded.recorded_at.as_option(),
+            Some(&trogonai_proto::convert::timestamp_from_datetime(&recorded_at()))
         );
 
         let decoded = v1_event(&events[3]);

@@ -256,6 +256,12 @@ pub fn decode_schedule_change(event: &v1::ScheduleEvent) -> Result<ScheduleChang
         }
         ScheduleEventCase::ScheduleOccurrenceScheduled(scheduled) => {
             let schedule_id = schedule_id_from(&scheduled.schedule_id)?;
+            let occurrence_sequence = ScheduleOccurrenceSequence::try_new(scheduled.occurrence_sequence.ok_or(
+                ScheduleEventDecodeError::MissingField {
+                    field: "occurrence_sequence",
+                },
+            )?)
+            .map_err(|source| ScheduleEventDecodeError::OccurrenceSequence { source })?;
             let occurrence_at = timestamp_to_datetime(
                 scheduled
                     .occurrence_at
@@ -265,6 +271,7 @@ pub fn decode_schedule_change(event: &v1::ScheduleEvent) -> Result<ScheduleChang
             )?;
             Ok(ScheduleChange::OccurrenceScheduled {
                 schedule_id,
+                occurrence_sequence,
                 occurrence_at,
             })
         }
@@ -910,6 +917,66 @@ mod tests {
         assert!(matches!(
             schedule_change_from_stream_event(&stream_event).unwrap(),
             Some(ScheduleChange::OccurrenceRecorded { .. })
+        ));
+
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(3),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
+                    scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at)),
+                }
+                .into(),
+            ),
+        };
+        let change = decode_schedule_change(&event).unwrap();
+        assert!(matches!(
+            change,
+            ScheduleChange::OccurrenceScheduled {
+                ref schedule_id,
+                ref occurrence_sequence,
+                occurrence_at: decoded_at,
+            } if schedule_id.as_str() == "backup"
+                && occurrence_sequence.as_u64() == 3
+                && decoded_at == occurrence_at
+        ));
+    }
+
+    #[test]
+    fn scheduled_occurrence_requires_valid_sequence() {
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: None,
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
+                    scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
+                }
+                .into(),
+            ),
+        };
+        assert!(matches!(
+            decode_schedule_change(&event).unwrap_err(),
+            ScheduleEventDecodeError::MissingField {
+                field: "occurrence_sequence",
+            }
+        ));
+
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(0),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
+                    scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at_instant())),
+                }
+                .into(),
+            ),
+        };
+        assert!(matches!(
+            decode_schedule_change(&event).unwrap_err(),
+            ScheduleEventDecodeError::OccurrenceSequence { .. }
         ));
     }
 
