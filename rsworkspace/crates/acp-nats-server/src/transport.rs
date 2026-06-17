@@ -1110,12 +1110,8 @@ pub async fn run_http_connection<N, J>(
                         }
 
                         if message.is_request() {
-                            let Some(request_id) = message.id.clone() else {
-                                let _ = response.send(Err(HttpTransportError::bad_request(
-                                    "JSON-RPC request is missing id",
-                                )));
-                                continue;
-                            };
+                            #[allow(clippy::expect_used)]
+                            let request_id = message.id.clone().expect("request must have id");
 
                             if message.is_initialize() {
                                 if initialized || pending_request.is_some() {
