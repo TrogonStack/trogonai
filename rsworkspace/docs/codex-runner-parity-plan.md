@@ -55,9 +55,23 @@ Full parity (all phases) is **~4.5–5.5 weeks**, but most of that cost lives in
 
 ---
 
+## Phase 0 — DONE (2026-06-17) · verdict
+
+Ran against real **`codex-cli 0.138.0`**. Full findings: **`docs/codex-protocol-delta.md`**; authoritative schema committed under **`docs/codex-protocol-0.138/`**.
+
+- **Verdict: a foundational protocol bump IS required (new Phase 0.5).** The runner's `process.rs::parse_event` keys streaming on `item/updated`, **which does not exist** in 0.138. The real event model (`item/agentMessage/delta`, `item/started`/`completed`, `item/reasoning/*`, `thread/tokenUsage/updated`) and the handshake (`thread.id`/`cwd`, not `threadId`/`workingDirectory`; `turn/start.input` is an array) all differ. The mock + integration tests encode the wrong protocol and must be rebuilt.
+- **Big upside:** native methods exist for **mid-turn steering (`turn/steer`), compaction (`thread/compact/start`), token usage (`thread/tokenUsage/updated`), per-tool approvals + elicitation (`ServerRequest`: `execCommandApproval`, `applyPatchApproval`, …), MCP, skills, and thread persistence/resume (`thread/list`/`read`/`resume`)**. Several gaps collapse from "build it" to "wire the native method." **Per-tool gating flips from architectural-infeasible to feasible.**
+- **B2 is moot** (the cumulative-snapshot premise was wrong); **P3/P5** have exact notifications identified.
+- **Revised single-dev estimate for real-codex parity: ~5–6 weeks** — the speculative tail is replaced by the concrete Phase 0.5 rewrite, roughly offset by the native-method savings in later phases.
+
+### Phase 0.5 — Foundational protocol bump (NEW, now the gate)
+Rewrite `process.rs` to the real 0.138 wire: `thread_start` → read `thread.id`, send `cwd`; `turn_start` → `{threadId, input:[…]}` array; `parse_event` → real notification set; `read_loop` → inbound-`ServerRequest` branch + `turnId`/`itemId` keying; new `CodexEvent` variants (AgentMessageDelta, ReasoningDelta, ItemStarted/Completed, TokenUsage, ApprovalRequest). Rebuild `mock_codex_server.rs` + integration tests against the committed schema. **Gates Phases 1–7.** Est: ~3–5 ideal days.
+
+---
+
 ## Workstreams
 
-### Phase 0 — Protocol ground-truth spike (do this first)
+### Phase 0 — Protocol ground-truth spike (DONE — see verdict above)
 De-risks every protocol-dependent fix below by replacing assumptions with the real 0.138 schema and live traces. Near-zero cost (schema gen is free/local; probe turns are a few cents of OpenAI tokens).
 
 | ID | Task | Approach |
