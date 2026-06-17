@@ -8,9 +8,15 @@
 //! without each one re-deriving the same validation.
 
 pub mod authentication_header;
+pub mod delivery_semantics;
 pub mod idempotency_key_header;
 pub mod nats_push_subject;
+pub mod push_delivery_semantics_registry;
 pub mod push_idempotency_key;
+pub mod push_notification_config;
 pub mod push_notification_config_id;
+pub mod push_notification_target;
+pub mod push_payload;
 pub mod status_transition_id;
+pub mod target;
 pub mod terminal_push_task_state;
