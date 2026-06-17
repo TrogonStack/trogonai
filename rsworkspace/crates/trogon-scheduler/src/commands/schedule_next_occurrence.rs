@@ -1,10 +1,13 @@
+use buffa::MessageField;
 use chrono::{DateTime, Utc};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
-use trogonai_proto::convert::TimestampConversionError;
+use trogonai_proto::convert::{TimestampConversionError, timestamp_from_datetime};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
-use super::domain::{ScheduleId, ScheduleOccurrenceSequenceError};
-use super::rrule::{RRuleCursor, RRuleExpansionError, next_rrule_occurrence, schedule_or_complete_event};
+use super::domain::{
+    RRuleCursor, Recurrence, RecurrenceError, RecurrenceStep, ScheduleId, ScheduleOccurrenceSequence,
+    ScheduleOccurrenceSequenceError,
+};
 
 /// Occurrences whose due instant is at most this far in the past are still armed,
 /// absorbing scheduling/processing latency around recently due occurrences.
@@ -44,7 +47,7 @@ pub enum ScheduleNextOccurrenceError {
     #[error("next recurrence occurrence could not be calculated: {source}")]
     NextOccurrence {
         #[source]
-        source: RRuleExpansionError,
+        source: RecurrenceError,
     },
     #[error("schedule occurrence sequence could not advance: {source}")]
     OccurrenceSequence {
@@ -127,12 +130,13 @@ impl Decider for ScheduleNextOccurrence {
                     _ => RRuleCursor::at_or_after(floor),
                 };
 
-                let next_occurrence = next_rrule_occurrence(schedule, cursor)
+                let recurrence = Recurrence::try_from(schedule)
+                    .map_err(|source| ScheduleNextOccurrenceError::NextOccurrence { source })?;
+                let step = recurrence
+                    .plan_next(cursor)
                     .map_err(|source| ScheduleNextOccurrenceError::NextOccurrence { source })?;
 
-                let event =
-                    schedule_or_complete_event(command.id.as_str(), next_occurrence, last_sequence, command.now)
-                        .map_err(|source| ScheduleNextOccurrenceError::OccurrenceSequence { source })?;
+                let event = recurrence_event(command.id.as_str(), step, last_sequence, command.now)?;
 
                 Ok(Decision::event(event))
             }
@@ -141,6 +145,36 @@ impl Decider for ScheduleNextOccurrence {
             }
         }
     }
+}
+
+/// Translates the aggregate's recurrence decision into the schedule event the
+/// command raises, advancing the gapless occurrence sequence when one is armed.
+fn recurrence_event(
+    schedule_id: &str,
+    step: RecurrenceStep,
+    last_sequence: u64,
+    scheduled_at: DateTime<Utc>,
+) -> Result<v1::ScheduleEvent, ScheduleNextOccurrenceError> {
+    let event = match step {
+        RecurrenceStep::Occurrence { at } => {
+            let sequence = ScheduleOccurrenceSequence::next_after(last_sequence)
+                .map_err(|source| ScheduleNextOccurrenceError::OccurrenceSequence { source })?;
+            v1::ScheduleOccurrenceScheduled {
+                schedule_id: schedule_id.to_string(),
+                occurrence_sequence: Some(sequence.as_u64()),
+                occurrence_at: MessageField::some(timestamp_from_datetime(&at)),
+                scheduled_at: MessageField::some(timestamp_from_datetime(&scheduled_at)),
+            }
+            .into()
+        }
+        RecurrenceStep::Exhausted => v1::ScheduleCompleted {
+            schedule_id: schedule_id.to_string(),
+            last_occurrence_sequence: Some(last_sequence),
+        }
+        .into(),
+    };
+
+    Ok(v1::ScheduleEvent { event: Some(event) })
 }
 
 impl CommandSnapshotPolicy for ScheduleNextOccurrence {

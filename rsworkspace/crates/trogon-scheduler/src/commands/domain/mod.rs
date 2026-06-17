@@ -1,4 +1,5 @@
 mod message;
+mod recurrence;
 mod schedule;
 mod schedule_event_delivery;
 mod schedule_event_sampling_source;
@@ -11,6 +12,8 @@ pub use message::{
     HeaderName, HeaderValue, MessageContent, MessageContentType, MessageEnvelope, MessageHeader, MessageHeaders,
     MessageHeadersError,
 };
+pub use recurrence::RecurrenceError;
+pub(crate) use recurrence::{RRuleCursor, Recurrence, RecurrenceStep};
 pub use schedule::{
     CronExpression, CronExpressionError, Delivery, DeliveryRoute, DeliveryRouteError, EveryDuration,
     EveryDurationError, RRuleDateTime, RRuleDateTimeError, RRuleExpression, RRuleExpressionError, RRuleTimezone,

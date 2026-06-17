@@ -4,7 +4,6 @@ mod pause_schedule;
 mod record_schedule_occurrence;
 mod remove_schedule;
 mod resume_schedule;
-pub(crate) mod rrule;
 mod schedule_next_occurrence;
 mod snapshot;
 mod state;

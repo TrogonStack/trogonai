@@ -3,8 +3,10 @@ use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, Events, F
 use trogonai_proto::convert::TimestampConversionError;
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
-use super::domain::{ScheduleId, ScheduleOccurrenceSequence, ScheduleOccurrenceSequenceError};
-use super::rrule::{RRuleCursor, RRuleExpansionError, next_rrule_occurrence, schedule_or_complete_event};
+use super::domain::{
+    RRuleCursor, Recurrence, RecurrenceError, RecurrenceStep, ScheduleId, ScheduleOccurrenceSequence,
+    ScheduleOccurrenceSequenceError,
+};
 
 #[derive(Debug, Clone)]
 pub struct RecordScheduleOccurrence {
@@ -52,7 +54,7 @@ pub enum RecordScheduleOccurrenceError {
     #[error("next recurrence occurrence could not be calculated: {source}")]
     NextOccurrence {
         #[source]
-        source: RRuleExpansionError,
+        source: RecurrenceError,
     },
     #[error("state value is missing")]
     MissingStateValue,
@@ -157,23 +159,27 @@ impl Decider for RecordScheduleOccurrence {
                     .schedule
                     .as_option()
                     .ok_or_else(|| RecordScheduleOccurrenceError::MissingSchedule { id: command.id.clone() })?;
-                let next_occurrence = next_rrule_occurrence(schedule, RRuleCursor::after(command.occurrence_at))
+                let recurrence = Recurrence::try_from(schedule)
+                    .map_err(|source| RecordScheduleOccurrenceError::NextOccurrence { source })?;
+                let step = recurrence
+                    .plan_next(RRuleCursor::after(command.occurrence_at))
                     .map_err(|source| RecordScheduleOccurrenceError::NextOccurrence { source })?;
 
                 // A paused schedule never arms the next wakeup, but an exhausted
                 // recurrence is still finished: it must still complete, just without
                 // planning a follow-up occurrence.
-                if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED && next_occurrence.is_some() {
+                if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
+                    && matches!(step, RecurrenceStep::Occurrence { .. })
+                {
                     return Ok(Decision::event(recorded));
                 }
 
-                let follow_up = schedule_or_complete_event(
+                let follow_up = recurrence_event(
                     command.id.as_str(),
-                    next_occurrence,
+                    step,
                     occurrence_sequence.as_u64(),
                     command.recorded_at,
-                )
-                .map_err(|source| RecordScheduleOccurrenceError::OccurrenceSequence { source })?;
+                )?;
 
                 Ok(Decision::events(Events::from_first(recorded, vec![follow_up])))
             }
@@ -182,6 +188,39 @@ impl Decider for RecordScheduleOccurrence {
             }
         }
     }
+}
+
+/// Translates the aggregate's recurrence decision into the follow-up schedule
+/// event the command raises, advancing the gapless occurrence sequence when a
+/// further occurrence is armed.
+fn recurrence_event(
+    schedule_id: &str,
+    step: RecurrenceStep,
+    last_sequence: u64,
+    scheduled_at: DateTime<Utc>,
+) -> Result<v1::ScheduleEvent, RecordScheduleOccurrenceError> {
+    let event = match step {
+        RecurrenceStep::Occurrence { at } => {
+            let sequence = ScheduleOccurrenceSequence::next_after(last_sequence)
+                .map_err(|source| RecordScheduleOccurrenceError::OccurrenceSequence { source })?;
+            v1::ScheduleOccurrenceScheduled {
+                schedule_id: schedule_id.to_string(),
+                occurrence_sequence: Some(sequence.as_u64()),
+                occurrence_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at)),
+                scheduled_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                    &scheduled_at,
+                )),
+            }
+            .into()
+        }
+        RecurrenceStep::Exhausted => v1::ScheduleCompleted {
+            schedule_id: schedule_id.to_string(),
+            last_occurrence_sequence: Some(last_sequence),
+        }
+        .into(),
+    };
+
+    Ok(v1::ScheduleEvent { event: Some(event) })
 }
 
 impl CommandSnapshotPolicy for RecordScheduleOccurrence {
