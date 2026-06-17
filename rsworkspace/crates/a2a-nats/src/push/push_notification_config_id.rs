@@ -7,22 +7,12 @@ pub struct PushNotificationConfigId(String);
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PushNotificationConfigIdError {
     Empty,
-    /// `:` is reserved as the field separator inside `PushIdempotencyKey`'s
-    /// derived form (`{task}:{cfg}:{terminal}`); allowing it inside a config
-    /// id would let two distinct (task, cfg) pairs hash to the same key.
-    ContainsReservedSeparator,
 }
 
 impl fmt::Display for PushNotificationConfigIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "push notification config id cannot be empty"),
-            Self::ContainsReservedSeparator => {
-                write!(
-                    f,
-                    "push notification config id must not contain ':' (reserved separator)"
-                )
-            }
         }
     }
 }
@@ -35,9 +25,6 @@ impl PushNotificationConfigId {
         let t = s.trim();
         if t.is_empty() {
             return Err(PushNotificationConfigIdError::Empty);
-        }
-        if t.contains(':') {
-            return Err(PushNotificationConfigIdError::ContainsReservedSeparator);
         }
         Ok(Self(t.to_owned()))
     }
@@ -83,11 +70,9 @@ mod tests {
     }
 
     #[test]
-    fn new_rejects_colon_to_keep_idempotency_key_injective() {
-        assert_eq!(
-            PushNotificationConfigId::new("cfg:1"),
-            Err(PushNotificationConfigIdError::ContainsReservedSeparator)
-        );
+    fn new_accepts_colon_now_that_idempotency_key_is_length_prefixed() {
+        let id = PushNotificationConfigId::new("cfg:1").unwrap();
+        assert_eq!(id.as_str(), "cfg:1");
     }
 
     #[test]
@@ -95,9 +80,6 @@ mod tests {
         let empty = PushNotificationConfigIdError::Empty;
         assert!(empty.to_string().contains("cannot be empty"));
         assert!(format!("{empty:?}").contains("Empty"));
-        let colon = PushNotificationConfigIdError::ContainsReservedSeparator;
-        assert!(colon.to_string().contains("must not contain ':'"));
-        assert!(format!("{colon:?}").contains("ContainsReservedSeparator"));
     }
 
     #[test]
