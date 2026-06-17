@@ -104,6 +104,14 @@ mod tests {
     }
 
     #[test]
+    fn a2a_agent_id_from_str_parses_valid_and_rejects_invalid() {
+        use std::str::FromStr;
+        let id: A2aAgentId = "from-str".parse().unwrap();
+        assert_eq!(id.as_str(), "from-str");
+        assert!(A2aAgentId::from_str("bad.dot").is_err());
+    }
+
+    #[test]
     fn agent_id_error_display() {
         assert_eq!(
             format!("{}", AgentIdError(SubjectTokenViolation::Empty)),

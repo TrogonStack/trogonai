@@ -83,6 +83,19 @@ mod tests {
     }
 
     #[test]
+    fn a2a_context_id_display_matches_inner() {
+        let id = A2aContextId::new("ctx-display").unwrap();
+        assert_eq!(format!("{id}"), "ctx-display");
+    }
+
+    #[test]
+    fn a2a_context_id_derefs_to_str() {
+        let id = A2aContextId::new("ctx-deref").unwrap();
+        let s: &str = &id;
+        assert_eq!(s, "ctx-deref");
+    }
+
+    #[test]
     fn context_id_error_display() {
         assert_eq!(
             format!("{}", ContextIdError(SubjectTokenViolation::Empty)),

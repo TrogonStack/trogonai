@@ -94,6 +94,13 @@ mod tests {
     }
 
     #[test]
+    fn a2a_task_id_derefs_to_str() {
+        let id = A2aTaskId::new("task-deref").unwrap();
+        let s: &str = &id;
+        assert_eq!(s, "task-deref");
+    }
+
+    #[test]
     fn task_id_error_display() {
         assert_eq!(
             format!("{}", TaskIdError(SubjectTokenViolation::Empty)),
