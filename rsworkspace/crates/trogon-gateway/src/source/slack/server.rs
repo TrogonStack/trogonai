@@ -340,10 +340,8 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &SlackConfig) -> Res
 pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,
+    webhook: &SlackWebhookConfig,
 ) -> Router {
-    let webhook = config
-        .webhook()
-        .expect("Slack webhook router requires webhook transport config");
     router_with_clock(publisher, config, webhook, SystemClock)
 }
 
@@ -576,7 +574,8 @@ mod tests {
     async fn router_wrapper_mounts_webhook_route() {
         let _guard = tracing_guard();
         let publisher = MockJetStreamPublisher::new();
-        let app = router(wrap_publisher(publisher), &test_config());
+        let config = test_config();
+        let app = router(wrap_publisher(publisher), &config, config.webhook().unwrap());
 
         let response = app
             .oneshot(

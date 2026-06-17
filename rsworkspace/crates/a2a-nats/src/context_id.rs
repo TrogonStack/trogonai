@@ -35,6 +35,7 @@ impl A2aContextId {
         NatsToken::new(s).map(Self).map_err(ContextIdError)
     }
 
+    #[allow(clippy::expect_used)]
     pub fn generate() -> Self {
         let id = uuid::Uuid::now_v7().simple().to_string();
         Self(NatsToken::new(id).expect("uuid v7 simple form is a valid NATS token"))

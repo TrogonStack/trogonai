@@ -166,9 +166,9 @@ async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    Ok(Json(CrcResponse {
-        response_token: signature::crc_response_token(state.consumer_secret.as_str(), &query.crc_token),
-    }))
+    let response_token = signature::crc_response_token(state.consumer_secret.as_str(), &query.crc_token)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(CrcResponse { response_token }))
 }
 
 #[instrument(
@@ -259,10 +259,9 @@ fn resolve_event_type(payload: &serde_json::Value) -> Result<(DottedNatsToken, P
     }
 
     if payload.get("matching_rules").is_some() {
-        return Ok((
-            DottedNatsToken::new("filtered_stream").expect("literal token is valid"),
-            PayloadKind::FilteredStream,
-        ));
+        return DottedNatsToken::new("filtered_stream")
+            .map(|event_type| (event_type, PayloadKind::FilteredStream))
+            .map_err(|_| RejectReason::InvalidEventType);
     }
 
     let Some(object) = payload.as_object() else {
@@ -508,7 +507,7 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             payload["response_token"],
-            signature::crc_response_token(TEST_SECRET, "challenge"),
+            signature::crc_response_token(TEST_SECRET, "challenge").unwrap(),
         );
     }
 

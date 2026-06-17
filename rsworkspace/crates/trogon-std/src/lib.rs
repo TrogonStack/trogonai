@@ -1,3 +1,8 @@
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 //! Zero-cost abstractions over `std` for TrogonStack projects.
 //!
 //! # Quick Start

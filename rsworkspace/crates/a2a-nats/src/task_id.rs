@@ -36,6 +36,7 @@ impl A2aTaskId {
 
     /// Generates a new time-ordered task id (UUID v7, hyphens stripped to satisfy
     /// NATS token rules and keep subjects compact).
+    #[allow(clippy::expect_used)]
     pub fn generate() -> Self {
         let id = uuid::Uuid::now_v7().simple().to_string();
         // simple() format strips hyphens; only hex chars remain — always a valid NatsToken.

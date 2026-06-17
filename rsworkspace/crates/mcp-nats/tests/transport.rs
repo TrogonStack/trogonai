@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use mcp_nats::{Config, McpPeerId, McpPrefix, client};
 use rmcp::model::{
     ClientJsonRpcMessage, ClientRequest, ListToolsRequest, PaginatedRequestParams, RequestId, ServerJsonRpcMessage,

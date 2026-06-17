@@ -1,4 +1,7 @@
-#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
 //! Typed decider primitives for event-sourced workflows.
 //!
 //! A *decider* turns a command into events against a prior state. This crate provides:

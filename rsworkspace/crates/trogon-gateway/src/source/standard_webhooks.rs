@@ -251,6 +251,7 @@ fn verify_signature(
     signature_header: &str,
 ) -> Result<(), SignatureError> {
     let signed_content = signed_content(webhook_id, webhook_timestamp, body);
+    #[allow(clippy::expect_used)]
     let mut mac = HmacSha256::new_from_slice(signing_key).expect("HMAC-SHA256 accepts any key length");
     mac.update(&signed_content);
     let computed = mac.finalize().into_bytes();
@@ -288,6 +289,7 @@ fn verify_signature(
     if saw_decodable_v1 {
         return Err(SignatureError::Mismatch);
     }
+    #[allow(clippy::expect_used)]
     let error = invalid_v1.expect("v1 signature entries without decodable signatures must be invalid");
     Err(SignatureError::InvalidSignatureEncoding(error))
 }
