@@ -107,7 +107,9 @@ pub fn format_skills_help(registry: &SkillRegistry) -> String {
 fn skill_roots(project_dir: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(home) = std::env::var("HOME") {
-        roots.push(PathBuf::from(home).join(".config/trogon/skills"));
+        let home = PathBuf::from(home);
+        roots.push(home.join("agentskills"));
+        roots.push(home.join(".config/trogon/skills"));
     }
     roots.push(project_dir.join(".claude/skills"));
     roots.push(project_dir.join(".trogon/skills"));
@@ -187,15 +189,21 @@ mod tests {
     }
 
     #[test]
-    fn discovery_finds_user_project_and_claude_alias_roots() {
+    fn discovery_finds_agentskills_user_project_and_claude_alias_roots() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path().join("project");
         let home = tmp.path().join("home");
 
+        fs::create_dir_all(home.join("agentskills/legacy-skill")).unwrap();
         fs::create_dir_all(home.join(".config/trogon/skills/global-skill")).unwrap();
         fs::create_dir_all(project.join(".claude/skills/claude-skill")).unwrap();
         fs::create_dir_all(project.join(".trogon/skills/trogon-skill")).unwrap();
 
+        fs::write(
+            home.join("agentskills/legacy-skill/SKILL.md"),
+            "---\ndescription: Legacy\n---\nLegacy body\n",
+        )
+        .unwrap();
         fs::write(
             home.join(".config/trogon/skills/global-skill/SKILL.md"),
             "---\ndescription: Global\n---\nGlobal body\n",
@@ -214,6 +222,7 @@ mod tests {
 
         let mut by_name = HashMap::new();
         for root in [
+            home.join("agentskills"),
             home.join(".config/trogon/skills"),
             project.join(".claude/skills"),
             project.join(".trogon/skills"),
@@ -224,10 +233,11 @@ mod tests {
         }
         let registry = SkillRegistry::new(by_name.into_values());
 
+        assert!(registry.get("legacy-skill").is_some());
         assert!(registry.get("global-skill").is_some());
         assert!(registry.get("claude-skill").is_some());
         assert!(registry.get("trogon-skill").is_some());
-        assert_eq!(registry.skills().count(), 3);
+        assert_eq!(registry.skills().count(), 4);
     }
 
     #[test]

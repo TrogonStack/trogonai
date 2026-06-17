@@ -1218,6 +1218,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             // Hybrid path: read-only / auto-allowed tools run concurrently; tools
             // that may block on the interactive permission gate stay serial.
             let mut results = Vec::with_capacity(tool_uses.len());
+            let mut current_ctx = Arc::clone(&self.tool_context);
             let mut i = 0;
             while i < tool_uses.len() {
                 if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
@@ -1231,7 +1232,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     let futures: Vec<_> = batch
                         .iter()
                         .map(|(id, name, input)| {
-                            let tool_context = Arc::clone(&self.tool_context);
+                            let tool_context = Arc::clone(&current_ctx);
                             let mcp_dispatch = self.mcp_dispatch.clone();
                             let post_tool_observer = self.post_tool_observer.clone();
                             let id = id.clone();
@@ -1296,9 +1297,15 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 Err(e) => format!("Tool error: {e}"),
                             }
                         } else {
-                            dispatch_tool(&self.tool_context, &name, &input).await.display_text()
+                            dispatch_tool(&current_ctx, &name, &input).await.display_text()
                         }
                     };
+
+                    if name == "change_directory"
+                        && let Some(new_cwd) = output.strip_prefix("Working directory is now ")
+                    {
+                        current_ctx = Arc::new(current_ctx.with_cwd(new_cwd));
+                    }
 
                     let output = if let Some(obs) = &self.post_tool_observer {
                         match obs.observe(&id, &name, &output).await {

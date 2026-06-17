@@ -78,20 +78,27 @@ pub struct SessionSummary {
 pub struct PromptOpts {
     /// Turn-scoped tool allow-list sent as prompt `_meta.toolAllowlist`.
     pub tool_allowlist: Vec<String>,
+    /// Turn-scoped permission rules sent as prompt `_meta.permissionRules`.
+    pub permission_rules: Option<String>,
 }
 
-/// Build an ACP `session/prompt` request, attaching `_meta.toolAllowlist` when set.
+/// Build an ACP `session/prompt` request, attaching turn-scoped `_meta` when set.
 pub fn build_prompt_request(session_id: &str, text: &str, opts: &PromptOpts) -> PromptRequest {
     let mut req =
         PromptRequest::new(session_id.to_string(), vec![ContentBlock::Text(TextContent::new(text))]);
+    let mut meta = serde_json::Map::new();
     if !opts.tool_allowlist.is_empty() {
         let arr = opts
             .tool_allowlist
             .iter()
             .map(|t| Value::String(t.clone()))
             .collect();
-        let mut meta = serde_json::Map::new();
         meta.insert("toolAllowlist".into(), Value::Array(arr));
+    }
+    if let Some(rules) = opts.permission_rules.as_ref().filter(|s| !s.is_empty()) {
+        meta.insert("permissionRules".into(), Value::String(rules.clone()));
+    }
+    if !meta.is_empty() {
         req = req.meta(meta);
     }
     req
@@ -1957,6 +1964,7 @@ mod session_init_tests {
             "hello",
             &PromptOpts {
                 tool_allowlist: vec!["read_file".into(), "bash".into()],
+                permission_rules: None,
             },
         );
         let meta = req.meta.as_ref().expect("meta present");
@@ -1967,6 +1975,24 @@ mod session_init_tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].as_str(), Some("read_file"));
         assert_eq!(tools[1].as_str(), Some("bash"));
+    }
+
+    #[test]
+    fn build_prompt_request_attaches_permission_rules_meta() {
+        let req = build_prompt_request(
+            "sess-1",
+            "hello",
+            &PromptOpts {
+                tool_allowlist: Vec::new(),
+                permission_rules: Some("allow_commands: git".into()),
+            },
+        );
+        let meta = req.meta.as_ref().expect("meta present");
+        assert_eq!(
+            meta.get("permissionRules").and_then(|v| v.as_str()),
+            Some("allow_commands: git")
+        );
+        assert!(meta.get("toolAllowlist").is_none());
     }
 
     #[test]

@@ -47,8 +47,18 @@ pub struct GatewayConfig {
 }
 
 /// Returns the context window token limit for a given model ID.
-fn context_window_tokens(_model: &str) -> u64 {
-    200_000
+fn context_window_tokens(model: &str) -> u64 {
+    let model = model.to_ascii_lowercase();
+    if model.contains("opus-4")
+        || model.contains("sonnet-4")
+        || model.contains("haiku")
+        || model.contains("claude-3")
+        || model.contains("claude-2")
+    {
+        200_000
+    } else {
+        0
+    }
 }
 
 /// Truncate a prompt to at most 256 characters for use as a session title.
@@ -580,14 +590,19 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
         let persist = std::env::var("TROGON_SUBAGENT_PERSIST")
             .ok()
-            .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+            .map(|v| !matches!(v.as_str(), "0" | "false" | "FALSE" | "no" | "NO"))
+            .unwrap_or(true);
 
-        // Cleanup on every path: drop the ephemeral session (unless persisted) and the worktree.
+        // Cleanup on every path unless persistence was requested.
         if !persist {
             let _ = self.store.delete(&sub_sid).await;
         }
         if let Some(w) = worktree {
-            w.cleanup().await;
+            if persist {
+                w.keep();
+            } else {
+                w.cleanup().await;
+            }
         }
 
         let text = collected.lock().map(|g| g.clone()).unwrap_or_default();
@@ -688,6 +703,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             req.meta.as_ref(),
             state.tool_allowlist.clone(),
         );
+        let turn_permission_rules_text = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("permissionRules"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // Compact history when token estimate exceeds 85 % of the session budget.
         // Degrades gracefully — if trogon-compactor is not running, continues unchanged.
@@ -847,6 +868,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         PermissionRules::default()
                     };
                     if let Some(ref extra) = state.permission_rules_text {
+                        rules.merge(PermissionRules::parse(extra));
+                    }
+                    if let Some(ref extra) = turn_permission_rules_text {
                         rules.merge(PermissionRules::parse(extra));
                     }
                     // Read containment: scope read-only auto-allow to cwd plus the
@@ -1374,8 +1398,48 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     #[cfg_attr(coverage, coverage(off))]
     async fn authenticate(
         &self,
-        _req: AuthenticateRequest,
+        req: AuthenticateRequest,
     ) -> agent_client_protocol::Result<AuthenticateResponse> {
+        let method = req.method_id.to_string();
+        if method != "gateway_auth" && method != "gateway" {
+            return Err(Error::new(
+                ErrorCode::InvalidParams.into(),
+                format!("unsupported auth method: {method}"),
+            ));
+        }
+
+        let gateway = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("gateway"))
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing gateway metadata"))?;
+        let base_url = gateway
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing gateway.baseUrl"))?
+            .to_string();
+        let mut token = String::new();
+        let mut extra_headers = Vec::new();
+        if let Some(headers) = gateway.get("headers").and_then(|v| v.as_object()) {
+            for (key, value) in headers {
+                let Some(value) = value.as_str() else {
+                    continue;
+                };
+                if key.eq_ignore_ascii_case("authorization") {
+                    token = value.strip_prefix("Bearer ").unwrap_or(value).to_string();
+                } else {
+                    extra_headers.push((key.clone(), value.to_string()));
+                }
+            }
+        }
+
+        *self.gateway_config.write().await = Some(GatewayConfig {
+            base_url,
+            token,
+            extra_headers,
+        });
         Ok(AuthenticateResponse::new())
     }
 
@@ -1496,7 +1560,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
-        let mut state = self.store.load(&session_id).await.unwrap_or_default();
+        let mut state = match self.store.load(&session_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(session_id, error = %e, "agent: failed to load session");
+                return Err(internal_error(format!("failed to load session: {e}")));
+            }
+        };
         let mut needs_save = false;
         let new_cwd = req.cwd.to_string_lossy().into_owned();
         if !new_cwd.is_empty() && state.cwd != new_cwd {
@@ -1519,6 +1589,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             && let Err(e) = self.store.save(&session_id, &state).await
         {
             warn!(session_id, error = %e, "agent: failed to persist session on load");
+            return Err(internal_error(format!("failed to save session: {e}")));
         }
         let response = LoadSessionResponse::new()
             .modes(self.session_mode_state(&state.mode))
@@ -1597,7 +1668,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             _ => String::new(),
         };
 
-        let mut state = self.store.load(&session_id).await.unwrap_or_default();
+        let mut state = match self.store.load(&session_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(session_id, error = %e, "agent: failed to load session for config update");
+                return Err(internal_error(format!("failed to load session: {e}")));
+            }
+        };
 
         match config_id.as_str() {
             "mode" => {
@@ -1605,6 +1682,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist config mode update");
+                    return Err(internal_error(format!("failed to save session: {e}")));
                 }
             }
             "model" => {
@@ -1612,6 +1690,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist config model update");
+                    return Err(internal_error(format!("failed to save session: {e}")));
                 }
             }
             "permissions" => {
@@ -1623,6 +1702,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist permission rules");
+                    return Err(internal_error(format!("failed to save session: {e}")));
                 }
             }
             "compactor_model" => {
@@ -1630,6 +1710,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist compactor_model");
+                    return Err(internal_error(format!("failed to save session: {e}")));
                 }
             }
             other => {
@@ -1765,6 +1846,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         state.total_cache_read_tokens = 0;
         if let Err(e) = self.store.save(&new_id, &state).await {
             warn!(new_id, error = %e, "agent: failed to save forked session");
+            return Err(internal_error(format!("failed to save forked session: {e}")));
         }
 
         self.publish_session_ready(&new_id).await;
@@ -2082,6 +2164,12 @@ mod tests {
     #[test]
     fn estimate_token_count_empty_returns_zero() {
         assert_eq!(estimate_token_count(&[]), 0);
+    }
+
+    #[test]
+    fn context_window_tokens_returns_unknown_for_unmapped_models() {
+        assert_eq!(context_window_tokens("claude-sonnet-4-6"), 200_000);
+        assert_eq!(context_window_tokens("some-future-model"), 0);
     }
 
     // ── build_compact_payload: wire contract ──────────────────────────────────
@@ -2669,10 +2757,11 @@ mod tests {
     #[tokio::test]
     async fn set_session_config_option_compactor_model_persists_to_store() {
         use agent_client_protocol::Agent as _;
-        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+        use trogon_runner_tools::session_store::{SessionState, SessionStore, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
         let store_clone = store.clone();
+        store_clone.save("s-cm", &SessionState::default()).await.unwrap();
         let agent = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
             store,
@@ -2712,6 +2801,113 @@ mod tests {
             .unwrap();
         let cleared = store_clone.load("s-cm").await.unwrap();
         assert_eq!(cleared.compactor_model, None, "empty value clears the override");
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_unknown_session_fails() {
+        use agent_client_protocol::Agent as _;
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            MemorySessionStore::new(),
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let err = agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new("missing", "mode", "plan"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InternalError);
+    }
+
+    #[tokio::test]
+    async fn load_session_unknown_session_fails() {
+        use agent_client_protocol::Agent as _;
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            MemorySessionStore::new(),
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let err = agent
+            .load_session(LoadSessionRequest::new("missing", "/tmp"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InternalError);
+    }
+
+    #[tokio::test]
+    async fn authenticate_gateway_auth_stores_gateway_config() {
+        use agent_client_protocol::Agent as _;
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let gateway_config = std::sync::Arc::new(tokio::sync::RwLock::new(None));
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            MemorySessionStore::new(),
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            gateway_config.clone(),
+        );
+        let meta = serde_json::json!({
+            "gateway": {
+                "baseUrl": "https://gateway.example.com/v1",
+                "headers": {
+                    "Authorization": "Bearer gateway-token",
+                    "X-Team": "infra"
+                }
+            }
+        });
+        let req = AuthenticateRequest::new("gateway_auth").meta(
+            serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(meta).unwrap(),
+        );
+
+        agent.authenticate(req).await.unwrap();
+
+        let cfg = gateway_config.read().await;
+        let cfg = cfg.as_ref().expect("gateway config stored");
+        assert_eq!(cfg.base_url, "https://gateway.example.com/v1");
+        assert_eq!(cfg.token, "gateway-token");
+        assert_eq!(cfg.extra_headers, vec![("X-Team".to_string(), "infra".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn authenticate_rejects_missing_gateway_metadata() {
+        use agent_client_protocol::Agent as _;
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            MemorySessionStore::new(),
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let err = agent
+            .authenticate(AuthenticateRequest::new("gateway_auth"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 
     #[cfg(feature = "test-helpers")]
@@ -3369,7 +3565,7 @@ mod tests {
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test(flavor = "current_thread")]
-    async fn spawn_subagent_deletes_session_by_default_but_persists_when_env_set() {
+    async fn spawn_subagent_persists_by_default_but_can_be_opted_out() {
         use std::sync::{Arc, Mutex};
 
         use async_trait::async_trait;
@@ -3406,7 +3602,7 @@ mod tests {
         }
 
         async fn run_spawn(
-            persist: bool,
+            disable_persist: bool,
         ) -> (Vec<String>, String, trogon_runner_tools::session_store::mock::MemorySessionStore) {
             let inner = MemorySessionStore::new();
             inner
@@ -3439,8 +3635,8 @@ mod tests {
                 std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             ));
 
-            if persist {
-                unsafe { std::env::set_var("TROGON_SUBAGENT_PERSIST", "1") };
+            if disable_persist {
+                unsafe { std::env::set_var("TROGON_SUBAGENT_PERSIST", "0") };
             } else {
                 unsafe { std::env::remove_var("TROGON_SUBAGENT_PERSIST") };
             }
@@ -3459,40 +3655,43 @@ mod tests {
         }
 
         let (deleted_default, text_default, store_default) = run_spawn(false).await;
-        assert_eq!(deleted_default.len(), 1, "default path must delete sub-session");
         assert!(
-            !text_default.contains("Sub-agent session persisted"),
-            "default path must not advertise persistence"
+            deleted_default.is_empty(),
+            "default path must not delete sub-session"
+        );
+        assert!(
+            text_default.contains("Sub-agent session persisted"),
+            "default path must advertise persistence: {text_default}"
+        );
+        assert!(
+            text_default.contains("--session-id"),
+            "default path must include session id for resume"
         );
 
-        let sub_ids: Vec<_> = store_default.list_ids().await.unwrap();
-        assert!(
-            !sub_ids.iter().any(|id| id != "parent-1"),
-            "sub-session must be gone after default spawn"
-        );
-
-        let (deleted_persist, text_persist, store_persist) = run_spawn(true).await;
-        assert!(
-            deleted_persist.is_empty(),
-            "persist path must not delete sub-session"
-        );
-        assert!(
-            text_persist.contains("Sub-agent session persisted"),
-            "persist path must include resume hint: {text_persist}"
-        );
-        assert!(
-            text_persist.contains("--session-id"),
-            "persist path must include session id for resume"
-        );
-
-        let remaining: Vec<_> = store_persist
+        let remaining_default: Vec<_> = store_default
             .list_ids()
             .await
             .unwrap()
             .into_iter()
             .filter(|id| id != "parent-1")
             .collect();
-        assert_eq!(remaining.len(), 1, "exactly one persisted sub-session");
+        assert_eq!(remaining_default.len(), 1, "default path must persist sub-session");
+
+        let (deleted_opt_out, text_opt_out, store_opt_out) = run_spawn(true).await;
+        assert_eq!(deleted_opt_out.len(), 1, "opt-out path must delete sub-session");
+        assert!(
+            !text_opt_out.contains("Sub-agent session persisted"),
+            "opt-out path must not include resume hint"
+        );
+
+        let remaining: Vec<_> = store_opt_out
+            .list_ids()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|id| id != "parent-1")
+            .collect();
+        assert!(remaining.is_empty(), "opt-out path must remove sub-session");
     }
 
     #[cfg(feature = "test-helpers")]

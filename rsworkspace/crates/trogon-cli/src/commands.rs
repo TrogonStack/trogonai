@@ -87,10 +87,38 @@ pub fn normalize_allowed_tools_for_runner(tools: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn command_permission_rules_for_allowed_tools(tools: &[String]) -> Option<String> {
+    let commands: Vec<String> = tools
+        .iter()
+        .filter_map(|tool| {
+            let (base, rest) = tool.split_once('(')?;
+            if trogon_runner_tools::permission_rules::normalize_tool_name(base.trim()) != "bash" {
+                return None;
+            }
+            let command = rest.strip_suffix(')').unwrap_or(rest).trim();
+            if command.is_empty() {
+                return None;
+            }
+            let command = command
+                .strip_suffix(":*")
+                .or_else(|| command.strip_suffix('*'))
+                .unwrap_or(command)
+                .trim();
+            (!command.is_empty()).then(|| command.to_string())
+        })
+        .collect();
+    if commands.is_empty() {
+        None
+    } else {
+        Some(format!("allow_commands: {}", commands.join(", ")))
+    }
+}
+
 /// Per-turn prompt overrides derived from a custom-command dispatch.
 pub fn prompt_opts_from_dispatch(dispatch: &CustomCommandDispatch) -> crate::session::PromptOpts {
     crate::session::PromptOpts {
         tool_allowlist: normalize_allowed_tools_for_runner(&dispatch.allowed_tools),
+        permission_rules: command_permission_rules_for_allowed_tools(&dispatch.allowed_tools),
     }
 }
 
@@ -356,6 +384,22 @@ mod tests {
         };
         let opts = prompt_opts_from_dispatch(&dispatch);
         assert_eq!(opts.tool_allowlist, vec!["read_file", "bash"]);
+        assert_eq!(opts.permission_rules, None);
+    }
+
+    #[test]
+    fn command_scoped_bash_allowed_tools_emit_permission_rules() {
+        let dispatch = CustomCommandDispatch {
+            prompt: "commit".into(),
+            model: None,
+            allowed_tools: vec!["Read".into(), "Bash(git:*)".into(), "Bash(cargo test*)".into()],
+        };
+        let opts = prompt_opts_from_dispatch(&dispatch);
+        assert_eq!(opts.tool_allowlist, vec!["read_file", "bash", "bash"]);
+        assert_eq!(
+            opts.permission_rules.as_deref(),
+            Some("allow_commands: git, cargo test")
+        );
     }
 
     #[test]

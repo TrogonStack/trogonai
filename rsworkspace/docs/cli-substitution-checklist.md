@@ -8,8 +8,8 @@ already landed, which made it a misleading source for remediation work.
 
 Use these sources instead:
 
-- `../docs/claude-code-replacement/claude-code-replacement-definitive-plan.md`
+- `../../docs/claude-code-replacement/claude-code-replacement-definitive-plan.md`
   for the replacement target.
-- `docs/cli-substitution-testing.md` for executable CLI substitution checks.
+- `cli-substitution-testing.md` for executable CLI substitution checks.
 - GitHub project `straw-hat-team/projects/15` for the active bug and gap
   remediation register.

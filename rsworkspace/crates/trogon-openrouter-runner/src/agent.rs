@@ -1735,6 +1735,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             req.meta.as_ref(),
             tool_allowlist,
         );
+        let turn_permission_rules_text = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("permissionRules"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let offered_tools =
             trogon_runner_tools::intersect_enabled_tools(&enabled_tools, &tool_allowlist);
         // MED-7: turn-scoped audit buffer, drained into session_audit after the turn.
@@ -2145,6 +2151,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     // config option (mirrors trogon-acp-runner) so a deny set at
                     // runtime is honored, not silently ignored.
                     if let Some(ref extra) = permission_rules_text {
+                        rules.merge(PermissionRules::parse(extra));
+                    }
+                    if let Some(ref extra) = turn_permission_rules_text {
                         rules.merge(PermissionRules::parse(extra));
                     }
                     let allowed_tools = self.permission_store.allowed_tools(&session_id);
