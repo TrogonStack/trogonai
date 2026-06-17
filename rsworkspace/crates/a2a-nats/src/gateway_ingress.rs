@@ -111,17 +111,18 @@ pub fn gateway_ingress_agent_and_method_dots(
     subject: &str,
     prefix: &A2aPrefix,
 ) -> Result<(A2aAgentId, String), GatewayIngressError> {
-    let agent_subject = resolve_gateway_ingress_subject(subject, prefix)?;
-    let leader = format!("{}.agents.", prefix.as_str());
-    let remainder = agent_subject
+    let leader = format!("{}.gateway.", prefix.as_str());
+    let rest = subject
         .strip_prefix(&leader)
-        .ok_or(GatewayIngressError::BadSubjectShape)?;
-    let tokens: Vec<&str> = remainder.split('.').filter(|t| !t.is_empty()).collect();
-    if tokens.len() < 2 {
+        .ok_or(GatewayIngressError::NotGatewayIngress)?;
+    if rest.is_empty() {
         return Err(GatewayIngressError::BadSubjectShape);
     }
-    let agent_id = A2aAgentId::new(tokens[0]).map_err(|_| GatewayIngressError::InvalidAgentId)?;
-    Ok((agent_id, tokens[1..].join(".")))
+    let tokens: Vec<&str> = rest.split('.').filter(|t| !t.is_empty()).collect();
+    let (agent_id_str, suffix_tokens) =
+        peel_agent_and_suffix(&tokens).ok_or(GatewayIngressError::UnknownMethodSuffix)?;
+    let agent_id = A2aAgentId::new(agent_id_str).map_err(|_| GatewayIngressError::InvalidAgentId)?;
+    Ok((agent_id, suffix_tokens.join(".")))
 }
 
 /// Resolve ingress subject → core agent RPC subject `{prefix}.agents.{agent_id}.{method…}`.
@@ -154,15 +155,10 @@ fn peel_agent_and_suffix<'a>(tokens: &'a [&'a str]) -> Option<(&'a str, &'a [&'a
             continue;
         }
         let head_len = tokens.len() - sfx.len();
-        // Single segment `{agent}.{method_tokens…}` only (no legacy `{tenant}.{agent}.{method…}` segment).
         if head_len != 1 {
             return None;
         }
-        let agent_id = tokens[0];
-        if agent_id.is_empty() {
-            return None;
-        }
-        return Some((agent_id, &tokens[head_len..]));
+        return Some((tokens[0], &tokens[head_len..]));
     }
     None
 }
@@ -349,5 +345,77 @@ mod tests {
         assert_eq!(value["id"], "x");
         assert_eq!(value["error"]["code"], -32600);
         assert!(value["error"]["message"].as_str().unwrap().contains("bad ingress"));
+    }
+
+    #[test]
+    fn empty_rest_after_gateway_leader_is_bad_shape() {
+        assert!(matches!(
+            resolve_gateway_ingress_subject("a2a.gateway.", &pfx()),
+            Err(GatewayIngressError::BadSubjectShape)
+        ));
+        assert!(matches!(
+            gateway_ingress_agent_and_method_dots("a2a.gateway.", &pfx()),
+            Err(GatewayIngressError::BadSubjectShape)
+        ));
+    }
+
+    #[test]
+    fn no_known_suffix_matches_returns_unknown_method() {
+        assert!(matches!(
+            resolve_gateway_ingress_subject("a2a.gateway.bot.foo.bar", &pfx()),
+            Err(GatewayIngressError::UnknownMethodSuffix)
+        ));
+    }
+
+    #[test]
+    fn ingress_error_display_covers_every_variant() {
+        assert!(
+            GatewayIngressError::NotGatewayIngress
+                .to_string()
+                .contains("does not start")
+        );
+        assert!(GatewayIngressError::BadSubjectShape.to_string().contains("expected"));
+        assert!(
+            GatewayIngressError::UnknownMethodSuffix
+                .to_string()
+                .contains("unknown method")
+        );
+        assert!(GatewayIngressError::InvalidAgentId.to_string().contains("agent id"));
+        assert!(
+            GatewayComposeError::EmptyMethodTail
+                .to_string()
+                .contains("method suffix is empty")
+        );
+    }
+
+    fn parse_error_code(bytes: &[u8]) -> i64 {
+        let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        value["error"]["code"].as_i64().unwrap()
+    }
+
+    #[test]
+    fn policy_denied_emits_code_minus_32801() {
+        let bytes = ingress_gateway_policy_denied_response_bytes(b"{}", "denied").unwrap();
+        assert_eq!(parse_error_code(&bytes), -32_801);
+    }
+
+    #[test]
+    fn declarative_denied_emits_code_minus_32803() {
+        let bytes = ingress_gateway_declarative_denied_response_bytes(b"{}", "tier1").unwrap();
+        assert_eq!(parse_error_code(&bytes), -32_803);
+    }
+
+    #[test]
+    fn tier3_refused_emits_code_minus_32802_with_rule() {
+        let bytes = ingress_gateway_tier3_refused_response_bytes(b"{}", "refused", "no-pii").unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], -32_802);
+        assert_eq!(value["error"]["data"]["rule"], "no-pii");
+    }
+
+    #[test]
+    fn deadline_exceeded_emits_code_minus_32800() {
+        let bytes = ingress_gateway_deadline_exceeded_response_bytes(b"{}", "timeout").unwrap();
+        assert_eq!(parse_error_code(&bytes), -32_800);
     }
 }
