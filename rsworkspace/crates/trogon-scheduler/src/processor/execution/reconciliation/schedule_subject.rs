@@ -1,5 +1,3 @@
-use trogon_nats::DottedNatsToken;
-
 use super::ScheduleKey;
 
 const EXECUTION_SUBJECT_PREFIX: &str = "scheduler.schedules.execution.v1";
@@ -13,7 +11,7 @@ pub(crate) const SCHEDULER_INTERNAL_PREFIX: &str = "trogon.scheduler";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleSubject {
-    token: DottedNatsToken,
+    subject: String,
     key: ScheduleKey,
 }
 
@@ -32,13 +30,11 @@ impl ScheduleSubject {
 
     fn with_prefix(prefix: &str, key: &ScheduleKey) -> Self {
         let subject = format!("{prefix}.{}", key.simple());
-        let token = DottedNatsToken::new(&subject)
-            .expect("a subject built from a fixed prefix and a uuid-simple key is a valid dotted token");
-        Self { token, key: *key }
+        Self { subject, key: *key }
     }
 
     pub fn as_str(&self) -> &str {
-        self.token.as_str()
+        &self.subject
     }
 
     /// The schedule key this subject was derived from.

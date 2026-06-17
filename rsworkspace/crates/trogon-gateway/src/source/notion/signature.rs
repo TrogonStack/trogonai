@@ -12,6 +12,8 @@ pub enum SignatureError {
     MissingPrefix,
     #[error("invalid hex encoding")]
     InvalidHex(#[source] hex::FromHexError),
+    #[error("invalid HMAC key")]
+    InvalidKey(#[source] hmac::digest::InvalidLength),
     #[error("signature mismatch")]
     Mismatch,
 }
@@ -23,7 +25,7 @@ pub fn verify(secret: &NotionVerificationToken, body: &[u8], signature_header: &
 
     let expected = hex::decode(hex_signature).map_err(SignatureError::InvalidHex)?;
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_str().as_bytes()).expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(secret.as_str().as_bytes()).map_err(SignatureError::InvalidKey)?;
     mac.update(body);
     mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }

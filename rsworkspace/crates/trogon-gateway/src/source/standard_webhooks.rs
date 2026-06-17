@@ -54,6 +54,8 @@ pub enum SignatureError {
     StaleTimestamp,
     #[error("invalid signature encoding")]
     InvalidSignatureEncoding(#[source] base64::DecodeError),
+    #[error("invalid HMAC key")]
+    InvalidKey(#[source] hmac::digest::InvalidLength),
     #[error("missing v1 signature")]
     MissingV1Signature,
     #[error("signature mismatch")]
@@ -206,7 +208,7 @@ fn verify_signature(
     signature_header: &str,
 ) -> Result<(), SignatureError> {
     let signed_content = signed_content(webhook_id, webhook_timestamp, body);
-    let mut mac = HmacSha256::new_from_slice(signing_key).expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(signing_key).map_err(SignatureError::InvalidKey)?;
     mac.update(&signed_content);
     let computed = mac.finalize().into_bytes();
 
@@ -243,7 +245,9 @@ fn verify_signature(
     if saw_decodable_v1 {
         return Err(SignatureError::Mismatch);
     }
-    let error = invalid_v1.expect("v1 signature entries without decodable signatures must be invalid");
+    let Some(error) = invalid_v1 else {
+        return Err(SignatureError::Mismatch);
+    };
     Err(SignatureError::InvalidSignatureEncoding(error))
 }
 

@@ -36,7 +36,9 @@ fn is_valid_allowed_host(raw: &str) -> bool {
     let (host, port) = match colon_count {
         0 => (raw, None),
         1 => {
-            let (host, port) = raw.rsplit_once(':').expect("single colon is present");
+            let Some((host, port)) = raw.rsplit_once(':') else {
+                return false;
+            };
             (host, Some(port))
         }
         _ => return false,

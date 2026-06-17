@@ -62,7 +62,10 @@
 //! # let _ = (event, precondition);
 //! # Ok::<(), trogon_decider_runtime::InvalidStreamPosition>(())
 //! ```
-#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
 
 /// Event envelopes and codec traits used by stream storage adapters.
 pub mod event;

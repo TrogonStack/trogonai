@@ -8,7 +8,10 @@ use crate::commands::domain::{
 };
 
 use super::RRuleExpansionError;
-use super::{GoDurationError, RRuleWakeupPayload, ScheduleKey, ScheduleSubject, format_go_duration};
+use super::{
+    GoDurationError, RRuleWakeupPayload, RRuleWakeupPayloadEncodeError, ScheduleKey, ScheduleSubject,
+    format_go_duration,
+};
 
 const NATS_SCHEDULE_HEADER: &str = "Nats-Schedule";
 const NATS_SCHEDULE_TIME_ZONE_HEADER: &str = "Nats-Schedule-Time-Zone";
@@ -59,6 +62,13 @@ pub enum ScheduleRequestError {
     UnsupportedDispatchSource,
     #[error("scheduler header '{name}' has a value with characters invalid for NATS headers")]
     InvalidHeaderValue { name: &'static str },
+    #[error("scheduler header '{name}' has a name with characters invalid for NATS headers")]
+    InvalidHeaderName { name: &'static str },
+    #[error("RRULE wakeup payload could not be encoded: {source}")]
+    RRuleWakeupPayloadEncode {
+        #[source]
+        source: RRuleWakeupPayloadEncodeError,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,7 +137,9 @@ impl ScheduleRequest {
         let key = ScheduleKey::derive(schedule_id);
         let subject = ScheduleSubject::execution(&key);
         let target = ScheduleSubject::rrule_wakeup(&key);
-        let payload = RRuleWakeupPayload::new(schedule_id.clone(), at).encode();
+        let payload = RRuleWakeupPayload::new(schedule_id.clone(), at)
+            .encode()
+            .map_err(|source| ScheduleRequestError::RRuleWakeupPayloadEncode { source })?;
 
         let mut headers = Vec::new();
         push_header(&mut headers, NATS_SCHEDULE_HEADER, at_schedule_value(at))?;
@@ -333,7 +345,7 @@ fn push_header(
     name: &'static str,
     value: impl Into<String>,
 ) -> Result<(), ScheduleRequestError> {
-    let header_name = HeaderName::new(name).expect("scheduler-owned header name is valid");
+    let header_name = HeaderName::new(name).map_err(|_| ScheduleRequestError::InvalidHeaderName { name })?;
     let value = HeaderValue::new(value).map_err(|_| ScheduleRequestError::InvalidHeaderValue { name })?;
     headers.push(ScheduleHeader {
         name: header_name,

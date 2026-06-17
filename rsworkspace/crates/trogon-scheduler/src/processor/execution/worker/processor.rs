@@ -148,6 +148,16 @@ pub(super) enum PoisonReason {
     },
     #[error("scheduler processor panicked while recording a failure")]
     FailureRecordPanic,
+    #[error("corrupt-checkpoint tombstone schedule could not be built: {source}")]
+    TombstoneSchedule {
+        #[source]
+        source: crate::commands::domain::EveryDurationError,
+    },
+    #[error("corrupt-checkpoint tombstone delivery could not be built: {source}")]
+    TombstoneDelivery {
+        #[source]
+        source: crate::commands::domain::DeliveryRouteError,
+    },
 }
 
 /// A transient failure: the record reached no durable outcome and must be
@@ -354,6 +364,12 @@ where
                     Err(ReconcileError::ScheduleRequest { source }) => CheckpointLoadStep::Poison(
                         self.failure_record(stream_event, PoisonReason::ScheduleRequest { source }),
                     ),
+                    Err(ReconcileError::TombstoneSchedule { source }) => CheckpointLoadStep::Poison(
+                        self.failure_record(stream_event, PoisonReason::TombstoneSchedule { source }),
+                    ),
+                    Err(ReconcileError::TombstoneDelivery { source }) => CheckpointLoadStep::Poison(
+                        self.failure_record(stream_event, PoisonReason::TombstoneDelivery { source }),
+                    ),
                 }
             }
         };
@@ -385,6 +401,12 @@ where
             ),
             Err(ReconcileError::ScheduleRequest { source }) => {
                 ReconcileStep::Poison(self.failure_record(stream_event, PoisonReason::ScheduleRequest { source }))
+            }
+            Err(ReconcileError::TombstoneSchedule { source }) => {
+                ReconcileStep::Poison(self.failure_record(stream_event, PoisonReason::TombstoneSchedule { source }))
+            }
+            Err(ReconcileError::TombstoneDelivery { source }) => {
+                ReconcileStep::Poison(self.failure_record(stream_event, PoisonReason::TombstoneDelivery { source }))
             }
         };
         let reconciliation = match reconcile_step {
@@ -603,9 +625,10 @@ fn recover_corrupt_checkpoint(
         next_checkpoint: ScheduleCheckpointRecord {
             schedule_id: schedule_id.clone(),
             status,
-            schedule: Schedule::every(Duration::from_secs(1)).expect("one second is a valid tombstone schedule"),
+            schedule: Schedule::every(Duration::from_secs(1))
+                .map_err(|source| ReconcileError::TombstoneSchedule { source })?,
             delivery: Delivery::nats_event(CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE)
-                .expect("tombstone delivery subject is valid"),
+                .map_err(|source| ReconcileError::TombstoneDelivery { source })?,
             message: ScheduleMessage {
                 content: MessageContent::json("{}"),
                 headers: ScheduleHeaders::default(),

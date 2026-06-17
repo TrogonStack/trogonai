@@ -8,6 +8,9 @@ unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
 
 [workspace.lints.clippy]
 all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
 
 [workspace.dependencies]
 # Internal crates

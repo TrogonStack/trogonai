@@ -28,6 +28,15 @@ pub enum RRuleWakeupPayloadDecodeError {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RRuleWakeupPayloadEncodeError {
+    #[error("RRULE wakeup payload could not be encoded as JSON: {source}")]
+    Json {
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RRuleWakeupPayload {
     schedule_id: ScheduleId,
@@ -50,12 +59,12 @@ impl RRuleWakeupPayload {
         self.occurrence_at
     }
 
-    pub(crate) fn encode(&self) -> Vec<u8> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, RRuleWakeupPayloadEncodeError> {
         let wire = RRuleWakeupPayloadWire {
             schedule_id: self.schedule_id.as_str().to_string(),
             occurrence_at: self.occurrence_at.to_rfc3339_opts(SecondsFormat::AutoSi, true),
         };
-        serde_json::to_vec(&wire).expect("rrule wakeup payload is JSON-serializable")
+        serde_json::to_vec(&wire).map_err(|source| RRuleWakeupPayloadEncodeError::Json { source })
     }
 
     pub(crate) fn decode(payload: &[u8]) -> Result<Self, RRuleWakeupPayloadDecodeError> {

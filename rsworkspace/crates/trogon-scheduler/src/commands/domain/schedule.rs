@@ -232,7 +232,10 @@ impl TryFrom<&str> for RRuleExpression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RRuleDateTime(String);
+pub struct RRuleDateTime {
+    raw: String,
+    datetime: DateTime<Utc>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum RRuleDateTimeError {
@@ -248,26 +251,26 @@ pub enum RRuleDateTimeError {
 impl RRuleDateTime {
     pub fn new(field: &'static str, value: impl Into<String>) -> Result<Self, RRuleDateTimeError> {
         let value = value.into();
-        DateTime::parse_from_rfc3339(&value).map_err(|source| RRuleDateTimeError::Invalid {
-            field,
-            value: value.clone(),
-            source: Box::new(source),
-        })?;
-        Ok(Self(value))
+        let datetime = DateTime::parse_from_rfc3339(&value)
+            .map(|datetime| datetime.with_timezone(&Utc))
+            .map_err(|source| RRuleDateTimeError::Invalid {
+                field,
+                value: value.clone(),
+                source: Box::new(source),
+            })?;
+        Ok(Self { raw: value, datetime })
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.raw
     }
 
     pub fn into_string(self) -> String {
-        self.0
+        self.raw
     }
 
     pub fn to_datetime(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(&self.0)
-            .expect("RRuleDateTime was validated as RFC3339 on construction")
-            .with_timezone(&Utc)
+        self.datetime
     }
 }
 

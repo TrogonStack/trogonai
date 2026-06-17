@@ -1,3 +1,8 @@
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 //! # trogon-nats
 //!
 //! Shared NATS infrastructure for TrogonStack applications.

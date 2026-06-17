@@ -1,5 +1,4 @@
 pub const DEFAULT_MCP_CLIENT_ID_PREFIX: &str = "http";
-pub const DEFAULT_MCP_HTTP_HOST: &str = "127.0.0.1";
 pub const DEFAULT_MCP_HTTP_PORT: u16 = 8081;
 pub const DEFAULT_MCP_SERVER_ID: &str = "default";
 pub const ENV_MCP_CLIENT_ID_PREFIX: &str = "MCP_CLIENT_ID_PREFIX";

@@ -619,8 +619,12 @@ pub async fn delete(headers: HeaderMap, State(state): State<AppState>) -> Respon
 
 fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
     let connection_id = AcpConnectionId::default();
-    let response_header = HeaderValue::from_str(&connection_id.to_string())
-        .expect("generated ACP connection id must be a valid header value");
+    let response_header = match HeaderValue::from_str(&connection_id.to_string()) {
+        Ok(response_header) => response_header,
+        Err(error) => {
+            return HttpTransportError::internal_with("invalid generated ACP connection id", error).into_response();
+        }
+    };
     let shutdown_rx = state.shutdown_tx.subscribe();
     let mut response = ws.on_upgrade(move |socket| async move {
         if state
@@ -675,7 +679,7 @@ async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<
             connection_id,
             protocol_version,
             body,
-        } => Ok(build_json_response(connection_id, protocol_version, body)),
+        } => build_json_response(connection_id, protocol_version, body),
     }
 }
 
@@ -712,7 +716,7 @@ async fn http_get(headers: HeaderMap, state: AppState) -> Result<Response, HttpT
         &connection_id,
         outcome.protocol_version.as_ref(),
         None,
-    );
+    )?;
     response
         .headers_mut()
         .insert(X_ACCEL_BUFFERING_HEADER, HeaderValue::from_static("no"));
@@ -739,7 +743,7 @@ async fn http_delete(headers: HeaderMap, state: AppState) -> Result<Response, Ht
         .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??;
 
     let mut response = StatusCode::ACCEPTED.into_response();
-    set_protocol_version_header(response.headers_mut(), protocol_version.as_ref());
+    set_protocol_version_header(response.headers_mut(), protocol_version.as_ref())?;
     Ok(response)
 }
 
@@ -933,13 +937,13 @@ fn build_json_response(
     connection_id: AcpConnectionId,
     protocol_version: Option<ProtocolVersion>,
     body: String,
-) -> Response {
+) -> Result<Response, HttpTransportError> {
     let mut response = (StatusCode::OK, body).into_response();
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    set_transport_headers(response.headers_mut(), &connection_id, protocol_version.as_ref(), None);
-    response
+    set_transport_headers(response.headers_mut(), &connection_id, protocol_version.as_ref(), None)?;
+    Ok(response)
 }
 
 fn set_transport_headers(
@@ -947,29 +951,35 @@ fn set_transport_headers(
     connection_id: &AcpConnectionId,
     protocol_version: Option<&ProtocolVersion>,
     session_id: Option<&acp_nats::AcpSessionId>,
-) {
+) -> Result<(), HttpTransportError> {
     headers.insert(
         ACP_CONNECTION_ID_HEADER,
         HeaderValue::from_str(&connection_id.to_string())
-            .expect("generated ACP connection id must be a valid header value"),
+            .map_err(|error| HttpTransportError::internal_with("invalid generated ACP connection id", error))?,
     );
-    set_protocol_version_header(headers, protocol_version);
+    set_protocol_version_header(headers, protocol_version)?;
     if let Some(session_id) = session_id {
         headers.insert(
             ACP_SESSION_ID_HEADER,
-            HeaderValue::from_str(session_id.as_str()).expect("generated ACP session id must be a valid header value"),
+            HeaderValue::from_str(session_id.as_str())
+                .map_err(|error| HttpTransportError::internal_with("invalid generated ACP session id", error))?,
         );
     }
+    Ok(())
 }
 
-fn set_protocol_version_header(headers: &mut HeaderMap, protocol_version: Option<&ProtocolVersion>) {
+fn set_protocol_version_header(
+    headers: &mut HeaderMap,
+    protocol_version: Option<&ProtocolVersion>,
+) -> Result<(), HttpTransportError> {
     if let Some(protocol_version) = protocol_version {
         headers.insert(
             ACP_PROTOCOL_VERSION_HEADER,
             HeaderValue::from_str(&protocol_version.to_string())
-                .expect("ACP protocol version must be a valid header value"),
+                .map_err(|error| HttpTransportError::internal_with("invalid ACP protocol version", error))?,
         );
     }
+    Ok(())
 }
 
 fn validate_protocol_version_header(
@@ -1107,7 +1117,12 @@ pub async fn run_http_connection<N, J>(
                         }
 
                         if message.is_request() {
-                            let request_id = message.id.clone().expect("request must have id");
+                            let Some(request_id) = message.id.clone() else {
+                                let _ = response.send(Err(HttpTransportError::bad_request(
+                                    "JSON-RPC request is missing id",
+                                )));
+                                continue;
+                            };
 
                             if message.is_initialize() {
                                 if initialized || pending_request.is_some() {

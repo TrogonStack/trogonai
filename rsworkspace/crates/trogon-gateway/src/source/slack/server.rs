@@ -341,9 +341,9 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,
 ) -> Router {
-    let webhook = config
-        .webhook()
-        .expect("Slack webhook router requires webhook transport config");
+    let Some(webhook) = config.webhook() else {
+        return Router::new();
+    };
     router_with_clock(publisher, config, webhook, SystemClock)
 }
 

@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use trogon_decider_runtime::StreamPosition;
 
 use crate::commands::domain::{
-    Delivery, Schedule, ScheduleEventStatus, ScheduleId, ScheduleMessage, ScheduleOccurrenceSequence,
+    Delivery, DeliveryRouteError, EveryDurationError, Schedule, ScheduleEventStatus, ScheduleId, ScheduleMessage,
+    ScheduleOccurrenceSequence,
 };
 use crate::processor::execution::checkpoints::{ReconcileOutcome, ScheduleCheckpointRecord, ScheduleStatus};
 
@@ -99,6 +100,16 @@ pub enum ReconcileError {
     ScheduleRequest {
         #[source]
         source: ScheduleRequestError,
+    },
+    #[error("corrupt-checkpoint tombstone schedule is invalid: {source}")]
+    TombstoneSchedule {
+        #[source]
+        source: EveryDurationError,
+    },
+    #[error("corrupt-checkpoint tombstone delivery is invalid: {source}")]
+    TombstoneDelivery {
+        #[source]
+        source: DeliveryRouteError,
     },
 }
 
