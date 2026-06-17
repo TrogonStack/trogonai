@@ -6,7 +6,7 @@ mod rrule_wakeup_payload;
 mod schedule_key;
 mod schedule_subject;
 
-pub(crate) use crate::commands::rrule::RRuleExpansionError;
+pub(crate) use crate::commands::domain::RecurrenceError as RRuleExpansionError;
 pub(crate) use go_duration::{GoDurationError, format_go_duration};
 pub(crate) use reconcile::{
     CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE, ReconcileAction, ReconcileError, Reconciliation, ScheduleChange, reconcile,

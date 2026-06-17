@@ -147,9 +147,6 @@ fn wakeup_outcome_from_rejection(
         RecordScheduleOccurrenceError::ScheduleDeleted { .. } => Ok(RRuleWakeupOutcome::Obsolete {
             reason: RRuleWakeupObsoleteReason::Deleted,
         }),
-        RecordScheduleOccurrenceError::SchedulePaused { .. } => Ok(RRuleWakeupOutcome::Obsolete {
-            reason: RRuleWakeupObsoleteReason::Paused,
-        }),
         RecordScheduleOccurrenceError::OccurrenceAlreadyRecorded { .. }
         | RecordScheduleOccurrenceError::OccurrenceNotPending { .. } => Ok(RRuleWakeupOutcome::DuplicateStale),
         other => Err(RRuleWakeupError::CommandRejected { source: other }),
@@ -437,12 +434,6 @@ mod tests {
             wakeup_outcome_from_rejection(RecordScheduleOccurrenceError::ScheduleDeleted { id: id.clone() }).unwrap(),
             RRuleWakeupOutcome::Obsolete {
                 reason: RRuleWakeupObsoleteReason::Deleted,
-            }
-        );
-        assert_eq!(
-            wakeup_outcome_from_rejection(RecordScheduleOccurrenceError::SchedulePaused { id: id.clone() }).unwrap(),
-            RRuleWakeupOutcome::Obsolete {
-                reason: RRuleWakeupObsoleteReason::Paused,
             }
         );
         assert_eq!(
