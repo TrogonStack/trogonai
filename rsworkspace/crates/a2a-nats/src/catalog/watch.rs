@@ -1,0 +1,179 @@
+//! Catalog KV watch event decoding.
+//!
+//! The live JetStream KV watch wrapper lands in the integration PR alongside
+//! its smoke harness so it can be exercised end-to-end; this slice ships the
+//! pure decoder (`map_kv_entry`) and the event/error shapes downstream code
+//! pattern-matches on.
+
+use async_nats::jetstream::kv::{self, Operation};
+
+use crate::agent_id::A2aAgentId;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentCardWatchEvent {
+    Put {
+        agent_id: A2aAgentId,
+        card: Box<a2a::agent_card::AgentCard>,
+        revision: u64,
+    },
+    Delete {
+        agent_id: A2aAgentId,
+        revision: u64,
+    },
+}
+
+#[derive(Debug)]
+pub enum AgentCardWatchError {
+    Kv(String),
+    InvalidKey(String),
+    Deserialize(serde_json::Error),
+    Schema(a2a_pack::AgentCardValidateError),
+}
+
+impl std::fmt::Display for AgentCardWatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Kv(msg) => write!(f, "KV watch error: {msg}"),
+            Self::InvalidKey(msg) => write!(f, "invalid catalog key: {msg}"),
+            Self::Deserialize(e) => write!(f, "failed to deserialize AgentCard: {e}"),
+            Self::Schema(e) => write!(f, "AgentCard schema validation failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for AgentCardWatchError {}
+
+pub fn map_kv_entry(entry: kv::Entry) -> Result<AgentCardWatchEvent, AgentCardWatchError> {
+    let agent_id = A2aAgentId::new(entry.key.as_str()).map_err(|_| {
+        AgentCardWatchError::InvalidKey(format!("catalog KV key `{}` is not a valid agent id", entry.key))
+    })?;
+    let revision = entry.revision;
+
+    match entry.operation {
+        Operation::Put => {
+            let parsed: serde_json::Value =
+                serde_json::from_slice(&entry.value).map_err(AgentCardWatchError::Deserialize)?;
+            a2a_pack::validate_agent_card_value(&parsed).map_err(AgentCardWatchError::Schema)?;
+            let card: a2a::agent_card::AgentCard =
+                serde_json::from_value(parsed).map_err(AgentCardWatchError::Deserialize)?;
+            Ok(AgentCardWatchEvent::Put {
+                agent_id,
+                card: Box::new(card),
+                revision,
+            })
+        }
+        Operation::Delete | Operation::Purge => Ok(AgentCardWatchEvent::Delete { agent_id, revision }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use time::OffsetDateTime;
+
+    fn minimal_card_json(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "description": "",
+            "version": "",
+            "defaultInputModes": [],
+            "defaultOutputModes": [],
+            "skills": [],
+            "capabilities": {},
+            "supportedInterfaces": [{
+                "url": "https://example.com/a2a",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "0.2.0"
+            }]
+        })
+    }
+
+    fn entry(key: &str, op: Operation, value: Bytes, revision: u64) -> kv::Entry {
+        kv::Entry {
+            bucket: "A2A_AGENT_CARDS".to_string(),
+            key: key.to_string(),
+            value,
+            revision,
+            delta: 0,
+            created: OffsetDateTime::UNIX_EPOCH,
+            operation: op,
+            seen_current: true,
+        }
+    }
+
+    #[test]
+    fn watch_error_display_covers_every_variant() {
+        let bad = serde_json::from_str::<String>("x").unwrap_err();
+        let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
+        assert!(AgentCardWatchError::Kv("down".into()).to_string().contains("KV watch"));
+        assert!(
+            AgentCardWatchError::InvalidKey("bad".into())
+                .to_string()
+                .contains("invalid catalog key")
+        );
+        assert!(
+            AgentCardWatchError::Deserialize(bad)
+                .to_string()
+                .contains("deserialize AgentCard")
+        );
+        assert!(
+            AgentCardWatchError::Schema(schema)
+                .to_string()
+                .contains("schema validation failed")
+        );
+    }
+
+    #[test]
+    fn map_kv_entry_put_valid_card() {
+        let body = serde_json::to_vec(&minimal_card_json("bot")).unwrap();
+        let entry = entry("bot", Operation::Put, Bytes::from(body), 7);
+
+        let event = map_kv_entry(entry).expect("valid put should map");
+        assert!(matches!(
+            event,
+            AgentCardWatchEvent::Put { ref agent_id, ref card, revision: 7 }
+                if agent_id.as_str() == "bot" && card.name == "bot"
+        ));
+    }
+
+    #[test]
+    fn map_kv_entry_put_invalid_json_returns_deserialize() {
+        let entry = entry("bot", Operation::Put, Bytes::from_static(b"not json"), 1);
+        let err = map_kv_entry(entry).expect_err("invalid json must error");
+        assert!(matches!(err, AgentCardWatchError::Deserialize(_)));
+    }
+
+    #[test]
+    fn map_kv_entry_put_schema_failure_returns_schema() {
+        let body = serde_json::to_vec(&serde_json::json!({})).unwrap();
+        let entry = entry("bot", Operation::Put, Bytes::from(body), 1);
+        let err = map_kv_entry(entry).expect_err("missing required fields must error");
+        assert!(matches!(err, AgentCardWatchError::Schema(_)));
+    }
+
+    #[test]
+    fn map_kv_entry_delete_yields_delete_event() {
+        let entry = entry("bot", Operation::Delete, Bytes::new(), 9);
+        let event = map_kv_entry(entry).expect("delete should map");
+        assert!(matches!(
+            event,
+            AgentCardWatchEvent::Delete { ref agent_id, revision: 9 } if agent_id.as_str() == "bot"
+        ));
+    }
+
+    #[test]
+    fn map_kv_entry_purge_yields_delete_event() {
+        let entry = entry("bot", Operation::Purge, Bytes::new(), 10);
+        let event = map_kv_entry(entry).expect("purge should map to delete");
+        assert!(matches!(event, AgentCardWatchEvent::Delete { revision: 10, .. }));
+    }
+
+    #[test]
+    fn map_kv_entry_invalid_key_returns_invalid_key() {
+        let body = serde_json::to_vec(&minimal_card_json("bot")).unwrap();
+        let entry = entry("not a valid id!", Operation::Put, Bytes::from(body), 1);
+        let err = map_kv_entry(entry).expect_err("bogus key must error");
+        assert!(matches!(err, AgentCardWatchError::InvalidKey(_)));
+    }
+}
