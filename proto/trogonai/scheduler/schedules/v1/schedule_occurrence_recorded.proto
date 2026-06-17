@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ScheduleOccurrenceRecorded records a due occurrence that the schedule aggregate accepted.
+message ScheduleOccurrenceRecorded {
+  // Stable NATS token used as the schedule stream id and schedule key.
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Gapless sequence among recorded occurrences for this schedule.
+  uint64 occurrence_sequence = 2;
+  // Concrete recurrence instant that the recorded occurrence represents.
+  google.protobuf.Timestamp occurrence_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Wall-clock instant the aggregate recorded the occurrence; audit only, never
+  // an identity input. Lateness is recorded_at - occurrence_at.
+  google.protobuf.Timestamp recorded_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}

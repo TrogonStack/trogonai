@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+// ScheduleCompleted records that a schedule exhausted its recurrence and will not plan further occurrences.
+message ScheduleCompleted {
+  // Stable NATS token used as the schedule stream id and schedule key.
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Sequence of the last recorded occurrence before completion.
+  uint64 last_occurrence_sequence = 2;
+}

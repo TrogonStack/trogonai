@@ -16,7 +16,7 @@ use bytes::Bytes;
 use std::future::IntoFuture;
 use trogon_nats::jetstream::{JetStreamPublisher, JetStreamSubjectPurger, PurgeOutcome};
 
-use crate::processor::execution::reconciliation::{ScheduleRequest, ScheduleSubject};
+use crate::processor::execution::reconciliation::{DispatchRequest, ScheduleRequest, ScheduleSubject};
 
 const NATS_MSG_ID_HEADER: &str = "Nats-Msg-Id";
 
@@ -103,6 +103,32 @@ where
         Ok(())
     }
 
+    pub async fn dispatch(
+        &self,
+        request: &DispatchRequest,
+        msg_id: &str,
+        trace_headers: &HeaderMap,
+    ) -> Result<(), ExecutionScheduleWriteError> {
+        let headers = build_dispatch_headers(request, msg_id, trace_headers);
+        let payload = Bytes::copy_from_slice(request.payload());
+
+        let ack = self
+            .publisher
+            .publish_with_headers(request.subject().as_str().to_string(), headers, payload)
+            .await
+            .map_err(|source| ExecutionScheduleWriteError::Publish {
+                source: Box::new(source),
+            })?;
+
+        ack.into_future()
+            .await
+            .map_err(|source| ExecutionScheduleWriteError::Ack {
+                source: Box::new(source),
+            })?;
+
+        Ok(())
+    }
+
     /// Purge-only operation for pause/remove. Purging an already-absent subject
     /// is a success.
     pub async fn purge(&self, subject: &ScheduleSubject) -> Result<(), ExecutionScheduleWriteError> {
@@ -139,6 +165,15 @@ fn build_headers(request: &ScheduleRequest, msg_id: &str, trace_headers: &Header
     headers
 }
 
+fn build_dispatch_headers(request: &DispatchRequest, msg_id: &str, trace_headers: &HeaderMap) -> HeaderMap {
+    let mut headers = trace_headers.clone();
+    for header in request.headers() {
+        headers.insert(header.name().as_str(), header.value().as_str());
+    }
+    headers.insert(NATS_MSG_ID_HEADER, msg_id);
+    headers
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -156,6 +191,18 @@ mod tests {
         ScheduleRequest::build(
             &ScheduleId::parse("orders/created").unwrap(),
             &Schedule::every(std::time::Duration::from_secs(30)).unwrap(),
+            &Delivery::nats_event("agent.run").unwrap(),
+            &ScheduleMessage {
+                content: MessageContent::json(r#"{"ok":true}"#),
+                headers: ScheduleHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn dispatch_request() -> DispatchRequest {
+        DispatchRequest::build(
+            &ScheduleId::parse("orders/created").unwrap(),
             &Delivery::nats_event("agent.run").unwrap(),
             &ScheduleMessage {
                 content: MessageContent::json(r#"{"ok":true}"#),
@@ -194,6 +241,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_publishes_user_payload_with_msg_id_and_trace_headers() {
+        let publisher = MockJetStreamPublisher::new();
+        let purger = MockJetStreamPurger::new();
+        let writer = ExecutionScheduleWriter::new(publisher.clone(), purger.clone());
+        let request = dispatch_request();
+
+        writer
+            .dispatch(&request, "event-7:dispatch", &trace_headers())
+            .await
+            .unwrap();
+
+        assert!(purger.purged_subjects().is_empty());
+        let published = publisher.published_messages();
+        assert_eq!(published.len(), 1);
+        let message = &published[0];
+        assert_eq!(message.subject, request.subject().as_str());
+        assert_eq!(message.headers.get("Nats-Msg-Id").unwrap().as_str(), "event-7:dispatch");
+        assert_eq!(
+            message.headers.get("Content-Type").unwrap().as_str(),
+            "application/json"
+        );
+        assert_eq!(message.headers.get("traceparent").unwrap().as_str(), "00-trace-span-01");
+        assert_eq!(message.headers.get("x-kind").unwrap().as_str(), "heartbeat");
+        assert_eq!(message.payload, Bytes::from_static(br#"{"ok":true}"#));
+    }
+
+    #[tokio::test]
     async fn purge_only_targets_the_subject_and_succeeds_when_absent() {
         let publisher = MockJetStreamPublisher::new();
         let purger = MockJetStreamPurger::new();
@@ -215,6 +289,21 @@ mod tests {
 
         let error = writer
             .upsert(&request(), "event-7", &HeaderMap::new())
+            .await
+            .unwrap_err();
+        assert!(error.is_transient());
+        assert!(matches!(error, ExecutionScheduleWriteError::Publish { .. }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_publish_failure_is_transient() {
+        let publisher = MockJetStreamPublisher::new();
+        publisher.fail_next_js_publish();
+        let purger = MockJetStreamPurger::new();
+        let writer = ExecutionScheduleWriter::new(publisher, purger);
+
+        let error = writer
+            .dispatch(&dispatch_request(), "event-7:dispatch", &HeaderMap::new())
             .await
             .unwrap_err();
         assert!(error.is_transient());
@@ -299,6 +388,14 @@ mod tests {
         assert!(matches!(error, ExecutionScheduleWriteError::Ack { .. }));
         assert_eq!(error.to_string(), "execution schedule publish ack failed: ack failed");
         assert!(std::error::Error::source(&error).is_some());
+
+        let writer = ExecutionScheduleWriter::new(AckFailingPublisher, MockJetStreamPurger::new());
+        let error = writer
+            .dispatch(&dispatch_request(), "event-7:dispatch", &HeaderMap::new())
+            .await
+            .unwrap_err();
+        assert!(error.is_transient());
+        assert!(matches!(error, ExecutionScheduleWriteError::Ack { .. }));
     }
 
     /// A single test double that backs both publish and purge with shared

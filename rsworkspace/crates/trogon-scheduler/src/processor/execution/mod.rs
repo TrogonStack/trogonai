@@ -9,6 +9,7 @@
 pub(crate) mod checkpoints;
 pub(crate) mod execution_schedules;
 pub(crate) mod reconciliation;
+pub mod wakeup;
 pub mod worker;
 
 #[cfg(all(test, not(coverage)))]

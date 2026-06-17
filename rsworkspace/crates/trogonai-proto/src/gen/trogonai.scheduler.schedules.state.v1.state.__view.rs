@@ -5,8 +5,29 @@
 pub struct StateView<'a> {
     /// Field 1: `state`
     pub state: ::core::option::Option<::buffa::EnumValue<super::super::StateValue>>,
-    #[doc(hidden)]
-    pub __buffa_phantom: ::core::marker::PhantomData<&'a ()>,
+    /// Field 2: `last_occurrence_at`
+    pub last_occurrence_at: ::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
+    >,
+    /// Field 3: `last_occurrence_sequence`
+    pub last_occurrence_sequence: ::core::option::Option<u64>,
+    /// Recurrence definition retained so the aggregate can plan the next occurrence.
+    ///
+    /// Field 4: `schedule`
+    pub schedule: ::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::ScheduleView<'a>,
+    >,
+    /// Occurrence currently placed on a timer but not yet recorded.
+    ///
+    /// Field 5: `pending_occurrence_at`
+    pub pending_occurrence_at: ::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
+    >,
+    /// Recurrence exhausted: the schedule emitted ScheduleCompleted and must not be
+    /// re-armed until it is re-created.
+    ///
+    /// Field 6: `completed`
+    pub completed: ::core::option::Option<bool>,
 }
 impl<'a> StateView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -57,6 +78,100 @@ impl<'a> StateView<'a> {
                         ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
                     );
                 }
+                2u32 => {
+                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                            field_number: 2u32,
+                            expected: 2u8,
+                            actual: tag.wire_type() as u8,
+                        });
+                    }
+                    if depth == 0 {
+                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
+                    }
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.last_occurrence_at.as_mut() {
+                        Some(existing) => existing._merge_into_view(sub, depth - 1)?,
+                        None => {
+                            view.last_occurrence_at = ::buffa::MessageFieldView::set(
+                                ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
+                                    sub,
+                                    depth - 1,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                3u32 => {
+                    if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                            field_number: 3u32,
+                            expected: 0u8,
+                            actual: tag.wire_type() as u8,
+                        });
+                    }
+                    view.last_occurrence_sequence = Some(
+                        ::buffa::types::decode_uint64(&mut cur)?,
+                    );
+                }
+                4u32 => {
+                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                            field_number: 4u32,
+                            expected: 2u8,
+                            actual: tag.wire_type() as u8,
+                        });
+                    }
+                    if depth == 0 {
+                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
+                    }
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.schedule.as_mut() {
+                        Some(existing) => existing._merge_into_view(sub, depth - 1)?,
+                        None => {
+                            view.schedule = ::buffa::MessageFieldView::set(
+                                super::super::super::super::v1::__buffa::view::ScheduleView::_decode_depth(
+                                    sub,
+                                    depth - 1,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                5u32 => {
+                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                            field_number: 5u32,
+                            expected: 2u8,
+                            actual: tag.wire_type() as u8,
+                        });
+                    }
+                    if depth == 0 {
+                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
+                    }
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.pending_occurrence_at.as_mut() {
+                        Some(existing) => existing._merge_into_view(sub, depth - 1)?,
+                        None => {
+                            view.pending_occurrence_at = ::buffa::MessageFieldView::set(
+                                ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
+                                    sub,
+                                    depth - 1,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                6u32 => {
+                    if tag.wire_type() != ::buffa::encoding::WireType::Varint {
+                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                            field_number: 6u32,
+                            expected: 0u8,
+                            actual: tag.wire_type() as u8,
+                        });
+                    }
+                    view.completed = Some(::buffa::types::decode_bool(&mut cur)?);
+                }
                 _ => {
                     ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
                 }
@@ -89,25 +204,81 @@ impl<'a> ::buffa::MessageView<'a> for StateView<'a> {
         let _ = __buffa_src;
         super::super::State {
             state: self.state,
+            last_occurrence_at: match self.last_occurrence_at.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        ::buffa_types::google::protobuf::Timestamp,
+                    >::some(v.to_owned_from_source(__buffa_src))
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            last_occurrence_sequence: self.last_occurrence_sequence,
+            schedule: match self.schedule.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::super::super::v1::Schedule,
+                    >::some(v.to_owned_from_source(__buffa_src))
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            pending_occurrence_at: match self.pending_occurrence_at.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        ::buffa_types::google::protobuf::Timestamp,
+                    >::some(v.to_owned_from_source(__buffa_src))
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            completed: self.completed,
             ..::core::default::Default::default()
         }
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for StateView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if let Some(ref v) = self.state {
             size += 1u32 + ::buffa::types::int32_encoded_len(v.to_i32()) as u32;
         }
+        if self.last_occurrence_at.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.last_occurrence_at.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        if let Some(v) = self.last_occurrence_sequence {
+            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+        }
+        if self.schedule.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.schedule.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        if self.pending_occurrence_at.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.pending_occurrence_at.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        if self.completed.is_some() {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -116,6 +287,43 @@ impl<'a> ::buffa::ViewEncode<'a> for StateView<'a> {
             ::buffa::encoding::Tag::new(1u32, ::buffa::encoding::WireType::Varint)
                 .encode(buf);
             ::buffa::types::encode_int32(v.to_i32(), buf);
+        }
+        if self.last_occurrence_at.is_set() {
+            ::buffa::encoding::Tag::new(
+                    2u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.last_occurrence_at.write_to(__cache, buf);
+        }
+        if let Some(v) = self.last_occurrence_sequence {
+            ::buffa::encoding::Tag::new(3u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_uint64(v, buf);
+        }
+        if self.schedule.is_set() {
+            ::buffa::encoding::Tag::new(
+                    4u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.schedule.write_to(__cache, buf);
+        }
+        if self.pending_occurrence_at.is_set() {
+            ::buffa::encoding::Tag::new(
+                    5u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.pending_occurrence_at.write_to(__cache, buf);
+        }
+        if let Some(v) = self.completed {
+            ::buffa::encoding::Tag::new(6u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(v, buf);
         }
     }
 }
@@ -139,6 +347,42 @@ impl<'__a> ::serde::Serialize for StateView<'__a> {
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         if let ::core::option::Option::Some(ref __v) = self.state {
             __map.serialize_entry("state", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self
+                .last_occurrence_at
+                .as_option()
+            {
+                __map.serialize_entry("lastOccurrenceAt", __v)?;
+            }
+        }
+        if let ::core::option::Option::Some(__v) = self.last_occurrence_sequence {
+            struct _W(u64);
+            impl ::serde::Serialize for _W {
+                fn serialize<__S: ::serde::Serializer>(
+                    &self,
+                    __s: __S,
+                ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                    ::buffa::json_helpers::uint64::serialize(&self.0, __s)
+                }
+            }
+            __map.serialize_entry("lastOccurrenceSequence", &_W(__v))?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.schedule.as_option() {
+                __map.serialize_entry("schedule", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self
+                .pending_occurrence_at
+                .as_option()
+            {
+                __map.serialize_entry("pendingOccurrenceAt", __v)?;
+            }
+        }
+        if let ::core::option::Option::Some(__v) = self.completed {
+            __map.serialize_entry("completed", &__v)?;
         }
         __map.end()
     }
@@ -241,6 +485,50 @@ impl StateOwnedView {
         &self,
     ) -> ::core::option::Option<::buffa::EnumValue<super::super::StateValue>> {
         self.0.reborrow().state
+    }
+    /// Field 2: `last_occurrence_at`
+    #[must_use]
+    pub fn last_occurrence_at(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+    > {
+        &self.0.reborrow().last_occurrence_at
+    }
+    /// Field 3: `last_occurrence_sequence`
+    #[must_use]
+    pub fn last_occurrence_sequence(&self) -> ::core::option::Option<u64> {
+        self.0.reborrow().last_occurrence_sequence
+    }
+    /// Recurrence definition retained so the aggregate can plan the next occurrence.
+    ///
+    /// Field 4: `schedule`
+    #[must_use]
+    pub fn schedule(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::v1::__buffa::view::ScheduleView<'_>,
+    > {
+        &self.0.reborrow().schedule
+    }
+    /// Occurrence currently placed on a timer but not yet recorded.
+    ///
+    /// Field 5: `pending_occurrence_at`
+    #[must_use]
+    pub fn pending_occurrence_at(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+    > {
+        &self.0.reborrow().pending_occurrence_at
+    }
+    /// Recurrence exhausted: the schedule emitted ScheduleCompleted and must not be
+    /// re-armed until it is re-created.
+    ///
+    /// Field 6: `completed`
+    #[must_use]
+    pub fn completed(&self) -> ::core::option::Option<bool> {
+        self.0.reborrow().completed
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<StateView<'static>>> for StateOwnedView {
