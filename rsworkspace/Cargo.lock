@@ -96,6 +96,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-identity-types"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "a2a-lf"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7932,6 +7941,7 @@ dependencies = [
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]
