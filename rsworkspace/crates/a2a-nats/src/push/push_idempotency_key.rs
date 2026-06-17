@@ -32,6 +32,10 @@ impl PushIdempotencyKey {
     /// Stable DLQ dedup key: same length-prefixed encoding as `derive_terminal`
     /// with a distinct kind discriminant so a terminal key and a DLQ key with
     /// equal-length components can't collide inside a shared dedupe store.
+    ///
+    /// `push_target_url` is accepted as `&str` here pending the validated
+    /// `PushTargetUrl` value object that lands with the push-target PR; once
+    /// that ships this parameter is retyped to `&PushTargetUrl`.
     pub fn derive_dlq(task_id: &A2aTaskId, transition_id: &StatusTransitionId, push_target_url: &str) -> Self {
         Self(encode_components([
             DLQ_KIND,
@@ -45,6 +49,13 @@ impl PushIdempotencyKey {
         self.0.as_str()
     }
 
+    /// Reconstruct a key from a value we previously wrote to the dedupe store.
+    ///
+    /// This is the only constructor that skips the length-prefixed encoding —
+    /// the wire-side store is the authoritative producer (every entry it
+    /// returns originated from `derive_terminal` or `derive_dlq`), so
+    /// re-validating here would just round-trip our own bytes. The intent is
+    /// boundary-trusted reconstruction, not user-supplied input.
     pub fn from_dedupe_wire(raw: impl Into<String>) -> Self {
         Self(raw.into())
     }

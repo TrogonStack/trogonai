@@ -182,26 +182,21 @@ async fn run<P, U, S, E, M>(
         while in_flight.len() < config.max_active_lanes {
             let Some(key) = ready.pop_front() else { break };
             queued_ready.remove(&key);
-            // Both ReadyOutcome::AlreadyInFlight and ReadyOutcome::EmptyQueue
-            // are defensive arms that `queued_ready` + the submission flow
-            // make unreachable through the public API. `resolve_ready_key` is
-            // unit-tested for each, so the loop here just drops both into a
-            // single `continue` and exits the wildcard arm without needing
-            // separate uncovered branches.
-            let outcome = resolve_ready_key(key, &in_flight, &mut pending);
-            match outcome {
-                ReadyOutcome::Dispatch(event, decoded, message) => {
-                    in_flight.insert(key);
-                    active_lanes.store(in_flight.len(), Ordering::SeqCst);
+            // ReadyOutcome::AlreadyInFlight and ReadyOutcome::EmptyQueue are
+            // defensive arms that `queued_ready` + the submission flow make
+            // unreachable through the public API; `resolve_ready_key` is
+            // unit-tested for each. `if let` drops the wildcard branch
+            // entirely so the loop has no untestable defensive arm.
+            if let ReadyOutcome::Dispatch(event, decoded, message) = resolve_ready_key(key, &in_flight, &mut pending) {
+                in_flight.insert(key);
+                active_lanes.store(in_flight.len(), Ordering::SeqCst);
 
-                    let processor = processor.clone();
-                    let clock = clock.clone();
-                    workers.push(async move {
-                        let report = process_one(processor, clock, event, decoded, message, key).await;
-                        (key, report)
-                    });
-                }
-                _ => continue,
+                let processor = processor.clone();
+                let clock = clock.clone();
+                workers.push(async move {
+                    let report = process_one(processor, clock, event, decoded, message, key).await;
+                    (key, report)
+                });
             }
         }
 

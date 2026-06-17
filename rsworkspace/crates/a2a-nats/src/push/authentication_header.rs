@@ -47,7 +47,10 @@ pub fn authorization_header_value(
     let scheme_lc = scheme_raw.to_ascii_lowercase();
 
     match scheme_lc.as_str() {
-        "digest" => Err(AuthenticationHeaderBuildError::UnsupportedScheme {
+        // Challenge-based schemes (RFC 7235) need a dedicated signing path; rejecting
+        // every one we know of up front keeps the static "scheme creds" fallback
+        // from silently producing an unusable Authorization value.
+        "digest" | "negotiate" | "ntlm" => Err(AuthenticationHeaderBuildError::UnsupportedScheme {
             scheme: auth.scheme.trim().to_string(),
         }),
         "bearer" | "jwt" => {
@@ -116,6 +119,17 @@ mod tests {
     fn digest_errors() {
         let err = authorization_header_value(Some(&auth("digest", "opaque"))).unwrap_err();
         assert!(matches!(err, AuthenticationHeaderBuildError::UnsupportedScheme { .. }));
+    }
+
+    #[test]
+    fn negotiate_and_ntlm_are_rejected_as_unsupported_challenge_schemes() {
+        for scheme in ["Negotiate", "ntlm", "NTLM"] {
+            let err = authorization_header_value(Some(&auth(scheme, "tok"))).unwrap_err();
+            assert!(
+                matches!(err, AuthenticationHeaderBuildError::UnsupportedScheme { .. }),
+                "{scheme} must round-trip through the unsupported-challenge arm"
+            );
+        }
     }
 
     #[test]
