@@ -122,6 +122,12 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+/// The single auth method this runner advertises in `initialize` and accepts in
+/// `authenticate`. Credentials reach the upstream provider out-of-band (env /
+/// vault token), so `authenticate` only confirms the client selected this
+/// method rather than silently succeeding for any (or an empty) id.
+const GATEWAY_AUTH_METHOD: &str = "gateway_auth";
+
 /// Estimates the token count of a message list using the heuristic `bytes / 4`.
 fn estimate_token_count(messages: &[Message]) -> u64 {
     serde_json::to_string(messages)
@@ -1366,7 +1372,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 env!("CARGO_PKG_VERSION"),
             ))
             .auth_methods(vec![AuthMethod::Agent(AuthMethodAgent::new(
-                "gateway_auth",
+                GATEWAY_AUTH_METHOD,
                 "Gateway",
             ))]))
     }
@@ -1374,8 +1380,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     #[cfg_attr(coverage, coverage(off))]
     async fn authenticate(
         &self,
-        _req: AuthenticateRequest,
+        req: AuthenticateRequest,
     ) -> agent_client_protocol::Result<AuthenticateResponse> {
+        // Honor the advertised method instead of accepting any id: a client that
+        // selects an unknown method must be told auth is required, not handed a
+        // silent success (the previous no-op dropped the distinction).
+        if req.method_id.0.as_ref() != GATEWAY_AUTH_METHOD {
+            return Err(Error::auth_required().data(serde_json::json!({
+                "requested": req.method_id.0.as_ref(),
+                "supported": [GATEWAY_AUTH_METHOD],
+            })));
+        }
         Ok(AuthenticateResponse::new())
     }
 
@@ -1765,6 +1780,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         state.total_cache_read_tokens = 0;
         if let Err(e) = self.store.save(&new_id, &state).await {
             warn!(new_id, error = %e, "agent: failed to save forked session");
+            // The fork only exists once persisted; returning the new id after a
+            // failed save would hand the client a session that can't be loaded.
+            return Err(internal_error(format!("failed to persist forked session: {e}")));
         }
 
         self.publish_session_ready(&new_id).await;
