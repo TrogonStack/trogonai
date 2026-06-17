@@ -11,6 +11,7 @@ all = "deny"
 
 [workspace.dependencies]
 # Internal crates
+a2a-pack = { path = "crates/a2a-pack" }
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp-nats" }
@@ -46,6 +47,7 @@ tower-http = { version = "=0.6.8", features = ["trace"] }
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+jsonschema = { version = "=0.46.5", default-features = false }
 
 # CLI
 clap = { version = "=4.6.1", features = ["derive"] }
