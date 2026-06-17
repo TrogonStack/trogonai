@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 //! First-party A2A policy bundle surface — AgentCard read-side validation.
 //!
 //! Ships the JSON-Schema for the A2A AgentCard plus a read-time validator used by

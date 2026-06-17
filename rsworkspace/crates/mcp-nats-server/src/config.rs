@@ -1,4 +1,4 @@
-use std::net::{AddrParseError, IpAddr, SocketAddr};
+use std::net::{AddrParseError, IpAddr, Ipv4Addr, SocketAddr};
 use std::num::ParseIntError;
 
 use clap::Parser;
@@ -8,8 +8,8 @@ use trogon_std::env::ReadEnv;
 
 use crate::allowed_host::{AllowedHost, AllowedHostError};
 use crate::constants::{
-    DEFAULT_MCP_CLIENT_ID_PREFIX, DEFAULT_MCP_HTTP_HOST, DEFAULT_MCP_HTTP_PORT, DEFAULT_MCP_SERVER_ID,
-    ENV_MCP_CLIENT_ID_PREFIX, ENV_MCP_HTTP_HOST, ENV_MCP_HTTP_PORT, ENV_MCP_SERVER_ID,
+    DEFAULT_MCP_CLIENT_ID_PREFIX, DEFAULT_MCP_HTTP_PORT, DEFAULT_MCP_SERVER_ID, ENV_MCP_CLIENT_ID_PREFIX,
+    ENV_MCP_HTTP_HOST, ENV_MCP_HTTP_PORT, ENV_MCP_SERVER_ID,
 };
 
 #[derive(Parser, Debug, Clone)]
@@ -68,7 +68,7 @@ fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Htt
     let host = args
         .host
         .or(read_env_host(env_provider)?)
-        .unwrap_or_else(|| DEFAULT_MCP_HTTP_HOST.parse().expect("default MCP HTTP host is valid"));
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
     let allowed_hosts = args
         .allowed_hosts
         .into_iter()

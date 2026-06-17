@@ -575,6 +575,7 @@ where
     }
 }
 
+#[allow(clippy::expect_used)]
 fn recover_corrupt_checkpoint(
     change: &ScheduleChange,
     stream_position: trogon_decider_runtime::StreamPosition,

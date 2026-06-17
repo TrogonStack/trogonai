@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 //! Wire-level caller identity types for the A2A protocol.
 //!
 //! The A2A protocol carries caller identity in a JWT header on every request.

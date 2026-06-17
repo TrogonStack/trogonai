@@ -126,16 +126,14 @@ impl SourcePlugin for SlackPlugin {
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        // Socket-mode-only integrations are spawned as long-running runners
-        // in `main.rs`; they have no HTTP route to mount.
         for integration in &config.slack {
-            if integration.config.webhook().is_none() {
+            let Some(webhook) = integration.config.webhook() else {
                 continue;
-            }
+            };
             let path = format!("{}/{}", self.path_prefix(), integration.id);
             app = app.nest(
                 &path,
-                crate::source::slack::router(publisher.clone(), &integration.config),
+                crate::source::slack::router(publisher.clone(), &integration.config, webhook),
             );
             info!(
                 source = self.id(),

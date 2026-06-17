@@ -158,7 +158,7 @@ fn change_notification_collection_message_id(notifications: &[Value]) -> String 
             hasher.update(id.as_bytes());
         } else {
             hasher.update(b"payload\x1e");
-            hasher.update(serde_json::to_vec(notification).expect("serde_json::Value serialization should not fail"));
+            hasher.update(notification.to_string().as_bytes());
         }
     }
 

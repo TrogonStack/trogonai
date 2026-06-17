@@ -38,7 +38,8 @@ impl GitLabSigningToken {
         if decoded.len() != GITLAB_SIGNING_TOKEN_BYTES {
             return Err(GitLabSigningTokenError::InvalidLength { actual: decoded.len() });
         }
-        let bytes = decoded.try_into().expect("decoded signing token length was checked");
+        let mut bytes = [0; GITLAB_SIGNING_TOKEN_BYTES];
+        bytes.copy_from_slice(&decoded);
         Ok(Self(bytes))
     }
 

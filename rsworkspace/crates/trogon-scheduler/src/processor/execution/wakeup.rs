@@ -333,7 +333,7 @@ mod tests {
     }
 
     fn wakeup_payload(id: &ScheduleId) -> Vec<u8> {
-        RRuleWakeupPayload::new(id.clone(), occurrence_at()).encode()
+        RRuleWakeupPayload::new(id.clone(), occurrence_at()).encode().unwrap()
     }
 
     fn wakeup_subject(id: &ScheduleId) -> String {

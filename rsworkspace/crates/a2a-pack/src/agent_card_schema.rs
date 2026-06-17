@@ -34,6 +34,7 @@ impl AgentCardJsonSchema {
         }
     }
 
+    #[allow(clippy::expect_used)]
     fn compile_bundled() -> Self {
         let schema: Value =
             serde_json::from_str(AGENT_CARD_JSON_SCHEMA).expect("bundled AgentCard JSON Schema must parse");

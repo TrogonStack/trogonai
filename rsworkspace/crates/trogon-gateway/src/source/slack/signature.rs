@@ -10,6 +10,8 @@ pub enum SignatureError {
     MissingPrefix,
     #[error("invalid hex encoding")]
     InvalidHex(#[source] hex::FromHexError),
+    #[error("invalid HMAC key")]
+    InvalidKey(#[source] hmac::digest::InvalidLength),
     #[error("signature mismatch")]
     Mismatch,
 }
@@ -30,7 +32,7 @@ pub fn verify(
 
     let expected = hex::decode(hex_sig).map_err(SignatureError::InvalidHex)?;
 
-    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes()).map_err(SignatureError::InvalidKey)?;
 
     mac.update(b"v0:");
     mac.update(timestamp.as_bytes());

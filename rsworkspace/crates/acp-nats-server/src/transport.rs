@@ -619,6 +619,7 @@ pub async fn delete(headers: HeaderMap, State(state): State<AppState>) -> Respon
 
 fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
     let connection_id = AcpConnectionId::default();
+    #[allow(clippy::expect_used)]
     let response_header = HeaderValue::from_str(&connection_id.to_string())
         .expect("generated ACP connection id must be a valid header value");
     let shutdown_rx = state.shutdown_tx.subscribe();
@@ -942,6 +943,7 @@ fn build_json_response(
     response
 }
 
+#[allow(clippy::expect_used)]
 fn set_transport_headers(
     headers: &mut HeaderMap,
     connection_id: &AcpConnectionId,
@@ -962,6 +964,7 @@ fn set_transport_headers(
     }
 }
 
+#[allow(clippy::expect_used)]
 fn set_protocol_version_header(headers: &mut HeaderMap, protocol_version: Option<&ProtocolVersion>) {
     if let Some(protocol_version) = protocol_version {
         headers.insert(
@@ -1107,6 +1110,7 @@ pub async fn run_http_connection<N, J>(
                         }
 
                         if message.is_request() {
+                            #[allow(clippy::expect_used)]
                             let request_id = message.id.clone().expect("request must have id");
 
                             if message.is_initialize() {
