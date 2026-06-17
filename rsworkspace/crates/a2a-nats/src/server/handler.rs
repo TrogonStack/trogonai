@@ -24,6 +24,12 @@ pub struct A2aError {
 }
 
 impl A2aError {
+    /// Construct an error with an arbitrary JSON-RPC code.
+    ///
+    /// Prefer the typed helpers below (`task_not_found`, `task_not_cancelable`, …) for
+    /// spec-defined codes. This constructor is the escape hatch for codes the protocol
+    /// adds before this crate ships matching helpers; tracked for a typed `A2aErrorCode`
+    /// value object in a follow-up that restricts construction to known codes.
     pub fn new(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
