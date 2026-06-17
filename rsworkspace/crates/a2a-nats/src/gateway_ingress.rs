@@ -3,8 +3,8 @@
 //! Tenant isolation uses **one NATS Account per tenant** (see [`docs/a2a/explanation/architecture.md`](../../../../docs/a2a/explanation/architecture.md) §Decisions); there is no `{tenant}`
 //! token on gateway subjects inside an Account — only **`{prefix}.gateway.{agent_id}.{method…}`**.
 //!
-//! To target a gateway from code that builds agent-shaped subjects (`{prefix}.agent…`), use
-//! [`gateway_ingress_subject_from_agent_subject`] (swap **`agent` → `gateway`** on the segment after the prefix).
+//! To target a gateway from code that builds agent-shaped subjects (`{prefix}.agents…`), use
+//! [`gateway_ingress_subject_from_agent_subject`] (swap **`agents` → `gateway`** on the segment after the prefix).
 
 use std::fmt;
 
@@ -63,12 +63,14 @@ impl std::error::Error for GatewayIngressError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GatewayComposeError {
     EmptyMethodTail,
+    UnknownMethodSuffix,
 }
 
 impl fmt::Display for GatewayComposeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyMethodTail => write!(f, "gateway ingress method suffix is empty"),
+            Self::UnknownMethodSuffix => write!(f, "gateway ingress method suffix is not a recognised A2A operation"),
         }
     }
 }
@@ -78,7 +80,10 @@ impl std::error::Error for GatewayComposeError {}
 /// Builds `{prefix}.gateway.{agent_id}.{method…}`.
 ///
 /// `method_suffix_dots` uses the same dotted tail as agent subjects (`"message.send"`,
-/// `"push.set"`, …).
+/// `"push.set"`, …) and is rejected with [`GatewayComposeError::UnknownMethodSuffix`]
+/// when it doesn't match an entry in [`GATEWAY_INGRESS_METHOD_SUFFIXES`] — that way the
+/// composer can't emit a typo-subject that [`resolve_gateway_ingress_subject`] would
+/// later refuse on the wire.
 pub fn compose_gateway_ingress_subject(
     prefix: &A2aPrefix,
     agent_id: &A2aAgentId,
@@ -87,6 +92,10 @@ pub fn compose_gateway_ingress_subject(
     let trimmed = method_suffix_dots.trim_matches('.');
     if trimmed.is_empty() {
         return Err(GatewayComposeError::EmptyMethodTail);
+    }
+    let tokens: Vec<&str> = trimmed.split('.').filter(|t| !t.is_empty()).collect();
+    if !GATEWAY_INGRESS_METHOD_SUFFIXES.iter().any(|sfx| tokens == *sfx) {
+        return Err(GatewayComposeError::UnknownMethodSuffix);
     }
 
     Ok(format!("{}.gateway.{}.{}", prefix.as_str(), agent_id.as_str(), trimmed))
@@ -368,6 +377,20 @@ mod tests {
     }
 
     #[test]
+    fn compose_rejects_unknown_method_suffix() {
+        let p = pfx();
+        let aid = A2aAgentId::new("b").unwrap();
+        assert!(matches!(
+            compose_gateway_ingress_subject(&p, &aid, "message.sned"),
+            Err(GatewayComposeError::UnknownMethodSuffix)
+        ));
+        assert!(matches!(
+            compose_gateway_ingress_subject(&p, &aid, "tasks"),
+            Err(GatewayComposeError::UnknownMethodSuffix)
+        ));
+    }
+
+    #[test]
     fn ingress_error_display_covers_every_variant() {
         assert!(
             GatewayIngressError::NotGatewayIngress
@@ -385,6 +408,11 @@ mod tests {
             GatewayComposeError::EmptyMethodTail
                 .to_string()
                 .contains("method suffix is empty")
+        );
+        assert!(
+            GatewayComposeError::UnknownMethodSuffix
+                .to_string()
+                .contains("not a recognised")
         );
     }
 
