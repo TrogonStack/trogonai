@@ -70,4 +70,10 @@ mod tests {
         let err = NatsPushSubject::new("").unwrap_err();
         assert!(err.to_string().contains("invalid NATS push subject"));
     }
+
+    #[test]
+    fn display_renders_inner_token() {
+        let subject = NatsPushSubject::new("a2a.push.bot.caller.task").unwrap();
+        assert_eq!(subject.to_string(), "a2a.push.bot.caller.task");
+    }
 }

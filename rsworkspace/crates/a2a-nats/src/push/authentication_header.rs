@@ -122,4 +122,49 @@ mod tests {
     fn none_absent_when_no_authentication_msg() {
         assert!(authorization_header_value(None).unwrap().is_none());
     }
+
+    #[test]
+    fn missing_scheme_is_rejected() {
+        let err = authorization_header_value(Some(&auth("   ", "tok"))).unwrap_err();
+        assert!(matches!(err, AuthenticationHeaderBuildError::MissingScheme));
+    }
+
+    #[test]
+    fn bearer_without_credentials_is_rejected() {
+        let err = authorization_header_value(Some(&auth("Bearer", "   "))).unwrap_err();
+        assert!(matches!(err, AuthenticationHeaderBuildError::EmptyCredentials));
+    }
+
+    #[test]
+    fn basic_without_credentials_is_rejected() {
+        let err = authorization_header_value(Some(&auth("Basic", ""))).unwrap_err();
+        assert!(matches!(err, AuthenticationHeaderBuildError::EmptyCredentials));
+    }
+
+    #[test]
+    fn custom_scheme_without_credentials_is_rejected() {
+        let err = authorization_header_value(Some(&auth("CustomScheme", ""))).unwrap_err();
+        assert!(matches!(err, AuthenticationHeaderBuildError::EmptyCredentials));
+    }
+
+    #[test]
+    fn error_display_covers_every_variant() {
+        assert!(
+            AuthenticationHeaderBuildError::MissingScheme
+                .to_string()
+                .contains("must not be empty")
+        );
+        assert!(
+            AuthenticationHeaderBuildError::EmptyCredentials
+                .to_string()
+                .contains("credentials required")
+        );
+        assert!(
+            AuthenticationHeaderBuildError::UnsupportedScheme {
+                scheme: "Digest".into()
+            }
+            .to_string()
+            .contains("not supported yet")
+        );
+    }
 }
