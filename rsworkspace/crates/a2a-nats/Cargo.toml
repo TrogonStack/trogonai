@@ -10,6 +10,9 @@ publish = false
 workspace = true
 
 [dependencies]
+a2a = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 trogon-nats = { workspace = true }
