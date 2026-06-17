@@ -32,6 +32,7 @@ dependencies = [
  "a2a-identity-types",
  "a2a-lf",
  "async-nats",
+ "async-trait",
  "bytes",
  "futures",
  "serde",

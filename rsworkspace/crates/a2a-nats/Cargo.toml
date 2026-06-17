@@ -13,6 +13,7 @@ workspace = true
 a2a = { workspace = true }
 a2a-identity-types = { workspace = true }
 async-nats = { workspace = true }
+async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
