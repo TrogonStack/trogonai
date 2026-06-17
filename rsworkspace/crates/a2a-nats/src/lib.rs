@@ -9,7 +9,6 @@
 //! **[`docs/a2a/README.md`](../../../../docs/a2a/README.md)**.
 
 pub mod a2a_prefix;
-pub mod server;
 pub mod agent_id;
 pub mod audit;
 pub mod catalog;
@@ -24,6 +23,7 @@ pub mod jsonrpc;
 pub mod nats;
 pub mod push;
 pub mod req_id;
+pub mod server;
 pub mod task_id;
 
 pub use a2a_prefix::{A2aPrefix, A2aPrefixError};
