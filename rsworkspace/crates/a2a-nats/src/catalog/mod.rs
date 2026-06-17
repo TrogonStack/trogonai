@@ -11,6 +11,6 @@ pub mod store;
 pub mod watch;
 
 pub use import_gate::{AllowAllImportGate, ImportGate, ImportGateError, ImportedAccountName, SpiceDbPrincipal};
-pub use registrar::{CatalogRegistrarService, RegistrarSubject};
+pub use registrar::RegistrarSubject;
 pub use store::{CatalogStore, CatalogStoreError, KvCatalogStore};
-pub use watch::{AgentCardWatchError, AgentCardWatchEvent, AgentCardWatchStream};
+pub use watch::{AgentCardWatchError, AgentCardWatchEvent, map_kv_entry};

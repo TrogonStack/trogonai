@@ -206,6 +206,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::import_gate::AllowAllImportGate;
     use trogon_nats::jetstream::mocks::MockJetStreamKvStore;
 
     fn agent_id(s: &str) -> A2aAgentId {
@@ -332,5 +333,128 @@ mod tests {
         use std::error::Error;
         let e = CatalogStoreError::Kv("x".into());
         assert!(e.source().is_none());
+    }
+
+    #[test]
+    fn error_display_and_source_covers_every_variant() {
+        use std::error::Error;
+        let bad = serde_json::from_str::<String>("x").unwrap_err();
+        let ser = CatalogStoreError::Serialize(serde_json::from_str::<String>("x").unwrap_err());
+        let de = CatalogStoreError::Deserialize(bad);
+        let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
+        let schema_err = CatalogStoreError::AgentCardSchema(schema);
+        let gate = CatalogStoreError::ImportGate(ImportGateError::Gateway("x".into()));
+
+        assert!(ser.to_string().contains("serialize"));
+        assert!(de.to_string().contains("deserialize"));
+        assert!(schema_err.to_string().contains("JSON Schema"));
+        assert!(!gate.to_string().is_empty());
+
+        assert!(de.source().is_some());
+        assert!(schema_err.source().is_some());
+        assert!(gate.source().is_some());
+    }
+
+    #[tokio::test]
+    async fn list_cards_returns_sorted_pairs() {
+        let kv = MockJetStreamKvStore::new();
+        kv.set_keys_result(Ok(vec!["beta".into(), "alpha".into()]));
+        let alpha = serde_json::to_vec(&card("alpha")).unwrap();
+        let beta = serde_json::to_vec(&card("beta")).unwrap();
+        kv.enqueue_get_some(bytes::Bytes::from(alpha));
+        kv.enqueue_get_some(bytes::Bytes::from(beta));
+
+        let store = KvCatalogStore::new(kv);
+        let pairs = store.list_cards().await.unwrap();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0.as_str(), "alpha");
+        assert_eq!(pairs[1].0.as_str(), "beta");
+    }
+
+    #[tokio::test]
+    async fn list_cards_rejects_invalid_kv_keys() {
+        let kv = MockJetStreamKvStore::new();
+        kv.set_keys_result(Ok(vec!["bad.segment".into()]));
+        let store = KvCatalogStore::new(kv);
+        let err = store.list_cards().await.unwrap_err();
+        assert!(matches!(err, CatalogStoreError::Kv(_)));
+    }
+
+    #[tokio::test]
+    async fn list_cards_gated_allow_all_matches_ungated() {
+        let kv = MockJetStreamKvStore::new();
+        kv.set_keys_result(Ok(vec!["alpha".into(), "beta".into()]));
+        for name in ["alpha", "beta", "alpha", "beta"] {
+            let bytes = serde_json::to_vec(&card(name)).unwrap();
+            kv.enqueue_get_some(bytes::Bytes::from(bytes));
+        }
+        let store = KvCatalogStore::new(kv);
+        let principal = SpiceDbPrincipal::new("user:fixture");
+        let ungated = store.list_cards().await.unwrap();
+        let gated = store
+            .list_cards_gated(&AllowAllImportGate, &principal, |_id, _card| None)
+            .await
+            .unwrap();
+        assert_eq!(ungated.len(), gated.len());
+    }
+
+    #[tokio::test]
+    async fn list_cards_gated_allow_keeps_imported_when_card_accepts_federated_source() {
+        let kv = MockJetStreamKvStore::new();
+        kv.set_keys_result(Ok(vec!["peer".into()]));
+        let bytes = serde_json::to_vec(&card("peer")).unwrap();
+        kv.enqueue_get_some(bytes::Bytes::from(bytes));
+
+        let store = KvCatalogStore::new(kv);
+        let principal = SpiceDbPrincipal::new("user:fixture");
+        let gated = store
+            .list_cards_gated(&AllowAllImportGate, &principal, |_id, _card| {
+                Some(ImportedAccountName::new("peer-account"))
+            })
+            .await
+            .unwrap();
+        assert_eq!(gated.len(), 1);
+        assert_eq!(gated[0].name, "peer");
+    }
+
+    #[tokio::test]
+    async fn list_cards_gated_deny_drops_imports_keeps_local() {
+        use async_trait::async_trait;
+
+        struct DenyAll;
+        #[async_trait]
+        impl ImportGate for DenyAll {
+            async fn permit(
+                &self,
+                _p: &SpiceDbPrincipal,
+                _i: &ImportedAccountName,
+                _a: &A2aAgentId,
+            ) -> Result<bool, ImportGateError> {
+                Ok(false)
+            }
+        }
+
+        let kv = MockJetStreamKvStore::new();
+        kv.set_keys_result(Ok(vec!["peer".into(), "local".into()]));
+        // list_cards sorts the keys so gets are issued in sorted order: local, peer.
+        for name in ["local", "peer"] {
+            let bytes = serde_json::to_vec(&card(name)).unwrap();
+            kv.enqueue_get_some(bytes::Bytes::from(bytes));
+        }
+
+        let store = KvCatalogStore::new(kv);
+        let principal = SpiceDbPrincipal::new("user:fixture");
+        let gated = store
+            .list_cards_gated(&DenyAll, &principal, |id, _card| {
+                if id.as_str() == "local" {
+                    None
+                } else {
+                    Some(ImportedAccountName::new("peer-account"))
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(gated.len(), 1);
+        assert_eq!(gated[0].name, "local");
     }
 }

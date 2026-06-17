@@ -41,7 +41,6 @@ dependencies = [
  "sha2 0.10.8",
  "time",
  "tokio",
- "tokio-util",
  "tracing",
  "trogon-nats",
  "uuid",
