@@ -152,12 +152,6 @@ mod tests {
         }
     }
 
-    fn state(value: state_v1::StateValue) -> state_v1::State {
-        state_v1::State {
-            state: Some(EnumValue::from(value)),
-        }
-    }
-
     #[test]
     fn given_when_then_supports_remove_job_decider() {
         TestCase::<RemoveSchedule>::new()
@@ -220,32 +214,41 @@ mod tests {
 
     #[test]
     fn decide_rejects_invalid_state_values() {
-        let command = remove_job_command("backup");
+        TestCase::<RemoveSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: None,
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(remove_job_command("backup"))
+            .then_error(RemoveScheduleError::MissingStateValue);
 
-        assert_eq!(
-            RemoveSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
-            RemoveScheduleError::MissingStateValue
-        );
-        assert_eq!(
-            RemoveSchedule::decide(
-                &state_v1::State {
-                    state: Some(EnumValue::from(123)),
-                },
-                &command,
-            )
-            .unwrap_err(),
-            RemoveScheduleError::UnknownStateValue { value: 123 }
-        );
-        assert_eq!(
-            RemoveSchedule::decide(
-                &state_v1::State {
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                },
-                &command,
-            )
-            .unwrap_err(),
-            RemoveScheduleError::UnknownStateValue { value: 0 }
-        );
+        TestCase::<RemoveSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(123)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(remove_job_command("backup"))
+            .then_error(RemoveScheduleError::UnknownStateValue { value: 123 });
+
+        TestCase::<RemoveSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(remove_job_command("backup"))
+            .then_error(RemoveScheduleError::UnknownStateValue { value: 0 });
     }
 
     #[test]
@@ -256,17 +259,6 @@ mod tests {
         assert_eq!(
             RemoveSchedule::initial_state().state.unwrap().as_known(),
             Some(state_v1::StateValue::STATE_VALUE_MISSING)
-        );
-        assert_eq!(
-            RemoveSchedule::evolve(
-                state(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED),
-                &removed("backup")
-            )
-            .unwrap()
-            .state
-            .unwrap()
-            .as_known(),
-            Some(state_v1::StateValue::STATE_VALUE_DELETED)
         );
     }
 

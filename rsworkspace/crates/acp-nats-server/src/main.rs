@@ -1,5 +1,6 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))] // coverage build cfg-excludes the entrypoint, orphaning its private helpers
 #![cfg_attr(coverage, feature(coverage_attribute))]
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod acp_connection_id;
 mod config;
@@ -44,10 +45,17 @@ async fn main() -> anyhow::Result<()> {
 
     let (shutdown_tx, _) = watch::channel(false);
     let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
+    let connection_runtime = build_connection_runtime()?;
 
-    let conn_thread = std::thread::Builder::new()
-        .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(manager_rx, nats_client, js_client, server_config.acp))?;
+    let conn_thread = std::thread::Builder::new().name(THREAD_NAME.into()).spawn(move || {
+        run_connection_thread(
+            connection_runtime,
+            manager_rx,
+            nats_client,
+            js_client,
+            server_config.acp,
+        )
+    })?;
 
     let state = AppState {
         bind_host: server_config.host,
@@ -104,10 +112,18 @@ fn main() {}
 
 use constants::{ACP_ENDPOINT, THREAD_NAME};
 
+fn build_connection_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| anyhow::anyhow!("failed to create per-connection runtime: {error}"))
+}
+
 /// Runs a single-threaded tokio runtime with a
 /// `LocalSet`. All WebSocket connections are processed here because the ACP
 /// `Agent` trait is `?Send`, requiring `spawn_local` / `Rc`.
 fn run_connection_thread<N, J>(
+    rt: tokio::runtime::Runtime,
     manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
     nats_client: N,
     js_client: J,
@@ -123,11 +139,6 @@ fn run_connection_thread<N, J>(
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Send + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create per-connection runtime");
-
     let local = tokio::task::LocalSet::new();
     rt.block_on(local.run_until(process_connections(manager_rx, nats_client, js_client, config)));
 
@@ -279,9 +290,10 @@ mod tests {
         manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
     ) -> std::thread::JoinHandle<()> {
         let config = test_config();
+        let connection_runtime = build_connection_runtime().expect("failed to create per-connection runtime");
         std::thread::Builder::new()
             .name(THREAD_NAME.into())
-            .spawn(move || run_connection_thread(manager_rx, nats_mock, MockJs::new(), config))
+            .spawn(move || run_connection_thread(connection_runtime, manager_rx, nats_mock, MockJs::new(), config))
             .expect("failed to spawn connection thread")
     }
 

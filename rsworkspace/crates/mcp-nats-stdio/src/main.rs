@@ -1,4 +1,6 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))] // coverage build cfg-excludes the entrypoint, orphaning its private helpers
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 mod config;
 
 use std::future::Future;

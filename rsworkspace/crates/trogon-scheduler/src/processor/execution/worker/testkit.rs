@@ -18,7 +18,10 @@ use chrono::{DateTime, Utc};
 use futures::stream::{Iter, iter};
 use std::vec::IntoIter;
 use time::OffsetDateTime;
-use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
+use trogon_decider_runtime::{
+    AppendStreamRequest, AppendStreamResponse, Event, EventId, Headers, ReadFrom, ReadStreamRequest,
+    ReadStreamResponse, StreamAppend, StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition,
+};
 use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamPublisher,
     JetStreamSubjectPurger,
@@ -414,6 +417,89 @@ pub fn recorded_at() -> DateTime<Utc> {
 
 fn deterministic_event_id(seed: &str, position: u64) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}:{position}").as_bytes())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MemoryEventStoreError {
+    #[error("optimistic concurrency conflict")]
+    Conflict,
+}
+
+/// In-memory schedule event store with per-stream optimistic concurrency, used
+/// to exercise the processor arming the next occurrence via a real command.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryEventStore {
+    streams: Arc<Mutex<HashMap<String, Vec<Event>>>>,
+}
+
+impl MemoryEventStore {
+    pub fn events(&self, stream_id: &str) -> Vec<StreamEvent> {
+        futures::executor::block_on(self.read_stream(ReadStreamRequest {
+            stream_id,
+            from: ReadFrom::Beginning,
+        }))
+        .unwrap()
+        .events
+    }
+
+    fn position_for_len(len: usize) -> Option<StreamPosition> {
+        (len > 0).then(|| StreamPosition::try_new(len.try_into().unwrap()).unwrap())
+    }
+}
+
+impl StreamRead<str> for MemoryEventStore {
+    type Error = MemoryEventStoreError;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        let streams = self.streams.lock().unwrap();
+        let events = streams.get(request.stream_id).cloned().unwrap_or_default();
+        let current_position = Self::position_for_len(events.len());
+        let from = match request.from {
+            ReadFrom::Beginning => 1,
+            ReadFrom::Position(position) => position.as_u64(),
+        };
+        let stream_events = events
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, event)| {
+                let position = u64::try_from(index + 1).unwrap();
+                (position >= from).then(|| StreamEvent {
+                    stream_id: request.stream_id.to_string(),
+                    event,
+                    stream_position: StreamPosition::try_new(position).unwrap(),
+                    recorded_at: recorded_at(),
+                })
+            })
+            .collect();
+
+        Ok(ReadStreamResponse {
+            current_position,
+            events: stream_events,
+        })
+    }
+}
+
+impl StreamAppend<str> for MemoryEventStore {
+    type Error = MemoryEventStoreError;
+
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        let mut streams = self.streams.lock().unwrap();
+        let events = streams.entry(request.stream_id.to_string()).or_default();
+        let current_position = Self::position_for_len(events.len());
+        let precondition_matches = match request.stream_write_precondition {
+            StreamWritePrecondition::Any => true,
+            StreamWritePrecondition::StreamExists => current_position.is_some(),
+            StreamWritePrecondition::NoStream => current_position.is_none(),
+            StreamWritePrecondition::At(position) => current_position == Some(position),
+        };
+        if !precondition_matches {
+            return Err(MemoryEventStoreError::Conflict);
+        }
+        events.extend(request.events);
+        let stream_position = StreamPosition::try_new(events.len().try_into().unwrap()).unwrap();
+
+        Ok(AppendStreamResponse { stream_position })
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use buffa::EnumValue;
+use buffa::{EnumValue, MessageField};
 use trogonai_proto::scheduler::schedules::{ScheduleEventCase, ScheduleStatusKind, state_v1, v1};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -7,6 +7,10 @@ pub enum EvolveError {
     MissingStateValue,
     #[error("protobuf schedule event is not supported by command state")]
     UnsupportedEvent,
+    #[error("protobuf schedule occurrence event is missing occurrence_at")]
+    MissingOccurrenceAt,
+    #[error("protobuf schedule occurrence event is missing occurrence_sequence")]
+    MissingOccurrenceSequence,
     #[error("protobuf state '{value}' is unknown")]
     UnknownStateValue { value: i32 },
 }
@@ -14,6 +18,11 @@ pub enum EvolveError {
 pub(super) fn initial_state() -> state_v1::State {
     state_v1::State {
         state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
+        last_occurrence_at: MessageField::default(),
+        last_occurrence_sequence: None,
+        schedule: MessageField::default(),
+        pending_occurrence_at: MessageField::default(),
+        completed: None,
     }
 }
 
@@ -35,8 +44,20 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
             });
         }
     };
+
+    let mut last_occurrence_at = state.last_occurrence_at.clone();
+    let mut last_occurrence_sequence = state.last_occurrence_sequence;
+    let mut schedule = state.schedule.clone();
+    let mut pending_occurrence_at = state.pending_occurrence_at.clone();
+    let mut completed = state.completed;
+
     let next_state = match &event.event {
         Some(ScheduleEventCase::ScheduleCreated(inner)) => {
+            last_occurrence_at = MessageField::default();
+            last_occurrence_sequence = None;
+            pending_occurrence_at = MessageField::default();
+            completed = None;
+            schedule = inner.schedule.clone();
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
             } else if matches!(
@@ -48,7 +69,10 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
                 state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
             }
         }
-        Some(ScheduleEventCase::ScheduleRemoved(_)) => state_v1::StateValue::STATE_VALUE_DELETED,
+        Some(ScheduleEventCase::ScheduleRemoved(_)) => {
+            pending_occurrence_at = MessageField::default();
+            state_v1::StateValue::STATE_VALUE_DELETED
+        }
         Some(ScheduleEventCase::SchedulePaused(_)) => {
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
@@ -60,14 +84,49 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
             } else {
+                // Resume is the boundary that discards an unrecorded paused wakeup
+                // so scheduling can re-arm from durable occurrence progress.
+                pending_occurrence_at = MessageField::default();
                 state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
             }
+        }
+        Some(ScheduleEventCase::ScheduleOccurrenceRecorded(inner)) => {
+            let occurrence_at = inner
+                .occurrence_at
+                .as_option()
+                .ok_or(EvolveError::MissingOccurrenceAt)?;
+            last_occurrence_at = MessageField::some(occurrence_at.clone());
+            last_occurrence_sequence = Some(
+                inner
+                    .occurrence_sequence
+                    .ok_or(EvolveError::MissingOccurrenceSequence)?,
+            );
+            pending_occurrence_at = MessageField::default();
+            current_state
+        }
+        Some(ScheduleEventCase::ScheduleOccurrenceScheduled(inner)) => {
+            let occurrence_at = inner
+                .occurrence_at
+                .as_option()
+                .ok_or(EvolveError::MissingOccurrenceAt)?;
+            pending_occurrence_at = MessageField::some(occurrence_at.clone());
+            current_state
+        }
+        Some(ScheduleEventCase::ScheduleCompleted(_)) => {
+            pending_occurrence_at = MessageField::default();
+            completed = Some(true);
+            current_state
         }
         None => return Err(EvolveError::UnsupportedEvent),
     };
 
     Ok(state_v1::State {
         state: Some(EnumValue::from(next_state)),
+        last_occurrence_at,
+        last_occurrence_sequence,
+        schedule,
+        pending_occurrence_at,
+        completed,
     })
 }
 
@@ -80,7 +139,12 @@ mod tests {
 
     fn state(value: state_v1::StateValue) -> state_v1::State {
         state_v1::State {
+            completed: None,
             state: Some(EnumValue::from(value)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
         }
     }
 
@@ -119,6 +183,58 @@ mod tests {
                 .into(),
             ),
         }
+    }
+
+    fn occurrence_recorded() -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceRecorded {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(1),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                        &occurrence_at(),
+                    )),
+                    recorded_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn occurrence_scheduled() -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(2),
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                        &occurrence_at(),
+                    )),
+                    scheduled_at: MessageField::some(
+                        trogonai_proto::convert::timestamp_from_datetime(&occurrence_at()),
+                    ),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn completed() -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCompleted {
+                    schedule_id: "backup".to_string(),
+                    last_occurrence_sequence: Some(1),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn occurrence_at() -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2026-06-15T18:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
     }
 
     #[test]
@@ -243,7 +359,18 @@ mod tests {
     #[test]
     fn evolve_reports_invalid_state_and_event_shapes() {
         assert_eq!(
-            evolve(state_v1::State { state: None }, &v1::ScheduleEvent { event: None }).unwrap_err(),
+            evolve(
+                state_v1::State {
+                    completed: None,
+                    state: None,
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
+                },
+                &v1::ScheduleEvent { event: None }
+            )
+            .unwrap_err(),
             EvolveError::MissingStateValue
         );
         assert_eq!(
@@ -277,12 +404,238 @@ mod tests {
         assert_eq!(
             evolve(
                 state_v1::State {
+                    completed: None,
                     state: Some(EnumValue::from(123)),
+                    last_occurrence_at: MessageField::default(),
+                    last_occurrence_sequence: None,
+                    schedule: MessageField::default(),
+                    pending_occurrence_at: MessageField::default(),
                 },
                 &v1::ScheduleEvent { event: None }
             )
             .unwrap_err(),
             EvolveError::UnknownStateValue { value: 123 }
+        );
+    }
+
+    #[test]
+    fn evolve_created_resets_progress_and_stashes_schedule() {
+        let dirty = state_v1::State {
+            completed: Some(true),
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
+            last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
+            last_occurrence_sequence: Some(9),
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                &occurrence_at(),
+            )),
+        };
+        let schedule = v1::Schedule {
+            kind: Some(
+                v1::schedule::Every {
+                    every: MessageField::some(buffa_types::google::protobuf::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                        ..Default::default()
+                    }),
+                }
+                .into(),
+            ),
+        };
+        let created = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCreated {
+                    schedule_id: "backup".to_string(),
+                    status: MessageField::some(v1::ScheduleStatus {
+                        kind: Some(v1::schedule_status::Scheduled {}.into()),
+                    }),
+                    schedule: MessageField::some(schedule.clone()),
+                    delivery: MessageField::default(),
+                    message: MessageField::default(),
+                }
+                .into(),
+            ),
+        };
+
+        let next = evolve(dirty, &created).unwrap();
+
+        assert_eq!(next.last_occurrence_at.as_option(), None);
+        assert_eq!(next.last_occurrence_sequence, None);
+        assert_eq!(next.pending_occurrence_at.as_option(), None);
+        assert_eq!(next.schedule.as_option(), Some(&schedule));
+        assert_eq!(next.completed, None);
+    }
+
+    #[test]
+    fn evolve_occurrence_recorded_advances_progress_and_clears_pending() {
+        let event = occurrence_recorded();
+        let pending = state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                &occurrence_at(),
+            )),
+        };
+        let next = evolve(pending, &event).unwrap();
+        let expected = trogonai_proto::convert::timestamp_from_datetime(&occurrence_at());
+
+        assert_eq!(
+            next.state.unwrap().as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+        );
+        assert_eq!(next.last_occurrence_at.as_option(), Some(&expected));
+        assert_eq!(next.last_occurrence_sequence, Some(1));
+        assert_eq!(next.pending_occurrence_at.as_option(), None);
+    }
+
+    #[test]
+    fn evolve_occurrence_scheduled_sets_pending_without_changing_presence() {
+        let next = evolve(
+            state(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED),
+            &occurrence_scheduled(),
+        )
+        .unwrap();
+        let expected = trogonai_proto::convert::timestamp_from_datetime(&occurrence_at());
+
+        assert_eq!(
+            next.state.unwrap().as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+        );
+        assert_eq!(next.pending_occurrence_at.as_option(), Some(&expected));
+        assert_eq!(next.last_occurrence_sequence, None);
+    }
+
+    #[test]
+    fn evolve_completed_clears_pending() {
+        let pending = state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
+            last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&occurrence_at())),
+            last_occurrence_sequence: Some(1),
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                &occurrence_at(),
+            )),
+        };
+
+        let next = evolve(pending, &completed()).unwrap();
+
+        assert_eq!(next.pending_occurrence_at.as_option(), None);
+        assert_eq!(next.last_occurrence_sequence, Some(1));
+        assert_eq!(next.completed, Some(true));
+        assert_eq!(
+            next.state.unwrap().as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+        );
+    }
+
+    #[test]
+    fn evolve_paused_retains_pending_so_in_flight_recording_can_land() {
+        let pending = state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                &occurrence_at(),
+            )),
+        };
+
+        let next = evolve(pending, &paused()).unwrap();
+        let expected = trogonai_proto::convert::timestamp_from_datetime(&occurrence_at());
+
+        assert_eq!(
+            next.state.unwrap().as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
+        );
+        assert_eq!(next.pending_occurrence_at.as_option(), Some(&expected));
+    }
+
+    #[test]
+    fn evolve_resumed_clears_unrecorded_paused_pending_so_schedule_can_rearm() {
+        let pending = state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                &occurrence_at(),
+            )),
+        };
+
+        let next = evolve(pending, &resumed()).unwrap();
+
+        assert_eq!(
+            next.state.unwrap().as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+        );
+        assert_eq!(next.pending_occurrence_at.as_option(), None);
+    }
+
+    #[test]
+    fn evolve_occurrence_recorded_requires_occurrence_at() {
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceRecorded {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(1),
+                    occurrence_at: MessageField::default(),
+                    recorded_at: MessageField::default(),
+                }
+                .into(),
+            ),
+        };
+
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED), &event).unwrap_err(),
+            EvolveError::MissingOccurrenceAt
+        );
+    }
+
+    #[test]
+    fn evolve_occurrence_recorded_requires_occurrence_sequence() {
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceRecorded {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: None,
+                    occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                        &occurrence_at(),
+                    )),
+                    recorded_at: MessageField::default(),
+                }
+                .into(),
+            ),
+        };
+
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED), &event).unwrap_err(),
+            EvolveError::MissingOccurrenceSequence
+        );
+    }
+
+    #[test]
+    fn evolve_occurrence_scheduled_requires_occurrence_at() {
+        let event = v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleOccurrenceScheduled {
+                    schedule_id: "backup".to_string(),
+                    occurrence_sequence: Some(2),
+                    occurrence_at: MessageField::default(),
+                    scheduled_at: MessageField::default(),
+                }
+                .into(),
+            ),
+        };
+
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED), &event).unwrap_err(),
+            EvolveError::MissingOccurrenceAt
         );
     }
 }

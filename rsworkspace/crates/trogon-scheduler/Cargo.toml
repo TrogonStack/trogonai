@@ -28,6 +28,7 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
 trogonai-proto = { path = "../trogonai-proto", features = ["schedules"] }
 uuid = { workspace = true, features = ["v5"] }
 
@@ -40,3 +41,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"
 trogon-decider = { path = "../trogon-decider", features = ["test-support"] }
 trogon-decider-nats = { path = "../trogon-decider-nats" }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

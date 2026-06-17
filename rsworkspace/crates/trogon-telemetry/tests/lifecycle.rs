@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::MemFs;
 use trogon_telemetry::{ResourceAttribute, ServiceName};

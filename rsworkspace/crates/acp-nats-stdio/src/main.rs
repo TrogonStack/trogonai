@@ -1,5 +1,7 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 mod config;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};

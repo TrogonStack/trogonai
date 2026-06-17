@@ -2,20 +2,23 @@ edition = "2024";
 
 package trogonai.scheduler.schedules.v1;
 
+import "trogonai/scheduler/schedules/v1/schedule_completed.proto";
 import "trogonai/scheduler/schedules/v1/schedule_created.proto";
+import "trogonai/scheduler/schedules/v1/schedule_occurrence_recorded.proto";
+import "trogonai/scheduler/schedules/v1/schedule_occurrence_scheduled.proto";
 import "trogonai/scheduler/schedules/v1/schedule_paused.proto";
 import "trogonai/scheduler/schedules/v1/schedule_removed.proto";
 import "trogonai/scheduler/schedules/v1/schedule_resumed.proto";
 
-// ScheduleEvent is the schedule-definition event stream.
-//
-// Runtime delivery history, such as a future fire event, belongs in a
-// separate stream so schedule execution does not pollute command-state history.
+// ScheduleEvent is the schedule aggregate event stream.
 message ScheduleEvent {
   oneof event {
     ScheduleCreated schedule_created = 1;
     SchedulePaused schedule_paused = 2;
     ScheduleResumed schedule_resumed = 3;
     ScheduleRemoved schedule_removed = 4;
+    ScheduleOccurrenceRecorded schedule_occurrence_recorded = 5;
+    ScheduleOccurrenceScheduled schedule_occurrence_scheduled = 6;
+    ScheduleCompleted schedule_completed = 7;
   }
 }

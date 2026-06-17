@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "trogon_decider::Decider::decide", reason = "test deciders through trogon_decider::testing::TestCase (given/when/then); do not call decide directly" },
+    { path = "trogon_decider::Decider::evolve", reason = "test deciders through trogon_decider::testing::TestCase (given/when/then); do not call evolve directly" },
+]

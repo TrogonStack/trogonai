@@ -26,5 +26,24 @@ pub mod schedule_event {
                 super::super::super::super::__buffa::view::ScheduleRemovedView<'a>,
             >,
         ),
+        ScheduleOccurrenceRecorded(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ScheduleOccurrenceRecordedView<
+                    'a,
+                >,
+            >,
+        ),
+        ScheduleOccurrenceScheduled(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ScheduleOccurrenceScheduledView<
+                    'a,
+                >,
+            >,
+        ),
+        ScheduleCompleted(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ScheduleCompletedView<'a>,
+            >,
+        ),
     }
 }

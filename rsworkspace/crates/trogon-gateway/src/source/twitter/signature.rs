@@ -12,14 +12,16 @@ pub enum SignatureError {
     MissingPrefix,
     #[error("invalid base64 encoding")]
     InvalidBase64(#[source] base64::DecodeError),
+    #[error("invalid HMAC key")]
+    InvalidKey(#[source] hmac::digest::InvalidLength),
     #[error("signature mismatch")]
     Mismatch,
 }
 
-pub fn crc_response_token(consumer_secret: &str, crc_token: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
+pub fn crc_response_token(consumer_secret: &str, crc_token: &str) -> Result<String, SignatureError> {
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).map_err(SignatureError::InvalidKey)?;
     mac.update(crc_token.as_bytes());
-    format!("sha256={}", STANDARD.encode(mac.finalize().into_bytes()))
+    Ok(format!("sha256={}", STANDARD.encode(mac.finalize().into_bytes())))
 }
 
 pub fn verify(consumer_secret: &str, body: &[u8], signature_header: &str) -> Result<(), SignatureError> {
@@ -31,7 +33,7 @@ pub fn verify(consumer_secret: &str, body: &[u8], signature_header: &str) -> Res
         .decode(encoded_signature)
         .map_err(SignatureError::InvalidBase64)?;
 
-    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).map_err(SignatureError::InvalidKey)?;
     mac.update(body);
     mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }
@@ -49,7 +51,7 @@ mod tests {
 
     #[test]
     fn crc_response_token_matches_expected_format() {
-        let response = crc_response_token("test-secret", "challenge");
+        let response = crc_response_token("test-secret", "challenge").unwrap();
         assert!(response.starts_with("sha256="));
         assert_eq!(response, "sha256=f8xLkQodu/oLP1gQIHLxKfBLAtZZsGw7YnD8CAkvrS0=");
     }
