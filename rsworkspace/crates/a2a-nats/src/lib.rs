@@ -15,6 +15,7 @@ pub mod constants;
 pub mod context_id;
 pub mod error;
 pub mod gateway_ingress;
+pub mod jetstream;
 pub mod jsonrpc;
 pub mod nats;
 pub mod req_id;
