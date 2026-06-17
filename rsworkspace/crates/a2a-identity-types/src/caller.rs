@@ -4,7 +4,7 @@ use crate::error::JwtError;
 
 /// NATS-safe caller identifier carried in `UserJwtClaims.caller_id` and used as
 /// a single subject segment in audit/DLQ paths. Single segment: no `.`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct CallerId(String);
 
@@ -16,6 +16,16 @@ impl CallerId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for CallerId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -54,8 +64,20 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_transparent() {
+    fn deserializes_transparent_when_valid() {
         let caller: CallerId = serde_json::from_str("\"alice\"").unwrap();
         assert_eq!(caller.as_str(), "alice");
+    }
+
+    #[test]
+    fn deserialize_rejects_dotted_input() {
+        let err = serde_json::from_str::<CallerId>("\"a.b\"").unwrap_err();
+        assert!(err.to_string().contains("caller_id"));
+    }
+
+    #[test]
+    fn deserialize_rejects_empty_input() {
+        let err = serde_json::from_str::<CallerId>("\"\"").unwrap_err();
+        assert!(err.to_string().contains("caller_id"));
     }
 }

@@ -36,13 +36,18 @@ mod tests {
 
     fn system_time_error() -> std::time::SystemTimeError {
         let now = std::time::SystemTime::now();
-        now.duration_since(now + std::time::Duration::from_secs(60)).unwrap_err()
+        now.duration_since(now + std::time::Duration::from_secs(60))
+            .unwrap_err()
     }
 
     #[test]
     fn display_covers_every_variant() {
         assert!(JwtError::Decode("oops".into()).to_string().contains("oops"));
-        assert!(JwtError::SystemTime(system_time_error()).to_string().contains("system time"));
+        assert!(
+            JwtError::SystemTime(system_time_error())
+                .to_string()
+                .contains("system time")
+        );
         assert!(JwtError::InvalidCallerId.to_string().contains("caller_id"));
         assert!(JwtError::InvalidExternalSubject.to_string().contains("external"));
         assert!(JwtError::IssuedAtOutOfRange.to_string().contains("out of"));
