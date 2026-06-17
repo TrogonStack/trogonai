@@ -36,6 +36,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "http",
  "moka",
  "serde",
  "serde_json",
