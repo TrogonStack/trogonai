@@ -34,6 +34,8 @@ jobs:
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt,clippy
 
       - name: Enforce crate licenses
         uses: ./.github/actions/enforce-cargo-license
@@ -128,6 +130,6 @@ jobs:
           cache-on-failure: true
           cache-workspace-crates: true
 
-      - name: Check release build
-        run: cargo check --release --all-targets
+      - name: Build release
+        run: cargo build --release
         working-directory: rsworkspace
