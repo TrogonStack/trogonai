@@ -88,6 +88,10 @@ jobs:
         with:
           tool: cargo-llvm-cov,nextest
 
+      - name: Run documentation tests
+        run: cargo test --doc
+        working-directory: rsworkspace
+
       - name: Run tests with coverage
         run: cargo cov nextest --cobertura --output-path coverage.xml
         working-directory: rsworkspace
