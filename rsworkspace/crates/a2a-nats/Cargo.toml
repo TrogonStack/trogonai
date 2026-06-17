@@ -12,9 +12,16 @@ workspace = true
 [dependencies]
 a2a = { workspace = true }
 a2a-identity-types = { workspace = true }
+async-nats = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
 trogon-nats = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
