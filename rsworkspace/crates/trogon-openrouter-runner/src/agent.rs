@@ -325,6 +325,9 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
     /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
+    /// Per-session MCP tool cache (MCP-4): avoids re-listing MCP tools on every
+    /// prompt. Rebuilt automatically when the session's servers/policy change.
+    session_mcp_caches: Arc<std::sync::Mutex<HashMap<String, Arc<trogon_runner_tools::SessionMcpCache>>>>,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -452,6 +455,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             runner_config: None,
             classifier: None,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_mcp_caches: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 }
@@ -492,6 +496,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             runner_config: self.runner_config,
             classifier: self.classifier,
             session_locks: self.session_locks,
+            session_mcp_caches: self.session_mcp_caches,
         }
     }
 
@@ -764,6 +769,15 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
         locks
             .entry(session_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+    }
+
+    /// Return the per-session MCP tool cache, creating it on first use (MCP-4).
+    fn session_mcp_cache(&self, session_id: &str) -> Arc<trogon_runner_tools::SessionMcpCache> {
+        let mut caches = self.session_mcp_caches.lock().unwrap();
+        caches
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(trogon_runner_tools::SessionMcpCache::new()))
             .clone()
     }
 
@@ -1814,10 +1828,6 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             "type": "string",
                             "description": "Name of a custom sub-agent defined in .claude/agents/. Its tools allowlist and instructions are enforced. Omit for a generic sub-agent."
                         },
-                        "capability": {
-                            "type": "string",
-                            "description": "Generic capability when no named agent is given, e.g. 'explore' or 'plan'"
-                        },
                         "prompt": {
                             "type": "string",
                             "description": "The task or question to send to the sub-agent"
@@ -1830,12 +1840,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         // Build per-session MCP tools and a dispatch table consulted in the tool
         // loop. A bad/unreachable server is logged and skipped, never fatal.
-        let (mcp_defs, mcp_dispatch) = trogon_runner_tools::build_session_mcp(
-            &self.tool_http_client,
-            &session_mcp_servers,
-            &trogon_runner_tools::egress::EgressPolicy::default_safe(),
-        )
-        .await;
+        let mcp_cache = self.session_mcp_cache(&session_id);
+        let (mcp_defs, mcp_dispatch) = mcp_cache
+            .get_or_build(
+                &self.tool_http_client,
+                &session_mcp_servers,
+                &trogon_runner_tools::egress::EgressPolicy::default_safe(),
+            )
+            .await;
         for d in mcp_defs {
             tool_defs.push(ToolDef {
                 name: d.name,
@@ -2278,6 +2290,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                                 .map(|d| d.tools.clone())
                                 .unwrap_or_default(),
                             allowed_tools: parent_allowed_tools,
+                            // NEW-8: the openrouter runner has no `--add-dir`/extra read-root
+                            // plumbing on its own sessions, so the parent holds none to forward.
+                            // cwd-only containment is the safe default — intentional empty, not a
+                            // dropped grant.
                             additional_read_dirs: Vec::new(),
                             additional_roots: Vec::new(),
                         };

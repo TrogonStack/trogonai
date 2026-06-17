@@ -37,7 +37,7 @@ use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, Snapsh
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 use trogon_runner_tools::{
-    build_session_mcp, convert_mcp_servers, elicit_via_channel, ElicitationTx, StoredMcpServer,
+    convert_mcp_servers, elicit_via_channel, ElicitationTx, StoredMcpServer,
 };
 use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
@@ -331,6 +331,9 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
     /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
     session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
+    /// Per-session MCP tool cache (MCP-4): avoids re-listing MCP tools on every
+    /// prompt. Rebuilt automatically when the session's servers/policy change.
+    session_mcp_caches: Arc<std::sync::Mutex<HashMap<String, Arc<trogon_runner_tools::SessionMcpCache>>>>,
 }
 
 /// Permission decision after applying bypass + the rule engine, before any interactive gate.
@@ -525,6 +528,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             runner_config: None,
             classifier: None,
             session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_mcp_caches: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -575,6 +579,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             runner_config: self.runner_config,
             classifier: self.classifier,
             session_locks: self.session_locks,
+            session_mcp_caches: self.session_mcp_caches,
         }
     }
 
@@ -907,6 +912,15 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         locks
             .entry(session_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+    }
+
+    /// Return the per-session MCP tool cache, creating it on first use (MCP-4).
+    fn session_mcp_cache(&self, session_id: &str) -> Arc<trogon_runner_tools::SessionMcpCache> {
+        let mut caches = self.session_mcp_caches.lock().unwrap();
+        caches
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(trogon_runner_tools::SessionMcpCache::new()))
             .clone()
     }
 
@@ -1866,10 +1880,6 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             "type": "string",
                             "description": "Name of a custom sub-agent defined in .claude/agents/. Its tools allowlist and instructions are enforced. Omit for a generic sub-agent."
                         },
-                        "capability": {
-                            "type": "string",
-                            "description": "Generic capability when no named agent is given, e.g. 'explore' or 'plan'"
-                        },
                         "prompt": {
                             "type": "string",
                             "description": "The task or question to send to the sub-agent"
@@ -1883,12 +1893,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // Connect to this session's MCP servers and advertise their tools.
         // `mcp_dispatch` maps a prefixed tool name back to (original_name, client)
         // and stays in scope for the tool-dispatch loop below.
-        let (mcp_defs, mcp_dispatch) = build_session_mcp(
-            &self.tool_http_client,
-            &session_mcp_servers,
-            &trogon_runner_tools::egress::EgressPolicy::default_safe(),
-        )
-        .await;
+        let mcp_cache = self.session_mcp_cache(&session_id);
+        let (mcp_defs, mcp_dispatch) = mcp_cache
+            .get_or_build(
+                &self.tool_http_client,
+                &session_mcp_servers,
+                &trogon_runner_tools::egress::EgressPolicy::default_safe(),
+            )
+            .await;
         for d in mcp_defs {
             call_tools.push(ToolSpec::Function {
                 name: d.name,
@@ -2426,6 +2438,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                         .map(|d| d.tools.clone())
                                         .unwrap_or_default(),
                                     allowed_tools: parent_allowed_tools,
+                                    // NEW-8: the xai runner has no `--add-dir`/extra read-root
+                                    // plumbing on its own sessions, so the parent holds none to
+                                    // forward. cwd-only containment is the safe default here — this
+                                    // is an intentional empty, not a dropped grant.
                                     additional_read_dirs: Vec::new(),
                                     additional_roots: Vec::new(),
                                 };

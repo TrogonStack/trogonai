@@ -18,6 +18,20 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
         .get("case_insensitive")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // Optional file-glob filter restricting which files are searched. Accepts a
+    // single pattern (`"*.rs"`) or an array (`["*.rs", "*.toml"]`). Patterns are
+    // matched against the path relative to the search base; an empty list means
+    // "search every file".
+    let globs: Vec<String> = match input.get("glob") {
+        Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect(),
+        _ => Vec::new(),
+    };
 
     let base = match resolve_path(&ctx.cwd, search_path) {
         Ok(p) => p,
@@ -33,10 +47,24 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
     };
 
     // Walk files respecting .gitignore via the `ignore` crate.
-    let walker = ignore::WalkBuilder::new(&base)
-        .hidden(false)
-        .git_ignore(true)
-        .build();
+    let mut builder = ignore::WalkBuilder::new(&base);
+    builder.hidden(false).git_ignore(true);
+    if !globs.is_empty() {
+        // An `Override` with only whitelist globs yields *only* matching files.
+        let mut ob = ignore::overrides::OverrideBuilder::new(&base);
+        for g in &globs {
+            if let Err(e) = ob.add(g) {
+                return format!("search_files: invalid glob '{g}': {e}");
+            }
+        }
+        match ob.build() {
+            Ok(ov) => {
+                builder.overrides(ov);
+            }
+            Err(e) => return format!("search_files: invalid glob filter: {e}"),
+        }
+    }
+    let walker = builder.build();
 
     let mut output = String::new();
     let mut match_count = 0;
@@ -189,6 +217,37 @@ mod tests {
         )
         .await;
         assert!(result.contains("a.rs:1:"), "case-insensitive regex must match: {result}");
+    }
+
+    #[tokio::test]
+    async fn glob_filter_restricts_searched_files() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "let needle = 1;\n").unwrap();
+        fs::write(dir.path().join("b.txt"), "let needle = 2;\n").unwrap();
+
+        let only_rs = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": "needle", "glob": "*.rs" }),
+        )
+        .await;
+        assert!(only_rs.contains("a.rs:1:"), "must match .rs file: {only_rs}");
+        assert!(!only_rs.contains("b.txt"), "glob must exclude .txt: {only_rs}");
+
+        let both = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": "needle", "glob": ["*.rs", "*.txt"] }),
+        )
+        .await;
+        assert!(both.contains("a.rs:1:"), "{both}");
+        assert!(both.contains("b.txt:1:"), "array of globs must include both: {both}");
+    }
+
+    #[tokio::test]
+    async fn invalid_glob_returns_error() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "needle\n").unwrap();
+        let result = search_files(&ctx(&dir), &json!({ "pattern": "needle", "glob": "[" })).await;
+        assert!(result.contains("invalid glob"), "expected glob error: {result}");
     }
 
     #[tokio::test]

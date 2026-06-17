@@ -1821,8 +1821,89 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 }
             }
         }
+        "resources" => {
+            // MCP-1: surface server-advertised resources (resources/list). Mirrors
+            // `prompts` — only HTTP/SSE servers are reachable from the CLI client;
+            // native stdio servers are owned by the runner subprocess.
+            let conns = mcp.active_connections(session.session_id());
+            if conns.is_empty() {
+                if mcp.active_for_session(session.session_id()).is_empty() {
+                    println!("no active MCP servers");
+                } else {
+                    println!("no active HTTP/SSE MCP servers with CLI-readable resources");
+                }
+                return;
+            }
+            println!("available MCP resources (read with /mcp read <server> <uri>):");
+            let mut any = false;
+            for (name, url, headers) in conns {
+                let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+                if client.initialize().await.is_err() {
+                    continue;
+                }
+                match client.resources_list().await {
+                    Ok(resources) => {
+                        for r in resources {
+                            any = true;
+                            let label = if r.name.is_empty() { &r.uri } else { &r.name };
+                            let mime = if r.mime_type.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" ({})", r.mime_type)
+                            };
+                            println!("  {name}: {label}{mime}");
+                            println!("      {}", r.uri);
+                            if !r.description.is_empty() {
+                                println!("      {}", r.description);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("  {name}: {e}"),
+                }
+            }
+            if !any {
+                println!("  (none advertised)");
+            }
+        }
+        "read" => {
+            // MCP-1: read a single resource by URI (resources/read).
+            let mut rparts = rest.splitn(2, ' ');
+            let server = rparts.next().unwrap_or("").trim();
+            let uri = rparts.next().unwrap_or("").trim();
+            if server.is_empty() || uri.is_empty() {
+                eprintln!("usage: /mcp read <server> <uri>");
+                return;
+            }
+            let Some((_, url, headers)) = mcp
+                .active_connections(session.session_id())
+                .into_iter()
+                .find(|(n, _, _)| n == server)
+            else {
+                eprintln!("no active HTTP/SSE MCP server named `{server}` (see /mcp resources)");
+                return;
+            };
+            let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+            if let Err(e) = client.initialize().await {
+                eprintln!("could not connect to `{server}`: {e}");
+                return;
+            }
+            match client.resources_read(uri).await {
+                Ok(contents) => {
+                    for c in contents {
+                        if let Some(text) = c.text {
+                            println!("{text}");
+                        } else if c.blob.is_some() {
+                            println!("[binary resource {} ({})]", c.uri, c.mime_type);
+                        }
+                    }
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
         other => {
-            eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove, login, import, prompts")
+            eprintln!(
+                "unknown /mcp subcommand `{other}` — try list, add, remove, login, import, prompts, resources, read"
+            )
         }
     }
 }

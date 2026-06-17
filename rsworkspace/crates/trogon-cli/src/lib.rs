@@ -58,6 +58,52 @@ impl Drop for KillOnDrop {
     }
 }
 
+/// PID of the autostarted `nats-server`, read by the signal reaper.
+#[cfg(unix)]
+static NATS_SERVER_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Install a SIGTERM/SIGHUP handler that reaps the autostarted `nats-server`
+/// before the CLI dies (NEW-24).
+///
+/// This complements the two existing mechanisms: `KillOnDrop` (normal exits) and
+/// `PR_SET_PDEATHSIG` (Linux-only, abnormal signal death). On non-Linux Unix
+/// (macOS/BSD) there is no pdeathsig, so a `SIGTERM` to just the CLI process would
+/// otherwise orphan the server — this closes that gap portably.
+///
+/// SIGINT is deliberately left untouched: the REPL arms its own `ctrl_c` handler
+/// to cancel in-flight turns, and a competing disposition here would break that
+/// UX. The handler body uses only async-signal-safe calls (`kill`/`signal`/`raise`).
+#[cfg(unix)]
+fn install_nats_reaper(pid: u32) {
+    use std::sync::atomic::Ordering;
+
+    NATS_SERVER_PID.store(pid as i32, Ordering::SeqCst);
+
+    extern "C" fn reap(sig: libc::c_int) {
+        let pid = NATS_SERVER_PID.load(Ordering::SeqCst);
+        if pid > 0 {
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+        }
+        // Restore the default disposition and re-raise so the CLI still exits with
+        // the signal's normal status instead of being swallowed.
+        unsafe {
+            libc::signal(sig, libc::SIG_DFL);
+            libc::raise(sig);
+        }
+    }
+
+    let handler = reap as *const () as libc::sighandler_t;
+    unsafe {
+        libc::signal(libc::SIGTERM, handler);
+        libc::signal(libc::SIGHUP, handler);
+    }
+}
+
+#[cfg(not(unix))]
+fn install_nats_reaper(_pid: u32) {}
+
 fn nats_server_command(port: &str) -> Command {
     let mut command = Command::new("nats-server");
     command
@@ -179,6 +225,9 @@ pub async fn connect_or_start_nats(
             ));
         }
     };
+
+    // NEW-24: reap the server on SIGTERM/SIGHUP even where pdeathsig is unavailable.
+    install_nats_reaper(child.id());
 
     let deadline = Instant::now() + timeout;
     loop {
