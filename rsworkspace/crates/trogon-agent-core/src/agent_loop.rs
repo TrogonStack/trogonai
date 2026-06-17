@@ -1533,7 +1533,7 @@ mod tests {
         assert_eq!(capped_retry_after(Some("soon")), MAX_RETRY_WAIT_SECS);
         // Worst-case total retry budget stays under the CLI's 180s prompt timeout.
         const MAX_RETRIES: u64 = 4;
-        assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180);
+        const _: () = assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180);
     }
 
     // ── MockAnthropicClient ───────────────────────────────────────────────────

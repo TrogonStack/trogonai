@@ -1962,8 +1962,8 @@ impl AgentLoop {
                     // partial assistant turn and continue generation.
                     max_token_continuations += 1;
                     if max_token_continuations > MAX_TOKEN_CONTINUATIONS {
-                        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
-                            if let Some((ref mut p, ref mut rev)) = checkpoint {
+                        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                            && let Some((ref mut p, ref mut rev)) = checkpoint {
                                 write_promise_terminal(
                                     store.as_ref(),
                                     &self.tenant_id,
@@ -1975,7 +1975,6 @@ impl AgentLoop {
                                 )
                                 .await;
                             }
-                        }
                         return Err(AgentError::UnexpectedStopReason(
                             "max_tokens continuation limit exceeded".to_string(),
                         ));
@@ -2313,15 +2312,14 @@ impl AgentLoop {
                 }
 
                 // Permission gate — fires before MCP and built-in tool dispatch.
-                if let Some(checker) = &self.permission_checker {
-                    if !checker.check(id, name, input).await {
+                if let Some(checker) = &self.permission_checker
+                    && !checker.check(id, name, input).await {
                         results.push(ToolResult {
                             tool_use_id: id.clone(),
                             content: format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"),
                         });
                         continue;
                     }
-                }
 
                 // Check MCP dispatch first, then fall back to built-in tools.
                 //

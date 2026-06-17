@@ -405,10 +405,9 @@ impl McpClient {
             .headers()
             .get(MCP_SESSION_ID_HEADER)
             .and_then(|v| v.to_str().ok())
+            && let Ok(mut guard) = self.session_id.lock()
         {
-            if let Ok(mut guard) = self.session_id.lock() {
-                *guard = Some(session_id.to_string());
-            }
+            *guard = Some(session_id.to_string());
         }
         let status = resp.status();
         if !status.is_success() {

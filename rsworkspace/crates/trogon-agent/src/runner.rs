@@ -1030,6 +1030,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 /// returns early for both without executing any LLM call. `Failed` promises ARE
 /// CAS-claimed: their failure may have been transient (e.g. HTTP error) and NATS
 /// redelivery is a legitimate retry opportunity.
+#[allow(clippy::too_many_arguments)]
 async fn prepare_agent_with_promise(
     agent: &Arc<AgentLoop>,
     promise_store: &Arc<dyn PromiseRepository>,
@@ -1311,7 +1312,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 
     // Recover the most recently active first (those closest to completion
     // are most likely to succeed quickly).
-    stale.sort_by(|a, b| b.claimed_at.cmp(&a.claimed_at));
+    stale.sort_by_key(|r| std::cmp::Reverse(r.claimed_at));
 
     // No hard cap: recovery runs in a background task so it doesn't block
     // fresh event processing. Warn when the backlog is large so operators

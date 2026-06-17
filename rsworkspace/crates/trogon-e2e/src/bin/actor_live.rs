@@ -246,7 +246,7 @@ async fn test_actor_host_processes_inbox_message(js: &jetstream::Context, nats: 
     const LABEL: &str = "ActorHost — publishes NATS message to inbox → actor handles + state saved";
     let id = uid();
     // subject without extra host segment so entity_key strips cleanly to just the entity id
-    let subject = format!("actors.live-counter.>");
+    let subject = "actors.live-counter.>".to_string();
     let entity_key = format!("inbox-entity-{id}");
     let inbox_subject = format!("actors.live-counter.{entity_key}");
 

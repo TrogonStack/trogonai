@@ -192,11 +192,10 @@ impl<S: OutcomesStore> ResultClient<S> {
         let mut results = Vec::new();
         for key in keys.into_iter().filter(|k| k.starts_with(&prefix)) {
             let parts: Vec<&str> = key.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                if let Some(r) = self.get(parts[0], parts[1]).await? {
+            if parts.len() == 2
+                && let Some(r) = self.get(parts[0], parts[1]).await? {
                     results.push(r);
                 }
-            }
         }
         Ok(results)
     }

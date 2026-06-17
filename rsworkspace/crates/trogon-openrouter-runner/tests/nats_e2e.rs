@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 //! End-to-end integration tests: OpenRouterAgent + AgentSideNatsConnection + real NATS.
 //!
 //! Verifies that OpenRouterAgent correctly handles ACP request-reply over a real NATS

@@ -1915,7 +1915,7 @@ async fn fork_session_ignores_branch_at_index_in_list_sessions() {
                 fork_info
                     .meta
                     .as_ref()
-                    .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                    .is_none_or(|m| !m.contains_key("branchedAtIndex")),
                 "branchedAtIndex must not appear in _meta — branchAtIndex is not supported by codex-runner"
             );
         })

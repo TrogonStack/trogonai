@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

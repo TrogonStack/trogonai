@@ -171,7 +171,7 @@ async fn memory_accumulates_across_multiple_sessions() {
 
     for i in 0..2usize {
         let publisher = NatsTranscriptPublisher::new(js.clone());
-        let session = Session::new(publisher, "agent", &format!("proj/{i}"));
+        let session = Session::new(publisher, "agent", format!("proj/{i}"));
         session.append_user_message("Hello", None).await.unwrap();
         let session_id = session.id().to_string();
         trigger_dreaming(&js, "agent", &format!("proj/{i}"), &session_id)

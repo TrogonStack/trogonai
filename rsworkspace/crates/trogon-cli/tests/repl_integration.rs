@@ -1,3 +1,4 @@
+#![allow(clippy::manual_async_fn)]
 //! Integration tests for trogon-cli repl functions that operate on the real
 //! filesystem and a concrete Session implementation.
 //!

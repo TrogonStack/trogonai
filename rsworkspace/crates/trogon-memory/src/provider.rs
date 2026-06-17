@@ -231,13 +231,12 @@ fn build_prompt(transcript: &[TranscriptEntry], existing: Option<&EntityMemory>)
     }
     out.push_str("</transcript>");
 
-    if let Some(memory) = existing {
-        if !memory.facts.is_empty() {
+    if let Some(memory) = existing
+        && !memory.facts.is_empty() {
             out.push_str(UPDATE_SUFFIX);
             let facts_json = serde_json::to_string(&memory.facts).unwrap_or_default();
             out.push_str(&facts_json);
         }
-    }
 
     out
 }

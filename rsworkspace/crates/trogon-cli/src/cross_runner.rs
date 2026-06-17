@@ -205,7 +205,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             return Err("session/export returned null — cannot import into new session".into());
         }
 
-        let messages = serde_json::from_str::<serde_json::Value>(&raw_messages).map_err(|e| e.to_string())?;
+        let messages = serde_json::from_str::<serde_json::Value>(raw_messages).map_err(|e| e.to_string())?;
         let import_params = serde_json::value::RawValue::from_string(
             serde_json::json!({
                 "sessionId": new_session_id,

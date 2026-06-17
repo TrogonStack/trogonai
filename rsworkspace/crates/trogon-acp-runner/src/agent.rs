@@ -649,6 +649,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
     /// Reload the latest persisted session and merge only the fields owned by this prompt.
     #[cfg_attr(coverage, coverage(off))]
+    #[allow(clippy::too_many_arguments)]
     async fn save_prompt_state_merged(
         &self,
         session_id: &str,

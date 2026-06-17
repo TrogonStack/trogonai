@@ -872,12 +872,12 @@ pub fn build_mode_permission_checker(
         settings_scope,
         trogon_md_scope,
     } = extras;
-    let scope = cwd.as_deref().and_then(|cwd| {
+    let scope = cwd.as_deref().map(|cwd| {
         match Scope::resolve(session_scope, settings_scope, trogon_md_scope, cwd) {
-            Ok(scope) => Some(scope),
+            Ok(scope) => scope,
             Err(err) => {
                 eprintln!("scope resolve failed ({err}), falling back to baseline for {cwd}");
-                Some(Scope::baseline(cwd))
+                Scope::baseline(cwd)
             }
         }
     });

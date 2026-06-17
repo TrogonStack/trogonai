@@ -2869,7 +2869,7 @@ impl<H, N, M> OpenRouterAgent<H, N, M> {
 #[cfg(any(test, feature = "test-helpers"))]
 impl<H, N, M> OpenRouterAgent<H, N, M> {
     pub fn test_notifier(&self) -> &N {
-        &*self.notifier
+        &self.notifier
     }
 
     pub async fn test_session_mode(&self, id: &str) -> Option<String> {

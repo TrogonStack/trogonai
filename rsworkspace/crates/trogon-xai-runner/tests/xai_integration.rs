@@ -3,7 +3,7 @@
 //! All tests use an in-process `MockXaiHttpClient` — no TCP servers are needed
 //! for the xAI HTTP layer. A minimal fake NATS TCP stub is still used to obtain
 //! a real `async_nats::Client` (fire-and-forget PUBs are silently dropped).
-#![allow(clippy::await_holding_lock)]
+#![allow(clippy::await_holding_lock, clippy::type_complexity)]
 #![allow(clippy::useless_conversion)]
 #![allow(clippy::arc_with_non_send_sync)]
 //!
