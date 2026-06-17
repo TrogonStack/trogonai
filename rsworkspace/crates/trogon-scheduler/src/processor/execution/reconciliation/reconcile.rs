@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
 use trogon_decider_runtime::StreamPosition;
 
-use crate::commands::domain::{Delivery, Schedule, ScheduleEventStatus, ScheduleId, ScheduleMessage};
+use crate::commands::domain::{
+    Delivery, Schedule, ScheduleEventStatus, ScheduleId, ScheduleMessage, ScheduleOccurrenceSequence,
+};
 use crate::processor::execution::checkpoints::{ReconcileOutcome, ScheduleCheckpointRecord, ScheduleStatus};
 
-use super::{ScheduleRequest, ScheduleRequestError, ScheduleSubject};
+use super::{DispatchRequest, ScheduleRequest, ScheduleRequestError, ScheduleSubject};
 
 pub(crate) const CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE: &str = "trogon.scheduler.corrupt-checkpoint";
 
@@ -37,6 +39,19 @@ pub enum ScheduleChange {
     Removed {
         schedule_id: ScheduleId,
     },
+    OccurrenceRecorded {
+        schedule_id: ScheduleId,
+        occurrence_sequence: ScheduleOccurrenceSequence,
+        occurrence_at: DateTime<Utc>,
+    },
+    OccurrenceScheduled {
+        schedule_id: ScheduleId,
+        occurrence_sequence: ScheduleOccurrenceSequence,
+        occurrence_at: DateTime<Utc>,
+    },
+    Completed {
+        schedule_id: ScheduleId,
+    },
 }
 
 impl ScheduleChange {
@@ -45,7 +60,10 @@ impl ScheduleChange {
             Self::Created { schedule_id, .. }
             | Self::Paused { schedule_id }
             | Self::Resumed { schedule_id }
-            | Self::Removed { schedule_id } => schedule_id,
+            | Self::Removed { schedule_id }
+            | Self::OccurrenceRecorded { schedule_id, .. }
+            | Self::OccurrenceScheduled { schedule_id, .. }
+            | Self::Completed { schedule_id } => schedule_id,
         }
     }
 }
@@ -53,7 +71,15 @@ impl ScheduleChange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileAction {
     Publish(ScheduleRequest),
+    Dispatch(DispatchRequest),
     Purge(ScheduleSubject),
+    /// Ask the schedule aggregate to plan the next occurrence. The execution
+    /// processor runs the `ScheduleNextOccurrence` command; the planned occurrence
+    /// returns as a `ScheduleOccurrenceScheduled` event that publishes the wakeup.
+    ArmNext {
+        schedule_id: ScheduleId,
+        now: DateTime<Utc>,
+    },
     CheckpointOnly,
 }
 
@@ -137,7 +163,170 @@ pub fn reconcile(
         ScheduleChange::Resumed { schedule_id } => {
             reconcile_resumed(current, schedule_id, stream_position, event_id, now)
         }
+        ScheduleChange::OccurrenceRecorded {
+            schedule_id,
+            occurrence_sequence,
+            occurrence_at,
+        } => reconcile_occurrence_recorded(
+            current,
+            schedule_id,
+            *occurrence_sequence,
+            *occurrence_at,
+            stream_position,
+            event_id,
+        ),
+        ScheduleChange::OccurrenceScheduled {
+            schedule_id,
+            occurrence_sequence: _,
+            occurrence_at,
+        } => reconcile_occurrence_scheduled(current, schedule_id, *occurrence_at, stream_position, event_id),
+        ScheduleChange::Completed { schedule_id } => {
+            reconcile_completed(current, schedule_id, stream_position, event_id)
+        }
     }
+}
+
+/// Dispatches the user message for a recorded occurrence.
+///
+/// The schedule aggregate already decided whether the recurrence continues, so
+/// this only fans the occurrence out to the delivery target; the follow-up
+/// `OccurrenceScheduled`/`Completed` event drives the next wakeup or purge.
+fn reconcile_occurrence_recorded(
+    current: Option<&ScheduleCheckpointRecord>,
+    schedule_id: &ScheduleId,
+    occurrence_sequence: ScheduleOccurrenceSequence,
+    occurrence_at: DateTime<Utc>,
+    stream_position: StreamPosition,
+    event_id: Option<&str>,
+) -> Result<Reconciliation, ReconcileError> {
+    let current = checkpoint_for(current, schedule_id)?;
+    if !matches!(current.status, ScheduleStatus::Scheduled | ScheduleStatus::Paused)
+        || !matches!(current.schedule, Schedule::RRule { .. })
+    {
+        return Ok(Reconciliation {
+            action: ReconcileAction::CheckpointOnly,
+            next_checkpoint: advanced(
+                current,
+                current.status,
+                ReconcileOutcome::DuplicateStale,
+                stream_position,
+                event_id,
+            ),
+        });
+    }
+
+    let dispatch = DispatchRequest::build_occurrence(
+        schedule_id,
+        occurrence_sequence,
+        occurrence_at,
+        &current.delivery,
+        &current.message,
+    )
+    .map_err(|source| ReconcileError::ScheduleRequest { source })?;
+
+    Ok(Reconciliation {
+        action: ReconcileAction::Dispatch(dispatch),
+        next_checkpoint: advanced(
+            current,
+            current.status,
+            ReconcileOutcome::Published,
+            stream_position,
+            event_id,
+        ),
+    })
+}
+
+/// Publishes the concrete `@at` wakeup the aggregate planned for the next
+/// occurrence. No recurrence calculation happens here: the instant comes
+/// straight from the `OccurrenceScheduled` event.
+fn reconcile_occurrence_scheduled(
+    current: Option<&ScheduleCheckpointRecord>,
+    schedule_id: &ScheduleId,
+    occurrence_at: DateTime<Utc>,
+    stream_position: StreamPosition,
+    event_id: Option<&str>,
+) -> Result<Reconciliation, ReconcileError> {
+    let current = checkpoint_for(current, schedule_id)?;
+    if current.status != ScheduleStatus::Scheduled || !matches!(current.schedule, Schedule::RRule { .. }) {
+        return Ok(Reconciliation {
+            action: ReconcileAction::CheckpointOnly,
+            next_checkpoint: advanced(
+                current,
+                current.status,
+                ReconcileOutcome::DuplicateStale,
+                stream_position,
+                event_id,
+            ),
+        });
+    }
+
+    let request = ScheduleRequest::build_rrule_wakeup(schedule_id, occurrence_at, &current.delivery)
+        .map_err(|source| ReconcileError::ScheduleRequest { source })?;
+
+    Ok(Reconciliation {
+        action: ReconcileAction::Publish(request),
+        next_checkpoint: advanced(
+            current,
+            ScheduleStatus::Scheduled,
+            ReconcileOutcome::Published,
+            stream_position,
+            event_id,
+        ),
+    })
+}
+
+/// Purges the execution subject once the aggregate reports the recurrence is
+/// exhausted.
+fn reconcile_completed(
+    current: Option<&ScheduleCheckpointRecord>,
+    schedule_id: &ScheduleId,
+    stream_position: StreamPosition,
+    event_id: Option<&str>,
+) -> Result<Reconciliation, ReconcileError> {
+    let current = checkpoint_for(current, schedule_id)?;
+    if !matches!(current.schedule, Schedule::RRule { .. })
+        || matches!(
+            current.status,
+            ScheduleStatus::Removed | ScheduleStatus::Unsupported | ScheduleStatus::Unknown
+        )
+    {
+        return Ok(Reconciliation {
+            action: ReconcileAction::CheckpointOnly,
+            next_checkpoint: advanced(
+                current,
+                current.status,
+                ReconcileOutcome::DuplicateStale,
+                stream_position,
+                event_id,
+            ),
+        });
+    }
+
+    Ok(Reconciliation {
+        action: ReconcileAction::Purge(current.subject()),
+        next_checkpoint: advanced(
+            current,
+            ScheduleStatus::Expired,
+            ReconcileOutcome::Expired,
+            stream_position,
+            event_id,
+        ),
+    })
+}
+
+fn checkpoint_for<'a>(
+    current: Option<&'a ScheduleCheckpointRecord>,
+    schedule_id: &ScheduleId,
+) -> Result<&'a ScheduleCheckpointRecord, ReconcileError> {
+    let current = current.ok_or_else(|| ReconcileError::MissingCheckpoint {
+        schedule_id: schedule_id.clone(),
+    })?;
+    if current.schedule_id != *schedule_id {
+        return Err(ReconcileError::MissingCheckpoint {
+            schedule_id: schedule_id.clone(),
+        });
+    }
+    Ok(current)
 }
 
 fn reconcile_resumed(
@@ -213,11 +402,18 @@ fn decide_enabled(
     message: &ScheduleMessage,
     now: DateTime<Utc>,
 ) -> Result<(ReconcileAction, ScheduleStatus, ReconcileOutcome), ReconcileError> {
+    // RRULE recurrence is owned by the schedule aggregate. Hand off to the
+    // arming command instead of expanding the rule here, so the execution layer
+    // never performs recurrence calculation — the next concrete occurrence
+    // arrives back as a `ScheduleOccurrenceScheduled` event.
     if matches!(schedule, Schedule::RRule { .. }) {
         return Ok((
-            ReconcileAction::CheckpointOnly,
-            ScheduleStatus::Unsupported,
-            ReconcileOutcome::Unsupported,
+            ReconcileAction::ArmNext {
+                schedule_id: schedule_id.clone(),
+                now,
+            },
+            ScheduleStatus::Scheduled,
+            ReconcileOutcome::Published,
         ));
     }
 
@@ -307,6 +503,28 @@ mod tests {
                 delivery: Delivery::nats_event("agent.run").unwrap(),
                 message: message(),
             }),
+        }
+    }
+
+    fn occurrence_recorded(id: &str, occurrence_sequence: u64, occurrence_at: &str) -> ScheduleChange {
+        ScheduleChange::OccurrenceRecorded {
+            schedule_id: schedule_id(id),
+            occurrence_sequence: ScheduleOccurrenceSequence::try_new(occurrence_sequence).unwrap(),
+            occurrence_at: instant(occurrence_at),
+        }
+    }
+
+    fn occurrence_scheduled(id: &str, occurrence_at: &str) -> ScheduleChange {
+        ScheduleChange::OccurrenceScheduled {
+            schedule_id: schedule_id(id),
+            occurrence_sequence: ScheduleOccurrenceSequence::try_new(2).unwrap(),
+            occurrence_at: instant(occurrence_at),
+        }
+    }
+
+    fn completed(id: &str) -> ScheduleChange {
+        ScheduleChange::Completed {
+            schedule_id: schedule_id(id),
         }
     }
 
@@ -416,8 +634,8 @@ mod tests {
     }
 
     #[test]
-    fn enabled_creation_with_rrule_is_unsupported() {
-        let rrule = Schedule::rrule("2026-01-01T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
+    fn enabled_creation_with_rrule_arms_the_next_occurrence() {
+        let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
         let reconciliation = reconcile(
             None,
             &created("recurring", ScheduleEventStatus::Scheduled, rrule),
@@ -427,12 +645,217 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(reconciliation.action, ReconcileAction::CheckpointOnly);
-        assert_eq!(reconciliation.next_checkpoint.status, ScheduleStatus::Unsupported);
+        // RRULE recurrence is owned by the aggregate: creation hands off to the
+        // arm command instead of expanding the rule in the processor.
         assert_eq!(
-            reconciliation.next_checkpoint.last_outcome,
-            ReconcileOutcome::Unsupported
+            reconciliation.action,
+            ReconcileAction::ArmNext {
+                schedule_id: schedule_id("recurring"),
+                now: now(),
+            }
         );
+        assert_eq!(reconciliation.next_checkpoint.status, ScheduleStatus::Scheduled);
+        assert_eq!(reconciliation.next_checkpoint.last_outcome, ReconcileOutcome::Published);
+    }
+
+    #[test]
+    fn recorded_occurrence_dispatches_the_user_message() {
+        let current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
+        );
+
+        let dispatch = reconcile(
+            Some(&current),
+            &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+            position(2),
+            Some("event-2"),
+            now(),
+        )
+        .unwrap();
+
+        let expected_dispatch = DispatchRequest::build_occurrence(
+            &schedule_id("recurring"),
+            ScheduleOccurrenceSequence::try_new(1).unwrap(),
+            instant("2026-06-03T00:00:00Z"),
+            &Delivery::nats_event("agent.run").unwrap(),
+            &message(),
+        )
+        .unwrap();
+        assert_eq!(dispatch.action, ReconcileAction::Dispatch(expected_dispatch));
+        assert_eq!(dispatch.next_checkpoint.status, ScheduleStatus::Scheduled);
+        assert_eq!(dispatch.next_checkpoint.last_outcome, ReconcileOutcome::Published);
+        assert_eq!(dispatch.next_checkpoint.last_applied_stream_position, position(2));
+    }
+
+    #[test]
+    fn recorded_occurrence_dispatches_while_checkpoint_is_paused() {
+        let mut current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
+        );
+        current.status = ScheduleStatus::Paused;
+
+        let dispatch = reconcile(
+            Some(&current),
+            &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+            position(2),
+            Some("event-2"),
+            now(),
+        )
+        .unwrap();
+
+        let expected_dispatch = DispatchRequest::build_occurrence(
+            &schedule_id("recurring"),
+            ScheduleOccurrenceSequence::try_new(1).unwrap(),
+            instant("2026-06-03T00:00:00Z"),
+            &Delivery::nats_event("agent.run").unwrap(),
+            &message(),
+        )
+        .unwrap();
+        assert_eq!(dispatch.action, ReconcileAction::Dispatch(expected_dispatch));
+        assert_eq!(dispatch.next_checkpoint.status, ScheduleStatus::Paused);
+        assert_eq!(dispatch.next_checkpoint.last_outcome, ReconcileOutcome::Published);
+        assert_eq!(dispatch.next_checkpoint.last_applied_stream_position, position(2));
+    }
+
+    #[test]
+    fn scheduled_occurrence_publishes_the_planned_wakeup() {
+        let current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
+        );
+
+        let continuation = reconcile(
+            Some(&current),
+            &occurrence_scheduled("recurring", "2026-06-04T00:00:00Z"),
+            position(3),
+            Some("event-3"),
+            now(),
+        )
+        .unwrap();
+
+        let expected = ScheduleRequest::build_rrule_wakeup(
+            &schedule_id("recurring"),
+            instant("2026-06-04T00:00:00Z"),
+            &Delivery::nats_event("agent.run").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(continuation.action, ReconcileAction::Publish(expected));
+        assert_eq!(continuation.next_checkpoint.status, ScheduleStatus::Scheduled);
+        assert_eq!(continuation.next_checkpoint.last_outcome, ReconcileOutcome::Published);
+    }
+
+    #[test]
+    fn completed_event_purges_and_expires() {
+        let current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
+        );
+
+        let completion = reconcile(
+            Some(&current),
+            &completed("recurring"),
+            position(3),
+            Some("event-3"),
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(completion.action, ReconcileAction::Purge(current.subject()));
+        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Expired);
+        assert_eq!(completion.next_checkpoint.last_outcome, ReconcileOutcome::Expired);
+    }
+
+    #[test]
+    fn completed_event_noops_for_non_rrule_checkpoints() {
+        let current = scheduled_record("recurring", Schedule::every(Duration::from_secs(30)).unwrap());
+
+        let completion = reconcile(
+            Some(&current),
+            &completed("recurring"),
+            position(3),
+            Some("event-3"),
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(completion.action, ReconcileAction::CheckpointOnly);
+        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Scheduled);
+        assert_eq!(
+            completion.next_checkpoint.last_outcome,
+            ReconcileOutcome::DuplicateStale
+        );
+    }
+
+    #[test]
+    fn completed_event_expires_paused_rrule_checkpoints() {
+        let mut current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
+        );
+        current.status = ScheduleStatus::Paused;
+
+        let completion = reconcile(
+            Some(&current),
+            &completed("recurring"),
+            position(3),
+            Some("event-3"),
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(completion.action, ReconcileAction::Purge(current.subject()));
+        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Expired);
+        assert_eq!(completion.next_checkpoint.last_outcome, ReconcileOutcome::Expired);
+    }
+
+    #[test]
+    fn recorded_occurrence_noops_for_non_rrule_checkpoints() {
+        let current = scheduled_record("recurring", Schedule::every(Duration::from_secs(30)).unwrap());
+
+        let continuation = reconcile(
+            Some(&current),
+            &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+            position(2),
+            Some("event-2"),
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(continuation.action, ReconcileAction::CheckpointOnly);
+        assert_eq!(
+            continuation.next_checkpoint.last_outcome,
+            ReconcileOutcome::DuplicateStale
+        );
+    }
+
+    #[test]
+    fn resume_of_rrule_arms_the_next_occurrence() {
+        let current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
+        );
+
+        let reconciliation = reconcile(
+            Some(&current),
+            &ScheduleChange::Resumed {
+                schedule_id: schedule_id("recurring"),
+            },
+            position(2),
+            None,
+            now(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reconciliation.action,
+            ReconcileAction::ArmNext {
+                schedule_id: schedule_id("recurring"),
+                now: now(),
+            }
+        );
+        assert_eq!(reconciliation.next_checkpoint.status, ScheduleStatus::Scheduled);
     }
 
     #[test]
