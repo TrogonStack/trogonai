@@ -312,6 +312,45 @@ mod tests {
     }
 
     #[test]
+    fn arms_the_occurrence_strictly_after_the_last_recorded_one() {
+        let id = "recurring";
+        let last = Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap();
+        let state = state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
+            last_occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&last)),
+            last_occurrence_sequence: Some(2),
+            schedule: MessageField::some(rrule_schedule(3)),
+            pending_occurrence_at: MessageField::default(),
+        };
+        // Resume shortly after the last recorded occurrence: the cursor must skip
+        // it and arm the next one, not re-arm the one already recorded.
+        let now = Utc.with_ymd_and_hms(2026, 6, 4, 0, 1, 0).unwrap();
+
+        let decision = ScheduleNextOccurrence::decide(&state, &command(id, now)).unwrap();
+        let Decision::Events(events) = decision else {
+            panic!("expected an arming decision");
+        };
+
+        assert_eq!(
+            events.as_slice(),
+            &[v1::ScheduleEvent {
+                event: Some(
+                    v1::ScheduleOccurrenceScheduled {
+                        schedule_id: id.to_string(),
+                        occurrence_sequence: Some(3),
+                        occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
+                            &Utc.with_ymd_and_hms(2026, 6, 5, 0, 0, 0).unwrap()
+                        )),
+                        scheduled_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&now)),
+                    }
+                    .into(),
+                ),
+            }]
+        );
+    }
+
+    #[test]
     fn completes_when_no_future_occurrence_remains() {
         let id = "recurring";
         let state = enabled_state(None, None, MessageField::some(rrule_schedule(2)));

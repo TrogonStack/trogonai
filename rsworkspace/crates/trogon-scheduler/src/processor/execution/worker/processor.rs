@@ -1131,6 +1131,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn arm_is_idempotent_when_already_armed() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let create = crate::CreateSchedule {
+            id: schedule_id(id),
+            status: ScheduleEventStatus::Scheduled,
+            schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
+            message: message(),
+        };
+        CommandExecution::new(&harness.event_store, &create)
+            .execute()
+            .await
+            .expect("seed schedule");
+        CommandExecution::new(
+            &harness.event_store,
+            &crate::ScheduleNextOccurrence::new(schedule_id(id), recorded_at()),
+        )
+        .execute()
+        .await
+        .expect("arm once");
+        let armed_len = harness.event_store.events(id).len();
+        assert_eq!(armed_len, 2);
+
+        // Reprocessing ScheduleCreated re-issues the arm command, but the schedule
+        // is already armed, so it must be an idempotent no-op (no second Scheduled).
+        let created = harness.event_store.events(id);
+        let processed = harness.process_stream(&created[0]).await;
+        assert_eq!(processed.outcome, ProcessedOutcome::Published);
+        assert_eq!(harness.event_store.events(id).len(), armed_len);
+    }
+
+    #[tokio::test]
+    async fn rrule_pause_purges_then_resume_rearms() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let create = crate::CreateSchedule {
+            id: schedule_id(id),
+            status: ScheduleEventStatus::Scheduled,
+            schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
+            message: message(),
+        };
+        CommandExecution::new(&harness.event_store, &create)
+            .execute()
+            .await
+            .expect("seed schedule");
+
+        // Created -> arm -> publish the first wakeup.
+        let events = harness.event_store.events(id);
+        harness.process_stream(&events[0]).await;
+        let events = harness.event_store.events(id);
+        harness.process_stream(&events[1]).await;
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
+
+        // Pause purges the live timer.
+        CommandExecution::new(&harness.event_store, &crate::PauseSchedule::new(schedule_id(id)))
+            .execute()
+            .await
+            .expect("pause");
+        let events = harness.event_store.events(id);
+        let paused = harness.process_stream(events.last().unwrap()).await;
+        assert_eq!(paused.outcome, ProcessedOutcome::Purged);
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 0);
+
+        // Resume re-arms a fresh occurrence and re-publishes the wakeup.
+        CommandExecution::new(&harness.event_store, &crate::ResumeSchedule::new(schedule_id(id)))
+            .execute()
+            .await
+            .expect("resume");
+        let events = harness.event_store.events(id);
+        harness.process_stream(events.last().unwrap()).await; // Resumed -> ArmNext -> Scheduled
+        let events = harness.event_store.events(id);
+        harness.process_stream(events.last().unwrap()).await; // Scheduled -> publish wakeup
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
+    }
+
+    #[tokio::test]
     async fn direct_dispatch_action_uses_the_event_id_without_disambiguation() {
         let harness = Harness::new();
         let request = crate::processor::execution::reconciliation::DispatchRequest::build(
