@@ -79,6 +79,25 @@ impl RegisterPayloadError {
     }
 }
 
+impl std::fmt::Display for RegisterPayloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JsonParse(e) => write!(f, "JSON parse error: {e}"),
+            Self::Schema(e) => write!(f, "AgentCard schema validation failed: {e}"),
+            Self::ValueParse(e) => write!(f, "AgentCard parse error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RegisterPayloadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::JsonParse(e) | Self::ValueParse(e) => Some(e),
+            Self::Schema(e) => Some(e),
+        }
+    }
+}
+
 pub fn parse_register_payload(payload: &[u8]) -> Result<a2a::agent_card::AgentCard, RegisterPayloadError> {
     let value: serde_json::Value = serde_json::from_slice(payload).map_err(RegisterPayloadError::JsonParse)?;
     a2a_pack::validate_agent_card_value(&value).map_err(RegisterPayloadError::Schema)?;
@@ -195,7 +214,8 @@ mod tests {
 
     #[test]
     fn catalog_store_json_rpc_maps_kv_to_internal_error() {
-        let (code, message) = catalog_store_json_rpc(CatalogStoreError::Kv("conn failed".into()));
+        let inner: Box<dyn std::error::Error + Send + Sync> = Box::new(std::io::Error::other("conn failed"));
+        let (code, message) = catalog_store_json_rpc(CatalogStoreError::Kv(inner));
         assert_eq!(code, -32603);
         assert!(message.contains("KV store error"));
     }
@@ -221,6 +241,23 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["error"]["code"], -32602);
         assert_eq!(v["error"]["message"], "invalid agent_id");
+    }
+
+    #[test]
+    fn register_payload_error_display_and_source_covers_every_variant() {
+        use std::error::Error;
+        let json = serde_json::from_str::<String>("x").unwrap_err();
+        let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
+        let value = serde_json::from_str::<String>("x").unwrap_err();
+        let json_err = RegisterPayloadError::JsonParse(json);
+        let schema_err = RegisterPayloadError::Schema(schema);
+        let value_err = RegisterPayloadError::ValueParse(value);
+        assert!(json_err.to_string().contains("JSON parse"));
+        assert!(schema_err.to_string().contains("schema validation"));
+        assert!(value_err.to_string().contains("AgentCard parse"));
+        assert!(json_err.source().is_some());
+        assert!(schema_err.source().is_some());
+        assert!(value_err.source().is_some());
     }
 
     #[test]

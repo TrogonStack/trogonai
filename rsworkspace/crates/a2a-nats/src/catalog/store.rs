@@ -11,6 +11,8 @@ use trogon_nats::jetstream::{
 use crate::agent_id::A2aAgentId;
 use crate::catalog::import_gate::{ImportGate, ImportGateError, ImportedAccountName, SpiceDbPrincipal};
 
+pub type BoxedKvError = Box<dyn std::error::Error + Send + Sync>;
+
 #[derive(Debug)]
 pub enum CatalogStoreError {
     Serialize(serde_json::Error),
@@ -18,7 +20,12 @@ pub enum CatalogStoreError {
     /// AgentCard document failed bundled JSON-Schema validation ([`a2a_pack`]).
     AgentCardSchema(a2a_pack::AgentCardValidateError),
     ImportGate(ImportGateError),
-    Kv(String),
+    /// Wraps the underlying KV failure as a boxed source so callers keep the
+    /// source-chain and can downcast to the concrete JetStream / async-nats
+    /// error type instead of pattern-matching on a stringified message.
+    Kv(BoxedKvError),
+    /// Catalog KV key segment failed `A2aAgentId` validation.
+    InvalidKey(String),
 }
 
 impl fmt::Display for CatalogStoreError {
@@ -28,7 +35,8 @@ impl fmt::Display for CatalogStoreError {
             Self::Deserialize(e) => write!(f, "failed to deserialize agent card: {e}"),
             Self::AgentCardSchema(e) => write!(f, "AgentCard rejected by JSON Schema: {e}"),
             Self::ImportGate(e) => write!(f, "{e}"),
-            Self::Kv(msg) => write!(f, "KV store error: {msg}"),
+            Self::Kv(e) => write!(f, "KV store error: {e}"),
+            Self::InvalidKey(msg) => write!(f, "invalid catalog KV key: {msg}"),
         }
     }
 }
@@ -39,7 +47,8 @@ impl std::error::Error for CatalogStoreError {
             Self::Serialize(e) | Self::Deserialize(e) => Some(e),
             Self::AgentCardSchema(e) => Some(e),
             Self::ImportGate(e) => Some(e),
-            Self::Kv(_) => None,
+            Self::Kv(e) => Some(e.as_ref()),
+            Self::InvalidKey(_) => None,
         }
     }
 }
@@ -90,17 +99,17 @@ where
             .store
             .keys()
             .await
-            .map_err(|e| CatalogStoreError::Kv(e.to_string()))?
+            .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?
             .try_collect()
             .await
-            .map_err(|e| CatalogStoreError::Kv(e.to_string()))?;
+            .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
         let mut keys = keys;
         keys.sort_unstable();
 
         let mut out = Vec::new();
         for key in keys {
             let agent_id = A2aAgentId::new(&key).map_err(|_| {
-                CatalogStoreError::Kv(format!("catalog KV key `{key}` is not a valid A2aAgentId segment"))
+                CatalogStoreError::InvalidKey(format!("catalog KV key `{key}` is not a valid A2aAgentId segment"))
             })?;
             if let Some(card) = self.get_card(&agent_id).await? {
                 out.push((agent_id, card));
@@ -165,20 +174,29 @@ where
             .store
             .entry(key.clone())
             .await
-            .map_err(|e| CatalogStoreError::Kv(e.to_string()))?;
+            .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
 
-        match entry {
-            Some(e) => {
+        // JetStream KV returns the latest revision even when it's a delete/purge
+        // tombstone — `update` against that revision would fail with "wrong last
+        // sequence", so we go through `create` when the most recent entry was a
+        // removal so re-registration after a delete still restores the card.
+        let live_revision = entry.and_then(|e| match e.operation {
+            async_nats::jetstream::kv::Operation::Put => Some(e.revision),
+            async_nats::jetstream::kv::Operation::Delete | async_nats::jetstream::kv::Operation::Purge => None,
+        });
+
+        match live_revision {
+            Some(revision) => {
                 self.store
-                    .update(&key, value, e.revision)
+                    .update(&key, value, revision)
                     .await
-                    .map_err(|e| CatalogStoreError::Kv(e.to_string()))?;
+                    .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
             }
             None => {
                 self.store
                     .create(&key, value)
                     .await
-                    .map_err(|e| CatalogStoreError::Kv(e.to_string()))?;
+                    .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
             }
         }
 
@@ -191,7 +209,7 @@ where
             .store
             .get(key)
             .await
-            .map_err(|e| CatalogStoreError::Kv(e.to_string()))?
+            .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?
         {
             None => Ok(None),
             Some(bytes) => {
@@ -261,6 +279,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_creates_when_latest_entry_is_a_delete_tombstone() {
+        use async_nats::jetstream::kv::Operation;
+        let kv = MockJetStreamKvStore::new();
+        kv.enqueue_entry(bytes::Bytes::new(), 7, Operation::Delete);
+        let store = KvCatalogStore::new(kv.clone());
+        store.put_card(&agent_id("bot"), &card("bot")).await.unwrap();
+        assert_eq!(kv.update_calls().len(), 0, "must not update against a delete tombstone");
+        let creates = kv.create_calls();
+        assert_eq!(creates.len(), 1);
+        assert_eq!(creates[0].0, "bot");
+    }
+
+    #[tokio::test]
+    async fn put_creates_when_latest_entry_is_a_purge_tombstone() {
+        use async_nats::jetstream::kv::Operation;
+        let kv = MockJetStreamKvStore::new();
+        kv.enqueue_entry(bytes::Bytes::new(), 9, Operation::Purge);
+        let store = KvCatalogStore::new(kv.clone());
+        store.put_card(&agent_id("bot"), &card("bot")).await.unwrap();
+        assert_eq!(kv.update_calls().len(), 0);
+        assert_eq!(kv.create_calls().len(), 1);
+    }
+
+    #[tokio::test]
     async fn get_returns_none_when_absent() {
         let kv = MockJetStreamKvStore::new();
         let store = KvCatalogStore::new(kv);
@@ -309,8 +351,27 @@ mod tests {
 
     #[test]
     fn error_display_kv() {
-        let e = CatalogStoreError::Kv("conn failed".into());
+        let inner: BoxedKvError = Box::new(std::io::Error::other("conn failed"));
+        let e = CatalogStoreError::Kv(inner);
         assert!(e.to_string().contains("KV store error"));
+        assert!(e.to_string().contains("conn failed"));
+    }
+
+    #[test]
+    fn error_kv_preserves_source_chain() {
+        use std::error::Error;
+        let inner: BoxedKvError = Box::new(std::io::Error::other("nats down"));
+        let e = CatalogStoreError::Kv(inner);
+        let src = e.source().expect("Kv error must expose its source");
+        assert!(src.to_string().contains("nats down"));
+    }
+
+    #[test]
+    fn error_invalid_key_has_no_source() {
+        use std::error::Error;
+        let e = CatalogStoreError::InvalidKey("bad.segment".into());
+        assert!(e.to_string().contains("invalid catalog KV key"));
+        assert!(e.source().is_none());
     }
 
     #[test]
@@ -326,13 +387,6 @@ mod tests {
         let inner = serde_json::from_str::<String>("x").unwrap_err();
         let e = CatalogStoreError::Serialize(inner);
         assert!(e.source().is_some());
-    }
-
-    #[test]
-    fn error_source_kv() {
-        use std::error::Error;
-        let e = CatalogStoreError::Kv("x".into());
-        assert!(e.source().is_none());
     }
 
     #[test]
@@ -377,7 +431,7 @@ mod tests {
         kv.set_keys_result(Ok(vec!["bad.segment".into()]));
         let store = KvCatalogStore::new(kv);
         let err = store.list_cards().await.unwrap_err();
-        assert!(matches!(err, CatalogStoreError::Kv(_)));
+        assert!(matches!(err, CatalogStoreError::InvalidKey(_)));
     }
 
     #[tokio::test]
