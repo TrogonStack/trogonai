@@ -33,7 +33,10 @@ pub type DecisionResult<C> = Result<
 >;
 
 #[doc(hidden)]
-#[allow(clippy::disallowed_methods, reason = "decider runtime entry point; the disallowed_methods rule targets test code calling decide/evolve directly")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "decider runtime entry point; the disallowed_methods rule targets test code calling decide/evolve directly"
+)]
 pub fn evaluate_decision<C>(state: C::State, command: &C) -> DecisionResult<C>
 where
     C: Decider,
@@ -117,7 +120,10 @@ where
     }
 
     #[doc(hidden)]
-    #[allow(clippy::disallowed_methods, reason = "decider runtime entry point; the disallowed_methods rule targets test code calling decide/evolve directly")]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "decider runtime entry point; the disallowed_methods rule targets test code calling decide/evolve directly"
+    )]
     pub fn handle(self, mut state: C::State, command: &C) -> DecisionResult<C> {
         match self {
             Self::Events(events) => {

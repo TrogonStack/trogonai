@@ -811,7 +811,10 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     });
 }
 
-#[allow(clippy::disallowed_methods, reason = "decider runtime replay path; the disallowed_methods rule targets test code calling decide/evolve directly")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "decider runtime replay path; the disallowed_methods rule targets test code calling decide/evolve directly"
+)]
 fn evolve_state_from_stream_events<C>(
     mut state: C::State,
     stream_events: &[StreamEvent],
@@ -2103,7 +2106,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods, reason = "unit-tests a decide guard on a fixture command; the runtime suite uses FakeRuntime, not the TestCase harness")]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "unit-tests a decide guard on a fixture command; the runtime suite uses FakeRuntime, not the TestCase harness"
+    )]
     fn required_register_decision_rejects_present_state() {
         let command = RequiredRegisterCommand::new("alpha");
 

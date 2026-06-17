@@ -359,7 +359,11 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
         TestCase::<ScheduleNextOccurrence>::new()
-            .given_state(enabled_state(Some(u64::MAX), None, MessageField::some(rrule_schedule(3))))
+            .given_state(enabled_state(
+                Some(u64::MAX),
+                None,
+                MessageField::some(rrule_schedule(3)),
+            ))
             .when(command(id, now))
             .then_error(ScheduleNextOccurrenceError::OccurrenceSequence {
                 source: ScheduleOccurrenceSequenceError::Overflow,
