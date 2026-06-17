@@ -226,53 +226,41 @@ mod tests {
 
     #[test]
     fn decide_rejects_invalid_state_values() {
-        let command = pause_job_command("backup");
+        TestCase::<PauseSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: None,
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(pause_job_command("backup"))
+            .then_error(PauseScheduleError::MissingStateValue);
 
-        assert_eq!(
-            PauseSchedule::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: None,
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &command
-            )
-            .unwrap_err(),
-            PauseScheduleError::MissingStateValue
-        );
-        assert_eq!(
-            PauseSchedule::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(123)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &command,
-            )
-            .unwrap_err(),
-            PauseScheduleError::UnknownStateValue { value: 123 }
-        );
-        assert_eq!(
-            PauseSchedule::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &command,
-            )
-            .unwrap_err(),
-            PauseScheduleError::UnknownStateValue { value: 0 }
-        );
+        TestCase::<PauseSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(123)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(pause_job_command("backup"))
+            .then_error(PauseScheduleError::UnknownStateValue { value: 123 });
+
+        TestCase::<PauseSchedule>::new()
+            .given_state(state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            })
+            .when(pause_job_command("backup"))
+            .then_error(PauseScheduleError::UnknownStateValue { value: 0 });
     }
 
     #[test]
