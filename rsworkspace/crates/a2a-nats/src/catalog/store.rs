@@ -149,7 +149,11 @@ impl<K> CatalogStore for KvCatalogStore<K>
 where
     K: JetStreamKvGet + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate + Send + Sync + Clone + 'static,
 {
-    async fn put_card(&self, agent_id: &A2aAgentId, card: &a2a::agent_card::AgentCard) -> Result<(), CatalogStoreError> {
+    async fn put_card(
+        &self,
+        agent_id: &A2aAgentId,
+        card: &a2a::agent_card::AgentCard,
+    ) -> Result<(), CatalogStoreError> {
         let value_json: Value = serde_json::to_value(card).map_err(CatalogStoreError::Serialize)?;
         a2a_pack::validate_agent_card_value(&value_json).map_err(CatalogStoreError::AgentCardSchema)?;
         let value: Bytes = serde_json::to_vec(&value_json)
