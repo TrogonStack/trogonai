@@ -71,12 +71,9 @@ impl AgentCardValidateError {
             .collect();
         lines.sort();
         lines.dedup();
-        let message = if lines.is_empty() {
-            "AgentCard failed JSON Schema validation".to_string()
-        } else {
-            lines.join("; ")
-        };
-        Self { message }
+        Self {
+            message: lines.join("; "),
+        }
     }
 }
 

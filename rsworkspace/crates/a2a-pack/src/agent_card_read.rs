@@ -33,13 +33,9 @@ pub type AgentCardSchemaError = AgentCardValidateError;
 
 /// Validates an AgentCard document on read, tagging the materialization source for callers.
 pub fn validate_agent_card_on_read(value: &Value, source: AgentCardSource) -> Result<(), AgentCardSchemaError> {
-    validate_agent_card_value(value).map_err(|error| {
-        warn!(
-            source = source.as_str(),
-            error = %error,
-            "AgentCard read validation failed; rejecting card"
-        );
-        error
+    let source_label = source.as_str();
+    validate_agent_card_value(value).inspect_err(|error| {
+        warn!(source = source_label, %error, "AgentCard read validation failed; rejecting card");
     })
 }
 
