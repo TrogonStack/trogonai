@@ -79,6 +79,11 @@ twilight-model = "=0.17.1"
 anyhow = "=1.0.102"
 thiserror = "=2.0.18"
 
+# SpiceDB / authzed gRPC (feature-gated SpiceDB-backed import gate)
+authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
+tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen", "router"] }
+moka = { version = "=0.12.10", features = ["future"] }
+
 # Misc
 sha2 = "=0.10.8"
 tempfile = "=3.27.0"
