@@ -4,6 +4,8 @@
 //! subjects and JetStream streams. This crate is being assembled incrementally;
 //! the current slice ships value objects + JSON-RPC codec + protocol constants.
 
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 pub mod a2a_prefix;
 pub mod agent_id;
 pub mod constants;
