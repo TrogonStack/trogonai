@@ -29,6 +29,7 @@ dependencies = [
 name = "a2a-nats"
 version = "0.1.0"
 dependencies = [
+ "a2a-identity-types",
  "a2a-lf",
  "bytes",
  "futures",
