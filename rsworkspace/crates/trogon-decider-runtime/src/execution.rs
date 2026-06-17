@@ -841,8 +841,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
-
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -2105,6 +2103,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "unit-tests a decide guard on a fixture command; the runtime suite uses FakeRuntime, not the TestCase harness")]
     fn required_register_decision_rejects_present_state() {
         let command = RequiredRegisterCommand::new("alpha");
 

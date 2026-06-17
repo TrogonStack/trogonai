@@ -230,10 +230,9 @@ impl CommandSnapshotPolicy for RecordScheduleOccurrence {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
-
     use buffa::{EnumValue, MessageField};
     use chrono::TimeZone;
+    use trogon_decider::testing::TestCase;
 
     use super::*;
     use crate::commands::domain::{Schedule as DomainSchedule, ScheduleEventSchedule};
@@ -293,26 +292,12 @@ mod tests {
         )
     }
 
-    fn disabled_state(
-        last_occurrence_at: Option<DateTime<Utc>>,
-        last_occurrence_sequence: Option<u64>,
-        pending_occurrence_at: Option<DateTime<Utc>>,
-        schedule: MessageField<v1::Schedule>,
-    ) -> state_v1::State {
-        present_state(
-            state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED,
-            last_occurrence_at,
-            last_occurrence_sequence,
-            pending_occurrence_at,
-            schedule,
-        )
-    }
-
     fn record(id: &str) -> RecordScheduleOccurrence {
         RecordScheduleOccurrence::new(schedule_id(id), occurrence_at(), recorded_at())
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "delegation test: asserts Decider::evolve forwards to the schedule state module")]
     fn decider_identity_delegates_to_schedule_state() {
         let command = record("recurring");
         assert_eq!(command.stream_id(), "recurring");
@@ -370,182 +355,173 @@ mod tests {
         }
     }
 
+    fn created(id: &str, enabled: bool, schedule: v1::Schedule) -> v1::ScheduleEvent {
+        let kind = if enabled {
+            v1::schedule_status::Scheduled {}.into()
+        } else {
+            v1::schedule_status::Paused {}.into()
+        };
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleCreated {
+                    schedule_id: id.to_string(),
+                    status: MessageField::some(v1::ScheduleStatus { kind: Some(kind) }),
+                    schedule: MessageField::some(schedule),
+                    delivery: MessageField::default(),
+                    message: MessageField::default(),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn removed(id: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleRemoved {
+                    schedule_id: id.to_string(),
+                }
+                .into(),
+            ),
+        }
+    }
+
     #[test]
     fn records_occurrence_and_schedules_the_next_one() {
         let id = "recurring";
-        let state = enabled_state(None, None, Some(occurrence_at()), MessageField::some(rrule_schedule(3)));
 
-        let decision = RecordScheduleOccurrence::decide(&state, &record(id)).unwrap();
-        assert!(matches!(&decision, Decision::Events(_)));
-        if let Decision::Events(events) = decision {
-            assert_eq!(
-                events.as_slice(),
-                &[
-                    recorded(id, 1, occurrence_at()),
-                    scheduled(id, 2, Utc.with_ymd_and_hms(2026, 6, 5, 0, 0, 0).unwrap()),
-                ]
-            );
-        }
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([created(id, true, rrule_schedule(3)), scheduled(id, 1, occurrence_at())])
+            .when(record(id))
+            .then([
+                recorded(id, 1, occurrence_at()),
+                scheduled(id, 2, Utc.with_ymd_and_hms(2026, 6, 5, 0, 0, 0).unwrap()),
+            ]);
     }
 
     #[test]
     fn records_final_occurrence_and_completes() {
         let id = "recurring";
-        let state = enabled_state(
-            Some(Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
-            Some(1),
-            Some(occurrence_at()),
-            MessageField::some(rrule_schedule(2)),
-        );
 
-        let decision = RecordScheduleOccurrence::decide(&state, &record(id)).unwrap();
-        assert!(matches!(&decision, Decision::Events(_)));
-        if let Decision::Events(events) = decision {
-            assert_eq!(events.as_slice(), &[recorded(id, 2, occurrence_at()), completed(id, 2)]);
-        }
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([
+                created(id, true, rrule_schedule(2)),
+                recorded(id, 1, Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
+                scheduled(id, 2, occurrence_at()),
+            ])
+            .when(record(id))
+            .then([recorded(id, 2, occurrence_at()), completed(id, 2)]);
     }
 
     #[test]
     fn records_paused_pending_occurrence_without_scheduling_follow_up() {
         let id = "recurring";
-        let state = disabled_state(None, None, Some(occurrence_at()), MessageField::some(rrule_schedule(3)));
 
-        let decision = RecordScheduleOccurrence::decide(&state, &record(id)).unwrap();
-        assert!(matches!(&decision, Decision::Events(_)));
-        if let Decision::Events(events) = decision {
-            assert_eq!(events.as_slice(), &[recorded(id, 1, occurrence_at())]);
-        }
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([created(id, false, rrule_schedule(3)), scheduled(id, 1, occurrence_at())])
+            .when(record(id))
+            .then([recorded(id, 1, occurrence_at())]);
     }
 
     #[test]
     fn records_final_occurrence_while_paused_completes() {
         let id = "recurring";
-        let state = disabled_state(
-            Some(Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
-            Some(1),
-            Some(occurrence_at()),
-            MessageField::some(rrule_schedule(2)),
-        );
 
-        let decision = RecordScheduleOccurrence::decide(&state, &record(id)).unwrap();
-        assert!(matches!(&decision, Decision::Events(_)));
-        if let Decision::Events(events) = decision {
-            assert_eq!(events.as_slice(), &[recorded(id, 2, occurrence_at()), completed(id, 2)]);
-        }
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([
+                created(id, false, rrule_schedule(2)),
+                recorded(id, 1, Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
+                scheduled(id, 2, occurrence_at()),
+            ])
+            .when(record(id))
+            .then([recorded(id, 2, occurrence_at()), completed(id, 2)]);
     }
 
     #[test]
     fn rejects_missing_and_deleted_schedules() {
         let id = "recurring";
 
-        assert_eq!(
-            RecordScheduleOccurrence::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &record(id),
-            )
-            .unwrap_err(),
-            RecordScheduleOccurrenceError::ScheduleNotFound { id: schedule_id(id) }
-        );
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given_no_history()
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::ScheduleNotFound { id: schedule_id(id) });
 
-        assert_eq!(
-            RecordScheduleOccurrence::decide(
-                &state_v1::State {
-                    completed: None,
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_DELETED)),
-                    last_occurrence_at: MessageField::default(),
-                    last_occurrence_sequence: None,
-                    schedule: MessageField::default(),
-                    pending_occurrence_at: MessageField::default(),
-                },
-                &record(id),
-            )
-            .unwrap_err(),
-            RecordScheduleOccurrenceError::ScheduleDeleted { id: schedule_id(id) }
-        );
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([created(id, true, rrule_schedule(2)), removed(id)])
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::ScheduleDeleted { id: schedule_id(id) });
     }
 
     #[test]
     fn rejects_duplicate_or_stale_occurrences() {
         let id = "recurring";
         let last_recorded_at = occurrence_at();
-        let state = enabled_state(
-            Some(last_recorded_at),
-            Some(1),
-            Some(occurrence_at()),
-            MessageField::some(rrule_schedule(2)),
-        );
 
-        assert_eq!(
-            RecordScheduleOccurrence::decide(&state, &record(id)).unwrap_err(),
-            RecordScheduleOccurrenceError::OccurrenceAlreadyRecorded {
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([
+                created(id, true, rrule_schedule(2)),
+                recorded(id, 1, last_recorded_at),
+                scheduled(id, 2, occurrence_at()),
+            ])
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::OccurrenceAlreadyRecorded {
                 id: schedule_id(id),
                 occurrence_at: occurrence_at(),
                 last_recorded_at,
-            }
-        );
+            });
     }
 
     #[test]
     fn rejects_occurrences_that_were_not_planned() {
         let id = "recurring";
 
-        let no_pending = enabled_state(None, None, None, MessageField::some(rrule_schedule(2)));
-        assert_eq!(
-            RecordScheduleOccurrence::decide(&no_pending, &record(id)).unwrap_err(),
-            RecordScheduleOccurrenceError::OccurrenceNotPending {
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([created(id, true, rrule_schedule(2))])
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::OccurrenceNotPending {
                 id: schedule_id(id),
                 occurrence_at: occurrence_at(),
                 pending_occurrence_at: None,
-            }
-        );
-        let paused_no_pending = disabled_state(None, None, None, MessageField::some(rrule_schedule(2)));
-        assert_eq!(
-            RecordScheduleOccurrence::decide(&paused_no_pending, &record(id)).unwrap_err(),
-            RecordScheduleOccurrenceError::OccurrenceNotPending {
+            });
+
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([created(id, false, rrule_schedule(2))])
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::OccurrenceNotPending {
                 id: schedule_id(id),
                 occurrence_at: occurrence_at(),
                 pending_occurrence_at: None,
-            }
-        );
+            });
 
         let other_pending = Utc.with_ymd_and_hms(2026, 6, 5, 0, 0, 0).unwrap();
-        let mismatched = enabled_state(None, None, Some(other_pending), MessageField::some(rrule_schedule(3)));
-        assert_eq!(
-            RecordScheduleOccurrence::decide(&mismatched, &record(id)).unwrap_err(),
-            RecordScheduleOccurrenceError::OccurrenceNotPending {
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([created(id, true, rrule_schedule(3)), scheduled(id, 1, other_pending)])
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::OccurrenceNotPending {
                 id: schedule_id(id),
                 occurrence_at: occurrence_at(),
                 pending_occurrence_at: Some(other_pending),
-            }
-        );
+            });
     }
 
     #[test]
     fn rejects_occurrence_sequence_overflow() {
         let id = "recurring";
-        let state = enabled_state(
-            Some(Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
-            Some(u64::MAX),
-            Some(occurrence_at()),
-            MessageField::some(rrule_schedule(2)),
-        );
 
-        assert_eq!(
-            RecordScheduleOccurrence::decide(&state, &record(id)).unwrap_err(),
-            RecordScheduleOccurrenceError::OccurrenceSequence {
-                source: ScheduleOccurrenceSequenceError::Overflow
-            }
-        );
+        TestCase::<RecordScheduleOccurrence>::new()
+            .given([
+                created(id, true, rrule_schedule(2)),
+                recorded(id, u64::MAX, Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap()),
+                scheduled(id, 2, occurrence_at()),
+            ])
+            .when(record(id))
+            .then_error(RecordScheduleOccurrenceError::OccurrenceSequence {
+                source: ScheduleOccurrenceSequenceError::Overflow,
+            });
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "exercises decide's guard against corrupt persisted state values that no event replay can produce")]
     fn rejects_malformed_state_values() {
         let id = "recurring";
 

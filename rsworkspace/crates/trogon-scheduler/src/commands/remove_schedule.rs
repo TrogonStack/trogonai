@@ -81,8 +81,6 @@ impl CommandSnapshotPolicy for RemoveSchedule {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
-
     use buffa::{EnumValue, MessageField};
     use trogon_decider::testing::TestCase;
     use trogon_decider_runtime::{CommandSnapshotPolicy, Decider};
@@ -226,6 +224,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "exercises decide's guard against corrupt persisted state values that no event replay can produce")]
     fn decide_rejects_invalid_state_values() {
         let command = remove_job_command("backup");
 
@@ -277,6 +276,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "delegation test: asserts Decider::evolve forwards to the schedule state module")]
     fn decider_trait_methods_delegate_to_schedule_state() {
         let command = remove_job_command("backup");
 

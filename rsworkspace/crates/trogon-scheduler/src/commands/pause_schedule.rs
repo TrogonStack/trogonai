@@ -84,8 +84,6 @@ impl CommandSnapshotPolicy for PauseSchedule {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
-
     use buffa::{EnumValue, MessageField};
     use trogon_decider::testing::TestCase;
 
@@ -227,6 +225,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "exercises decide's guard against corrupt persisted state values that no event replay can produce")]
     fn decide_rejects_invalid_state_values() {
         let command = pause_job_command("backup");
 

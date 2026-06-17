@@ -101,8 +101,6 @@ impl Decider for CreateSchedule {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
-
     use std::error::Error;
 
     use buffa::{EnumValue, MessageField};
@@ -278,6 +276,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods, reason = "exercises decide's guard against corrupt persisted state values that no event replay can produce")]
     fn decide_rejects_invalid_state_values() {
         assert_eq!(
             CreateSchedule::decide(
