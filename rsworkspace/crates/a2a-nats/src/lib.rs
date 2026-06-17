@@ -18,6 +18,7 @@ pub mod gateway_ingress;
 pub mod jetstream;
 pub mod jsonrpc;
 pub mod nats;
+pub mod push;
 pub mod req_id;
 pub mod server;
 pub mod task_id;
