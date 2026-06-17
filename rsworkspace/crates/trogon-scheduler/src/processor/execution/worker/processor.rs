@@ -1289,6 +1289,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn paused_rrule_recorded_occurrence_still_dispatches_user_message() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let create = crate::CreateSchedule {
+            id: schedule_id(id),
+            status: ScheduleEventStatus::Scheduled,
+            schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
+            message: message(),
+        };
+        CommandExecution::new(&harness.event_store, &create)
+            .execute()
+            .await
+            .expect("seed schedule");
+
+        let events = harness.event_store.events(id);
+        harness.process_stream(&events[0]).await;
+        let events = harness.event_store.events(id);
+        harness.process_stream(&events[1]).await;
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
+
+        CommandExecution::new(&harness.event_store, &crate::PauseSchedule::new(schedule_id(id)))
+            .execute()
+            .await
+            .expect("pause");
+        let events = harness.event_store.events(id);
+        let paused = harness.process_stream(events.last().unwrap()).await;
+        assert_eq!(paused.outcome, ProcessedOutcome::Purged);
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 0);
+
+        let occurrence_at = DateTime::parse_from_rfc3339("2026-06-04T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        CommandExecution::new(
+            &harness.event_store,
+            &crate::RecordScheduleOccurrence::new(schedule_id(id), occurrence_at, recorded_at()),
+        )
+        .execute()
+        .await
+        .expect("record paused occurrence");
+
+        let events = harness.event_store.events(id);
+        let dispatched = harness.process_stream(events.last().unwrap()).await;
+        assert_eq!(dispatched.outcome, ProcessedOutcome::Published);
+        assert_eq!(harness.execution.scheduled_count("agent.run"), 1);
+        assert_eq!(
+            harness.execution.payload_for("agent.run").unwrap().as_ref(),
+            br#"{"ok":true}"#
+        );
+        assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 0);
+
+        let checkpoint = ScheduleCheckpointStore::new(harness.kv.clone())
+            .load(&key_for_stream(id))
+            .await
+            .unwrap()
+            .unwrap()
+            .record;
+        assert_eq!(checkpoint.status, ScheduleStatus::Paused);
+    }
+
+    #[tokio::test]
     async fn direct_dispatch_action_uses_the_event_id_without_disambiguation() {
         let harness = Harness::new();
         let request = crate::processor::execution::reconciliation::DispatchRequest::build(

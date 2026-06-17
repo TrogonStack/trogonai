@@ -200,7 +200,9 @@ fn reconcile_occurrence_recorded(
     event_id: Option<&str>,
 ) -> Result<Reconciliation, ReconcileError> {
     let current = checkpoint_for(current, schedule_id)?;
-    if current.status != ScheduleStatus::Scheduled || !matches!(current.schedule, Schedule::RRule { .. }) {
+    if !matches!(current.status, ScheduleStatus::Scheduled | ScheduleStatus::Paused)
+        || !matches!(current.schedule, Schedule::RRule { .. })
+    {
         return Ok(Reconciliation {
             action: ReconcileAction::CheckpointOnly,
             next_checkpoint: advanced(
@@ -226,7 +228,7 @@ fn reconcile_occurrence_recorded(
         action: ReconcileAction::Dispatch(dispatch),
         next_checkpoint: advanced(
             current,
-            ScheduleStatus::Scheduled,
+            current.status,
             ReconcileOutcome::Published,
             stream_position,
             event_id,
@@ -682,6 +684,37 @@ mod tests {
         .unwrap();
         assert_eq!(dispatch.action, ReconcileAction::Dispatch(expected_dispatch));
         assert_eq!(dispatch.next_checkpoint.status, ScheduleStatus::Scheduled);
+        assert_eq!(dispatch.next_checkpoint.last_outcome, ReconcileOutcome::Published);
+        assert_eq!(dispatch.next_checkpoint.last_applied_stream_position, position(2));
+    }
+
+    #[test]
+    fn recorded_occurrence_dispatches_while_checkpoint_is_paused() {
+        let mut current = scheduled_record(
+            "recurring",
+            Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap(),
+        );
+        current.status = ScheduleStatus::Paused;
+
+        let dispatch = reconcile(
+            Some(&current),
+            &occurrence_recorded("recurring", 1, "2026-06-03T00:00:00Z"),
+            position(2),
+            Some("event-2"),
+            now(),
+        )
+        .unwrap();
+
+        let expected_dispatch = DispatchRequest::build_occurrence(
+            &schedule_id("recurring"),
+            ScheduleOccurrenceSequence::try_new(1).unwrap(),
+            instant("2026-06-03T00:00:00Z"),
+            &Delivery::nats_event("agent.run").unwrap(),
+            &message(),
+        )
+        .unwrap();
+        assert_eq!(dispatch.action, ReconcileAction::Dispatch(expected_dispatch));
+        assert_eq!(dispatch.next_checkpoint.status, ScheduleStatus::Paused);
         assert_eq!(dispatch.next_checkpoint.last_outcome, ReconcileOutcome::Published);
         assert_eq!(dispatch.next_checkpoint.last_applied_stream_position, position(2));
     }
