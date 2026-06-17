@@ -30,8 +30,15 @@ impl<'de> Deserialize<'de> for CallerId {
 }
 
 fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
-    if s.is_empty() || s.contains('.') {
+    if s.is_empty() {
         return Err(JwtError::InvalidCallerId);
+    }
+    for c in s.chars() {
+        match c {
+            '.' | '*' | '>' => return Err(JwtError::InvalidCallerId),
+            c if c.is_whitespace() => return Err(JwtError::InvalidCallerId),
+            _ => {}
+        }
     }
     Ok(())
 }
@@ -54,6 +61,20 @@ mod tests {
     #[test]
     fn rejects_dotted() {
         assert!(matches!(CallerId::new("a.b"), Err(JwtError::InvalidCallerId)));
+    }
+
+    #[test]
+    fn rejects_nats_wildcards() {
+        assert!(matches!(CallerId::new("*"), Err(JwtError::InvalidCallerId)));
+        assert!(matches!(CallerId::new(">"), Err(JwtError::InvalidCallerId)));
+        assert!(matches!(CallerId::new("a*b"), Err(JwtError::InvalidCallerId)));
+        assert!(matches!(CallerId::new("a>b"), Err(JwtError::InvalidCallerId)));
+    }
+
+    #[test]
+    fn rejects_whitespace() {
+        assert!(matches!(CallerId::new("a b"), Err(JwtError::InvalidCallerId)));
+        assert!(matches!(CallerId::new("a\tb"), Err(JwtError::InvalidCallerId)));
     }
 
     #[test]

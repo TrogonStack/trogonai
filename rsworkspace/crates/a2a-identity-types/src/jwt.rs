@@ -18,24 +18,35 @@ pub const CALLER_JWT_HEADER_NAME: &str = "A2a-Caller-Jwt";
 pub struct CallerJwtHeaderValue(String);
 
 impl CallerJwtHeaderValue {
+    /// Builds a header value from a [`MintedUserJwt`]. The minted JWT is already
+    /// shape-validated at construction, so this is infallible.
     pub fn from_minted(jwt: &MintedUserJwt) -> Self {
         Self(jwt.as_str().to_owned())
     }
 
     pub fn parse(token: impl Into<String>) -> Result<Self, JwtError> {
         let token = token.into();
-        if token.trim().is_empty() {
-            return Err(JwtError::Decode("caller JWT header value is empty".into()));
-        }
-        if token.split('.').count() != 3 {
-            return Err(JwtError::Decode("caller JWT header value is not a compact JWT".into()));
-        }
+        validate_compact_jwt_shape(&token)?;
         Ok(Self(token))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+fn validate_compact_jwt_shape(token: &str) -> Result<(), JwtError> {
+    if token.trim().is_empty() {
+        return Err(JwtError::Decode("caller JWT header value is empty".into()));
+    }
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(JwtError::Decode("caller JWT header value is not a compact JWT".into()));
+    }
+    if parts.iter().any(|p| p.is_empty()) {
+        return Err(JwtError::Decode("caller JWT header value has empty segment".into()));
+    }
+    Ok(())
 }
 
 impl fmt::Display for CallerJwtHeaderValue {
@@ -51,8 +62,13 @@ impl fmt::Display for CallerJwtHeaderValue {
 pub struct MintedUserJwt(String);
 
 impl MintedUserJwt {
-    pub fn new(token: impl Into<String>) -> Self {
-        Self(token.into())
+    /// Constructs a minted JWT from an already-shape-valid compact JWT string.
+    /// Returns an error if the input is not three non-empty `.`-separated
+    /// segments. Signature verification still lives gateway-side.
+    pub fn new(token: impl Into<String>) -> Result<Self, JwtError> {
+        let token = token.into();
+        validate_compact_jwt_shape(&token)?;
+        Ok(Self(token))
     }
 
     pub fn as_str(&self) -> &str {
@@ -146,16 +162,40 @@ mod tests {
 
     #[test]
     fn header_value_from_minted_copies_string() {
-        let minted = MintedUserJwt::new("a.b.c");
+        let minted = MintedUserJwt::new("a.b.c").unwrap();
         let value = CallerJwtHeaderValue::from_minted(&minted);
         assert_eq!(value.as_str(), "a.b.c");
     }
 
     #[test]
     fn minted_jwt_into_string_yields_owned_token() {
-        let minted = MintedUserJwt::new("a.b.c");
+        let minted = MintedUserJwt::new("a.b.c").unwrap();
         assert_eq!(minted.clone().into_string(), "a.b.c");
         assert_eq!(minted.as_str(), "a.b.c");
+    }
+
+    #[test]
+    fn minted_jwt_rejects_non_compact_input() {
+        assert!(matches!(MintedUserJwt::new("a.b").unwrap_err(), JwtError::Decode(_)));
+        assert!(matches!(MintedUserJwt::new("a..c").unwrap_err(), JwtError::Decode(_)));
+        assert!(matches!(MintedUserJwt::new("a.b.").unwrap_err(), JwtError::Decode(_)));
+        assert!(matches!(MintedUserJwt::new("").unwrap_err(), JwtError::Decode(_)));
+    }
+
+    #[test]
+    fn parse_rejects_empty_segments() {
+        assert!(matches!(
+            CallerJwtHeaderValue::parse("a..c").unwrap_err(),
+            JwtError::Decode(_)
+        ));
+        assert!(matches!(
+            CallerJwtHeaderValue::parse("a.b.").unwrap_err(),
+            JwtError::Decode(_)
+        ));
+        assert!(matches!(
+            CallerJwtHeaderValue::parse(".b.c").unwrap_err(),
+            JwtError::Decode(_)
+        ));
     }
 
     #[test]
@@ -187,33 +227,27 @@ mod tests {
     #[test]
     fn ensure_fresh_accepts_future_exp() {
         let token = build_token(json!({ "exp": 9_999_999_999i64 }));
-        MintedUserJwt::new(token).ensure_fresh().unwrap();
+        MintedUserJwt::new(token).unwrap().ensure_fresh().unwrap();
     }
 
     #[test]
     fn ensure_fresh_rejects_missing_exp() {
         let token = build_token(json!({}));
-        let err = MintedUserJwt::new(token).ensure_fresh().unwrap_err();
+        let err = MintedUserJwt::new(token).unwrap().ensure_fresh().unwrap_err();
         assert!(matches!(err, JwtError::Decode(ref msg) if msg.contains("missing exp")));
     }
 
     #[test]
     fn ensure_fresh_rejects_expired_exp() {
         let token = build_token(json!({ "exp": 1i64 }));
-        let err = MintedUserJwt::new(token).ensure_fresh().unwrap_err();
+        let err = MintedUserJwt::new(token).unwrap().ensure_fresh().unwrap_err();
         assert!(matches!(err, JwtError::Decode(ref msg) if msg.contains("expired")));
     }
 
     #[test]
     fn ensure_fresh_rejects_future_nbf() {
         let token = build_token(json!({ "exp": 9_999_999_999i64, "nbf": 9_999_999_998i64 }));
-        let err = MintedUserJwt::new(token).ensure_fresh().unwrap_err();
+        let err = MintedUserJwt::new(token).unwrap().ensure_fresh().unwrap_err();
         assert!(matches!(err, JwtError::Decode(ref msg) if msg.contains("not yet valid")));
-    }
-
-    #[test]
-    fn ensure_fresh_propagates_decode_error_from_invalid_token() {
-        let err = MintedUserJwt::new("not-a-jwt").ensure_fresh().unwrap_err();
-        assert!(matches!(err, JwtError::Decode(_)));
     }
 }
