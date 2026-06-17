@@ -765,7 +765,7 @@ mod tests {
 
         let published = js.published_messages();
         assert!(!published.is_empty(), "expected at least one JetStream publish");
-        assert!(published[0].subject.contains("a2a.v1.tasks.t-event.events."));
+        assert!(published[0].subject.contains("a2a.tasks.t-event.events."));
     }
 
     #[tokio::test]
@@ -875,7 +875,7 @@ mod tests {
         let subjects = js.published_subjects();
         let dlq_idx = subjects
             .iter()
-            .position(|s| s == "a2a.v1.push.dlq._.dlq-task")
+            .position(|s| s == "a2a.push.dlq._.dlq-task")
             .unwrap_or_else(|| panic!("missing DLQ publish; got {subjects:?}"));
 
         let msg: serde_json::Value =
@@ -954,7 +954,7 @@ mod tests {
         let subjects = js.published_subjects();
         let dlq_idx = subjects
             .iter()
-            .position(|s| s == "a2a.v1.push.dlq.p_q.dlq-task")
+            .position(|s| s == "a2a.push.dlq.p_q.dlq-task")
             .unwrap_or_else(|| panic!("missing DLQ publish; got {subjects:?}"));
         let _: serde_json::Value = serde_json::from_slice(&js.published_payloads()[dlq_idx]).expect("DLQ payload JSON");
         assert_eq!(dispatcher.recorded_calls().len(), 1);
@@ -1020,7 +1020,7 @@ mod tests {
 
         let subjects = js.published_subjects();
         assert!(
-            subjects.iter().any(|s| s == "a2a.v1.push.dlq.hdr_caller.dlq-task"),
+            subjects.iter().any(|s| s == "a2a.push.dlq.hdr_caller.dlq-task"),
             "expected header-derived DLQ subject; got {subjects:?}"
         );
     }
@@ -1084,7 +1084,7 @@ mod tests {
 
         let subjects = js.published_subjects();
         assert!(
-            subjects.iter().any(|s| s == "a2a.v1.push.dlq._.dlq-task"),
+            subjects.iter().any(|s| s == "a2a.push.dlq._.dlq-task"),
             "expected fallback DLQ subject; got {subjects:?}"
         );
     }

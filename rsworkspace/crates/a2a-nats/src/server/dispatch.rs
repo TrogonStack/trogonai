@@ -67,113 +67,113 @@ mod tests {
 
     #[test]
     fn message_send() {
-        let pl = prefix_len("a2a.v1", "planner");
+        let pl = prefix_len("a2a", "planner");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.planner.message.send", pl),
+            A2aMethod::from_subject("a2a.agents.planner.message.send", pl),
             Some(A2aMethod::MessageSend)
         );
     }
 
     #[test]
     fn message_stream() {
-        let pl = prefix_len("a2a.v1", "planner");
+        let pl = prefix_len("a2a", "planner");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.planner.message.stream", pl),
+            A2aMethod::from_subject("a2a.agents.planner.message.stream", pl),
             Some(A2aMethod::MessageStream)
         );
     }
 
     #[test]
     fn tasks_get() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.get", pl),
+            A2aMethod::from_subject("a2a.agents.bot.tasks.get", pl),
             Some(A2aMethod::TasksGet)
         );
     }
 
     #[test]
     fn tasks_list() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.list", pl),
+            A2aMethod::from_subject("a2a.agents.bot.tasks.list", pl),
             Some(A2aMethod::TasksList)
         );
     }
 
     #[test]
     fn tasks_cancel() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.cancel", pl),
+            A2aMethod::from_subject("a2a.agents.bot.tasks.cancel", pl),
             Some(A2aMethod::TasksCancel)
         );
     }
 
     #[test]
     fn tasks_resubscribe() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.tasks.resubscribe", pl),
+            A2aMethod::from_subject("a2a.agents.bot.tasks.resubscribe", pl),
             Some(A2aMethod::TasksResubscribe)
         );
     }
 
     #[test]
     fn push_set() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.push.set", pl),
+            A2aMethod::from_subject("a2a.agents.bot.push.set", pl),
             Some(A2aMethod::PushNotificationSet)
         );
     }
 
     #[test]
     fn push_get() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.push.get", pl),
+            A2aMethod::from_subject("a2a.agents.bot.push.get", pl),
             Some(A2aMethod::PushNotificationGet)
         );
     }
 
     #[test]
     fn push_list() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.push.list", pl),
+            A2aMethod::from_subject("a2a.agents.bot.push.list", pl),
             Some(A2aMethod::PushNotificationList)
         );
     }
 
     #[test]
     fn push_delete() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.push.delete", pl),
+            A2aMethod::from_subject("a2a.agents.bot.push.delete", pl),
             Some(A2aMethod::PushNotificationDelete)
         );
     }
 
     #[test]
     fn agent_card() {
-        let pl = prefix_len("a2a.v1", "bot");
+        let pl = prefix_len("a2a", "bot");
         assert_eq!(
-            A2aMethod::from_subject("a2a.v1.agents.bot.card", pl),
+            A2aMethod::from_subject("a2a.agents.bot.card", pl),
             Some(A2aMethod::AgentCard)
         );
     }
 
     #[test]
     fn unknown_suffix_returns_none() {
-        let pl = prefix_len("a2a.v1", "bot");
-        assert_eq!(A2aMethod::from_subject("a2a.v1.agents.bot.unknown.method", pl), None);
+        let pl = prefix_len("a2a", "bot");
+        assert_eq!(A2aMethod::from_subject("a2a.agents.bot.unknown.method", pl), None);
     }
 
     #[test]
     fn too_short_subject_returns_none() {
-        let pl = prefix_len("a2a.v1", "bot");
-        assert_eq!(A2aMethod::from_subject("a2a.v1.agents.bot", pl), None);
+        let pl = prefix_len("a2a", "bot");
+        assert_eq!(A2aMethod::from_subject("a2a.agents.bot", pl), None);
     }
 
     #[test]

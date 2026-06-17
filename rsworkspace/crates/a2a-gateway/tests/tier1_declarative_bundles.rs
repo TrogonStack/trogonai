@@ -33,7 +33,7 @@ fn ctx(method: A2aMethod, agent: &str, caller_subject: Option<&str>, nats_subjec
 }
 
 fn ingress_subject(agent: &str, method_dots: &str) -> String {
-    format!("a2a.v1.gateway.{agent}.{method_dots}")
+    format!("a2a.gateway.{agent}.{method_dots}")
 }
 
 #[test]

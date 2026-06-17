@@ -126,7 +126,7 @@ Connect with JetStream read access inside the tenant Account:
 nats --context TENANT stream info A2A_EVENTS
 
 # Expect: discard old; retention interest
-# Subject filter: a2a.v1.tasks.*.events.*  (adjust prefix if non-default)
+# Subject filter: a2a.tasks.*.events.*  (adjust prefix if non-default)
 ```
 
 **Agent process:**
