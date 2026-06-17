@@ -53,6 +53,11 @@ impl std::error::Error for CatalogStoreError {
     }
 }
 
+enum PutAttemptError {
+    Conflict,
+    Fatal(CatalogStoreError),
+}
+
 fn deserialize_validated_agent_card(parsed: Value) -> Result<a2a::agent_card::AgentCard, CatalogStoreError> {
     a2a_pack::validate_agent_card_value(&parsed).map_err(CatalogStoreError::AgentCardSchema)?;
     serde_json::from_value::<a2a::agent_card::AgentCard>(parsed).map_err(CatalogStoreError::Deserialize)
@@ -170,37 +175,63 @@ where
             .map_err(CatalogStoreError::Serialize)?;
         let key = agent_id.as_str().to_owned();
 
-        let entry = self
-            .store
-            .entry(key.clone())
-            .await
-            .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
+        // Bounded retry loop so a concurrent registrar publishing the same key
+        // between our `entry()` read and our `create`/`update` write can't make
+        // re-registration fail permanently. Three attempts is enough to absorb
+        // the two race shapes (`WrongLastRevision` against a stale revision and
+        // `AlreadyExists` against a re-created key) without spinning on a
+        // persistent backend failure.
+        const MAX_PUT_ATTEMPTS: u32 = 3;
+        let mut attempt: u32 = 0;
+        loop {
+            attempt += 1;
+            let entry = self
+                .store
+                .entry(key.clone())
+                .await
+                .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
 
-        // JetStream KV returns the latest revision even when it's a delete/purge
-        // tombstone — `update` against that revision would fail with "wrong last
-        // sequence", so we go through `create` when the most recent entry was a
-        // removal so re-registration after a delete still restores the card.
-        let live_revision = entry.and_then(|e| match e.operation {
-            async_nats::jetstream::kv::Operation::Put => Some(e.revision),
-            async_nats::jetstream::kv::Operation::Delete | async_nats::jetstream::kv::Operation::Purge => None,
-        });
+            // JetStream KV returns the latest revision even when it's a delete or
+            // purge tombstone — `update` against that revision would fail with
+            // "wrong last sequence", so re-registration after a delete must go
+            // through `create` to restore the key.
+            let live_revision = entry.and_then(|e| match e.operation {
+                async_nats::jetstream::kv::Operation::Put => Some(e.revision),
+                async_nats::jetstream::kv::Operation::Delete | async_nats::jetstream::kv::Operation::Purge => None,
+            });
 
-        match live_revision {
-            Some(revision) => {
-                self.store
-                    .update(&key, value, revision)
+            let outcome = match live_revision {
+                Some(revision) => self
+                    .store
+                    .update(&key, value.clone(), revision)
                     .await
-                    .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
-            }
-            None => {
-                self.store
-                    .create(&key, value)
+                    .map(|_| ())
+                    .map_err(|e| match e.kind() {
+                        async_nats::jetstream::kv::UpdateErrorKind::WrongLastRevision => PutAttemptError::Conflict,
+                        _ => PutAttemptError::Fatal(CatalogStoreError::Kv(Box::new(e))),
+                    }),
+                None => self
+                    .store
+                    .create(&key, value.clone())
                     .await
-                    .map_err(|e| CatalogStoreError::Kv(Box::new(e)))?;
+                    .map(|_| ())
+                    .map_err(|e| match e.kind() {
+                        async_nats::jetstream::kv::CreateErrorKind::AlreadyExists => PutAttemptError::Conflict,
+                        _ => PutAttemptError::Fatal(CatalogStoreError::Kv(Box::new(e))),
+                    }),
+            };
+
+            match outcome {
+                Ok(()) => return Ok(()),
+                Err(PutAttemptError::Fatal(e)) => return Err(e),
+                Err(PutAttemptError::Conflict) if attempt < MAX_PUT_ATTEMPTS => continue,
+                Err(PutAttemptError::Conflict) => {
+                    return Err(CatalogStoreError::Kv(Box::<dyn std::error::Error + Send + Sync>::from(
+                        "catalog KV write lost a revision race after retries",
+                    )));
+                }
             }
         }
-
-        Ok(())
     }
 
     async fn get_card(&self, agent_id: &A2aAgentId) -> Result<Option<a2a::agent_card::AgentCard>, CatalogStoreError> {
@@ -300,6 +331,79 @@ mod tests {
         store.put_card(&agent_id("bot"), &card("bot")).await.unwrap();
         assert_eq!(kv.update_calls().len(), 0);
         assert_eq!(kv.create_calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn put_retries_when_concurrent_writer_races_create() {
+        use async_nats::jetstream::kv;
+
+        let kv_store = MockJetStreamKvStore::new();
+        // Two attempts: first sees no entry → create races and loses (AlreadyExists);
+        // second sees a Put entry at revision 5 → update succeeds.
+        kv_store.enqueue_entry_none();
+        kv_store.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
+        kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 5, kv::Operation::Put);
+        kv_store.enqueue_update_result(Ok(6));
+
+        let store = KvCatalogStore::new(kv_store.clone());
+        store.put_card(&agent_id("bot"), &card("bot")).await.unwrap();
+        assert_eq!(kv_store.create_calls().len(), 1);
+        assert_eq!(kv_store.update_calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn put_retries_when_concurrent_writer_races_update() {
+        use async_nats::jetstream::kv;
+
+        let kv_store = MockJetStreamKvStore::new();
+        kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 3, kv::Operation::Put);
+        kv_store.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+        kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 4, kv::Operation::Put);
+        kv_store.enqueue_update_result(Ok(5));
+
+        let store = KvCatalogStore::new(kv_store.clone());
+        store.put_card(&agent_id("bot"), &card("bot")).await.unwrap();
+        assert_eq!(kv_store.update_calls().len(), 2);
+        assert_eq!(kv_store.update_calls()[1].2, 4);
+    }
+
+    #[tokio::test]
+    async fn put_propagates_non_conflict_update_error_without_retry() {
+        use async_nats::jetstream::kv;
+        let kv_store = MockJetStreamKvStore::new();
+        kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 3, kv::Operation::Put);
+        kv_store.enqueue_update_result(Err(kv::UpdateErrorKind::TimedOut));
+        let store = KvCatalogStore::new(kv_store.clone());
+        let err = store.put_card(&agent_id("bot"), &card("bot")).await.unwrap_err();
+        assert!(matches!(err, CatalogStoreError::Kv(_)));
+        assert_eq!(kv_store.update_calls().len(), 1, "fatal update errors must not retry");
+    }
+
+    #[tokio::test]
+    async fn put_propagates_non_conflict_create_error_without_retry() {
+        use async_nats::jetstream::kv;
+        let kv_store = MockJetStreamKvStore::new();
+        kv_store.enqueue_create_result(Err(kv::CreateErrorKind::InvalidKey));
+        let store = KvCatalogStore::new(kv_store.clone());
+        let err = store.put_card(&agent_id("bot"), &card("bot")).await.unwrap_err();
+        assert!(matches!(err, CatalogStoreError::Kv(_)));
+        assert_eq!(kv_store.create_calls().len(), 1, "fatal create errors must not retry");
+    }
+
+    #[tokio::test]
+    async fn put_gives_up_when_revision_race_persists_past_retry_budget() {
+        use async_nats::jetstream::kv;
+
+        let kv_store = MockJetStreamKvStore::new();
+        for _ in 0..3 {
+            kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 1, kv::Operation::Put);
+            kv_store.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+        }
+
+        let store = KvCatalogStore::new(kv_store.clone());
+        let err = store.put_card(&agent_id("bot"), &card("bot")).await.unwrap_err();
+        assert!(matches!(err, CatalogStoreError::Kv(_)));
+        assert_eq!(kv_store.update_calls().len(), 3);
     }
 
     #[tokio::test]

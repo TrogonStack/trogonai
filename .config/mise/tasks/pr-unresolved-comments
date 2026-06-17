@@ -8,8 +8,7 @@
 #
 # Exits 0 with "no unresolved threads" if clean; exits 1 if any unresolved
 # threads remain so it can gate a follow-up step.
-set -u
-set -o pipefail
+set -euo pipefail
 
 JSON_OUT=0
 PR=""
@@ -38,10 +37,11 @@ OWNER="${REPO_NWO%/*}"
 NAME="${REPO_NWO#*/}"
 
 QUERY='
-query($owner: String!, $name: String!, $pr: Int!) {
+query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $pr) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
@@ -58,12 +58,29 @@ query($owner: String!, $name: String!, $pr: Int!) {
 }
 '
 
-THREADS_JSON="$(gh api graphql \
-    -f query="$QUERY" \
-    -F owner="$OWNER" \
-    -F name="$NAME" \
-    -F pr="$PR" \
-    --jq '.data.repository.pullRequest.reviewThreads.nodes | map(select(.isResolved == false))')"
+# Paginate through every review thread page so PRs with >100 threads can't
+# silently hide unresolved comments past the first page.
+THREADS_JSON='[]'
+CURSOR=""
+while :; do
+    if [[ -z "$CURSOR" ]]; then
+        PAGE="$(gh api graphql -f query="$QUERY" -F owner="$OWNER" -F name="$NAME" -F pr="$PR")"
+    else
+        PAGE="$(gh api graphql -f query="$QUERY" -F owner="$OWNER" -F name="$NAME" -F pr="$PR" -F cursor="$CURSOR")"
+    fi
+    if [[ -z "$PAGE" ]] || ! jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1 <<<"$PAGE"; then
+        echo "FAIL: GitHub GraphQL returned no review-thread payload for PR #$PR — check 'gh auth status' and PR visibility." >&2
+        exit 2
+    fi
+    THREADS_JSON="$(jq -s '
+        (.[0] + (.[1].data.repository.pullRequest.reviewThreads.nodes | map(select(.isResolved == false))))
+    ' <(echo "$THREADS_JSON") <(echo "$PAGE"))"
+    HAS_NEXT="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<<"$PAGE")"
+    if [[ "$HAS_NEXT" != "true" ]]; then
+        break
+    fi
+    CURSOR="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<<"$PAGE")"
+done
 
 if [[ "$JSON_OUT" == 1 ]]; then
     echo "$THREADS_JSON"
