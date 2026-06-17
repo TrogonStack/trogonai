@@ -84,6 +84,8 @@ impl CommandSnapshotPolicy for PauseSchedule {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
+
     use buffa::{EnumValue, MessageField};
     use trogon_decider::testing::TestCase;
 

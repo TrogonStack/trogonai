@@ -811,6 +811,7 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     });
 }
 
+#[allow(clippy::disallowed_methods, reason = "decider runtime replay path; the disallowed_methods rule targets test code calling decide/evolve directly")]
 fn evolve_state_from_stream_events<C>(
     mut state: C::State,
     stream_events: &[StreamEvent],
@@ -840,6 +841,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods, reason = "pre-existing direct decide/evolve calls; migrate to trogon_decider::testing::TestCase")]
+
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},

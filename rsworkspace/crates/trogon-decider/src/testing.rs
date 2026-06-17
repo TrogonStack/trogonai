@@ -447,6 +447,7 @@ where
     /// Replays given events and provides the command under test.
     ///
     /// Panics when the given history cannot be replayed through [`Decider::evolve`].
+    #[allow(clippy::disallowed_methods, reason = "TestCase is the sanctioned harness; it replays history through evolve so tests don't call it directly")]
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
         let mut state = C::initial_state();
