@@ -8,7 +8,7 @@
 use bytes::Bytes;
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::agent_id::A2aAgentId;
+use crate::agent_id::{A2aAgentId, AgentIdError};
 
 use super::store::CatalogStoreError;
 
@@ -36,12 +36,53 @@ impl std::fmt::Display for RegistrarSubject {
     }
 }
 
-pub fn register_subject_prefix(prefix: &str) -> String {
-    format!("{prefix}.catalog.register.")
+pub fn register_subject_prefix(prefix: &A2aPrefix) -> String {
+    format!("{}.catalog.register.", prefix.as_str())
 }
 
-pub fn agent_id_suffix(subject: &str, prefix_len: usize) -> Option<&str> {
-    subject.get(prefix_len..).filter(|s| !s.is_empty())
+/// Why a wire subject failed `{prefix}.catalog.register.{agent_id}` parsing.
+#[derive(Debug)]
+pub enum AgentSuffixError {
+    /// The subject didn't carry the expected `{prefix}.catalog.register.` leader.
+    NotARegisterSubject,
+    /// Subject had the right leader but no agent-id token after the dot.
+    MissingAgentId,
+    /// Agent-id token failed `A2aAgentId` validation.
+    InvalidAgentId(AgentIdError),
+}
+
+impl std::fmt::Display for AgentSuffixError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotARegisterSubject => write!(f, "subject is not a `{{prefix}}.catalog.register.` register subject"),
+            Self::MissingAgentId => write!(f, "register subject is missing the `{{agent_id}}` segment"),
+            Self::InvalidAgentId(e) => write!(f, "register subject agent_id is invalid: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for AgentSuffixError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidAgentId(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+/// Extract a validated `A2aAgentId` from a `{prefix}.catalog.register.{agent_id}` subject.
+///
+/// Returns a typed error instead of an `Option<&str>` so the bad-shape, missing
+/// agent-id, and validation-failed paths each propagate distinctly to the caller.
+pub fn agent_id_from_subject(subject: &str, prefix: &A2aPrefix) -> Result<A2aAgentId, AgentSuffixError> {
+    let leader = register_subject_prefix(prefix);
+    let remainder = subject
+        .strip_prefix(leader.as_str())
+        .ok_or(AgentSuffixError::NotARegisterSubject)?;
+    if remainder.is_empty() {
+        return Err(AgentSuffixError::MissingAgentId);
+    }
+    A2aAgentId::new(remainder).map_err(AgentSuffixError::InvalidAgentId)
 }
 
 pub fn success_reply() -> Option<Bytes> {
@@ -176,17 +217,53 @@ mod tests {
     }
 
     #[test]
-    fn agent_id_suffix_peels_register_subject() {
-        let prefix_dot = register_subject_prefix("a2a");
-        let subject = "a2a.catalog.register.planner";
-        assert_eq!(agent_id_suffix(subject, prefix_dot.len()), Some("planner"));
+    fn register_subject_prefix_takes_typed_prefix() {
+        assert_eq!(register_subject_prefix(&prefix("a2a")), "a2a.catalog.register.");
+        assert_eq!(register_subject_prefix(&prefix("my.app")), "my.app.catalog.register.");
     }
 
     #[test]
-    fn agent_id_suffix_returns_none_when_too_short() {
-        let prefix_dot = register_subject_prefix("a2a");
-        assert_eq!(agent_id_suffix("a2a.catalog.register.", prefix_dot.len()), None);
-        assert_eq!(agent_id_suffix("a2a.catalog.register", prefix_dot.len()), None);
+    fn agent_id_from_subject_returns_typed_agent_id() {
+        let id = agent_id_from_subject("a2a.catalog.register.planner", &prefix("a2a")).unwrap();
+        assert_eq!(id.as_str(), "planner");
+    }
+
+    #[test]
+    fn agent_id_from_subject_rejects_subject_missing_register_leader() {
+        let err = agent_id_from_subject("a2a.other.register.planner", &prefix("a2a")).unwrap_err();
+        assert!(matches!(err, AgentSuffixError::NotARegisterSubject));
+    }
+
+    #[test]
+    fn agent_id_from_subject_rejects_missing_agent_id_segment() {
+        let err = agent_id_from_subject("a2a.catalog.register.", &prefix("a2a")).unwrap_err();
+        assert!(matches!(err, AgentSuffixError::MissingAgentId));
+    }
+
+    #[test]
+    fn agent_id_from_subject_rejects_invalid_agent_id_segment() {
+        let err = agent_id_from_subject("a2a.catalog.register.bad*agent", &prefix("a2a")).unwrap_err();
+        assert!(matches!(err, AgentSuffixError::InvalidAgentId(_)));
+    }
+
+    #[test]
+    fn agent_suffix_error_display_and_source() {
+        use std::error::Error;
+        assert!(
+            AgentSuffixError::NotARegisterSubject
+                .to_string()
+                .contains("register subject")
+        );
+        assert!(
+            AgentSuffixError::MissingAgentId
+                .to_string()
+                .contains("missing the `{agent_id}`")
+        );
+        let id_err = A2aAgentId::new("bad*agent").unwrap_err();
+        let wrap = AgentSuffixError::InvalidAgentId(id_err);
+        assert!(wrap.to_string().contains("agent_id is invalid"));
+        assert!(wrap.source().is_some());
+        assert!(AgentSuffixError::MissingAgentId.source().is_none());
     }
 
     #[test]
