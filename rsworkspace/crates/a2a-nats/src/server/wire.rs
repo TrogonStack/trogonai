@@ -8,15 +8,37 @@
 use crate::jsonrpc::JsonRpcId;
 
 /// Inbound JSON-RPC 2.0 request from a client.
+///
+/// `id` distinguishes three wire states the JSON-RPC 2.0 spec treats as
+/// semantically different:
+/// - field absent → notification (no response expected) → `None`
+/// - field present with explicit `null` → request with null id → `Some(JsonRpcId::Null)`
+/// - field present with number/string → typed id → `Some(JsonRpcId::{Number,String})`
 #[derive(Debug, serde::Deserialize)]
 pub struct JsonRpcRequest<P> {
     #[serde(rename = "jsonrpc")]
     #[allow(dead_code)]
     pub version: String,
+    #[serde(default, deserialize_with = "deserialize_optional_id")]
     pub id: Option<JsonRpcId>,
     #[allow(dead_code)]
     pub method: Option<String>,
     pub params: Option<P>,
+}
+
+fn deserialize_optional_id<'de, D>(deserializer: D) -> Result<Option<JsonRpcId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+    use serde::de::IntoDeserializer;
+    let value: serde_json::Value = serde::Deserialize::deserialize(deserializer)?;
+    if value.is_null() {
+        return Ok(Some(JsonRpcId::Null));
+    }
+    JsonRpcId::deserialize(value.into_deserializer())
+        .map(Some)
+        .map_err(|e: serde_json::Error| <D::Error as serde::de::Error>::custom(e.to_string()))
 }
 
 /// Outbound JSON-RPC 2.0 success response.
@@ -158,5 +180,33 @@ mod tests {
         let resp = JsonRpcErrorResponse::internal_error(None, "boom");
         assert_eq!(resp.error.code, -32603);
         assert_eq!(resp.error.message, "boom");
+    }
+
+    #[test]
+    fn request_absent_id_is_notification() {
+        let raw = br#"{"jsonrpc":"2.0","method":"m","params":null}"#;
+        let req: JsonRpcRequest<serde_json::Value> = parse_request(raw).unwrap();
+        assert_eq!(req.id, None);
+    }
+
+    #[test]
+    fn request_explicit_null_id_is_call_with_null() {
+        let raw = br#"{"jsonrpc":"2.0","id":null,"method":"m","params":null}"#;
+        let req: JsonRpcRequest<serde_json::Value> = parse_request(raw).unwrap();
+        assert_eq!(req.id, Some(JsonRpcId::Null));
+    }
+
+    #[test]
+    fn request_number_id_round_trips() {
+        let raw = br#"{"jsonrpc":"2.0","id":42,"method":"m","params":null}"#;
+        let req: JsonRpcRequest<serde_json::Value> = parse_request(raw).unwrap();
+        assert_eq!(req.id, Some(JsonRpcId::Number(42)));
+    }
+
+    #[test]
+    fn request_string_id_round_trips() {
+        let raw = br#"{"jsonrpc":"2.0","id":"abc","method":"m","params":null}"#;
+        let req: JsonRpcRequest<serde_json::Value> = parse_request(raw).unwrap();
+        assert_eq!(req.id, Some(JsonRpcId::String("abc".into())));
     }
 }
