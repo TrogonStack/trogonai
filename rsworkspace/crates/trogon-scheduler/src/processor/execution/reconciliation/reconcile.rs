@@ -282,7 +282,12 @@ fn reconcile_completed(
     event_id: Option<&str>,
 ) -> Result<Reconciliation, ReconcileError> {
     let current = checkpoint_for(current, schedule_id)?;
-    if current.status != ScheduleStatus::Scheduled || !matches!(current.schedule, Schedule::RRule { .. }) {
+    if !matches!(current.schedule, Schedule::RRule { .. })
+        || matches!(
+            current.status,
+            ScheduleStatus::Removed | ScheduleStatus::Unsupported | ScheduleStatus::Unknown
+        )
+    {
         return Ok(Reconciliation {
             action: ReconcileAction::CheckpointOnly,
             next_checkpoint: advanced(
@@ -751,7 +756,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_event_noops_for_paused_rrule_checkpoints() {
+    fn completed_event_expires_paused_rrule_checkpoints() {
         let mut current = scheduled_record(
             "recurring",
             Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
@@ -767,12 +772,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(completion.action, ReconcileAction::CheckpointOnly);
-        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Paused);
-        assert_eq!(
-            completion.next_checkpoint.last_outcome,
-            ReconcileOutcome::DuplicateStale
-        );
+        assert_eq!(completion.action, ReconcileAction::Purge(current.subject()));
+        assert_eq!(completion.next_checkpoint.status, ScheduleStatus::Expired);
+        assert_eq!(completion.next_checkpoint.last_outcome, ReconcileOutcome::Expired);
     }
 
     #[test]
