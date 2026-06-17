@@ -434,6 +434,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut, C: Epoch
 
 #[cfg(test)]
 mod tests {
+    use super::super::config::{SlackAppToken, SlackSocketModeConfig};
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
@@ -815,6 +816,27 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["custom.event.app_mention"]);
+    }
+
+    #[tokio::test]
+    async fn router_without_webhook_transport_has_no_webhook_route() {
+        let config = SlackConfig {
+            subject_prefix: NatsToken::new("slack").unwrap(),
+            stream_name: NatsToken::new("SLACK").unwrap(),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            transport: super::super::config::SlackTransportConfig::SocketMode(SlackSocketModeConfig {
+                app_token: SlackAppToken::new("xapp-test").unwrap(),
+            }),
+        };
+        let app = router(wrap_publisher(MockJetStreamPublisher::new()), &config);
+        let body = event_callback_body("app_mention");
+        let ts = current_timestamp();
+        let sig = compute_sig(TEST_SECRET, &ts, &body);
+
+        let resp = app.oneshot(webhook_request(&body, &ts, Some(&sig))).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

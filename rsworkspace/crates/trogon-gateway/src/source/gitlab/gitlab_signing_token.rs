@@ -38,12 +38,8 @@ impl GitLabSigningToken {
         if decoded.len() != GITLAB_SIGNING_TOKEN_BYTES {
             return Err(GitLabSigningTokenError::InvalidLength { actual: decoded.len() });
         }
-        let bytes = match <Vec<u8> as TryInto<[u8; GITLAB_SIGNING_TOKEN_BYTES]>>::try_into(decoded) {
-            Ok(bytes) => bytes,
-            Err(decoded) => {
-                return Err(GitLabSigningTokenError::InvalidLength { actual: decoded.len() });
-            }
-        };
+        let mut bytes = [0; GITLAB_SIGNING_TOKEN_BYTES];
+        bytes.copy_from_slice(&decoded);
         Ok(Self(bytes))
     }
 

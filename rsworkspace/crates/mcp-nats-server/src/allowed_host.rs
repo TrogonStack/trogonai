@@ -36,10 +36,9 @@ fn is_valid_allowed_host(raw: &str) -> bool {
     let (host, port) = match colon_count {
         0 => (raw, None),
         1 => {
-            let Some((host, port)) = raw.rsplit_once(':') else {
-                return false;
-            };
-            (host, Some(port))
+            let colon = raw.find(':').unwrap_or(raw.len());
+            let (host, port) = raw.split_at(colon);
+            (host, Some(&port[1..]))
         }
         _ => return false,
     };
