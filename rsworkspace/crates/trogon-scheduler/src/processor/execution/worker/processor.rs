@@ -484,15 +484,13 @@ where
         }
     }
 
-    /// Asks the schedule aggregate to plan the next occurrence. Rejections that
-    /// mean "nothing to arm" (already armed or paused) are idempotent no-ops;
-    /// transient store failures and unexpected rejections surface for redelivery.
     async fn arm_next_occurrence(&self, schedule_id: &ScheduleId, now: DateTime<Utc>) -> Result<(), RetrySignal> {
         let command = ScheduleNextOccurrence::new(schedule_id.clone(), now);
         match CommandExecution::new(&self.event_store, &command).execute().await {
             Ok(_) => Ok(()),
             Err(CommandError::Decide(rejection)) => match rejection {
                 ScheduleNextOccurrenceError::AlreadyArmed { .. }
+                | ScheduleNextOccurrenceError::AlreadyCompleted { .. }
                 | ScheduleNextOccurrenceError::SchedulePaused { .. } => Ok(()),
                 other => Err(RetrySignal::ArmSchedule {
                     source: Box::new(other),
@@ -1158,6 +1156,36 @@ mod tests {
         let processed = harness.process_stream(&created[0]).await;
         assert_eq!(processed.outcome, ProcessedOutcome::Published);
         assert_eq!(harness.event_store.events(id).len(), armed_len);
+    }
+
+    #[tokio::test]
+    async fn arm_is_idempotent_when_completion_was_appended_before_checkpoint_save() {
+        let harness = Harness::new();
+        let id = "recurring";
+        let create = crate::CreateSchedule {
+            id: schedule_id(id),
+            status: ScheduleEventStatus::Scheduled,
+            schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=1", None).unwrap(),
+            delivery: Delivery::nats_event("agent.run").unwrap(),
+            message: message(),
+        };
+        CommandExecution::new(&harness.event_store, &create)
+            .execute()
+            .await
+            .expect("seed schedule");
+
+        let created = harness.event_store.events(id);
+        harness.kv.fail_next_create();
+        let retry = harness.processor.process(&created[0], recorded_at()).await.unwrap_err();
+        assert!(matches!(retry, RetrySignal::Checkpoint { .. }));
+        assert_eq!(harness.event_store.events(id).len(), 2);
+
+        let processed = harness.process_stream(&created[0]).await;
+        assert_eq!(processed.outcome, ProcessedOutcome::Published);
+
+        let completed = harness.event_store.events(id);
+        let expired = harness.process_stream(&completed[1]).await;
+        assert_eq!(expired.outcome, ProcessedOutcome::Expired);
     }
 
     #[tokio::test]
