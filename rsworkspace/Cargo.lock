@@ -5460,6 +5460,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "buffa 0.7.0",
+ "buffa-types 0.7.0",
  "bytes",
  "futures",
  "futures-util",
@@ -5480,7 +5481,9 @@ dependencies = [
  "trogon-registry",
  "trogon-runner-tools",
  "trogon-std",
+ "trogon-telemetry",
  "trogon-tools",
+ "trogonai-artifacts",
  "trogonai-catalog-client",
  "trogonai-catalog-proto",
  "trogonai-compactor-proto",
@@ -5612,6 +5615,7 @@ dependencies = [
  "trogon-registry",
  "trogon-runner-tools",
  "trogon-std",
+ "trogon-telemetry",
  "trogon-tools",
  "trogonai-capabilities",
  "trogonai-catalog-client",
@@ -6395,6 +6399,7 @@ name = "trogonai-artifacts"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "base64 0.21.7",
  "buffa 0.7.0",
  "buffa-types 0.7.0",
  "bytes",

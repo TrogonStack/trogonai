@@ -1,7 +1,7 @@
 use serde_json::json;
 use trogonai_session_contracts::{
-    CanonicalMessage, PromptProjection, SessionConfig, SessionSnapshotState,
-    __buffa::oneof::content_block::Kind as BlockKind,
+    __buffa::oneof::content_block::Kind as BlockKind, CanonicalMessage, PromptProjection, SessionConfig,
+    SessionSnapshotState,
 };
 
 use crate::error::SwitchingError;
@@ -22,9 +22,7 @@ pub fn portable_config_from_snapshot(state: &SessionSnapshotState) -> PortableRu
         compactor_model: config.and_then(|cfg| cfg.compactor_model.clone()),
         mode: None,
         system_prompt: config.and_then(|cfg| cfg.system_prompt.clone()),
-        mcp_servers_json: config
-            .map(|cfg| cfg.mcp_servers_json.clone())
-            .unwrap_or_default(),
+        mcp_servers_json: config.map(|cfg| cfg.mcp_servers_json.clone()).unwrap_or_default(),
     }
 }
 
@@ -100,10 +98,7 @@ fn canonical_message_to_legacy_json(message: &CanonicalMessage) -> serde_json::V
 }
 
 /// Merge portable config from runner legacy state into canonical `SessionConfig`.
-pub fn merge_portable_config(
-    base: &mut SessionConfig,
-    portable: &PortableRunnerConfig,
-) {
+pub fn merge_portable_config(base: &mut SessionConfig, portable: &PortableRunnerConfig) {
     if let Some(compactor_model) = &portable.compactor_model {
         base.compactor_model = Some(compactor_model.clone());
     }
@@ -132,10 +127,7 @@ mod tests {
             ..SessionSnapshotState::default()
         };
         let portable = portable_config_from_snapshot(&state);
-        assert_eq!(
-            portable.compactor_model.as_deref(),
-            Some("xai/grok-code-fast")
-        );
+        assert_eq!(portable.compactor_model.as_deref(), Some("xai/grok-code-fast"));
         assert_eq!(portable.system_prompt.as_deref(), Some("stay helpful"));
     }
 

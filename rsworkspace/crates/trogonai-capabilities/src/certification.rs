@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::error::CapabilityError;
+use crate::probe::{ProbeKind, ProbeResult};
 
 /// Provider certification level used by the Switch Safety Gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,6 +17,36 @@ pub enum CertificationLevel {
 impl CertificationLevel {
     pub fn allows_switch_without_warning(self) -> bool {
         matches!(self, Self::SwitchSafe | Self::Production)
+    }
+
+    /// Probes that MUST pass for a model to be switch-safe: structured tool use, JSON
+    /// schema, and a usable context window. A model that fails any of these cannot be
+    /// trusted to carry a real session, so it stays `Basic` (gate still confirms).
+    const SWITCH_CRITICAL: &'static [ProbeKind] = &[ProbeKind::ToolUse, ProbeKind::JsonSchema, ProbeKind::ContextLimits];
+
+    /// Derive a certification level from a contract-test probe battery
+    /// (§ Capability Registry Freshness: *"contract tests para tool use, image input,
+    /// JSON schema, context limits, streaming y compaction"* — promotion to
+    /// `SwitchSafe`/`Production` must come from probes, never from a static baseline).
+    ///
+    /// - every probe passing → `Production`;
+    /// - all switch-critical probes passing (some optional ones failing) → `SwitchSafe`;
+    /// - a switch-critical probe failing, or no probes at all → `Basic`.
+    pub fn from_probe_results(results: &[ProbeResult]) -> Self {
+        if results.is_empty() {
+            return Self::Basic;
+        }
+        let passed = |kind: ProbeKind| results.iter().any(|r| r.kind == kind && r.passed);
+        let failed_any = results.iter().any(|r| !r.passed);
+        let critical_ok = Self::SWITCH_CRITICAL.iter().all(|kind| passed(*kind));
+
+        if !critical_ok {
+            Self::Basic
+        } else if failed_any {
+            Self::SwitchSafe
+        } else {
+            Self::Production
+        }
     }
 }
 
@@ -47,6 +78,25 @@ impl ProviderCertificationEntry {
             });
         }
         Ok(())
+    }
+
+    /// Apply a probe battery to this entry: set the verified capability booleans from the
+    /// probe results, promote (or demote) the certification level via
+    /// [`CertificationLevel::from_probe_results`], and stamp `last_verified_at` so the
+    /// freshness policy treats the entry as verified rather than assumed.
+    pub fn apply_probe_results(&mut self, results: &[ProbeResult], now: OffsetDateTime) {
+        for result in results {
+            match result.kind {
+                ProbeKind::ToolUse => self.tool_use = result.passed,
+                ProbeKind::ImageInput => self.image_input = result.passed,
+                ProbeKind::JsonSchema => self.json_schema = result.passed,
+                ProbeKind::ContextLimits => self.long_context = result.passed,
+                ProbeKind::Streaming => self.streaming = result.passed,
+                ProbeKind::CompactionSupported => {}
+            }
+        }
+        self.certified_level = CertificationLevel::from_probe_results(results);
+        self.last_verified_at = Some(now);
     }
 }
 
@@ -84,6 +134,28 @@ impl ProviderCertificationMatrix {
         entry.validate()?;
         self.entries.push(entry);
         Ok(())
+    }
+
+    /// Certify a model/runner from a probe battery, promoting it out of the unverified
+    /// `Basic` baseline (§ Backlog: *"Promover certificacion por probes"*). Returns the
+    /// resulting level. Errors if the model/runner is not in the matrix — promotion must
+    /// target a known expected entry, not invent one.
+    pub fn certify_from_probes(
+        &mut self,
+        model: &str,
+        runner: &str,
+        results: &[ProbeResult],
+        now: OffsetDateTime,
+    ) -> Result<CertificationLevel, CapabilityError> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.model == model && entry.runner == runner)
+            .ok_or_else(|| CapabilityError::InvalidCertification {
+                detail: format!("no certification entry for model={model} runner={runner}"),
+            })?;
+        entry.apply_probe_results(results, now);
+        Ok(entry.certified_level)
     }
 
     /// Kernel-owned initial certification matrix (cambio-modelo.md "Open
@@ -182,6 +254,98 @@ mod tests {
         // so once verified they become switch-safe without a matrix gap.
         assert!(matrix.is_switch_allowed("claude-sonnet-4-6", "claude", "grok-code-fast", "xai"));
         assert!(matrix.is_switch_allowed("grok-code-fast", "xai", "claude-sonnet-4-6", "claude"));
+    }
+
+    fn probe(kind: ProbeKind, passed: bool) -> ProbeResult {
+        ProbeResult {
+            kind,
+            passed,
+            detail: None,
+        }
+    }
+
+    fn full_battery(all_pass: bool) -> Vec<ProbeResult> {
+        [
+            ProbeKind::ToolUse,
+            ProbeKind::ImageInput,
+            ProbeKind::JsonSchema,
+            ProbeKind::ContextLimits,
+            ProbeKind::Streaming,
+            ProbeKind::CompactionSupported,
+        ]
+        .into_iter()
+        .map(|kind| probe(kind, all_pass))
+        .collect()
+    }
+
+    #[test]
+    fn empty_probes_stay_basic() {
+        assert_eq!(CertificationLevel::from_probe_results(&[]), CertificationLevel::Basic);
+    }
+
+    #[test]
+    fn all_probes_pass_is_production() {
+        assert_eq!(
+            CertificationLevel::from_probe_results(&full_battery(true)),
+            CertificationLevel::Production
+        );
+    }
+
+    #[test]
+    fn critical_pass_with_optional_failure_is_switch_safe() {
+        // Critical (tool_use, json_schema, context_limits) pass; image/streaming fail.
+        let results = vec![
+            probe(ProbeKind::ToolUse, true),
+            probe(ProbeKind::JsonSchema, true),
+            probe(ProbeKind::ContextLimits, true),
+            probe(ProbeKind::ImageInput, false),
+            probe(ProbeKind::Streaming, false),
+            probe(ProbeKind::CompactionSupported, false),
+        ];
+        assert_eq!(
+            CertificationLevel::from_probe_results(&results),
+            CertificationLevel::SwitchSafe
+        );
+    }
+
+    #[test]
+    fn critical_failure_stays_basic() {
+        let results = vec![
+            probe(ProbeKind::ToolUse, false),
+            probe(ProbeKind::JsonSchema, true),
+            probe(ProbeKind::ContextLimits, true),
+        ];
+        assert_eq!(CertificationLevel::from_probe_results(&results), CertificationLevel::Basic);
+    }
+
+    #[test]
+    fn certify_from_probes_promotes_baseline_entry_and_stamps_verification() {
+        let mut matrix = ProviderCertificationMatrix::baseline();
+        // Baseline is unverified Basic with no timestamp.
+        assert_eq!(
+            matrix.certification_level("grok-code-fast", "xai"),
+            CertificationLevel::Basic
+        );
+        assert!(matrix.get("grok-code-fast", "xai").unwrap().last_verified_at.is_none());
+
+        let now = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let level = matrix
+            .certify_from_probes("grok-code-fast", "xai", &full_battery(true), now)
+            .unwrap();
+
+        assert_eq!(level, CertificationLevel::Production);
+        let entry = matrix.get("grok-code-fast", "xai").unwrap();
+        assert_eq!(entry.certified_level, CertificationLevel::Production);
+        assert_eq!(entry.last_verified_at, Some(now));
+        assert!(entry.certified_level.allows_switch_without_warning());
+    }
+
+    #[test]
+    fn certify_from_probes_errors_for_unknown_entry() {
+        let mut matrix = ProviderCertificationMatrix::baseline();
+        let now = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let err = matrix.certify_from_probes("mystery", "nobody", &full_battery(true), now);
+        assert!(err.is_err());
     }
 
     #[test]

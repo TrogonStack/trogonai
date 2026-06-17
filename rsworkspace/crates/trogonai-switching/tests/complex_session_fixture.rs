@@ -16,35 +16,33 @@ use bytes::Bytes;
 use trogon_nats::jetstream::{MockJetStreamKvStore, MockObjectStore};
 use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
 use trogonai_artifacts::{
-    ArtifactAvailability, ArtifactStorageMode, ArtifactStore, ArtifactStoreConfig,
-    ArtifactUnavailableReason, StoreArtifactRequest,
+    ArtifactAvailability, ArtifactStorageMode, ArtifactStore, ArtifactStoreConfig, ArtifactUnavailableReason,
+    StoreArtifactRequest,
 };
 use trogonai_capabilities::{
-    CapabilityConfig, CapabilityRegistry, CertificationLevel, ProviderCertificationEntry,
-    ProviderCertificationMatrix, build_adaptation_plan, detect_session_capability_usage,
+    CapabilityConfig, CapabilityRegistry, CertificationLevel, ProviderCertificationEntry, ProviderCertificationMatrix,
+    build_adaptation_plan, detect_session_capability_usage,
 };
 use trogonai_session_contracts::{
-    Actor, ActorType, ArtifactRef, CanonicalMessage, CanonicalToolCall, CapabilitySchema,
-    CapabilitySource, ContentBlock, DegradationKind, EventId, IdempotencyKey, ModelSwitchReason,
-    OperationId, SCHEMA_VERSION_V1, SessionCompactedPayload, SessionCreatedPayload, SessionEvent,
-    SessionEventPayload, SessionId, SummaryCreatedPayload, SwitchSafetyStatus, TextToolResult,
-    ToolCallResult, ToolCallStatus, ToolExecutionId, ToolResultFormat,
-    __buffa::oneof::content_block::Kind as BlockKind,
-    __buffa::oneof::tool_call_result::Kind as ToolResultKind, session_event_payload::Kind,
+    __buffa::oneof::content_block::Kind as BlockKind, __buffa::oneof::tool_call_result::Kind as ToolResultKind, Actor,
+    ActorType, ArtifactRef, CanonicalMessage, CanonicalToolCall, CapabilitySchema, CapabilitySource, ContentBlock,
+    DegradationKind, EventId, IdempotencyKey, ModelSwitchReason, OperationId, SCHEMA_VERSION_V1,
+    SessionCompactedPayload, SessionCreatedPayload, SessionEvent, SessionEventPayload, SessionId,
+    SummaryCreatedPayload, SwitchSafetyStatus, TextToolResult, ToolCallResult, ToolCallStatus, ToolExecutionId,
+    ToolResultFormat, session_event_payload::Kind,
 };
 use trogonai_session_kernel::{
     InMemoryEventLog, MockSessionLease, MockSessionLeaseFactory, SessionKernel, SessionKernelConfig,
     SessionLeaseManager, SnapshotStore,
 };
+use trogonai_session_projection::ContextTwinStore;
 use trogonai_session_projection::{
     DefaultPromptCompiler, ProjectionConfig, ProjectionInput, PromptCompiler, derive_context_twin,
 };
 use trogonai_switching::{
-    CancelContext, CancelOutcome, CancelState, MockRunnerAcknowledgement, MockRunnerCancellation,
-    RunnerBindingStore, SwitchModelRequest, SwitchOrchestrator, SwitchState, SwitchingConfig,
-    ToolExecutionState, cancel_operation,
+    CancelContext, CancelOutcome, CancelState, MockRunnerAcknowledgement, MockRunnerCancellation, RunnerBindingStore,
+    SwitchModelRequest, SwitchOrchestrator, SwitchState, SwitchingConfig, ToolExecutionState, cancel_operation,
 };
-use trogonai_session_projection::ContextTwinStore;
 
 const SESSION: &str = "sess_complex_fixture";
 const FROM_MODEL: &str = "anthropic/claude-sonnet";
@@ -237,20 +235,13 @@ type Orchestrator = SwitchOrchestrator<
 /// Build the orchestrator over a *shared* `InMemoryEventLog` (Clone shares state)
 /// so that events appended both by the driver and by the orchestrator land in the
 /// same canonical log and replay together.
-fn build_orchestrator(
-    event_log: InMemoryEventLog,
-    registry: Registry<MockRegistryStore>,
-) -> Orchestrator {
+fn build_orchestrator(event_log: InMemoryEventLog, registry: Registry<MockRegistryStore>) -> Orchestrator {
     let kernel_config = SessionKernelConfig::default();
     let snap_store = SnapshotStore::new(MockJetStreamKvStore::new(), kernel_config.clone());
     let snapshots = snap_store.clone();
-    let leases = SessionLeaseManager::new(
-        MockSessionLeaseFactory::new(MockSessionLease::new()),
-        "complex-fixture",
-    );
+    let leases = SessionLeaseManager::new(MockSessionLeaseFactory::new(MockSessionLease::new()), "complex-fixture");
     let kernel = SessionKernel::new(kernel_config, event_log, snap_store, leases);
-    let runner_bindings =
-        RunnerBindingStore::new(MockJetStreamKvStore::new(), SwitchingConfig::default());
+    let runner_bindings = RunnerBindingStore::new(MockJetStreamKvStore::new(), SwitchingConfig::default());
     let twin_store = ContextTwinStore::new(MockJetStreamKvStore::new(), ProjectionConfig::default());
 
     SwitchOrchestrator::new(
@@ -580,10 +571,7 @@ async fn complex_session_fixture_passes_all_criteria() {
     assert_eq!(cancel_state, CancelState::OperationCancelled);
     for event in cancel_events {
         let key = event.idempotency_key.clone();
-        driver_kernel
-            .append_event_idempotent(event, &key)
-            .await
-            .unwrap();
+        driver_kernel.append_event_idempotent(event, &key).await.unwrap();
     }
     let after_cancel = event_log.read_session_events(&session_id).await.unwrap();
     assert!(
@@ -641,10 +629,7 @@ async fn complex_session_fixture_passes_all_criteria() {
 
     let post_switch = event_log.read_session_events(&session_id).await.unwrap();
     // Safety Gate + model switch + runner attach/detach are all durable events.
-    assert!(has_kind(&post_switch, |k| matches!(
-        k,
-        Kind::SwitchSafetyEvaluated(_)
-    )));
+    assert!(has_kind(&post_switch, |k| matches!(k, Kind::SwitchSafetyEvaluated(_))));
     assert!(has_kind(&post_switch, |k| matches!(k, Kind::ModelSwitched(_))));
     // ELEMENT 12: runner attach/detach recorded by the orchestrator.
     assert!(has_kind(&post_switch, |k| matches!(k, Kind::RunnerDetached(_))));
@@ -659,14 +644,9 @@ async fn complex_session_fixture_passes_all_criteria() {
     // ELEMENT 7 + CRITERION 5: compactor_model preserved/audited across the switch.
     // The fixture's compactor_model (claude-haiku) is from the source provider;
     // after switching to grok it is either preserved or explicitly degraded.
-    let compactor_preserved = has_kind(&post_switch, |k| {
-        matches!(k, Kind::CompactorModelPreserved(_))
-    });
-    let compactor_degraded = has_kind(&post_switch, |k| {
-        matches!(k, Kind::CompactorModelUnavailable(_))
-    }) && has_kind(&post_switch, |k| {
-        matches!(k, Kind::FallbackToDefaultCompactor(_))
-    });
+    let compactor_preserved = has_kind(&post_switch, |k| matches!(k, Kind::CompactorModelPreserved(_)));
+    let compactor_degraded = has_kind(&post_switch, |k| matches!(k, Kind::CompactorModelUnavailable(_)))
+        && has_kind(&post_switch, |k| matches!(k, Kind::FallbackToDefaultCompactor(_)));
     assert!(
         compactor_preserved || compactor_degraded,
         "ELEMENT 7: compactor_model handling must be explicitly audited \
@@ -677,21 +657,10 @@ async fn complex_session_fixture_passes_all_criteria() {
     let child_id = SessionId::new("sess_complex_fixture_fork").unwrap();
     let head_seq = post_switch.iter().map(|e| e.seq).max().unwrap();
     let child = driver_kernel
-        .fork_session(
-            &session_id,
-            &child_id,
-            head_seq,
-            "op_fork",
-            kernel_actor(),
-            timestamp(),
-        )
+        .fork_session(&session_id, &child_id, head_seq, "op_fork", kernel_actor(), timestamp())
         .await
         .unwrap();
-    let child_session = child
-        .state
-        .as_option()
-        .and_then(|s| s.session.as_option())
-        .unwrap();
+    let child_session = child.state.as_option().and_then(|s| s.session.as_option()).unwrap();
     assert_eq!(
         child_session.parent_session_id.as_deref(),
         Some(SESSION),
@@ -787,11 +756,7 @@ async fn complex_session_fixture_passes_all_criteria() {
 
     // ---- CRITERION 4: referenced artifacts exist OR yield artifact_unavailable. ----
     // (a) The store that persisted the object resolves it as Available.
-    match artifact_store
-        .retrieve_availability(&stored.metadata)
-        .await
-        .unwrap()
-    {
+    match artifact_store.retrieve_availability(&stored.metadata).await.unwrap() {
         ArtifactAvailability::Available(retrieved) => {
             assert_eq!(retrieved.content, large_output);
         }
@@ -803,11 +768,7 @@ async fn complex_session_fixture_passes_all_criteria() {
         MockObjectStore::new(),
         ArtifactStoreConfig::from_session_kernel(&SessionKernelConfig::default()),
     );
-    match empty_store
-        .retrieve_availability(&stored.metadata)
-        .await
-        .unwrap()
-    {
+    match empty_store.retrieve_availability(&stored.metadata).await.unwrap() {
         ArtifactAvailability::Unavailable(unavailable) => {
             assert_eq!(
                 unavailable.reason,

@@ -18,16 +18,10 @@ pub enum SwitchingError {
     ForceSwitchRejected { detail: String },
 
     #[error("invalid switch state transition from {from:?} to {to:?}")]
-    InvalidSwitchTransition {
-        from: SwitchState,
-        to: SwitchState,
-    },
+    InvalidSwitchTransition { from: SwitchState, to: SwitchState },
 
     #[error("invalid cancel state transition from {from:?} to {to:?}")]
-    InvalidCancelTransition {
-        from: CancelState,
-        to: CancelState,
-    },
+    InvalidCancelTransition { from: CancelState, to: CancelState },
 
     #[error("invalid force switch state transition from {from:?} to {to:?}")]
     InvalidForceSwitchTransition {
@@ -45,16 +39,10 @@ pub enum SwitchingError {
     RunnerAcknowledgementFailed { detail: String },
 
     #[error("runner attach failed for {runner_id}: {detail}")]
-    RunnerAttachFailed {
-        runner_id: String,
-        detail: String,
-    },
+    RunnerAttachFailed { runner_id: String, detail: String },
 
     #[error("runner detach failed for {runner_id}: {detail}")]
-    RunnerDetachFailed {
-        runner_id: String,
-        detail: String,
-    },
+    RunnerDetachFailed { runner_id: String, detail: String },
 
     #[error("session kernel error: {0}")]
     Kernel(#[from] trogonai_session_kernel::SessionKernelError),

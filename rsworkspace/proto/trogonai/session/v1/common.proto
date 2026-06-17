@@ -49,6 +49,17 @@ enum EncryptionStatus {
   ENCRYPTION_STATUS_ENCRYPTED = 2;
 }
 
+// Whether an artifact's bytes are durably stored, or only an external reference is
+// available (§ Politica para imagenes URL y Base64: a URL that could not be fetched
+// keeps only a degraded `external_ref`).
+enum ArtifactSourceAvailability {
+  ARTIFACT_SOURCE_AVAILABILITY_UNSPECIFIED = 0;
+  // Bytes were fetched/decoded, validated and stored as an own artifact.
+  ARTIFACT_SOURCE_AVAILABILITY_STORED = 1;
+  // Degraded: only an external reference (e.g. an un-fetchable source URL) is kept.
+  ARTIFACT_SOURCE_AVAILABILITY_EXTERNAL_REF = 2;
+}
+
 enum SwitchSafetyStatus {
   SWITCH_SAFETY_STATUS_UNSPECIFIED = 0;
   SWITCH_SAFETY_STATUS_ALLOWED = 1;
@@ -62,6 +73,62 @@ enum ContinuityCheckpointStatus {
   CONTINUITY_CHECKPOINT_STATUS_PASSED = 1;
   CONTINUITY_CHECKPOINT_STATUS_FAILED = 2;
   CONTINUITY_CHECKPOINT_STATUS_REPAIRED = 3;
+}
+
+// Formal, shared result of a canonical model switch (§ Contrato formal de resultado
+// del switch). Every switch normalizes to exactly one of these — not a free-text log
+// string — so events, metrics and UX/API derive from a durable contract.
+enum SwitchResult {
+  SWITCH_RESULT_UNSPECIFIED = 0;
+  // Target model active with no relevant degradations.
+  SWITCH_RESULT_SWITCHED = 1;
+  // Not executed: the Safety Gate found an unsafe condition.
+  SWITCH_RESULT_BLOCKED = 2;
+  // Executable, but needs explicit confirmation for loss/degradation.
+  SWITCH_RESULT_REQUIRES_CONFIRMATION = 3;
+  // Executed with visible, recorded degradations.
+  SWITCH_RESULT_DEGRADED = 4;
+  // Checkpoint detected a mismatch and the projection was repaired before continuing.
+  SWITCH_RESULT_REPAIRED = 5;
+  // Attempted, a later stage failed, and the prior binding was restored.
+  SWITCH_RESULT_ROLLED_BACK = 6;
+  // Failed, but the canonical session is still consistent and it can be retried.
+  SWITCH_RESULT_FAILED_RECOVERABLE = 7;
+  // Failed by a condition needing intervention/config change before retrying.
+  SWITCH_RESULT_FAILED_TERMINAL = 8;
+}
+
+// Compact checkpoint summary carried by the visible switch result.
+message SwitchCheckpointSummary {
+  // Whether a continuity checkpoint was required for this switch (high-risk).
+  bool required = 1;
+  // Checkpoint outcome: "passed" | "repaired" | "failed" | "not_run" | "not_required".
+  string status = 2;
+}
+
+// Single normalized, durable result of a switch attempt (§ Contrato de resultado
+// visible del switch). Every surface that exposes a model switch — CLI, TUI, NATS
+// event, Rust struct or future API — consumes THIS type, so none of them can create
+// false continuity. Per ADR 0009 the durable/wire form is this versioned protobuf
+// message, not a free-text log line; logs and metrics derive from it.
+message SwitchVisibleResult {
+  string session_id = 1;
+  SwitchResult result = 2;
+  string from_model = 3;
+  string to_model = 4;
+  string from_runner = 5;
+  string to_runner = 6;
+  bool runner_changed = 7;
+  // Visible, recorded degradations (capability warnings + safety reasons).
+  repeated string degradations = 8;
+  // Capabilities that could not be preserved across the switch.
+  repeated string lost_capabilities = 9;
+  // True when the switch fell back to legacy handoff instead of canonical binding.
+  bool fallback_used = 10;
+  optional string fallback_reason = 11;
+  SwitchCheckpointSummary checkpoint = 12;
+  // Concrete next step for blocked/terminal results (e.g. wait/persist/confirm/cause).
+  optional string next_action = 13;
 }
 
 enum ModelSwitchReason {

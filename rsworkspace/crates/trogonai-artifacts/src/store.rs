@@ -5,8 +5,8 @@ use bytes::Bytes;
 use time::OffsetDateTime;
 use trogon_nats::jetstream::{ObjectStoreDelete, ObjectStoreGet, ObjectStorePut};
 use trogonai_session_contracts::{
-    ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactRetentionPolicy, EncryptionStatus, EventId,
-    SCHEMA_VERSION_V1, SessionId, TextToolResult, ToolCallResult, ToolExecutionId,
+    ArtifactId, ArtifactMetadata, ArtifactSourceAvailability, ArtifactRef, ArtifactRetentionPolicy, EncryptionStatus,
+    EventId, SCHEMA_VERSION_V1, SessionId, TextToolResult, ToolCallResult, ToolExecutionId,
 };
 
 use crate::checksum::sha256_hex;
@@ -34,6 +34,14 @@ pub struct StoreArtifactRequest {
     pub retention_policy: ArtifactRetentionPolicy,
     pub permission_scope: String,
     pub encryption_status: EncryptionStatus,
+    // § Politica para imagenes URL y Base64: provenance kept as metadata so a URL/Base64
+    // source is never the canonical truth (defaults are non-image / STORED).
+    pub availability: ArtifactSourceAvailability,
+    pub source_url: Option<String>,
+    pub fetched_at: Option<buffa_types::google::protobuf::Timestamp>,
+    pub source_encoding: Option<String>,
+    pub declared_mime: Option<String>,
+    pub decoded_mime: Option<String>,
 }
 
 impl StoreArtifactRequest {
@@ -52,6 +60,12 @@ impl StoreArtifactRequest {
             retention_policy: ArtifactRetentionPolicy::Session,
             permission_scope: crate::config::DEFAULT_PERMISSION_SCOPE.to_string(),
             encryption_status: EncryptionStatus::None,
+            availability: ArtifactSourceAvailability::Stored,
+            source_url: None,
+            fetched_at: None,
+            source_encoding: None,
+            declared_mime: None,
+            decoded_mime: None,
         }
     }
 
@@ -59,6 +73,50 @@ impl StoreArtifactRequest {
         self.tool_execution_id = Some(tool_execution_id);
         self
     }
+
+    /// Build a request from a Base64 image source (§ Imagen Base64): decode to raw bytes
+    /// (never store the Base64 string), validate the real MIME against the declared one,
+    /// and keep `source_encoding=base64`, `declared_mime`, `decoded_mime` as metadata.
+    /// `sha256`/`size_bytes` are computed over the DECODED bytes by [`ArtifactStore::store`].
+    pub fn from_base64_image(
+        session_id: SessionId,
+        event_id: EventId,
+        declared_mime: impl Into<String>,
+        base64_data: &str,
+    ) -> Result<Self, ArtifactStoreError> {
+        use base64::Engine as _;
+        let declared = declared_mime.into();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_data.trim().as_bytes())
+            .map_err(|err| ArtifactStoreError::InvalidImageSource {
+                detail: format!("base64 decode failed: {err}"),
+            })?;
+        // § "validar MIME real contra MIME declarado": sniff magic bytes; fall back to
+        // the declared MIME when the format is not recognized.
+        let decoded = sniff_image_mime(&bytes).unwrap_or_else(|| declared.clone());
+        let mut request = Self::new(session_id, event_id, decoded.clone(), Bytes::from(bytes));
+        request.source_encoding = Some("base64".to_string());
+        request.declared_mime = Some(declared);
+        request.decoded_mime = Some(decoded);
+        request.availability = ArtifactSourceAvailability::Stored;
+        Ok(request)
+    }
+}
+
+/// Detect a common image MIME from leading magic bytes (§ "validar MIME real").
+pub(crate) fn sniff_image_mime(bytes: &[u8]) -> Option<String> {
+    let mime = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        return None;
+    };
+    Some(mime.to_string())
 }
 
 /// Result of storing artifact content.
@@ -227,6 +285,12 @@ where
                 permission_scope: request.permission_scope,
                 encryption_status: EnumValue::Known(request.encryption_status),
                 truncated: preview_truncated,
+                availability: EnumValue::Known(request.availability),
+                source_url: request.source_url.clone(),
+                fetched_at: request.fetched_at.clone().map(MessageField::some).unwrap_or_default(),
+                source_encoding: request.source_encoding.clone(),
+                declared_mime: request.declared_mime.clone(),
+                decoded_mime: request.decoded_mime.clone(),
                 ..ArtifactMetadata::default()
             };
 
@@ -273,6 +337,12 @@ where
             permission_scope: request.permission_scope,
             encryption_status: EnumValue::Known(request.encryption_status),
             truncated: true,
+            availability: EnumValue::Known(request.availability),
+            source_url: request.source_url.clone(),
+            fetched_at: request.fetched_at.clone().map(MessageField::some).unwrap_or_default(),
+            source_encoding: request.source_encoding.clone(),
+            declared_mime: request.declared_mime.clone(),
+            decoded_mime: request.decoded_mime.clone(),
             ..ArtifactMetadata::default()
         };
 
@@ -525,5 +595,76 @@ mod tests {
         let artifact_ref = stored.to_artifact_ref();
         assert_eq!(artifact_ref.artifact_id, "artifact_test");
         assert!(artifact_ref.truncated);
+    }
+
+    // § Imagen Base64: decode -> validate -> hash -> store bytes as artifact; keep
+    // source_encoding/declared_mime/decoded_mime as metadata; never store the string.
+
+    fn png_bytes() -> Vec<u8> {
+        // PNG signature + a few payload bytes.
+        vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03]
+    }
+
+    #[test]
+    fn from_base64_image_decodes_to_raw_bytes_and_validates_mime() {
+        use base64::Engine as _;
+        let png = png_bytes();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        // Declared MIME is deliberately wrong; the real MIME is sniffed from the bytes.
+        let request = StoreArtifactRequest::from_base64_image(
+            SessionId::new("sess_img").unwrap(),
+            EventId::new("evt_img").unwrap(),
+            "image/jpeg",
+            &b64,
+        )
+        .unwrap();
+
+        // Content is the DECODED bytes, not the Base64 string (§ "no guardar el string").
+        assert_eq!(request.content.as_ref(), png.as_slice());
+        assert_eq!(request.source_encoding.as_deref(), Some("base64"));
+        assert_eq!(request.declared_mime.as_deref(), Some("image/jpeg"));
+        assert_eq!(request.decoded_mime.as_deref(), Some("image/png"));
+        assert_eq!(request.mime, "image/png");
+        assert_eq!(request.availability, ArtifactSourceAvailability::Stored);
+    }
+
+    #[test]
+    fn from_base64_image_rejects_undecodable_source() {
+        let err = StoreArtifactRequest::from_base64_image(
+            SessionId::new("sess_img").unwrap(),
+            EventId::new("evt_img").unwrap(),
+            "image/png",
+            "!!! not base64 !!!",
+        )
+        .unwrap_err();
+        assert!(matches!(err, ArtifactStoreError::InvalidImageSource { .. }));
+    }
+
+    #[tokio::test]
+    async fn stored_base64_image_hashes_decoded_bytes_not_the_string() {
+        use base64::Engine as _;
+        let png = png_bytes();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        let request = StoreArtifactRequest::from_base64_image(
+            SessionId::new("sess_img").unwrap(),
+            EventId::new("evt_img").unwrap(),
+            "image/png",
+            &b64,
+        )
+        .unwrap();
+
+        let store = test_store(1024);
+        let stored = store.store(request).await.unwrap();
+
+        // sha256 is over the decoded image bytes, not the Base64 string (§ "sha256 sobre
+        // los bytes, no sobre el string Base64").
+        assert_eq!(stored.metadata.sha256, crate::checksum::sha256_hex(&Bytes::from(png.clone())));
+        assert_eq!(stored.metadata.size_bytes, png.len() as u64);
+        assert_eq!(stored.metadata.source_encoding.as_deref(), Some("base64"));
+        assert_eq!(stored.metadata.decoded_mime.as_deref(), Some("image/png"));
+        assert_eq!(
+            stored.metadata.availability.as_known(),
+            Some(ArtifactSourceAvailability::Stored)
+        );
     }
 }

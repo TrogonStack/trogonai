@@ -29,10 +29,7 @@ pub trait SnapshotReader: Send + Sync + Clone + 'static {
 }
 
 impl<T: EventLogBackend> EventLogReader for T {
-    async fn read_session_events(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<SessionEvent>, SessionKernelError> {
+    async fn read_session_events(&self, session_id: &SessionId) -> Result<Vec<SessionEvent>, SessionKernelError> {
         EventLogBackend::read_session_events(self, session_id).await
     }
 }
@@ -86,10 +83,7 @@ mod tests {
     }
 
     impl SnapshotReader for MockSnapshotReader {
-        async fn load_snapshot(
-            &self,
-            _session_id: &SessionId,
-        ) -> Result<Option<SessionSnapshot>, SessionKernelError> {
+        async fn load_snapshot(&self, _session_id: &SessionId) -> Result<Option<SessionSnapshot>, SessionKernelError> {
             Ok(self.snapshot.clone())
         }
     }
@@ -130,13 +124,9 @@ mod tests {
         event_log.append(created_event("sess_recovery", 1)).await.unwrap();
         event_log.append(created_event("sess_recovery", 2)).await.unwrap();
 
-        let recovered = recover_session(
-            &event_log,
-            &MockSnapshotReader { snapshot: None },
-            &session_id,
-        )
-        .await
-        .unwrap();
+        let recovered = recover_session(&event_log, &MockSnapshotReader { snapshot: None }, &session_id)
+            .await
+            .unwrap();
 
         assert_eq!(recovered.replayed_events, 2);
         assert_eq!(recovered.state, RecoveryState::Completed);

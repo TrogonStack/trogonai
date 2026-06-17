@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv"] }
+base64 = "0.21"
 buffa = "=0.7.0"
 buffa-types = "=0.7.0"
 bytes = { workspace = true }

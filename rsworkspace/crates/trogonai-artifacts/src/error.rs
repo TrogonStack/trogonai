@@ -10,6 +10,13 @@ pub enum ArtifactStoreError {
         detail: String,
     },
 
+    // § Politica para imagenes URL y Base64: an image source that cannot be decoded
+    // (or fetched) must surface explicitly, not be stored as canonical truth.
+    #[error("invalid image source: {detail}")]
+    InvalidImageSource {
+        detail: String,
+    },
+
     #[error("artifact object store get failed for artifact {artifact_id}: {detail}")]
     ObjectStoreGet {
         artifact_id: ArtifactId,

@@ -165,9 +165,7 @@ pub enum ToolExecutionState {
 }
 
 impl ToolExecutionState {
-    pub fn from_tool_call_status(
-        status: trogonai_session_contracts::ToolCallStatus,
-    ) -> Self {
+    pub fn from_tool_call_status(status: trogonai_session_contracts::ToolCallStatus) -> Self {
         use trogonai_session_contracts::ToolCallStatus;
         match status {
             ToolCallStatus::Pending => Self::Pending,
@@ -271,9 +269,7 @@ mod tests {
     fn cancel_path_supports_reconciliation() {
         let mut state = CancelState::Idle;
         state = state.transition_to(CancelState::CancelRequested).unwrap();
-        state = state
-            .transition_to(CancelState::RunnerCancelRequested)
-            .unwrap();
+        state = state.transition_to(CancelState::RunnerCancelRequested).unwrap();
         state = state.transition_to(CancelState::RequiresReconciliation).unwrap();
         assert_eq!(state, CancelState::RequiresReconciliation);
     }

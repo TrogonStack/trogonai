@@ -1,16 +1,15 @@
 use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
-use trogonai_capabilities::{ProviderCertificationMatrix, ResolvedCapabilities, SessionCapabilityUsage,
-    detect_session_capability_usage,
+use trogonai_capabilities::{
+    ProviderCertificationMatrix, ResolvedCapabilities, SessionCapabilityUsage, detect_session_capability_usage,
 };
 use trogonai_session_contracts::{
-    CapabilityAdaptationAction, ContinuityCheckpointStatus, SessionSnapshotState,
-    SwitchAdaptationPlan, SwitchSafetyDecision, SwitchSafetyReason, SwitchSafetyStatus,
-    ToolCallStatus,
+    ArtifactSourceAvailability, CapabilityAdaptationAction, ContinuityCheckpointStatus, SessionSnapshotState,
+    SwitchAdaptationPlan, SwitchSafetyDecision, SwitchSafetyReason, SwitchSafetyStatus, ToolCallStatus,
 };
 use uuid::Uuid;
 
-use crate::config::SwitchingConfig;
+use crate::config::{DegradationPolicy, SwitchingConfig};
 use crate::state::{ArtifactPersistenceState, ToolExecutionState};
 use crate::telemetry;
 
@@ -42,6 +41,7 @@ pub fn evaluate_switch_safety(input: &SwitchSafetyInput<'_>) -> SwitchSafetyDeci
     evaluate_tool_calls(input.session, &mut reasons, &mut blocked, &mut needs_confirmation);
     evaluate_incomplete_streams(input.session, &mut reasons, &mut blocked);
     evaluate_artifacts(input, &mut reasons, &mut blocked);
+    evaluate_external_ref_artifacts(input, &mut reasons, &mut needs_confirmation);
     evaluate_nonportable_runtime(input.session, &mut reasons, &mut blocked, &mut needs_confirmation);
     evaluate_context_twin_freshness(input, &mut reasons, &mut needs_confirmation);
     evaluate_adaptation_plan(input, &mut reasons, &mut blocked, &mut needs_confirmation);
@@ -143,11 +143,7 @@ fn evaluate_incomplete_streams(
     }
 }
 
-fn evaluate_artifacts(
-    input: &SwitchSafetyInput<'_>,
-    reasons: &mut Vec<SwitchSafetyReason>,
-    blocked: &mut bool,
-) {
+fn evaluate_artifacts(input: &SwitchSafetyInput<'_>, reasons: &mut Vec<SwitchSafetyReason>, blocked: &mut bool) {
     for artifact in &input.session.artifacts {
         let persistence = artifact_persistence_state(artifact, input.config.inline_artifact_limit_bytes);
         if !persistence.blocks_switch() {
@@ -161,6 +157,30 @@ fn evaluate_artifacts(
                 artifact.artifact_id, persistence
             ),
         ));
+    }
+}
+
+/// § Imagen por URL (§985): an image that exists only as a degraded `external_ref` (its
+/// bytes were never fetched/stored as canonical truth) must not silently cross a switch —
+/// the canonical context is incomplete. The Switch Safety Gate requires explicit
+/// confirmation of the degradation before proceeding.
+fn evaluate_external_ref_artifacts(
+    input: &SwitchSafetyInput<'_>,
+    reasons: &mut Vec<SwitchSafetyReason>,
+    needs_confirmation: &mut bool,
+) {
+    for artifact in &input.session.artifacts {
+        if artifact.availability.as_known() == Some(ArtifactSourceAvailability::ExternalRef) {
+            *needs_confirmation = true;
+            reasons.push(reason(
+                "image_external_ref_only",
+                format!(
+                    "image artifact {} exists only as an external reference ({}); its bytes were not preserved canonically",
+                    artifact.artifact_id,
+                    artifact.source_url.as_deref().unwrap_or("unknown source")
+                ),
+            ));
+        }
     }
 }
 
@@ -231,8 +251,16 @@ fn evaluate_adaptation_plan(
         return;
     };
 
+    // § Block vs confirmation matrix — configurable risk policy for a degradation (a
+    // portable capability loss). Default `Confirm` preserves the closed rule "degradacion
+    // aceptable requiere confirmacion"; `Block` is the stricter risk choice; `Warn` only
+    // records it. Non-portable loss still blocks unconditionally in the loop below.
     for warning in &plan.warnings {
-        *needs_confirmation = true;
+        match input.config.degradation_policy() {
+            DegradationPolicy::Warn => {}
+            DegradationPolicy::Confirm => *needs_confirmation = true,
+            DegradationPolicy::Block => *blocked = true,
+        }
         reasons.push(reason("capability_degradation", warning.clone()));
     }
 
@@ -280,8 +308,7 @@ fn evaluate_indispensable_capabilities(
         *needs_confirmation = true;
         reasons.push(reason(
             "capability_degradation",
-            "target model does not support image input; image references preserved but not sent"
-                .to_string(),
+            "target model does not support image input; image references preserved but not sent".to_string(),
         ));
     }
 }
@@ -337,12 +364,9 @@ fn evaluate_certification(
 
     if !from_model.is_empty()
         && !from_runner.is_empty()
-        && !input.certification.is_switch_allowed(
-            &from_model,
-            &from_runner,
-            input.target_model,
-            input.target_runner,
-        )
+        && !input
+            .certification
+            .is_switch_allowed(&from_model, &from_runner, input.target_model, input.target_runner)
     {
         *needs_confirmation = true;
         reasons.push(reason(
@@ -391,8 +415,7 @@ fn evaluate_compactor_degradation(
 
 fn has_unreconciled_destructive_state(session: &SessionSnapshotState) -> bool {
     session.tool_calls.iter().any(|tool| {
-        tool.status.as_known() == Some(ToolCallStatus::RequiresReconciliation)
-            && tool.name.contains("delete")
+        tool.status.as_known() == Some(ToolCallStatus::RequiresReconciliation) && tool.name.contains("delete")
     }) || session
         .nonportable
         .as_option()
@@ -487,8 +510,8 @@ mod tests {
     use buffa::MessageField;
     use trogonai_capabilities::ResolvedCapabilities;
     use trogonai_session_contracts::{
-        ArtifactMetadata, CanonicalToolCall, CapabilitySchema, CapabilitySource, SessionConfig,
-        SessionMetadata, SwitchAdaptation, SCHEMA_VERSION_V1,
+        ArtifactMetadata, CanonicalToolCall, CapabilitySchema, CapabilitySource, SCHEMA_VERSION_V1, SessionConfig,
+        SessionMetadata, SwitchAdaptation,
     };
 
     fn base_session() -> SessionSnapshotState {
@@ -557,17 +580,8 @@ mod tests {
         let caps = target_capabilities(true);
         let config = SwitchingConfig::default();
         let certification = ProviderCertificationMatrix::default();
-        let decision = evaluate_switch_safety(&safety_input(
-            &session,
-            &caps,
-            None,
-            &config,
-            &certification,
-        ));
-        assert_eq!(
-            decision.status.as_known(),
-            Some(SwitchSafetyStatus::BlockedUntilSafe)
-        );
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
+        assert_eq!(decision.status.as_known(), Some(SwitchSafetyStatus::BlockedUntilSafe));
     }
 
     #[test]
@@ -585,17 +599,171 @@ mod tests {
         };
         let config = SwitchingConfig::default();
         let certification = ProviderCertificationMatrix::default();
-        let decision = evaluate_switch_safety(&safety_input(
-            &session,
-            &caps,
-            Some(&plan),
-            &config,
-            &certification,
-        ));
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, Some(&plan), &config, &certification));
         assert_eq!(
             decision.status.as_known(),
             Some(SwitchSafetyStatus::RequiresUserConfirmation)
         );
+    }
+
+    fn degradation_plan() -> SwitchAdaptationPlan {
+        SwitchAdaptationPlan {
+            warnings: vec!["images will be omitted".to_string()],
+            adaptations: vec![SwitchAdaptation {
+                capability: "image_input".to_string(),
+                action: EnumValue::Known(CapabilityAdaptationAction::UseArtifactRefs),
+                ..SwitchAdaptation::default()
+            }],
+            ..SwitchAdaptationPlan::default()
+        }
+    }
+
+    fn config_with_policy(policy: DegradationPolicy) -> SwitchingConfig {
+        SwitchingConfig::default().with_degradation_policy(policy)
+    }
+
+    // A session with NO independent confirmation triggers: fresh Context Twin so the
+    // degradation risk policy is the ONLY variable deciding the outcome.
+    fn clean_session() -> SessionSnapshotState {
+        let mut session = base_session();
+        session.context_twin = MessageField::some(trogonai_session_contracts::ContextTwin {
+            session_id: "sess_safety".to_string(),
+            derived_from_seq: 10,
+            ..trogonai_session_contracts::ContextTwin::default()
+        });
+        session
+    }
+
+    // Certify BOTH ends and the switch pair so neither the certification level nor the
+    // switch-matrix check independently forces confirmation.
+    fn certified_matrix() -> ProviderCertificationMatrix {
+        fn entry(
+            model: &str,
+            runner: &str,
+            switch_from: Vec<String>,
+            switch_to: Vec<String>,
+        ) -> trogonai_capabilities::ProviderCertificationEntry {
+            trogonai_capabilities::ProviderCertificationEntry {
+                model: model.to_string(),
+                runner: runner.to_string(),
+                text: true,
+                tool_use: true,
+                parallel_tools: true,
+                image_input: false,
+                json_schema: true,
+                long_context: true,
+                streaming: true,
+                artifact_refs: true,
+                mcp_tools: true,
+                switch_from,
+                switch_to,
+                certified_level: trogonai_capabilities::CertificationLevel::Production,
+                last_verified_at: None,
+            }
+        }
+        let mut matrix = ProviderCertificationMatrix::default();
+        matrix
+            .push_validated(entry(
+                "anthropic/claude-sonnet",
+                "openrouter",
+                Vec::new(),
+                vec!["xai/grok-code-fast".to_string()],
+            ))
+            .expect("valid source entry");
+        matrix
+            .push_validated(entry(
+                "xai/grok-code-fast",
+                "xai",
+                vec!["anthropic/claude-sonnet".to_string()],
+                Vec::new(),
+            ))
+            .expect("valid target entry");
+        matrix
+    }
+
+    // § Block vs confirmation matrix: the SAME degradation maps to different outcomes by
+    // the configurable risk policy, while never altering the closed irreversible rule.
+
+    #[test]
+    fn degradation_policy_confirm_requires_confirmation() {
+        let session = clean_session();
+        let caps = target_capabilities(true);
+        let plan = degradation_plan();
+        let config = config_with_policy(DegradationPolicy::Confirm);
+        let certification = certified_matrix();
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, Some(&plan), &config, &certification));
+        assert_eq!(
+            decision.status.as_known(),
+            Some(SwitchSafetyStatus::RequiresUserConfirmation)
+        );
+    }
+
+    #[test]
+    fn degradation_policy_block_blocks_the_switch() {
+        let session = clean_session();
+        let caps = target_capabilities(true);
+        let plan = degradation_plan();
+        let config = config_with_policy(DegradationPolicy::Block);
+        let certification = certified_matrix();
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, Some(&plan), &config, &certification));
+        assert_eq!(decision.status.as_known(), Some(SwitchSafetyStatus::BlockedUntilSafe));
+    }
+
+    #[test]
+    fn degradation_policy_warn_allows_with_warning() {
+        let session = clean_session();
+        let caps = target_capabilities(true);
+        let plan = degradation_plan();
+        let config = config_with_policy(DegradationPolicy::Warn);
+        let certification = certified_matrix();
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, Some(&plan), &config, &certification));
+        assert_eq!(
+            decision.status.as_known(),
+            Some(SwitchSafetyStatus::AllowedWithWarning)
+        );
+    }
+
+    #[test]
+    fn degradation_policy_default_is_confirm() {
+        // The closed rule's default: a degradation requires confirmation (§2229).
+        assert_eq!(SwitchingConfig::default().degradation_policy(), DegradationPolicy::Confirm);
+    }
+
+    #[test]
+    fn external_ref_image_requires_confirmation() {
+        // § Imagen por URL (§985): an image that exists only as a degraded external_ref
+        // must require explicit confirmation before the switch proceeds.
+        let mut session = clean_session();
+        session.artifacts.push(ArtifactMetadata {
+            artifact_id: "art_img".to_string(),
+            availability: EnumValue::Known(ArtifactSourceAvailability::ExternalRef),
+            source_url: Some("https://host/img.png".to_string()),
+            ..ArtifactMetadata::default()
+        });
+        let caps = target_capabilities(true);
+        let config = SwitchingConfig::default();
+        let certification = certified_matrix();
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
+        assert_eq!(
+            decision.status.as_known(),
+            Some(SwitchSafetyStatus::RequiresUserConfirmation)
+        );
+    }
+
+    #[test]
+    fn stored_image_does_not_trigger_external_ref_confirmation() {
+        // A properly stored image (availability = Stored) is canonical truth: no gate.
+        let mut session = clean_session();
+        session.artifacts.push(ArtifactMetadata {
+            artifact_id: "art_img".to_string(),
+            availability: EnumValue::Known(ArtifactSourceAvailability::Stored),
+            ..ArtifactMetadata::default()
+        });
+        let caps = target_capabilities(true);
+        let config = SwitchingConfig::default();
+        let certification = certified_matrix();
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
+        assert_eq!(decision.status.as_known(), Some(SwitchSafetyStatus::Allowed));
     }
 
     #[test]
@@ -609,17 +777,8 @@ mod tests {
         let caps = target_capabilities(true);
         let config = SwitchingConfig::default();
         let certification = ProviderCertificationMatrix::default();
-        let decision = evaluate_switch_safety(&safety_input(
-            &session,
-            &caps,
-            None,
-            &config,
-            &certification,
-        ));
-        assert_eq!(
-            decision.status.as_known(),
-            Some(SwitchSafetyStatus::BlockedUntilSafe)
-        );
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
+        assert_eq!(decision.status.as_known(), Some(SwitchSafetyStatus::BlockedUntilSafe));
     }
 
     #[test]
@@ -633,13 +792,7 @@ mod tests {
         let caps = target_capabilities(true); // tool_use ok, compaction_supported = false
         let config = SwitchingConfig::default();
         let certification = ProviderCertificationMatrix::default();
-        let decision = evaluate_switch_safety(&safety_input(
-            &session,
-            &caps,
-            None,
-            &config,
-            &certification,
-        ));
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
         assert!(
             decision
                 .reasons
@@ -661,13 +814,7 @@ mod tests {
         let caps = target_capabilities(true);
         let config = SwitchingConfig::default();
         let certification = ProviderCertificationMatrix::default();
-        let decision = evaluate_switch_safety(&safety_input(
-            &session,
-            &caps,
-            None,
-            &config,
-            &certification,
-        ));
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
         assert!(
             !decision
                 .reasons

@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
+use trogonai_session_contracts::SwitchResult;
 
 static SWITCH_COMPLETED: OnceLock<Counter<u64>> = OnceLock::new();
 static SWITCH_BLOCKED: OnceLock<Counter<u64>> = OnceLock::new();
@@ -12,6 +13,7 @@ static CHECKPOINT_MISMATCH: OnceLock<Counter<u64>> = OnceLock::new();
 static CONTEXT_REPAIR: OnceLock<Counter<u64>> = OnceLock::new();
 static ARTIFACT_MISSING: OnceLock<Counter<u64>> = OnceLock::new();
 static CAPABILITY_DEGRADATION: OnceLock<Counter<u64>> = OnceLock::new();
+static SWITCH_RESULT: OnceLock<Counter<u64>> = OnceLock::new();
 static RUNNER_ATTACH: OnceLock<Counter<u64>> = OnceLock::new();
 static RUNNER_DETACH: OnceLock<Counter<u64>> = OnceLock::new();
 static RUNNER_ATTACH_FAILURE: OnceLock<Counter<u64>> = OnceLock::new();
@@ -193,12 +195,7 @@ pub fn record_switch_completed(
     );
 }
 
-pub fn record_switch_blocked(
-    session_id: &str,
-    operation_id: &str,
-    target_model: &str,
-    reason_kind: &str,
-) {
+pub fn record_switch_blocked(session_id: &str, operation_id: &str, target_model: &str, reason_kind: &str) {
     switch_blocked_counter().add(
         1,
         &[
@@ -223,6 +220,44 @@ pub fn record_switch_confirmation_required(session_id: &str, operation_id: &str,
     );
 }
 
+fn switch_result_counter() -> &'static Counter<u64> {
+    SWITCH_RESULT.get_or_init(|| {
+        meter()
+            .u64_counter("trogonai.switching.result")
+            .with_description("Model switches by formal SwitchResult outcome")
+            .build()
+    })
+}
+
+/// Stable, snake_case label for the formal switch outcome (§ Contrato formal de
+/// resultado del switch). Every switch normalizes to exactly one of these.
+fn switch_result_label(result: SwitchResult) -> &'static str {
+    match result {
+        SwitchResult::Unspecified => "unspecified",
+        SwitchResult::Switched => "switched",
+        SwitchResult::Blocked => "blocked",
+        SwitchResult::RequiresConfirmation => "requires_confirmation",
+        SwitchResult::Degraded => "degraded",
+        SwitchResult::Repaired => "repaired",
+        SwitchResult::RolledBack => "rolled_back",
+        SwitchResult::FailedRecoverable => "failed_recoverable",
+        SwitchResult::FailedTerminal => "failed_terminal",
+    }
+}
+
+/// Record the single, normalized outcome of a switch attempt. The doc requires
+/// every result to map to metrics (§ "cada resultado debe mapear a métricas").
+pub fn record_switch_result(session_id: &str, operation_id: &str, result: SwitchResult) {
+    switch_result_counter().add(
+        1,
+        &[
+            KeyValue::new("session_id", session_id.to_string()),
+            KeyValue::new("operation_id", operation_id.to_string()),
+            KeyValue::new("switch_result", switch_result_label(result)),
+        ],
+    );
+}
+
 pub fn record_switch_allowed_with_warning(session_id: &str, operation_id: &str, target_model: &str) {
     switch_warning_counter().add(
         1,
@@ -235,12 +270,7 @@ pub fn record_switch_allowed_with_warning(session_id: &str, operation_id: &str, 
     );
 }
 
-pub fn record_checkpoint_result(
-    session_id: &str,
-    operation_id: &str,
-    target_model: &str,
-    checkpoint_result: &str,
-) {
+pub fn record_checkpoint_result(session_id: &str, operation_id: &str, target_model: &str, checkpoint_result: &str) {
     checkpoint_result_counter().add(
         1,
         &[
@@ -284,12 +314,7 @@ pub fn record_artifact_missing(session_id: &str, operation_id: &str) {
     );
 }
 
-pub fn record_capability_degradation(
-    session_id: &str,
-    operation_id: &str,
-    target_model: &str,
-    capability: &str,
-) {
+pub fn record_capability_degradation(session_id: &str, operation_id: &str, target_model: &str, capability: &str) {
     capability_degradation_counter().add(
         1,
         &[

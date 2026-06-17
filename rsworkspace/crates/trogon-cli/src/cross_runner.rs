@@ -4,19 +4,19 @@ use std::time::Instant;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsJetStreamClient};
 use agent_client_protocol::{
-    Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, SetSessionModelRequest,
 };
 use tokio::sync::mpsc;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
 use trogonai_session_contracts::{
-    IdempotencyKey, ModelSwitchReason, OperationId, SessionConfig, SessionId,
+    IdempotencyKey, ModelSwitchReason, OperationId, SessionConfig, SessionId, SwitchResult,
 };
-use trogonai_session_kernel::{shadow_sync_from_export, SessionKernelFeatureFlags};
+use trogonai_session_kernel::{SessionKernelFeatureFlags, shadow_sync_from_export};
 use trogonai_switching::{
-    messages_json_for_runner_hydration, portable_config_from_snapshot, PassthroughCheckpointRunner,
-    SwitchGateOutcome, SwitchModelRequest, SwitchOrchestrator, SwitchingError,
+    PassthroughCheckpointRunner, SwitchGateOutcome, SwitchModelRequest, SwitchOrchestrator, SwitchingError,
+    classify_switch_result, messages_json_for_runner_hydration, portable_config_from_snapshot,
 };
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
@@ -47,7 +47,7 @@ pub struct CrossRunnerSwitcher<S: RegistryStore> {
     nats: async_nats::Client,
     base_config: Config,
     registry: Registry<S>,
-  kernel_stack: Option<crate::session_kernel::SessionKernelStack>,
+    kernel_stack: Option<crate::session_kernel::SessionKernelStack>,
     /// Each entry is `(Bridge, notification_rx)`.  The receiver is kept alive
     /// for exactly as long as the bridge; they are inserted and removed together.
     bridges: HashMap<String, BridgeSlot>,
@@ -64,10 +64,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         }
     }
 
-    pub fn with_kernel_stack(
-        mut self,
-        stack: crate::session_kernel::SessionKernelStack,
-    ) -> Self {
+    pub fn with_kernel_stack(mut self, stack: crate::session_kernel::SessionKernelStack) -> Self {
         self.kernel_stack = Some(stack);
         self
     }
@@ -156,6 +153,14 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                         "completed",
                         result.checkpoint_result.as_deref(),
                     );
+                    // The structured result is emitted (not a parsed string); a degraded
+                    // or repaired switch stays visible in logs derived from it.
+                    tracing::info!(
+                        session_id = current_session_id,
+                        target_model = model_id,
+                        switch_result = switch_result_label(result.result),
+                        "canonical model switch completed"
+                    );
                     return Ok((target_prefix, result.runner_session_id));
                 }
                 Err(err) => {
@@ -164,9 +169,21 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                         &err.operation_id,
                         &err.reason,
                     );
+                    // § Rollback Strategy / Compatibilidad temporal: a silent handoff is
+                    // only permitted while the event log is NOT primary. Under event-primary
+                    // a canonical failure must surface the structured repairable result,
+                    // never a quiet handoff that would fake continuity from the old runner.
+                    if !stack.flags.allows_handoff_fallback() {
+                        return Err(format!(
+                            "model switch failed under event-primary mode ({}; no silent handoff): {}",
+                            switch_result_label(err.result),
+                            err.reason
+                        ));
+                    }
                     tracing::warn!(
                         session_id = current_session_id,
                         target_model = model_id,
+                        switch_result = switch_result_label(err.result),
                         error = %err.reason,
                         "canonical session kernel switch failed — falling back to export/import handoff"
                     );
@@ -191,29 +208,26 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         let session_id = SessionId::new(trogon_session_id).map_err(|err| CanonicalSwitchFailure {
             operation_id: trogon_session_id.to_string(),
             reason: err.to_string(),
+            result: SwitchResult::FailedRecoverable,
         })?;
-        let operation_id = OperationId::new(format!("op_switch_{}", uuid::Uuid::now_v7()))
-            .map_err(|err| CanonicalSwitchFailure {
+        let operation_id =
+            OperationId::new(format!("op_switch_{}", uuid::Uuid::now_v7())).map_err(|err| CanonicalSwitchFailure {
                 operation_id: trogon_session_id.to_string(),
                 reason: err.to_string(),
+                result: SwitchResult::FailedRecoverable,
             })?;
-        let idempotency_key = IdempotencyKey::new(format!("idem_{}", uuid::Uuid::now_v7()))
-            .map_err(|err| CanonicalSwitchFailure {
+        let idempotency_key =
+            IdempotencyKey::new(format!("idem_{}", uuid::Uuid::now_v7())).map_err(|err| CanonicalSwitchFailure {
                 operation_id: operation_id.as_str().to_string(),
                 reason: err.to_string(),
+                result: SwitchResult::FailedRecoverable,
             })?;
 
         if stack.flags.event_log_shadow_mode {
             let portable_config = legacy_portable_session_config(&self.nats, trogon_session_id).await;
             let portable_snapshot = portable_config_to_session_config(&portable_config);
-            if let Err(err) = shadow_sync_from_export(
-                &stack.kernel,
-                &session_id,
-                export_json,
-                cwd,
-                portable_snapshot,
-            )
-            .await
+            if let Err(err) =
+                shadow_sync_from_export(&stack.kernel, &session_id, export_json, cwd, portable_snapshot).await
             {
                 tracing::warn!(
                     session_id = trogon_session_id,
@@ -236,7 +250,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             stack.certification.clone(),
         );
 
-        let switch_result = orchestrator
+        let outcome = orchestrator
             .switch_model(SwitchModelRequest {
                 session_id: session_id.clone(),
                 target_model: model_id.to_string(),
@@ -248,8 +262,12 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 correlation_id: format!("corr_{}", uuid::Uuid::now_v7()),
                 idempotency_key,
             })
-            .await
-            .map_err(|err| map_switching_error(operation_id.as_str(), err))?;
+            .await;
+        // Normalize ONCE into the structured SwitchResult before unwrapping, so every
+        // return path carries it (§ Trabajo restante: "emitir SwitchResult estructurado").
+        let result_kind = classify_switch_result(&outcome);
+
+        let switch_result = outcome.map_err(|err| map_switching_error(operation_id.as_str(), result_kind, err))?;
 
         let result = match switch_result {
             Ok(result) => result,
@@ -267,6 +285,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 return Err(CanonicalSwitchFailure {
                     operation_id: operation_id.as_str().to_string(),
                     reason: "switch blocked by safety gate".to_string(),
+                    result: result_kind,
                 });
             }
             Err(SwitchGateOutcome::ConfirmationRequired(_)) => {
@@ -278,18 +297,24 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 return Err(CanonicalSwitchFailure {
                     operation_id: operation_id.as_str().to_string(),
                     reason: "switch requires user confirmation".to_string(),
+                    result: result_kind,
                 });
             }
         };
 
         let portable = {
             let legacy = legacy_portable_session_config(&self.nats, trogon_session_id).await;
-            let snapshot = stack.kernel.load_snapshot(&session_id).await.map_err(|err| {
-                CanonicalSwitchFailure {
+            let snapshot = stack
+                .kernel
+                .load_snapshot(&session_id)
+                .await
+                .map_err(|err| CanonicalSwitchFailure {
                     operation_id: operation_id.as_str().to_string(),
                     reason: err.to_string(),
-                }
-            })?;
+                    // Canonical switch committed; only post-switch hydration failed, so the
+                    // session stays consistent and the attempt is retryable.
+                    result: SwitchResult::FailedRecoverable,
+                })?;
             let mut portable = snapshot
                 .as_ref()
                 .and_then(|snap| snap.state.as_option())
@@ -310,24 +335,20 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             portable
         };
 
-        let import_messages = messages_json_for_runner_hydration(&result.projection, &[])
-            .map_err(|err| CanonicalSwitchFailure {
+        let import_messages =
+            messages_json_for_runner_hydration(&result.projection, &[]).map_err(|err| CanonicalSwitchFailure {
                 operation_id: operation_id.as_str().to_string(),
                 reason: err.to_string(),
+                result: SwitchResult::FailedRecoverable,
             })?;
 
         let new_session_id = self
-            .open_and_hydrate_runner_session(
-                target_prefix,
-                cwd,
-                &import_messages,
-                model_id,
-                &portable,
-            )
+            .open_and_hydrate_runner_session(target_prefix, cwd, &import_messages, model_id, &portable)
             .await
             .map_err(|reason| CanonicalSwitchFailure {
                 operation_id: operation_id.as_str().to_string(),
                 reason,
+                result: SwitchResult::FailedRecoverable,
             })?;
 
         trogonai_switching::telemetry::metrics::record_switch_completed(
@@ -339,20 +360,22 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             &result.to_runner,
         );
 
-        let checkpoint_result = result.checkpoint.as_ref().map(|checkpoint| {
-            match checkpoint.status.as_known() {
+        let checkpoint_result = result
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| match checkpoint.status.as_known() {
                 Some(trogonai_session_contracts::ContinuityCheckpointStatus::Passed) => "passed",
                 Some(trogonai_session_contracts::ContinuityCheckpointStatus::Repaired) => "repaired",
                 Some(trogonai_session_contracts::ContinuityCheckpointStatus::Failed) => "failed",
                 _ => "unknown",
-            }
-        });
+            });
 
         Ok(CanonicalSwitchOutcome {
             operation_id: operation_id.as_str().to_string(),
             source_model: result.from_model,
             runner_session_id: new_session_id,
             checkpoint_result: checkpoint_result.map(str::to_string),
+            result: result_kind,
         })
     }
 
@@ -515,17 +538,40 @@ struct CanonicalSwitchOutcome {
     source_model: String,
     runner_session_id: String,
     checkpoint_result: Option<String>,
+    /// The normalized, structured switch result (§ Contrato formal de resultado del
+    /// switch). cross_runner emits THIS, not a parsed string.
+    result: SwitchResult,
 }
 
 struct CanonicalSwitchFailure {
     operation_id: String,
     reason: String,
+    /// Structured outcome so the caller/UX derive behavior from the result, not text
+    /// (§ "logs y metricas deben derivarse del resultado estructurado, no de parsear texto").
+    result: SwitchResult,
 }
 
-fn map_switching_error(operation_id: &str, err: SwitchingError) -> CanonicalSwitchFailure {
+fn map_switching_error(operation_id: &str, result: SwitchResult, err: SwitchingError) -> CanonicalSwitchFailure {
     CanonicalSwitchFailure {
         operation_id: operation_id.to_string(),
         reason: err.to_string(),
+        result,
+    }
+}
+
+/// Stable snake_case label for the structured switch result, for user-facing messages
+/// and logs that must derive from the result rather than parse free text.
+fn switch_result_label(result: SwitchResult) -> &'static str {
+    match result {
+        SwitchResult::Unspecified => "unspecified",
+        SwitchResult::Switched => "switched",
+        SwitchResult::Blocked => "blocked",
+        SwitchResult::RequiresConfirmation => "requires_confirmation",
+        SwitchResult::Degraded => "degraded",
+        SwitchResult::Repaired => "repaired",
+        SwitchResult::RolledBack => "rolled_back",
+        SwitchResult::FailedRecoverable => "failed_recoverable",
+        SwitchResult::FailedTerminal => "failed_terminal",
     }
 }
 
@@ -553,13 +599,8 @@ async fn legacy_portable_session_config(
     }
 }
 
-fn portable_config_to_session_config(
-    portable: &trogonai_switching::PortableRunnerConfig,
-) -> Option<SessionConfig> {
-    if portable.compactor_model.is_none()
-        && portable.system_prompt.is_none()
-        && portable.mcp_servers_json.is_empty()
-    {
+fn portable_config_to_session_config(portable: &trogonai_switching::PortableRunnerConfig) -> Option<SessionConfig> {
+    if portable.compactor_model.is_none() && portable.system_prompt.is_none() && portable.mcp_servers_json.is_empty() {
         return None;
     }
     Some(SessionConfig {
@@ -577,7 +618,10 @@ async fn apply_portable_runner_config(
     portable: &trogonai_switching::PortableRunnerConfig,
 ) -> Result<(), String> {
     bridge
-        .set_session_model(SetSessionModelRequest::new(session_id.to_string(), model_id.to_string()))
+        .set_session_model(SetSessionModelRequest::new(
+            session_id.to_string(),
+            model_id.to_string(),
+        ))
         .await
         .map_err(|err| err.to_string())?;
     if let Some(mode) = &portable.mode {
@@ -588,13 +632,11 @@ async fn apply_portable_runner_config(
     }
     if let Some(compactor_model) = &portable.compactor_model {
         bridge
-            .set_session_config_option(
-                SetSessionConfigOptionRequest::new(
-                    session_id.to_string(),
-                    "compactor_model",
-                    compactor_model.as_str(),
-                ),
-            )
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                session_id.to_string(),
+                "compactor_model",
+                compactor_model.as_str(),
+            ))
             .await
             .map_err(|err| err.to_string())?;
     }
@@ -637,6 +679,33 @@ mod tests {
         let mut cap = AgentCapability::new("runner", ["chat"], "agents.runner.>");
         cap.metadata = serde_json::json!({ "models": [model], "acp_prefix": acp_prefix });
         cap
+    }
+
+    // §2206 "emitir SwitchResult estructurado": cross_runner carries the structured
+    // result through its failure type, and user-facing text DERIVES from it (§2031:
+    // "logs y metricas deben derivarse del resultado estructurado, no de parsear texto").
+
+    #[test]
+    fn map_switching_error_carries_the_structured_result() {
+        let failure = map_switching_error(
+            "op_1",
+            SwitchResult::FailedTerminal,
+            SwitchingError::TargetModelNotFound { model_id: "ghost".to_string() },
+        );
+        assert_eq!(failure.result, SwitchResult::FailedTerminal);
+        assert_eq!(failure.operation_id, "op_1");
+    }
+
+    #[test]
+    fn switch_result_label_is_stable_for_every_state() {
+        assert_eq!(switch_result_label(SwitchResult::Switched), "switched");
+        assert_eq!(switch_result_label(SwitchResult::Blocked), "blocked");
+        assert_eq!(switch_result_label(SwitchResult::RequiresConfirmation), "requires_confirmation");
+        assert_eq!(switch_result_label(SwitchResult::Degraded), "degraded");
+        assert_eq!(switch_result_label(SwitchResult::Repaired), "repaired");
+        assert_eq!(switch_result_label(SwitchResult::RolledBack), "rolled_back");
+        assert_eq!(switch_result_label(SwitchResult::FailedRecoverable), "failed_recoverable");
+        assert_eq!(switch_result_label(SwitchResult::FailedTerminal), "failed_terminal");
     }
 
     #[tokio::test]

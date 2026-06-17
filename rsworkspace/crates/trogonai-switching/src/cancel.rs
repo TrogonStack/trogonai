@@ -3,8 +3,8 @@ use buffa_types::google::protobuf::Timestamp;
 use trogonai_session_contracts::session_event_payload::Kind;
 use trogonai_session_contracts::{
     OperationCancelFailedPayload, OperationCancelRequestedPayload, OperationCancelledPayload,
-    OperationRequiresReconciliationPayload, RunnerCancelRequestedPayload, RunnerCancelledPayload,
-    SessionEvent, SessionEventPayload,
+    OperationRequiresReconciliationPayload, RunnerCancelRequestedPayload, RunnerCancelledPayload, SessionEvent,
+    SessionEventPayload,
 };
 
 use crate::error::SwitchingError;
@@ -124,11 +124,7 @@ pub async fn cancel_operation<R: RunnerCancellation>(
             Err(err) => {
                 state = state.transition_to(CancelState::RequiresReconciliation)?;
                 events.push(requires_reconciliation_event(context, &err.to_string()));
-                return Ok((
-                    CancelOutcome::RequiresReconciliation(err.to_string()),
-                    state,
-                    events,
-                ));
+                return Ok((CancelOutcome::RequiresReconciliation(err.to_string()), state, events));
             }
         }
     }
@@ -245,9 +241,7 @@ mod tests {
                     Some(Kind::RunnerCancelled(_)) => "runner_cancelled",
                     Some(Kind::OperationCancelled(_)) => "operation_cancelled",
                     Some(Kind::OperationCancelFailed(_)) => "operation_cancel_failed",
-                    Some(Kind::OperationRequiresReconciliation(_)) => {
-                        "operation_requires_reconciliation"
-                    }
+                    Some(Kind::OperationRequiresReconciliation(_)) => "operation_requires_reconciliation",
                     _ => "untyped",
                 }
                 .to_string()
@@ -257,10 +251,9 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_before_tool_calls_marks_operation_cancelled() {
-        let (outcome, state, events) =
-            cancel_operation::<mock::MockRunnerCancellation>(None, &cancel_context(), &[])
-                .await
-                .unwrap();
+        let (outcome, state, events) = cancel_operation::<mock::MockRunnerCancellation>(None, &cancel_context(), &[])
+            .await
+            .unwrap();
         assert_eq!(outcome, CancelOutcome::Cancelled);
         assert_eq!(state, CancelState::OperationCancelled);
         // Cancellation is a typed event flow, not a silent interruption.
@@ -276,13 +269,10 @@ mod tests {
             should_fail: false,
             ..Default::default()
         };
-        let (outcome, state, events) = cancel_operation(
-            Some(&runner),
-            &cancel_context(),
-            &[ToolExecutionState::Started],
-        )
-        .await
-        .unwrap();
+        let (outcome, state, events) =
+            cancel_operation(Some(&runner), &cancel_context(), &[ToolExecutionState::Started])
+                .await
+                .unwrap();
         assert_eq!(outcome, CancelOutcome::Cancelled);
         assert_eq!(state, CancelState::OperationCancelled);
         assert_eq!(
@@ -302,13 +292,10 @@ mod tests {
             should_fail: true,
             ..Default::default()
         };
-        let (outcome, state, events) = cancel_operation(
-            Some(&runner),
-            &cancel_context(),
-            &[ToolExecutionState::Started],
-        )
-        .await
-        .unwrap();
+        let (outcome, state, events) =
+            cancel_operation(Some(&runner), &cancel_context(), &[ToolExecutionState::Started])
+                .await
+                .unwrap();
         assert!(matches!(outcome, CancelOutcome::RequiresReconciliation(_)));
         assert_eq!(state, CancelState::RequiresReconciliation);
         assert_eq!(
@@ -327,13 +314,10 @@ mod tests {
             already_completed: true,
             ..Default::default()
         };
-        let (outcome, state, events) = cancel_operation(
-            Some(&runner),
-            &cancel_context(),
-            &[ToolExecutionState::Started],
-        )
-        .await
-        .unwrap();
+        let (outcome, state, events) =
+            cancel_operation(Some(&runner), &cancel_context(), &[ToolExecutionState::Started])
+                .await
+                .unwrap();
         assert!(matches!(outcome, CancelOutcome::Failed(_)));
         assert_eq!(state, CancelState::CancelFailed);
         assert_eq!(

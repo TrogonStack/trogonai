@@ -1,6 +1,4 @@
-use trogonai_session_contracts::{
-    SessionSnapshotState, SwitchSafetyDecision, SwitchSafetyStatus, ToolCallStatus,
-};
+use trogonai_session_contracts::{SessionSnapshotState, SwitchSafetyDecision, SwitchSafetyStatus, ToolCallStatus};
 
 use crate::error::SwitchingError;
 use crate::state::ForceSwitchState;
@@ -33,9 +31,7 @@ pub fn evaluate_force_switch(
     if !request.confirmed {
         let _ = state.transition_to(ForceSwitchState::Rejected)?;
         return Ok((
-            ForceSwitchOutcome::Rejected(
-                "force switch requires explicit user confirmation".to_string(),
-            ),
+            ForceSwitchOutcome::Rejected("force switch requires explicit user confirmation".to_string()),
             ForceSwitchState::Rejected,
         ));
     }
@@ -84,8 +80,7 @@ pub fn evaluate_force_switch(
 
 fn has_unreconciled_destructive_operation(session: &SessionSnapshotState) -> bool {
     session.tool_calls.iter().any(|tool| {
-        tool.status.as_known() == Some(ToolCallStatus::RequiresReconciliation)
-            && tool.name.contains("delete")
+        tool.status.as_known() == Some(ToolCallStatus::RequiresReconciliation) && tool.name.contains("delete")
     })
 }
 
@@ -113,9 +108,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             outcome,
-            ForceSwitchOutcome::Rejected(
-                "force switch requires explicit user confirmation".to_string()
-            )
+            ForceSwitchOutcome::Rejected("force switch requires explicit user confirmation".to_string())
         );
         assert_eq!(state, ForceSwitchState::Rejected);
     }

@@ -6,7 +6,8 @@ use trogonai_session_contracts::{
     Actor, ActorType, ArtifactMetadata, ArtifactRetentionPolicy,
     CapabilitySchema, CapabilitySource, ContextTwin, EncryptionStatus, ModelSwitchedPayload,
     ModelSwitchReason, RunnerBinding, RunnerBindingStatus, SCHEMA_VERSION_V1, SessionCreatedPayload,
-    SessionEvent, SessionEventPayload, SessionSnapshot, SessionSnapshotState, ToolResultFormat,
+    SessionEvent, SessionEventPayload, SessionSnapshot, SessionSnapshotState, SwitchCheckpointSummary,
+    SwitchOutcomeRecordedPayload, SwitchResult, SwitchVisibleResult, ToolResultFormat,
 };
 
 pub fn sample_timestamp() -> Timestamp {
@@ -76,6 +77,55 @@ pub fn sample_model_switched_event() -> SessionEvent {
                     to_model: "grok-code-fast".to_string(),
                     reason: EnumValue::Known(ModelSwitchReason::UserRequested),
                     ..ModelSwitchedPayload::default()
+                }
+                .into(),
+            ),
+            ..SessionEventPayload::default()
+        }),
+        ..SessionEvent::default()
+    }
+}
+
+pub fn sample_switch_outcome_recorded_event() -> SessionEvent {
+    SessionEvent {
+        schema_version: SCHEMA_VERSION_V1,
+        event_id: "evt_golden_switch_result".to_string(),
+        session_id: "sess_golden".to_string(),
+        seq: 43,
+        operation_id: "op_golden_switch".to_string(),
+        correlation_id: "corr_golden_switch".to_string(),
+        causation_id: Some("evt_golden_model_switched".to_string()),
+        idempotency_key: "idem_golden_switch_switch_outcome_recorded".to_string(),
+        created_at: MessageField::some(sample_timestamp()),
+        actor: MessageField::some(Actor {
+            r#type: EnumValue::Known(ActorType::Kernel),
+            id: "trogonai-switching".to_string(),
+            ..Actor::default()
+        }),
+        payload: MessageField::some(SessionEventPayload {
+            kind: Some(
+                SwitchOutcomeRecordedPayload {
+                    result: MessageField::some(SwitchVisibleResult {
+                        session_id: "sess_golden".to_string(),
+                        result: EnumValue::Known(SwitchResult::Degraded),
+                        from_model: "anthropic/claude-sonnet".to_string(),
+                        to_model: "grok-code-fast".to_string(),
+                        from_runner: "openrouter".to_string(),
+                        to_runner: "xai".to_string(),
+                        runner_changed: true,
+                        degradations: vec!["images dropped".to_string()],
+                        lost_capabilities: vec!["image_input".to_string()],
+                        fallback_used: false,
+                        fallback_reason: None,
+                        checkpoint: MessageField::some(SwitchCheckpointSummary {
+                            required: true,
+                            status: "passed".to_string(),
+                            ..SwitchCheckpointSummary::default()
+                        }),
+                        next_action: None,
+                        ..SwitchVisibleResult::default()
+                    }),
+                    ..SwitchOutcomeRecordedPayload::default()
                 }
                 .into(),
             ),
@@ -202,7 +252,7 @@ pub fn minimal_session_event_wire() -> SessionEvent {
 pub fn write_golden_fixtures(dir: &std::path::Path) {
     std::fs::create_dir_all(dir).expect("create fixture dir");
 
-    let fixtures: [(&str, Vec<u8>); 6] = [
+    let fixtures: [(&str, Vec<u8>); 7] = [
         (
             "session_event_session_created_v1.bin",
             sample_session_event().encode_to_vec(),
@@ -210,6 +260,10 @@ pub fn write_golden_fixtures(dir: &std::path::Path) {
         (
             "session_event_model_switched_v1.bin",
             sample_model_switched_event().encode_to_vec(),
+        ),
+        (
+            "session_event_switch_outcome_recorded_v1.bin",
+            sample_switch_outcome_recorded_event().encode_to_vec(),
         ),
         (
             "context_twin_v1.bin",

@@ -115,6 +115,11 @@ impl ValidatedSessionEvent {
         if event.idempotency_key.is_empty() {
             return Err(ContractValidationError::MissingField("idempotency_key"));
         }
+        // NOTE: `actor` and `payload` are listed obligatorio by §4, but are
+        // intentionally NOT enforced here: the §Schema Versioning N-1 rule requires
+        // accepting minimal/older events that may lack them (see the
+        // `n_minus_one_reader_accepts_minimal_event_without_optional_fields` contract
+        // test). The two doc requirements conflict; N-1 compatibility wins.
 
         Ok(Self {
             schema_version: if event.schema_version == 0 {

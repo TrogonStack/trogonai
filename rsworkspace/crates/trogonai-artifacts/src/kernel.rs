@@ -4,8 +4,8 @@ use buffa::{EnumValue, MessageField};
 use trogon_nats::jetstream::ObjectStoreDelete;
 use trogonai_session_contracts::{
     Actor, ArtifactCreatedPayload, ArtifactGcDeletedPayload, ArtifactGcMarkedPayload,
-    ArtifactMetadata, ArtifactRetentionPolicy, CorrelationId, EventId, IdempotencyKey, OperationId,
-    RedactionAppliedPayload, SCHEMA_VERSION_V1, SessionEvent, SessionEventPayload,
+    ArtifactMetadata, ArtifactRetentionPolicy, ArtifactSourceAvailability, CorrelationId, EventId, IdempotencyKey,
+    OperationId, RedactionAppliedPayload, SCHEMA_VERSION_V1, SessionEvent, SessionEventPayload, SessionId,
     SessionSnapshotState, __buffa::oneof::tool_call_result::Kind as ToolResultKind,
 };
 
@@ -99,24 +99,25 @@ fn redaction_applied_event(
 }
 
 fn artifact_created_event(stored: &StoredArtifact, context: &ArtifactEventContext) -> SessionEvent {
-    let session_id = stored.metadata.session_id.clone();
-    let event_id = format!("evt_{}", uuid::Uuid::now_v7());
+    artifact_created_event_from_metadata(&stored.metadata, context)
+}
 
+fn artifact_created_event_from_metadata(metadata: &ArtifactMetadata, context: &ArtifactEventContext) -> SessionEvent {
     SessionEvent {
         schema_version: SCHEMA_VERSION_V1,
-        event_id,
-        session_id,
+        event_id: format!("evt_{}", uuid::Uuid::now_v7()),
+        session_id: metadata.session_id.clone(),
         seq: 0,
         operation_id: context.operation_id.as_str().to_string(),
         correlation_id: context.correlation_id.as_str().to_string(),
         causation_id: context.causation_id.as_ref().map(|id| id.as_str().to_string()),
         idempotency_key: context.idempotency_key.as_str().to_string(),
-        created_at: stored.metadata.created_at.clone(),
+        created_at: metadata.created_at.clone(),
         actor: MessageField::some(context.actor.clone()),
         payload: MessageField::some(SessionEventPayload {
             kind: Some(
                 ArtifactCreatedPayload {
-                    artifact: MessageField::some(stored.metadata.clone()),
+                    artifact: MessageField::some(metadata.clone()),
                     ..ArtifactCreatedPayload::default()
                 }
                 .into(),
@@ -125,6 +126,57 @@ fn artifact_created_event(stored: &StoredArtifact, context: &ArtifactEventContex
         }),
         ..SessionEvent::default()
     }
+}
+
+/// Record a degraded external reference for an image whose bytes could NOT be fetched
+/// (§ Imagen por URL: "si no se puede fetchear por auth, timeout, tamano, politica o red,
+/// guardar solo external_ref degradado"). No bytes are stored; only metadata with
+/// `availability = ExternalRef` and the `source_url` is kept and emitted as
+/// `artifact_created` for the canonical event log. A downstream Safety Gate decides if an
+/// indispensable image existing only as an external_ref must block the switch (§985).
+pub async fn record_external_ref_image<E, Kv, L>(
+    kernel: &SessionKernel<E, Kv, L>,
+    context: &ArtifactEventContext,
+    session_id: &SessionId,
+    source_url: &str,
+    declared_mime: &str,
+    fetched_at: buffa_types::google::protobuf::Timestamp,
+) -> Result<(ArtifactMetadata, SessionEvent), ArtifactStoreError>
+where
+    E: EventLogBackend,
+    Kv: trogon_nats::jetstream::JetStreamKvGet
+        + trogon_nats::jetstream::JetStreamKvEntry
+        + trogon_nats::jetstream::JetStreamKvCreate
+        + trogon_nats::jetstream::JetStreamKeyValueUpdate
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    L: SessionLeaseFactory + Clone + 'static,
+{
+    let metadata = ArtifactMetadata {
+        schema_version: SCHEMA_VERSION_V1,
+        artifact_id: format!("artifact_{}", uuid::Uuid::now_v7()),
+        session_id: session_id.as_str().to_string(),
+        event_id: context.causation_id.as_ref().map(|id| id.as_str().to_string()).unwrap_or_default(),
+        sha256: String::new(),
+        size_bytes: 0,
+        mime: declared_mime.to_string(),
+        storage_ref: String::new(),
+        created_at: MessageField::some(fetched_at.clone()),
+        retention_policy: EnumValue::Known(ArtifactRetentionPolicy::Session),
+        permission_scope: crate::config::DEFAULT_PERMISSION_SCOPE.to_string(),
+        // Bytes never reached canonical storage: this is a degraded reference.
+        availability: EnumValue::Known(ArtifactSourceAvailability::ExternalRef),
+        source_url: Some(source_url.to_string()),
+        fetched_at: MessageField::some(fetched_at),
+        truncated: true,
+        ..ArtifactMetadata::default()
+    };
+
+    let event = artifact_created_event_from_metadata(&metadata, context);
+    let appended = kernel.append_event(event).await?;
+    Ok((metadata, appended))
 }
 
 /// Builds an `artifact_created` event for an already persisted artifact.
@@ -315,6 +367,66 @@ mod tests {
             }
             other => panic!("expected artifact_created, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn record_external_ref_image_emits_degraded_artifact_without_bytes() {
+        let session_id = SessionId::new("sess_extref").unwrap();
+        let snapshot_store = trogon_nats::jetstream::MockJetStreamKvStore::new();
+        snapshot_store.enqueue_get_none();
+        let kernel = SessionKernel::new(
+            SessionKernelConfig::default(),
+            InMemoryEventLog::new(),
+            SnapshotStore::new(snapshot_store, SessionKernelConfig::default()),
+            SessionLeaseManager::new(MockSessionLeaseFactory::new(MockSessionLease::new()), "node-1"),
+        );
+        let context = ArtifactEventContext {
+            operation_id: OperationId::new("op_img").unwrap(),
+            correlation_id: CorrelationId::new("corr_img").unwrap(),
+            idempotency_key: IdempotencyKey::new("idem_img").unwrap(),
+            causation_id: None,
+            actor: Actor {
+                r#type: EnumValue::Known(ActorType::Kernel),
+                id: "session-kernel".to_string(),
+                ..Actor::default()
+            },
+        };
+        let fetched_at = buffa_types::google::protobuf::Timestamp {
+            seconds: 1_700_000_000,
+            nanos: 0,
+            ..buffa_types::google::protobuf::Timestamp::default()
+        };
+
+        let (metadata, appended) = record_external_ref_image(
+            &kernel,
+            &context,
+            &session_id,
+            "https://host/img.png",
+            "image/png",
+            fetched_at,
+        )
+        .await
+        .unwrap();
+
+        // § Imagen por URL: degraded path keeps only an external reference — no bytes,
+        // no checksum, no storage ref, availability = ExternalRef.
+        assert_eq!(
+            metadata.availability.as_known(),
+            Some(ArtifactSourceAvailability::ExternalRef)
+        );
+        assert_eq!(metadata.source_url.as_deref(), Some("https://host/img.png"));
+        assert!(metadata.sha256.is_empty());
+        assert!(metadata.storage_ref.is_empty());
+        assert_eq!(metadata.size_bytes, 0);
+        assert!(metadata.fetched_at.as_option().is_some());
+
+        // Still recorded as artifact_created in the canonical event log.
+        assert_eq!(appended.seq, 1);
+        let payload = appended.payload.as_option().unwrap();
+        assert!(matches!(
+            payload.kind.as_ref().unwrap(),
+            session_event_payload::Kind::ArtifactCreated(_)
+        ));
     }
 
     #[tokio::test]

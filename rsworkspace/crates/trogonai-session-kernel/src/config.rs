@@ -38,10 +38,7 @@ pub struct SessionKernelConfig {
     #[config(env = "TROGON_SESSION_KERNEL_LEASE_RENEW_INTERVAL_SECS", default = 10)]
     lease_renew_interval_secs: u64,
 
-    #[config(
-        env = "TROGON_SESSION_KERNEL_CHECKPOINT_LATENCY_BUDGET_SECS",
-        default = 20
-    )]
+    #[config(env = "TROGON_SESSION_KERNEL_CHECKPOINT_LATENCY_BUDGET_SECS", default = 20)]
     checkpoint_latency_budget_secs: u64,
 
     #[config(env = "TROGON_SESSION_KERNEL_SWITCH_LATENCY_BUDGET_SECS", default = 5)]
@@ -82,14 +79,8 @@ mod tests {
     #[test]
     fn defaults_match_documented_values() {
         let config = SessionKernelConfig::default();
-        assert_eq!(
-            config.inline_artifact_limit_bytes,
-            DEFAULT_INLINE_ARTIFACT_LIMIT_BYTES
-        );
-        assert_eq!(
-            config.max_event_payload_bytes,
-            DEFAULT_MAX_EVENT_PAYLOAD_BYTES
-        );
+        assert_eq!(config.inline_artifact_limit_bytes, DEFAULT_INLINE_ARTIFACT_LIMIT_BYTES);
+        assert_eq!(config.max_event_payload_bytes, DEFAULT_MAX_EVENT_PAYLOAD_BYTES);
         assert_eq!(config.max_snapshot_bytes, DEFAULT_MAX_SNAPSHOT_BYTES);
         assert_eq!(config.lease_ttl(), Duration::from_secs(30));
         assert_eq!(config.lease_renew_interval(), Duration::from_secs(10));

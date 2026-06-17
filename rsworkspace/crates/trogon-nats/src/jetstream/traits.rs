@@ -183,6 +183,12 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
         + 'static;
 
     fn messages(&self) -> impl Future<Output = Result<Self::Messages, Self::StreamError>> + Send;
+
+    /// Number of messages pending for this consumer at the time it was created. Used to
+    /// bound a snapshot read so it stops after draining the current messages instead of
+    /// waiting indefinitely for future ones (a pull consumer's `messages()` stream is
+    /// otherwise continuous and never ends).
+    fn num_pending(&self) -> impl Future<Output = u64> + Send;
 }
 
 /// The message type produced by the consumer at the end of the
@@ -347,5 +353,11 @@ impl JetStreamConsumer for jetstream::consumer::Consumer<pull::Config> {
 
     async fn messages(&self) -> Result<Self::Messages, Self::StreamError> {
         self.messages().await
+    }
+
+    async fn num_pending(&self) -> u64 {
+        // Populated when the consumer was created (DeliverPolicy::All) — the count of
+        // messages matching the filter currently in the stream.
+        self.cached_info().num_pending
     }
 }

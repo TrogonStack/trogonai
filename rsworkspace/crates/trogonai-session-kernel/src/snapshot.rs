@@ -1,6 +1,6 @@
 use buffa::Message as _;
 use bytes::Bytes;
-use trogon_nats::jetstream::{JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKeyValueUpdate};
+use trogon_nats::jetstream::{JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet};
 use trogonai_session_contracts::{SessionId, SessionSnapshot, ValidatedSessionSnapshot};
 
 use crate::config::SessionKernelConfig;
@@ -28,10 +28,7 @@ impl<S> SnapshotStore<S>
 where
     S: JetStreamKvGet + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate + Clone + Send + Sync + 'static,
 {
-    pub async fn load_snapshot(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionSnapshot>, SessionKernelError> {
+    pub async fn load_snapshot(&self, session_id: &SessionId) -> Result<Option<SessionSnapshot>, SessionKernelError> {
         let key = session_snapshot_key(session_id);
         let Some(bytes) = self
             .store
@@ -41,8 +38,8 @@ where
         else {
             return Ok(None);
         };
-        let snapshot = SessionSnapshot::decode_from_slice(&bytes)
-            .map_err(|err| SessionKernelError::Decode(err.to_string()))?;
+        let snapshot =
+            SessionSnapshot::decode_from_slice(&bytes).map_err(|err| SessionKernelError::Decode(err.to_string()))?;
         ValidatedSessionSnapshot::try_from_snapshot(snapshot.clone())?;
         Ok(Some(snapshot))
     }

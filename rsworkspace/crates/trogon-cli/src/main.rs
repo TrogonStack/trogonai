@@ -96,6 +96,19 @@ fn run_dev_stack() -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     trogon_cli::env_local::load_env_local();
+
+    // Initialize the OpenTelemetry provider so kernel/switch metrics emitted from the
+    // CLI (e.g. `/model` cross-runner switches) actually export instead of registering
+    // against a no-op global meter (ADR-0008 / cambio-modelo.md Exit Criteria: "el
+    // binario host debe inicializar el provider OTel"). File-only logging is used so the
+    // interactive REPL is not corrupted by stderr log lines.
+    trogon_telemetry::init_logger_file_only(
+        trogon_telemetry::ServiceName::TrogonCli,
+        Vec::<trogon_telemetry::ResourceAttribute>::new(),
+        &trogon_std::env::SystemEnv,
+        &trogon_std::fs::SystemFs,
+    );
+
     let args = Args::parse();
 
     if matches!(args.command, Some(Command::Dev)) {
@@ -170,6 +183,9 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         let code = trogon_cli::print::run(session, &prompt, format, options).await;
+        // Flush OTel providers before process::exit bypasses normal Drop, so buffered
+        // metrics/traces are exported rather than lost.
+        let _ = trogon_telemetry::shutdown_otel();
         // MED-40: explicitly drop the KillOnDrop guard so the auto-started NATS
         // server process is killed before process::exit bypasses normal Drop.
         drop(nats_server);
@@ -267,6 +283,12 @@ async fn main() -> anyhow::Result<()> {
             args.dangerously_skip_permissions,
         )
         .await?;
+    }
+
+    // Flush OpenTelemetry providers so buffered switch/kernel metrics are exported
+    // before the process exits.
+    if let Err(err) = trogon_telemetry::shutdown_otel() {
+        tracing::warn!(error = %err, "OpenTelemetry shutdown reported errors");
     }
 
     Ok(())

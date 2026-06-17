@@ -1,28 +1,27 @@
 use std::time::Duration;
 
 use async_nats::jetstream::kv;
+use buffa::MessageField;
+use buffa_types::google::protobuf::Timestamp;
 use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus, is_create_key_value_already_exists,
 };
-use buffa::MessageField;
-use buffa_types::google::protobuf::Timestamp;
 use trogonai_session_contracts::{
-    Actor, AssistantMessageCompletedPayload, CanonicalMessage, CanonicalToolCall,
-    ContractValidationError, EventsArchivedPayload, SCHEMA_VERSION_V1, SessionBranchedPayload,
-    SessionEvent, SessionEventPayload, SessionId, SessionSnapshot, SnapshotCreatedPayload,
-    TerminalContinuity, TerminalContinuityCapturedPayload, ToolCallCompletedPayload,
-    ToolCallRequestedPayload, UserMessageAddedPayload,
+    Actor, AssistantMessageCompletedPayload, CanonicalMessage, CanonicalToolCall, ContractValidationError,
+    EventsArchivedPayload, SCHEMA_VERSION_V1, SessionBranchedPayload, SessionEvent, SessionEventPayload, SessionId,
+    SessionSnapshot, SnapshotCreatedPayload, TerminalContinuity, TerminalContinuityCapturedPayload,
+    ToolCallCompletedPayload, ToolCallRequestedPayload, UserMessageAddedPayload,
 };
 
 use crate::config::SessionKernelConfig;
 use crate::error::SessionKernelError;
 use crate::event_log::EventLogBackend;
 use crate::lease::{
-    SessionLeaseFactory, SessionLeaseGuard, SessionLeaseManager, SessionMutatingOperation, SessionKvLease,
+    SessionKvLease, SessionLeaseFactory, SessionLeaseGuard, SessionLeaseManager, SessionMutatingOperation,
     lease_bucket_config, lease_key_for_session,
 };
 use crate::materialize::materialize_from_events;
-use crate::recovery::{recover_session, RecoveredSession, SnapshotReader};
+use crate::recovery::{RecoveredSession, SnapshotReader, recover_session};
 use crate::snapshot::SnapshotStore;
 use crate::telemetry;
 use crate::usage::UsageStore;
@@ -38,10 +37,7 @@ where
         + Sync
         + 'static,
 {
-    async fn load_snapshot(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionSnapshot>, SessionKernelError> {
+    async fn load_snapshot(&self, session_id: &SessionId) -> Result<Option<SessionSnapshot>, SessionKernelError> {
         self.load_snapshot(session_id).await
     }
 }
@@ -152,6 +148,31 @@ where
         }
     }
 
+    /// Acquire the session lease and start a background heartbeat that renews it
+    /// every `lease_renew_interval` for the duration of the operation (Session
+    /// Lease: "heartbeat/renew mientras dura la operacion"). The returned
+    /// [`crate::lease::LeaseRenewal`] must be held alive for the whole operation;
+    /// dropping it stops the heartbeat and the lease expires by TTL.
+    pub async fn acquire_session_lease_renewing(
+        &self,
+        session_id: &SessionId,
+        operation: SessionMutatingOperation,
+    ) -> Result<
+        (
+            SessionLeaseGuard<<L as SessionLeaseFactory>::Lease>,
+            crate::lease::LeaseRenewal,
+        ),
+        SessionKernelError,
+    > {
+        let guard = self.acquire_session_lease(session_id, operation).await?;
+        let renewal = self.leases.start_renewal(
+            guard.lease().clone(),
+            guard.revision(),
+            self.config.lease_renew_interval(),
+        );
+        Ok((guard, renewal))
+    }
+
     pub async fn renew_session_lease(
         &self,
         guard: &mut SessionLeaseGuard<<L as SessionLeaseFactory>::Lease>,
@@ -166,13 +187,21 @@ where
         self.leases.release_session_lease(guard).await
     }
 
+    /// Release a lease acquired via [`Self::acquire_session_lease_renewing`]: stops
+    /// the renewal heartbeat and releases the lease explicitly at its latest
+    /// revision (Session Lease flow). TTL stays only as the crash fallback.
+    pub async fn release_session_lease_renewing(
+        &self,
+        guard: SessionLeaseGuard<<L as SessionLeaseFactory>::Lease>,
+        renewal: crate::lease::LeaseRenewal,
+    ) -> Result<(), SessionKernelError> {
+        self.leases.release_session_lease_renewing(guard, renewal).await
+    }
+
     pub async fn append_event(&self, mut event: SessionEvent) -> Result<SessionEvent, SessionKernelError> {
         self.assign_next_seq(&mut event).await?;
         let appended = self.event_log.append(event).await?;
-        telemetry::metrics::record_event_appended(
-            appended.session_id.as_str(),
-            event_payload_name(&appended),
-        );
+        telemetry::metrics::record_event_appended(appended.session_id.as_str(), event_payload_name(&appended));
         Ok(appended)
     }
 
@@ -196,10 +225,7 @@ where
         self.assign_next_seq(&mut event).await?;
         match self.event_log.append(event).await {
             Ok(appended) => {
-                telemetry::metrics::record_event_appended(
-                    appended.session_id.as_str(),
-                    event_payload_name(&appended),
-                );
+                telemetry::metrics::record_event_appended(appended.session_id.as_str(), event_payload_name(&appended));
                 Ok(appended)
             }
             Err(err) => {
@@ -217,26 +243,17 @@ where
         }
     }
 
-    pub async fn load_snapshot(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionSnapshot>, SessionKernelError> {
+    pub async fn load_snapshot(&self, session_id: &SessionId) -> Result<Option<SessionSnapshot>, SessionKernelError> {
         self.snapshots.load_snapshot(session_id).await
     }
 
-    pub async fn materialize_state(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionSnapshot, SessionKernelError> {
+    pub async fn materialize_state(&self, session_id: &SessionId) -> Result<SessionSnapshot, SessionKernelError> {
         let existing = self.snapshots.load_snapshot(session_id).await?;
         let events = self.event_log.read_session_events(session_id).await?;
         let snapshot = materialize_from_events(session_id.as_str(), &events, existing)?;
         self.snapshots.save_snapshot(&snapshot).await?;
         if let Some(usage_store) = &self.usage
-            && let Some(usage) = snapshot
-                .state
-                .as_option()
-                .and_then(|state| state.usage.as_option())
+            && let Some(usage) = snapshot.state.as_option().and_then(|state| state.usage.as_option())
         {
             usage_store.save_usage(session_id, usage).await?;
         }
@@ -595,10 +612,7 @@ where
     }
 }
 
-pub async fn provision_lease_store<J, S>(
-    js: &J,
-    config: &SessionKernelConfig,
-) -> Result<S, SessionKernelError>
+pub async fn provision_lease_store<J, S>(js: &J, config: &SessionKernelConfig) -> Result<S, SessionKernelError>
 where
     J: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
     S: JetStreamKeyValueStatus,
@@ -631,10 +645,7 @@ where
     Ok(store)
 }
 
-pub async fn provision_snapshot_store<J, S>(
-    js: &J,
-    config: &SessionKernelConfig,
-) -> Result<S, SessionKernelError>
+pub async fn provision_snapshot_store<J, S>(js: &J, config: &SessionKernelConfig) -> Result<S, SessionKernelError>
 where
     J: JetStreamGetKeyValue<Store = S> + trogon_nats::jetstream::JetStreamCreateKeyValue<Store = S>,
 {
@@ -651,10 +662,7 @@ where
     }
 }
 
-pub async fn provision_usage_store<J, S>(
-    js: &J,
-    config: &SessionKernelConfig,
-) -> Result<S, SessionKernelError>
+pub async fn provision_usage_store<J, S>(js: &J, config: &SessionKernelConfig) -> Result<S, SessionKernelError>
 where
     J: JetStreamGetKeyValue<Store = S> + trogon_nats::jetstream::JetStreamCreateKeyValue<Store = S>,
 {
@@ -709,9 +717,7 @@ fn event_payload_name(event: &SessionEvent) -> &'static str {
             trogonai_session_contracts::session_event_payload::Kind::ModelSwitched(_) => "model_switched",
             trogonai_session_contracts::session_event_payload::Kind::RunnerAttached(_) => "runner_attached",
             trogonai_session_contracts::session_event_payload::Kind::RunnerDetached(_) => "runner_detached",
-            trogonai_session_contracts::session_event_payload::Kind::PermissionRuleAdded(_) => {
-                "permission_rule_added"
-            }
+            trogonai_session_contracts::session_event_payload::Kind::PermissionRuleAdded(_) => "permission_rule_added",
             trogonai_session_contracts::session_event_payload::Kind::TodoUpdated(_) => "todo_updated",
             trogonai_session_contracts::session_event_payload::Kind::SessionCompacted(_) => "session_compacted",
             trogonai_session_contracts::session_event_payload::Kind::SessionBranched(_) => "session_branched",
@@ -738,9 +744,7 @@ fn event_payload_name(event: &SessionEvent) -> &'static str {
             trogonai_session_contracts::session_event_payload::Kind::ForceSwitchCompleted(_) => {
                 "force_switch_completed"
             }
-            trogonai_session_contracts::session_event_payload::Kind::ForceSwitchRejected(_) => {
-                "force_switch_rejected"
-            }
+            trogonai_session_contracts::session_event_payload::Kind::ForceSwitchRejected(_) => "force_switch_rejected",
             trogonai_session_contracts::session_event_payload::Kind::RunnerFailed(_) => "runner_failed",
             trogonai_session_contracts::session_event_payload::Kind::InvalidEventRejected(_) => {
                 "invalid_event_rejected"
@@ -761,6 +765,9 @@ fn event_payload_name(event: &SessionEvent) -> &'static str {
             }
             trogonai_session_contracts::session_event_payload::Kind::FallbackToDefaultCompactor(_) => {
                 "fallback_to_default_compactor"
+            }
+            trogonai_session_contracts::session_event_payload::Kind::SwitchOutcomeRecorded(_) => {
+                "switch_outcome_recorded"
             }
         })
         .unwrap_or("unknown")

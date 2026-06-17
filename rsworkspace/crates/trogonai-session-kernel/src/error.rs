@@ -22,22 +22,13 @@ pub enum SessionKernelError {
     LeaseRenewInterval(#[from] LeaseRenewIntervalError),
 
     #[error("failed to acquire session lease for {session_id}: {detail}")]
-    LeaseAcquire {
-        session_id: SessionId,
-        detail: String,
-    },
+    LeaseAcquire { session_id: SessionId, detail: String },
 
     #[error("failed to renew session lease for {session_id}: {detail}")]
-    LeaseRenew {
-        session_id: SessionId,
-        detail: String,
-    },
+    LeaseRenew { session_id: SessionId, detail: String },
 
     #[error("failed to release session lease for {session_id}: {detail}")]
-    LeaseRelease {
-        session_id: SessionId,
-        detail: String,
-    },
+    LeaseRelease { session_id: SessionId, detail: String },
 
     #[error("event contract validation failed: {0}")]
     ContractValidation(#[from] ContractValidationError),
@@ -86,10 +77,7 @@ pub enum SessionKernelError {
     Encode(String),
 
     #[error("recovery failed for session {session_id}: {detail}")]
-    Recovery {
-        session_id: SessionId,
-        detail: String,
-    },
+    Recovery { session_id: SessionId, detail: String },
 }
 
 impl SessionKernelError {

@@ -4,38 +4,37 @@ use buffa::{EnumValue, MessageField};
 use time::OffsetDateTime;
 use trogon_registry::{Registry, RegistryStore};
 use trogonai_capabilities::{
-    CapabilityConfig, ProviderCertificationMatrix, create_switch_adaptation_plan,
-    resolve_model_capabilities,
+    CapabilityConfig, ProviderCertificationMatrix, create_switch_adaptation_plan, resolve_model_capabilities,
 };
 use trogonai_session_contracts::{
-    Actor, ActorType, CanonicalMessage, ContentBlock, ModelSwitchReason, PromptProjection, SessionId,
-    SessionSnapshot, SessionSnapshotState, SwitchSafetyDecision, SwitchSafetyStatus,
-    __buffa::oneof::content_block::Kind as BlockKind,
+    __buffa::oneof::content_block::Kind as BlockKind, Actor, ActorType, CanonicalMessage, ContentBlock,
+    ContinuityCheckpointStatus, ModelSwitchReason, PromptProjection, SessionId, SessionSnapshot,
+    SessionSnapshotState, SwitchResult, SwitchSafetyDecision, SwitchSafetyStatus,
 };
 use trogonai_session_kernel::{
     EventLogBackend, SessionKernel, SessionLeaseFactory, SessionMutatingOperation, SnapshotStore,
 };
 use trogonai_session_projection::{
-    ContextTwinStore, DefaultPromptCompiler, ProjectionConfig, ProjectionInput, PromptCompiler,
-    update_context_twin, ContextTwinUpdateContext,
+    ContextTwinStore, ContextTwinUpdateContext, DefaultPromptCompiler, ProjectionConfig, ProjectionInput,
+    PromptCompiler, update_context_twin,
 };
 
-use crate::checkpoint::{requires_continuity_checkpoint, run_continuity_checkpoint, RunnerAcknowledgement};
+use crate::checkpoint::{RunnerAcknowledgement, requires_continuity_checkpoint, run_continuity_checkpoint};
 use crate::config::SwitchingConfig;
 use crate::error::SwitchingError;
 use crate::event::{
-    compactor_model_preserved_event, compactor_model_unavailable_event,
-    continuity_checkpoint_completed_event, continuity_checkpoint_started_event,
-    fallback_to_default_compactor_event, force_switch_completed_event, force_switch_confirmed_event,
-    force_switch_rejected_event, force_switch_requested_event, model_switched_event,
-    runner_failed_event, switch_adaptation_plan_created_event, switch_safety_evaluated_event,
-    SwitchFlowContext,
+    SwitchFlowContext, compactor_model_preserved_event, compactor_model_unavailable_event,
+    continuity_checkpoint_completed_event, continuity_checkpoint_started_event, fallback_to_default_compactor_event,
+    force_switch_completed_event, force_switch_confirmed_event, force_switch_rejected_event,
+    force_switch_requested_event, model_switched_event, runner_failed_event, switch_adaptation_plan_created_event,
+    switch_outcome_recorded_event, switch_safety_evaluated_event,
 };
-use crate::force::{evaluate_force_switch, ForceSwitchOutcome, ForceSwitchRequest};
-use crate::runner::{attach_runner, detach_runner, invalidate_nonportable_runner_state, RunnerBindingStore};
-use crate::safety::{evaluate_switch_safety, SwitchSafetyInput};
+use crate::force::{ForceSwitchOutcome, ForceSwitchRequest, evaluate_force_switch};
+use crate::runner::{RunnerBindingStore, attach_runner, detach_runner, invalidate_nonportable_runner_state};
+use crate::safety::{SwitchSafetyInput, evaluate_switch_safety};
 use crate::state::SwitchState;
 use crate::telemetry;
+use crate::visible_result::{VisibleResultContext, build_visible_result};
 
 /// User-initiated model switch request.
 #[derive(Debug, Clone)]
@@ -53,7 +52,7 @@ pub struct SwitchModelRequest {
 
 /// Completed switch result returned to callers.
 #[derive(Debug, Clone)]
-pub struct SwitchResult {
+pub struct SwitchCompletion {
     pub state: SwitchState,
     pub from_model: String,
     pub from_runner: String,
@@ -71,6 +70,62 @@ pub struct SwitchResult {
 pub enum SwitchGateOutcome {
     Blocked(SwitchSafetyDecision),
     ConfirmationRequired(SwitchSafetyDecision),
+}
+
+/// Classify a switch outcome into the formal, shared [`SwitchResult`] contract
+/// (§ "Contrato formal de resultado del switch"). Every switch normalizes to exactly
+/// one of the 8 durable states, so events, metrics and UX/API derive from a contract
+/// rather than free-text logs.
+pub fn classify_switch_result(
+    outcome: &Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError>,
+) -> SwitchResult {
+    match outcome {
+        Ok(Ok(completion)) => {
+            let repaired = completion
+                .checkpoint
+                .as_ref()
+                .and_then(|checkpoint| checkpoint.status.as_known())
+                == Some(ContinuityCheckpointStatus::Repaired);
+            if repaired {
+                SwitchResult::Repaired
+            } else if switch_was_degraded(completion) {
+                SwitchResult::Degraded
+            } else {
+                SwitchResult::Switched
+            }
+        }
+        Ok(Err(SwitchGateOutcome::Blocked(_))) => SwitchResult::Blocked,
+        Ok(Err(SwitchGateOutcome::ConfirmationRequired(_))) => SwitchResult::RequiresConfirmation,
+        Err(err) if switch_error_is_terminal(err) => SwitchResult::FailedTerminal,
+        Err(_) => SwitchResult::FailedRecoverable,
+    }
+}
+
+/// `degraded` (§1976): the switch executed but with visible, recorded degradations —
+/// adaptation-plan warnings or a "with warning" safety decision.
+fn switch_was_degraded(completion: &SwitchCompletion) -> bool {
+    !completion.adaptation_plan.warnings.is_empty()
+        || completion.safety.status.as_known() == Some(SwitchSafetyStatus::AllowedWithWarning)
+        || !completion.safety.reasons.is_empty()
+}
+
+/// `failed_terminal` (§1980, §2023): runner inexistente, schema incompatible, config
+/// faltante, transición inválida o force-switch rechazado — todo lo que requiere
+/// intervención/cambio de config antes de reintentar. Lo demás es `failed_recoverable`
+/// (la sesión canónica sigue consistente y se puede reintentar).
+fn switch_error_is_terminal(err: &SwitchingError) -> bool {
+    matches!(
+        err,
+        SwitchingError::TargetModelNotFound { .. }
+            | SwitchingError::MissingField(_)
+            | SwitchingError::ForceSwitchRejected { .. }
+            | SwitchingError::InvalidSwitchTransition { .. }
+            | SwitchingError::InvalidCancelTransition { .. }
+            | SwitchingError::InvalidForceSwitchTransition { .. }
+            | SwitchingError::Kernel(
+                trogonai_session_kernel::SessionKernelError::ContractValidation(_)
+            )
+    )
 }
 
 /// Orchestrates the 22-step canonical model switch flow.
@@ -91,7 +146,8 @@ where
     compiler: DefaultPromptCompiler,
 }
 
-impl<E, SnapKv, LeaseF, BindingKv, TwinKv, RegStore, R> SwitchOrchestrator<E, SnapKv, LeaseF, BindingKv, TwinKv, RegStore, R>
+impl<E, SnapKv, LeaseF, BindingKv, TwinKv, RegStore, R>
+    SwitchOrchestrator<E, SnapKv, LeaseF, BindingKv, TwinKv, RegStore, R>
 where
     E: EventLogBackend,
     SnapKv: trogon_nats::jetstream::JetStreamKvGet
@@ -154,7 +210,7 @@ where
     pub async fn switch_model(
         &self,
         request: SwitchModelRequest,
-    ) -> Result<Result<SwitchResult, SwitchGateOutcome>, SwitchingError> {
+    ) -> Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> {
         let mut switch_state = SwitchState::Requested;
         let mut events_appended = 0_usize;
         let now = OffsetDateTime::now_utc();
@@ -170,352 +226,407 @@ where
             created_at: created_at.clone(),
         };
 
-        let _lease = match self
+        // Hold the lease AND a renewal heartbeat for the whole switch so a long
+        // operation never lets it expire mid-flight ("heartbeat/renew mientras dura
+        // la operacion"). Both are kept in scope until the function returns.
+        let (lease_guard, lease_renewal) = match self
             .kernel
-            .acquire_session_lease(&request.session_id, SessionMutatingOperation::SwitchModel)
+            .acquire_session_lease_renewing(&request.session_id, SessionMutatingOperation::SwitchModel)
             .await
         {
-            Ok(guard) => guard,
+            Ok(held) => held,
             Err(trogonai_session_kernel::SessionKernelError::SessionBusy { session_id, .. }) => {
                 return Err(SwitchingError::SessionBusy { session_id });
             }
             Err(err) => return Err(err.into()),
         };
-        switch_state = switch_state.transition_to(SwitchState::LeaseAcquired)?;
+        let log_session_id = request.session_id.as_str().to_string();
+        let log_operation_id = request.operation_id.as_str().to_string();
+        // Captured before the `async move` consumes `request`/`flow`, so the durable
+        // outcome record can be appended after the flow completes (still under lease).
+        let target_model = request.target_model.clone();
+        let result_flow = flow.clone();
 
-        let snapshot = self.load_or_materialize(&request.session_id).await?;
-        let last_applied_seq = snapshot.last_applied_seq;
-        let mut session_state = snapshot
-            .state
-            .into_option()
-            .ok_or(SwitchingError::MissingField("snapshot.state"))?;
+        // Run the whole switch under the lease, then release it EXPLICITLY (Session
+        // Lease flow step 22: acquire -> mutation -> append -> materialize -> release).
+        // The `async move` block captures every `?` and early return so the explicit
+        // release below always runs; the lease TTL stays only as the crash fallback.
+        let switch_outcome: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> = async move {
+            switch_state = switch_state.transition_to(SwitchState::LeaseAcquired)?;
 
-        let from_model = session_state
-            .config
-            .as_option()
-            .and_then(|config| config.model.clone())
-            .ok_or(SwitchingError::MissingField("config.model"))?;
-        let from_runner = session_state
-            .config
-            .as_option()
-            .and_then(|config| config.runner.clone())
-            .unwrap_or_default();
+            let snapshot = self.load_or_materialize(&request.session_id).await?;
+            let last_applied_seq = snapshot.last_applied_seq;
+            let mut session_state = snapshot
+                .state
+                .into_option()
+                .ok_or(SwitchingError::MissingField("snapshot.state"))?;
 
-        let target_capabilities =
-            resolve_model_capabilities(&self.registry, &request.target_model, now, &self.capability_config)
-                .await?;
-        let target_runner = target_capabilities.runner_id.clone();
+            let from_model = session_state
+                .config
+                .as_option()
+                .and_then(|config| config.model.clone())
+                .ok_or(SwitchingError::MissingField("config.model"))?;
+            let from_runner = session_state
+                .config
+                .as_option()
+                .and_then(|config| config.runner.clone())
+                .unwrap_or_default();
 
-        let (context_twin, _twin_event) = update_context_twin(
-            &self.kernel,
-            &self.twin_store,
-            ContextTwinUpdateContext {
-                session_id: request.session_id.clone(),
-                operation_id: request.operation_id.clone(),
-                correlation_id: request.correlation_id.clone(),
-                idempotency_key: trogonai_session_contracts::IdempotencyKey::new(format!(
-                    "{}_twin",
-                    request.idempotency_key.as_str()
-                ))
-                .map_err(|err| SwitchingError::Kernel(
-                    trogonai_session_kernel::SessionKernelError::ContractValidation(
-                        trogonai_session_contracts::ContractValidationError::InvalidIdempotencyKey(err),
-                    ),
-                ))?,
-                causation_id: None,
-                actor: kernel_actor(),
-                updated_at: created_at.clone(),
-            },
-        )
-        .await?;
-        events_appended += 1;
-        session_state.context_twin = MessageField::some(context_twin.clone());
+            let target_capabilities =
+                resolve_model_capabilities(&self.registry, &request.target_model, now, &self.capability_config).await?;
+            let target_runner = target_capabilities.runner_id.clone();
 
-        let adaptation_plan = create_switch_adaptation_plan(
-            &self.registry,
-            &session_state,
-            &request.target_model,
-            now,
-            &self.capability_config,
-        )
-        .await?;
-        switch_state = switch_state.transition_to(SwitchState::AdaptationPlanned)?;
+            let (context_twin, _twin_event) = update_context_twin(
+                &self.kernel,
+                &self.twin_store,
+                ContextTwinUpdateContext {
+                    session_id: request.session_id.clone(),
+                    operation_id: request.operation_id.clone(),
+                    correlation_id: request.correlation_id.clone(),
+                    idempotency_key: trogonai_session_contracts::IdempotencyKey::new(format!(
+                        "{}_twin",
+                        request.idempotency_key.as_str()
+                    ))
+                    .map_err(|err| {
+                        SwitchingError::Kernel(trogonai_session_kernel::SessionKernelError::ContractValidation(
+                            trogonai_session_contracts::ContractValidationError::InvalidIdempotencyKey(err),
+                        ))
+                    })?,
+                    causation_id: None,
+                    actor: kernel_actor(),
+                    updated_at: created_at.clone(),
+                },
+            )
+            .await?;
+            events_appended += 1;
+            session_state.context_twin = MessageField::some(context_twin.clone());
 
-        let adapt_event = switch_adaptation_plan_created_event(&flow, &adaptation_plan);
-        self.kernel.append_event(adapt_event).await?;
-        events_appended += 1;
-        session_state.switch_adaptation_plan = MessageField::some(adaptation_plan.clone());
+            let adaptation_plan = create_switch_adaptation_plan(
+                &self.registry,
+                &session_state,
+                &request.target_model,
+                now,
+                &self.capability_config,
+            )
+            .await?;
+            switch_state = switch_state.transition_to(SwitchState::AdaptationPlanned)?;
 
-        // Record compactor_model preservation/degradation (§ Token Budget Policy).
-        // The actual fallback is only recorded later, once the switch proceeds past
-        // the safety gate, so degradation of an explicit user preference stays explicit.
-        let compactor_model_unavailable = if let Some(compactor_model) = session_state
-            .config
-            .as_option()
-            .and_then(|config| config.compactor_model.clone())
-        {
-            if target_capabilities.schema.compaction_supported {
+            let adapt_event = switch_adaptation_plan_created_event(&flow, &adaptation_plan);
+            self.kernel.append_event(adapt_event).await?;
+            events_appended += 1;
+            session_state.switch_adaptation_plan = MessageField::some(adaptation_plan.clone());
+
+            // Record compactor_model preservation/degradation (§ Token Budget Policy).
+            // The actual fallback is only recorded later, once the switch proceeds past
+            // the safety gate, so degradation of an explicit user preference stays explicit.
+            let compactor_model_unavailable = if let Some(compactor_model) = session_state
+                .config
+                .as_option()
+                .and_then(|config| config.compactor_model.clone())
+            {
+                if target_capabilities.schema.compaction_supported {
+                    self.kernel
+                        .append_event(compactor_model_preserved_event(&flow, &compactor_model))
+                        .await?;
+                    events_appended += 1;
+                    None
+                } else {
+                    self.kernel
+                        .append_event(compactor_model_unavailable_event(
+                            &flow,
+                            &compactor_model,
+                            &request.target_model,
+                        ))
+                        .await?;
+                    events_appended += 1;
+                    Some(compactor_model)
+                }
+            } else {
+                None
+            };
+
+            let safety = evaluate_switch_safety(&SwitchSafetyInput {
+                session: &session_state,
+                target_model: &request.target_model,
+                target_runner: &target_runner,
+                target_capabilities: &target_capabilities,
+                adaptation_plan: Some(&adaptation_plan),
+                certification: &self.certification,
+                config: &self.switching_config,
+                force: request.force,
+                user_confirmed: request.user_confirmed,
+                last_applied_seq,
+            });
+            switch_state = switch_state.transition_to(SwitchState::SafetyEvaluated)?;
+
+            let safety_event = switch_safety_evaluated_event(&flow, &safety);
+            self.kernel.append_event(safety_event).await?;
+            events_appended += 1;
+            session_state.switch_safety = MessageField::some(safety.clone());
+
+            if request.force {
                 self.kernel
-                    .append_event(compactor_model_preserved_event(&flow, &compactor_model))
+                    .append_event(force_switch_requested_event(&flow, &request.force_acknowledged_losses))
                     .await?;
                 events_appended += 1;
-                None
+                let (outcome, _force_state) = evaluate_force_switch(
+                    &ForceSwitchRequest {
+                        confirmed: request.user_confirmed,
+                        acknowledged_losses: request.force_acknowledged_losses.clone(),
+                    },
+                    &session_state,
+                    &safety,
+                )?;
+                match outcome {
+                    ForceSwitchOutcome::Completed {
+                        invalidated,
+                        pending_reconciliation,
+                    } => {
+                        self.kernel.append_event(force_switch_confirmed_event(&flow)).await?;
+                        events_appended += 1;
+                        self.kernel
+                            .append_event(force_switch_completed_event(
+                                &flow,
+                                &invalidated,
+                                &pending_reconciliation,
+                            ))
+                            .await?;
+                        events_appended += 1;
+                    }
+                    ForceSwitchOutcome::Rejected(reason) => {
+                        self.kernel
+                            .append_event(force_switch_rejected_event(&flow, &reason))
+                            .await?;
+                        return Ok(Err(SwitchGateOutcome::ConfirmationRequired(safety)));
+                    }
+                }
             } else {
+                match safety.status.as_known() {
+                    Some(SwitchSafetyStatus::BlockedUntilSafe) => {
+                        return Ok(Err(SwitchGateOutcome::Blocked(safety)));
+                    }
+                    Some(SwitchSafetyStatus::RequiresUserConfirmation) if !request.user_confirmed => {
+                        return Ok(Err(SwitchGateOutcome::ConfirmationRequired(safety)));
+                    }
+                    _ => {}
+                }
+            }
+
+            let switch_event = model_switched_event(
+                &flow,
+                &from_runner,
+                &from_model,
+                &target_runner,
+                &request.target_model,
+                request.reason,
+            );
+            self.kernel.append_event(switch_event).await?;
+            events_appended += 1;
+            switch_state = switch_state.transition_to(SwitchState::ModelSwitched)?;
+
+            // The switch proceeded past the gate, so an unavailable compactor_model now
+            // falls back to the default — record it explicitly (§ Token Budget Policy).
+            if let Some(compactor_model) = &compactor_model_unavailable {
                 self.kernel
-                    .append_event(compactor_model_unavailable_event(
+                    .append_event(fallback_to_default_compactor_event(
                         &flow,
-                        &compactor_model,
+                        compactor_model,
                         &request.target_model,
                     ))
                     .await?;
                 events_appended += 1;
-                Some(compactor_model)
             }
-        } else {
-            None
-        };
 
-        let safety = evaluate_switch_safety(&SwitchSafetyInput {
-            session: &session_state,
-            target_model: &request.target_model,
-            target_runner: &target_runner,
-            target_capabilities: &target_capabilities,
-            adaptation_plan: Some(&adaptation_plan),
-            certification: &self.certification,
-            config: &self.switching_config,
-            force: request.force,
-            user_confirmed: request.user_confirmed,
-            last_applied_seq,
-        });
-        switch_state = switch_state.transition_to(SwitchState::SafetyEvaluated)?;
-
-        let safety_event = switch_safety_evaluated_event(&flow, &safety);
-        self.kernel.append_event(safety_event).await?;
-        events_appended += 1;
-        session_state.switch_safety = MessageField::some(safety.clone());
-
-        if request.force {
-            self.kernel
-                .append_event(force_switch_requested_event(
-                    &flow,
-                    &request.force_acknowledged_losses,
-                ))
+            if from_runner != target_runner {
+                let binding_context = flow.runner_binding_context();
+                let (detach_event, _) = detach_runner(
+                    &self.runner_bindings,
+                    &binding_context,
+                    &from_runner,
+                    &from_model,
+                    "model_switch",
+                    &mut session_state,
+                )
                 .await?;
-            events_appended += 1;
-            let (outcome, _force_state) = evaluate_force_switch(
-                &ForceSwitchRequest {
-                    confirmed: request.user_confirmed,
-                    acknowledged_losses: request.force_acknowledged_losses.clone(),
-                },
-                &session_state,
-                &safety,
-            )?;
-            match outcome {
-                ForceSwitchOutcome::Completed {
-                    invalidated,
-                    pending_reconciliation,
-                } => {
-                    self.kernel
-                        .append_event(force_switch_confirmed_event(&flow))
-                        .await?;
-                    events_appended += 1;
-                    self.kernel
-                        .append_event(force_switch_completed_event(
-                            &flow,
-                            &invalidated,
-                            &pending_reconciliation,
-                        ))
-                        .await?;
-                    events_appended += 1;
-                }
-                ForceSwitchOutcome::Rejected(reason) => {
-                    self.kernel
-                        .append_event(force_switch_rejected_event(&flow, &reason))
-                        .await?;
-                    return Ok(Err(SwitchGateOutcome::ConfirmationRequired(safety)));
-                }
+                self.kernel.append_event(detach_event).await?;
+                events_appended += 1;
+                switch_state = switch_state.transition_to(SwitchState::RunnerDetached)?;
+
+                self.persist_snapshot_with_nonportable_cleared(&request.session_id, &mut session_state)
+                    .await?;
             }
-        } else {
-            match safety.status.as_known() {
-                Some(SwitchSafetyStatus::BlockedUntilSafe) => {
-                    return Ok(Err(SwitchGateOutcome::Blocked(safety)));
-                }
-                Some(SwitchSafetyStatus::RequiresUserConfirmation) if !request.user_confirmed => {
-                    return Ok(Err(SwitchGateOutcome::ConfirmationRequired(safety)));
-                }
-                _ => {}
-            }
-        }
 
-        let switch_event = model_switched_event(
-            &flow,
-            &from_runner,
-            &from_model,
-            &target_runner,
-            &request.target_model,
-            request.reason,
-        );
-        self.kernel.append_event(switch_event).await?;
-        events_appended += 1;
-        switch_state = switch_state.transition_to(SwitchState::ModelSwitched)?;
-
-        // The switch proceeded past the gate, so an unavailable compactor_model now
-        // falls back to the default — record it explicitly (§ Token Budget Policy).
-        if let Some(compactor_model) = &compactor_model_unavailable {
-            self.kernel
-                .append_event(fallback_to_default_compactor_event(
-                    &flow,
-                    compactor_model,
-                    &request.target_model,
-                ))
-                .await?;
-            events_appended += 1;
-        }
-
-        if from_runner != target_runner {
-            let binding_context = flow.runner_binding_context();
-            let (detach_event, _) = detach_runner(
+            let capability_snapshot_id = Some(format!("cap_{}", uuid::Uuid::now_v7()));
+            let (binding, attach_event, _) = attach_runner(
                 &self.runner_bindings,
-                &binding_context,
-                &from_runner,
-                &from_model,
-                "model_switch",
-                &mut session_state,
+                &flow.runner_binding_context(),
+                &target_runner,
+                &request.target_model,
+                capability_snapshot_id,
             )
             .await?;
-            self.kernel.append_event(detach_event).await?;
+            self.kernel.append_event(attach_event).await?;
             events_appended += 1;
-            switch_state = switch_state.transition_to(SwitchState::RunnerDetached)?;
+            switch_state = switch_state.transition_to(SwitchState::RunnerAttached)?;
+            session_state.active_runner_binding = MessageField::some(binding);
 
-            self.persist_snapshot_with_nonportable_cleared(&request.session_id, &mut session_state)
-                .await?;
-        }
+            let continuity_warnings = safety
+                .reasons
+                .iter()
+                .map(|reason| format!("{}: {}", reason.kind, reason.detail))
+                .collect();
 
-        let capability_snapshot_id = Some(format!("cap_{}", uuid::Uuid::now_v7()));
-        let (binding, attach_event, _) = attach_runner(
-            &self.runner_bindings,
-            &flow.runner_binding_context(),
-            &target_runner,
-            &request.target_model,
-            capability_snapshot_id,
-        )
-        .await?;
-        self.kernel.append_event(attach_event).await?;
-        events_appended += 1;
-        switch_state = switch_state.transition_to(SwitchState::RunnerAttached)?;
-        session_state.active_runner_binding = MessageField::some(binding);
+            let current_request = session_state
+                .conversation
+                .iter()
+                .rev()
+                .find(|message| message.role == "user")
+                .cloned()
+                .or_else(|| switch_continuity_request(&request.target_model, &created_at));
 
-        let continuity_warnings = safety
-            .reasons
-            .iter()
-            .map(|reason| format!("{}: {}", reason.kind, reason.detail))
-            .collect();
+            ensure_projection_prerequisites(&mut session_state);
 
-        let current_request = session_state
-            .conversation
-            .iter()
-            .rev()
-            .find(|message| message.role == "user")
-            .cloned()
-            .or_else(|| switch_continuity_request(&request.target_model, &created_at));
+            let projection = self.compiler.compile(ProjectionInput {
+                session_id: request.session_id.as_str().to_string(),
+                model_id: request.target_model.clone(),
+                snapshot: session_state.clone(),
+                context_twin: context_twin.clone(),
+                adaptation_plan: Some(adaptation_plan.clone()),
+                capabilities: target_capabilities.clone(),
+                token_budget: target_capabilities.schema.max_context_tokens,
+                current_request,
+                continuity_warnings,
+                config: self.projection_config.clone(),
+                created_at: Some(created_at.clone()),
+                projection_id: Some(format!("proj_{}", uuid::Uuid::now_v7())),
+            })?;
+            switch_state = switch_state.transition_to(SwitchState::ProjectionCompiled)?;
 
-        ensure_projection_prerequisites(&mut session_state);
+            let mut checkpoint_result = None;
+            if requires_continuity_checkpoint(
+                &session_state,
+                &from_runner,
+                &target_runner,
+                Some(&adaptation_plan),
+                &self.switching_config,
+            ) {
+                let checkpoint_id = format!("checkpoint_{}", uuid::Uuid::now_v7());
+                let started =
+                    continuity_checkpoint_started_event(&flow, &checkpoint_id, &request.target_model, &target_runner);
+                self.kernel.append_event(started).await?;
+                events_appended += 1;
 
-        let projection = self.compiler.compile(ProjectionInput {
-            session_id: request.session_id.as_str().to_string(),
-            model_id: request.target_model.clone(),
-            snapshot: session_state.clone(),
-            context_twin: context_twin.clone(),
-            adaptation_plan: Some(adaptation_plan.clone()),
-            capabilities: target_capabilities.clone(),
-            token_budget: target_capabilities.schema.max_context_tokens,
-            current_request,
-            continuity_warnings,
-            config: self.projection_config.clone(),
-            created_at: Some(created_at.clone()),
-            projection_id: Some(format!("proj_{}", uuid::Uuid::now_v7())),
-        })?;
-        switch_state = switch_state.transition_to(SwitchState::ProjectionCompiled)?;
+                let (result, _) = match run_continuity_checkpoint(
+                    self.runner.as_ref(),
+                    request.session_id.as_str(),
+                    &request.target_model,
+                    &context_twin,
+                    &projection,
+                    &self.switching_config,
+                )
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(err @ SwitchingError::RunnerAcknowledgementFailed { .. }) => {
+                        // Runner failed after runner_attached: record runner_failed (its
+                        // materialization invalidates the active binding) and preserve
+                        // session state (§ Failure Mode Policy). A low-confidence
+                        // checkpoint is not a runner failure and propagates unchanged.
+                        self.kernel
+                            .append_event(runner_failed_event(
+                                &flow.runner_binding_context(),
+                                &target_runner,
+                                &request.target_model,
+                                &err.to_string(),
+                            ))
+                            .await?;
+                        return Err(err);
+                    }
+                    Err(err) => return Err(err),
+                };
+                let completed = continuity_checkpoint_completed_event(&flow, &result);
+                self.kernel.append_event(completed).await?;
+                events_appended += 1;
+                session_state.continuity_checkpoint = MessageField::some(result.clone());
+                checkpoint_result = Some(result);
+                switch_state = switch_state.transition_to(SwitchState::CheckpointPassed)?;
+            }
 
-        let mut checkpoint_result = None;
-        if requires_continuity_checkpoint(
-            &session_state,
-            &from_runner,
-            &target_runner,
-            Some(&adaptation_plan),
-            &self.switching_config,
-        ) {
-            let checkpoint_id = format!("checkpoint_{}", uuid::Uuid::now_v7());
-            let started = continuity_checkpoint_started_event(
-                &flow,
-                &checkpoint_id,
+            let materialized = self.kernel.materialize_state(&request.session_id).await?;
+            let _ = materialized;
+            switch_state = switch_state.transition_to(SwitchState::Completed)?;
+
+            telemetry::metrics::record_switch_completed(
+                request.session_id.as_str(),
+                request.operation_id.as_str(),
+                &from_model,
                 &request.target_model,
+                &from_runner,
                 &target_runner,
             );
-            self.kernel.append_event(started).await?;
-            events_appended += 1;
 
-            let (result, _) = match run_continuity_checkpoint(
-                self.runner.as_ref(),
-                request.session_id.as_str(),
-                &request.target_model,
-                &context_twin,
-                &projection,
-                &self.switching_config,
-            )
+            Ok(Ok(SwitchCompletion {
+                state: switch_state,
+                from_model,
+                from_runner,
+                to_model: request.target_model,
+                to_runner: target_runner,
+                safety,
+                adaptation_plan,
+                projection,
+                checkpoint: checkpoint_result,
+                events_appended,
+            }))
+        }
+        .await;
+
+        // Normalize the attempt to ONE visible result, persist it as a durable event,
+        // and derive the metric from it (§ Contrato formal/visible de resultado del
+        // switch: cada resultado mapea a evento durable y a métricas, no a texto libre).
+        // Appended while the lease is still held (acquire -> ... -> append -> release).
+        let switch_result = classify_switch_result(&switch_outcome);
+        let (from_model, from_runner, to_model, to_runner) = match &switch_outcome {
+            Ok(Ok(completion)) => (
+                completion.from_model.clone(),
+                completion.from_runner.clone(),
+                completion.to_model.clone(),
+                completion.to_runner.clone(),
+            ),
+            // Gate-stopped or errored before binding: source/target runner unresolved.
+            _ => (String::new(), String::new(), target_model.clone(), String::new()),
+        };
+        let visible = build_visible_result(
+            &VisibleResultContext {
+                session_id: &log_session_id,
+                from_model: &from_model,
+                from_runner: &from_runner,
+                to_model: &to_model,
+                to_runner: &to_runner,
+                fallback_used: false,
+                fallback_reason: None,
+            },
+            &switch_outcome,
+        );
+        if let Err(err) = self
+            .kernel
+            .append_event(switch_outcome_recorded_event(&result_flow, visible))
             .await
-            {
-                Ok(outcome) => outcome,
-                Err(err @ SwitchingError::RunnerAcknowledgementFailed { .. }) => {
-                    // Runner failed after runner_attached: record runner_failed (its
-                    // materialization invalidates the active binding) and preserve
-                    // session state (§ Failure Mode Policy). A low-confidence
-                    // checkpoint is not a runner failure and propagates unchanged.
-                    self.kernel
-                        .append_event(runner_failed_event(
-                            &flow.runner_binding_context(),
-                            &target_runner,
-                            &request.target_model,
-                            &err.to_string(),
-                        ))
-                        .await?;
-                    return Err(err);
-                }
-                Err(err) => return Err(err),
-            };
-            let completed = continuity_checkpoint_completed_event(&flow, &result);
-            self.kernel.append_event(completed).await?;
-            events_appended += 1;
-            session_state.continuity_checkpoint = MessageField::some(result.clone());
-            checkpoint_result = Some(result);
-            switch_state = switch_state.transition_to(SwitchState::CheckpointPassed)?;
+        {
+            tracing::warn!(session_id = %log_session_id, error = %err, "switch: outcome record append failed");
+        }
+        telemetry::metrics::record_switch_result(&log_session_id, &log_operation_id, switch_result);
+
+        // Release the lease explicitly (Session Lease flow); TTL is only the crash
+        // fallback. Non-fatal: on failure the lease still expires by TTL.
+        if let Err(err) = self
+            .kernel
+            .release_session_lease_renewing(lease_guard, lease_renewal)
+            .await
+        {
+            tracing::warn!(session_id = %log_session_id, error = %err, "switch: lease release failed");
         }
 
-        let materialized = self.kernel.materialize_state(&request.session_id).await?;
-        let _ = materialized;
-        switch_state = switch_state.transition_to(SwitchState::Completed)?;
-
-        telemetry::metrics::record_switch_completed(
-            request.session_id.as_str(),
-            request.operation_id.as_str(),
-            &from_model,
-            &request.target_model,
-            &from_runner,
-            &target_runner,
-        );
-
-        Ok(Ok(SwitchResult {
-            state: switch_state,
-            from_model,
-            from_runner,
-            to_model: request.target_model,
-            to_runner: target_runner,
-            safety,
-            adaptation_plan,
-            projection,
-            checkpoint: checkpoint_result,
-            events_appended,
-        }))
+        switch_outcome
     }
 
     async fn load_or_materialize(&self, session_id: &SessionId) -> Result<SessionSnapshot, SwitchingError> {
@@ -582,7 +693,137 @@ fn ensure_projection_prerequisites(state: &mut SessionSnapshotState) {
         config.system_prompt = Some("Continue the active Trogonai session.".to_string());
     }
     if config.permission_rules_text.is_none() {
-        config.permission_rules_text =
-            Some("Apply portable session permission rules.".to_string());
+        config.permission_rules_text = Some("Apply portable session permission rules.".to_string());
+    }
+}
+
+#[cfg(test)]
+mod classify_tests {
+    use super::*;
+    use trogonai_session_contracts::{
+        ContinuityCheckpointResult, SwitchAdaptationPlan, SwitchSafetyReason,
+    };
+
+    fn safety(status: SwitchSafetyStatus, reasons: Vec<SwitchSafetyReason>) -> SwitchSafetyDecision {
+        SwitchSafetyDecision {
+            status: EnumValue::Known(status),
+            reasons,
+            ..SwitchSafetyDecision::default()
+        }
+    }
+
+    fn completion(
+        safety: SwitchSafetyDecision,
+        warnings: Vec<String>,
+        checkpoint: Option<ContinuityCheckpointStatus>,
+    ) -> SwitchCompletion {
+        SwitchCompletion {
+            state: SwitchState::Completed,
+            from_model: "claude-sonnet".to_string(),
+            from_runner: "acp.claude".to_string(),
+            to_model: "grok".to_string(),
+            to_runner: "acp.grok".to_string(),
+            safety,
+            adaptation_plan: SwitchAdaptationPlan {
+                warnings,
+                ..SwitchAdaptationPlan::default()
+            },
+            projection: PromptProjection::default(),
+            checkpoint: checkpoint.map(|status| ContinuityCheckpointResult {
+                status: EnumValue::Known(status),
+                ..ContinuityCheckpointResult::default()
+            }),
+            events_appended: 3,
+        }
+    }
+
+    fn reason(kind: &str) -> SwitchSafetyReason {
+        SwitchSafetyReason {
+            kind: kind.to_string(),
+            detail: "test".to_string(),
+            ..SwitchSafetyReason::default()
+        }
+    }
+
+    // §1954-1987: the 8 formal states must derive deterministically from the
+    // Safety Gate outcome, runner/checkpoint result and error class.
+
+    #[test]
+    fn clean_switch_is_switched() {
+        let c = completion(safety(SwitchSafetyStatus::Allowed, vec![]), vec![], None);
+        let out = Ok(Ok(c));
+        assert_eq!(classify_switch_result(&out), SwitchResult::Switched);
+    }
+
+    #[test]
+    fn adaptation_warnings_are_degraded() {
+        let c = completion(
+            safety(SwitchSafetyStatus::Allowed, vec![]),
+            vec!["dropped reasoning trace".to_string()],
+            None,
+        );
+        assert_eq!(classify_switch_result(&Ok(Ok(c))), SwitchResult::Degraded);
+    }
+
+    #[test]
+    fn allowed_with_warning_safety_is_degraded() {
+        let c = completion(
+            safety(SwitchSafetyStatus::AllowedWithWarning, vec![reason("capability_loss")]),
+            vec![],
+            None,
+        );
+        assert_eq!(classify_switch_result(&Ok(Ok(c))), SwitchResult::Degraded);
+    }
+
+    #[test]
+    fn repaired_checkpoint_takes_precedence_over_degraded() {
+        // A repaired projection plus warnings still classifies as Repaired: the
+        // checkpoint repair is the more specific, higher-signal outcome.
+        let c = completion(
+            safety(SwitchSafetyStatus::Allowed, vec![]),
+            vec!["minor drift".to_string()],
+            Some(ContinuityCheckpointStatus::Repaired),
+        );
+        assert_eq!(classify_switch_result(&Ok(Ok(c))), SwitchResult::Repaired);
+    }
+
+    #[test]
+    fn passed_checkpoint_is_not_repaired() {
+        let c = completion(
+            safety(SwitchSafetyStatus::Allowed, vec![]),
+            vec![],
+            Some(ContinuityCheckpointStatus::Passed),
+        );
+        assert_eq!(classify_switch_result(&Ok(Ok(c))), SwitchResult::Switched);
+    }
+
+    #[test]
+    fn blocked_gate_is_blocked() {
+        let out: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> =
+            Ok(Err(SwitchGateOutcome::Blocked(safety(SwitchSafetyStatus::BlockedUntilSafe, vec![]))));
+        assert_eq!(classify_switch_result(&out), SwitchResult::Blocked);
+    }
+
+    #[test]
+    fn confirmation_gate_is_requires_confirmation() {
+        let out: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> = Ok(Err(
+            SwitchGateOutcome::ConfirmationRequired(safety(SwitchSafetyStatus::RequiresUserConfirmation, vec![])),
+        ));
+        assert_eq!(classify_switch_result(&out), SwitchResult::RequiresConfirmation);
+    }
+
+    #[test]
+    fn target_model_not_found_is_failed_terminal() {
+        let out: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> =
+            Err(SwitchingError::TargetModelNotFound { model_id: "ghost".to_string() });
+        assert_eq!(classify_switch_result(&out), SwitchResult::FailedTerminal);
+    }
+
+    #[test]
+    fn session_busy_is_failed_recoverable() {
+        let out: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> = Err(
+            SwitchingError::SessionBusy { session_id: SessionId::new("sess_test").expect("valid id") },
+        );
+        assert_eq!(classify_switch_result(&out), SwitchResult::FailedRecoverable);
     }
 }

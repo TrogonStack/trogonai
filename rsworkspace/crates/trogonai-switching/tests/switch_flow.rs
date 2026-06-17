@@ -6,13 +6,12 @@ use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
 use trogonai_capabilities::{
-    CapabilityConfig, CapabilityRegistry, CertificationLevel, ProviderCertificationEntry,
-    ProviderCertificationMatrix,
+    CapabilityConfig, CapabilityRegistry, CertificationLevel, ProviderCertificationEntry, ProviderCertificationMatrix,
 };
 use trogonai_session_contracts::{
-    Actor, ActorType, CapabilitySchema, CapabilitySource, IdempotencyKey, ModelSwitchReason,
-    OperationId, SCHEMA_VERSION_V1, SessionCreatedPayload, SessionEvent, SessionEventPayload,
-    SessionId, SwitchSafetyStatus, ToolResultFormat,
+    Actor, ActorType, CapabilitySchema, CapabilitySource, IdempotencyKey, ModelSwitchReason, OperationId,
+    SCHEMA_VERSION_V1, SessionCreatedPayload, SessionEvent, SessionEventPayload, SessionId, SwitchSafetyStatus,
+    ToolResultFormat,
 };
 use trogonai_session_kernel::{
     InMemoryEventLog, MockSessionLease, MockSessionLeaseFactory, SessionKernel, SessionKernelConfig,
@@ -20,8 +19,8 @@ use trogonai_session_kernel::{
 };
 use trogonai_session_projection::{ContextTwinStore, ProjectionConfig};
 use trogonai_switching::{
-    MockRunnerAcknowledgement, RunnerBindingStore, SwitchModelRequest, SwitchOrchestrator, SwitchState,
-    SwitchingConfig, SwitchSafetyInput, evaluate_switch_safety,
+    MockRunnerAcknowledgement, RunnerBindingStore, SwitchModelRequest, SwitchOrchestrator, SwitchSafetyInput,
+    SwitchState, SwitchingConfig, evaluate_switch_safety,
 };
 
 fn timestamp() -> Timestamp {
@@ -190,10 +189,7 @@ fn build_orchestrator(
         kernel_config.clone(),
     );
     let snapshots = snap_store.clone();
-    let leases = SessionLeaseManager::new(
-        MockSessionLeaseFactory::new(MockSessionLease::new()),
-        "switch-test",
-    );
+    let leases = SessionLeaseManager::new(MockSessionLeaseFactory::new(MockSessionLease::new()), "switch-test");
     let kernel = SessionKernel::new(kernel_config, event_log, snap_store, leases);
     let runner_bindings = RunnerBindingStore::new(
         trogon_nats::jetstream::MockJetStreamKvStore::new(),
@@ -272,6 +268,22 @@ async fn full_switch_flow_cross_runner_with_mock_runner() {
     // switch proceeds past the gate.
     assert!(has_kind(|kind| matches!(kind, Kind::CompactorModelUnavailable(_))));
     assert!(has_kind(|kind| matches!(kind, Kind::FallbackToDefaultCompactor(_))));
+
+    // The normalized outcome is persisted as ONE durable visible result (§ Contrato
+    // formal/visible). A degraded (compactor-unavailable) switch records `degraded`,
+    // and the visible result carries the resolved runners.
+    let outcome_event = events
+        .iter()
+        .find_map(|event| match event.payload.as_option().and_then(|p| p.kind.as_ref()) {
+            Some(Kind::SwitchOutcomeRecorded(payload)) => payload.result.as_option(),
+            _ => None,
+        })
+        .expect("a switch_outcome_recorded event must be emitted");
+    use trogonai_session_contracts::SwitchResult;
+    assert_eq!(outcome_event.result.as_known(), Some(SwitchResult::Degraded));
+    assert_eq!(outcome_event.from_runner, "openrouter");
+    assert_eq!(outcome_event.to_runner, "xai");
+    assert!(outcome_event.runner_changed);
 }
 
 #[tokio::test]
@@ -324,15 +336,14 @@ async fn switch_blocked_when_session_busy() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        err,
-        trogonai_switching::SwitchingError::SessionBusy { .. }
-    ));
+    assert!(matches!(err, trogonai_switching::SwitchingError::SessionBusy { .. }));
 }
 
 #[tokio::test]
 async fn safety_gate_blocks_tool_in_progress_before_orchestrator() {
-    use trogonai_session_contracts::{CanonicalToolCall, SessionConfig, SessionMetadata, SessionSnapshotState, ToolCallStatus};
+    use trogonai_session_contracts::{
+        CanonicalToolCall, SessionConfig, SessionMetadata, SessionSnapshotState, ToolCallStatus,
+    };
 
     let session = SessionSnapshotState {
         session: MessageField::some(SessionMetadata {
@@ -373,10 +384,7 @@ async fn safety_gate_blocks_tool_in_progress_before_orchestrator() {
         last_applied_seq: 5,
     });
 
-    assert_eq!(
-        decision.status.as_known(),
-        Some(SwitchSafetyStatus::BlockedUntilSafe)
-    );
+    assert_eq!(decision.status.as_known(), Some(SwitchSafetyStatus::BlockedUntilSafe));
 }
 
 #[test]
@@ -418,10 +426,7 @@ async fn switch_records_runner_failed_when_runner_fails_after_attach() {
         trogon_nats::jetstream::MockJetStreamKvStore::new(),
         kernel_config.clone(),
     );
-    let leases = SessionLeaseManager::new(
-        MockSessionLeaseFactory::new(MockSessionLease::new()),
-        "switch-test",
-    );
+    let leases = SessionLeaseManager::new(MockSessionLeaseFactory::new(MockSessionLease::new()), "switch-test");
     let kernel = SessionKernel::new(kernel_config, event_log.clone(), snap_store.clone(), leases);
     // continuity_checkpoint_enabled defaults to true, so the post-attach runner ack runs.
     let orchestrator = SwitchOrchestrator::new(

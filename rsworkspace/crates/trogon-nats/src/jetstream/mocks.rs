@@ -1371,6 +1371,12 @@ impl JetStreamConsumer for MockJetStreamConsumer {
             .ok_or_else(|| MockError("messages() already called".to_string()))?;
         Ok(rx.boxed())
     }
+
+    async fn num_pending(&self) -> u64 {
+        // The channel-backed stream terminates when the sender drops, so a bounded read
+        // relies on stream end rather than this count; report an unbounded sentinel.
+        u64::MAX
+    }
 }
 
 #[derive(Clone, Debug)]

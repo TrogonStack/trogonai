@@ -1,9 +1,10 @@
 use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
-use trogonai_session_contracts::__buffa::oneof::content_block::Kind as BlockKind;
 use serde::Deserialize;
+use trogonai_session_contracts::__buffa::oneof::content_block::Kind as BlockKind;
+use trogonai_session_contracts::__buffa::oneof::tool_call_result::Kind as ResultKind;
 use trogonai_session_contracts::{
-    Actor, ActorType, CanonicalMessage, ContentBlock, SessionConfig, SessionId, SessionMetadata,
+    Actor, ActorType, CanonicalMessage, CanonicalToolCall, ContentBlock, SessionConfig, SessionId, SessionMetadata,
     SessionSnapshot, SessionSnapshotState,
 };
 
@@ -30,12 +31,19 @@ pub struct ShadowSyncReport {
     pub snapshot_saved: bool,
 }
 
-/// Divergence between materialized canonical state and legacy export.
+/// Divergence between materialized canonical state and the authoritative
+/// `state.messages` (§ Migration "comparar snapshot materializado contra estado
+/// actual"; § No-Lossy Contract). Conversation roles/counts come from the legacy
+/// export; tool I/O fidelity is compared against the full baseline tool calls so
+/// summarized/truncated tool input or output is surfaced rather than masked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShadowDivergenceReport {
     pub materialized_messages: usize,
     pub legacy_messages: usize,
     pub mismatched_roles: usize,
+    pub materialized_tool_calls: usize,
+    pub baseline_tool_calls: usize,
+    pub mismatched_tool_io: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,10 +77,7 @@ enum LegacyPortableBlock {
 }
 
 /// Resolve whether reads should prefer the event log for a session.
-pub fn resolve_event_log_primary(
-    flags: &SessionKernelFeatureFlags,
-    record: &SessionMigrationRecord,
-) -> bool {
+pub fn resolve_event_log_primary(flags: &SessionKernelFeatureFlags, record: &SessionMigrationRecord) -> bool {
     match flags.event_log_primary_mode() {
         EventLogPrimaryMode::LegacyMessages => false,
         EventLogPrimaryMode::NewSessionsOnly => record.event_log_primary,
@@ -142,10 +147,49 @@ pub fn snapshot_from_legacy_export(
     })
 }
 
-/// Compare materialized canonical conversation against legacy export for shadow metrics.
+/// Extract the textual result content of a canonical tool call, if any. Used to
+/// compare tool-output fidelity (a truncated output diverges from the full one).
+fn tool_result_text(call: &CanonicalToolCall) -> Option<String> {
+    call.result
+        .as_option()
+        .and_then(|result| result.kind.as_ref())
+        .and_then(|kind| match kind {
+            ResultKind::Text(text) => Some(text.content.clone()),
+            ResultKind::ArtifactRef(_) => None,
+        })
+}
+
+/// Whether the materialized tool result diverges from the full baseline result.
+///
+/// A claim-checked `ArtifactRef` stores the FULL output out-of-line (§ No-Lossy
+/// Contract: large outputs go to artifact refs without truncating canonical truth), so a
+/// materialized ref is NOT a divergence against the legacy inline text — it is the same
+/// content stored canonically. Only an inline text result that differs from the full
+/// baseline (a summarized/truncated output) counts as divergence.
+fn tool_result_diverges(materialized: &CanonicalToolCall, base: &CanonicalToolCall) -> bool {
+    let materialized_is_artifact_ref = materialized
+        .result
+        .as_option()
+        .and_then(|result| result.kind.as_ref())
+        .is_some_and(|kind| matches!(kind, ResultKind::ArtifactRef(_)));
+    if materialized_is_artifact_ref {
+        return false;
+    }
+    tool_result_text(materialized) != tool_result_text(base)
+}
+
+/// Compare the materialized canonical state against the authoritative
+/// `state.messages` for shadow metrics (§ Migration; § No-Lossy Contract).
+///
+/// Conversation message count and roles are compared against the legacy export.
+/// `baseline_tool_calls` is the FULL tool-call view derived from `state.messages`
+/// (full input JSON and output, not the summarized portable export); each
+/// materialized tool call is compared against it so a summarized input or a
+/// truncated output is reported as a divergence instead of silently coinciding.
 pub fn compare_shadow_divergence(
     materialized: &SessionSnapshotState,
     export_json: &str,
+    baseline_tool_calls: &[CanonicalToolCall],
 ) -> Result<ShadowDivergenceReport, SessionKernelError> {
     let legacy = conversation_from_legacy_export(export_json)?;
     let materialized_messages = materialized.conversation.len();
@@ -157,14 +201,30 @@ pub fn compare_shadow_divergence(
         .filter(|(left, right)| left.role != right.role)
         .count();
 
-    if mismatched_roles > 0 || materialized_messages != legacy_messages {
+    let materialized_tool_calls = materialized.tool_calls.len();
+    let baseline_tool_calls_count = baseline_tool_calls.len();
+    let mut mismatched_tool_io = 0usize;
+    for base in baseline_tool_calls {
+        match materialized.tool_calls.iter().find(|call| call.id == base.id) {
+            Some(materialized_call) => {
+                if materialized_call.input_json != base.input_json
+                    || tool_result_diverges(materialized_call, base)
+                {
+                    mismatched_tool_io += 1;
+                }
+            }
+            None => mismatched_tool_io += 1,
+        }
+    }
+
+    if mismatched_roles > 0 || materialized_messages != legacy_messages || mismatched_tool_io > 0 {
         telemetry::metrics::record_shadow_divergence(
             materialized
                 .session
                 .as_option()
                 .map(|meta| meta.id.as_str())
                 .unwrap_or("unknown"),
-            mismatched_roles,
+            mismatched_roles + mismatched_tool_io,
         );
     }
 
@@ -172,10 +232,17 @@ pub fn compare_shadow_divergence(
         materialized_messages,
         legacy_messages,
         mismatched_roles,
+        materialized_tool_calls,
+        baseline_tool_calls: baseline_tool_calls_count,
+        mismatched_tool_io,
     })
 }
 
-/// Shadow-mode sync: materialize legacy export into KV without affecting the operational path.
+/// Shadow-mode sync: materialize legacy export into KV without affecting the
+/// operational path. Compares only the conversation (count/roles) here; tool I/O
+/// fidelity is compared by the caller AFTER the tool-call events are materialized,
+/// so the comparison runs against the COMPLETE snapshot (§ Migration: materialize
+/// snapshot → compare). See [`compare_shadow_divergence`].
 pub async fn shadow_sync_from_export<E, S, L>(
     kernel: &SessionKernel<E, S, L>,
     session_id: &SessionId,
@@ -223,15 +290,83 @@ where
         snapshot
     };
 
-    let divergence = compare_shadow_divergence(
-        snapshot.state.as_option().expect("snapshot state"),
-        export_json,
-    )?;
+    // Conversation-only comparison here (the snapshot's tool calls for THIS turn are
+    // not materialized yet — the caller compares tool I/O against the complete
+    // snapshot afterwards). An empty tool baseline means no tool-I/O divergence.
+    let divergence = compare_shadow_divergence(snapshot.state.as_option().expect("snapshot state"), export_json, &[])?;
     telemetry::metrics::record_shadow_sync(session_id.as_str(), message_count);
 
     Ok(ShadowSyncReport {
         message_count,
         divergence_message_count: divergence.mismatched_roles,
+        snapshot_saved: true,
+    })
+}
+
+/// Shadow-mode sync from a FULL canonical conversation (structured content blocks
+/// with complete tool I/O), rather than the summarized portable export. This keeps
+/// the canonical transcript no-lossy (§11; § No-Lossy Contract). The conversation is
+/// the authoritative `state.messages`, so no divergence comparison is needed.
+pub async fn shadow_sync_from_conversation<E, S, L>(
+    kernel: &SessionKernel<E, S, L>,
+    session_id: &SessionId,
+    conversation: &[CanonicalMessage],
+    cwd: &str,
+    portable_config: Option<SessionConfig>,
+) -> Result<ShadowSyncReport, SessionKernelError>
+where
+    E: EventLogBackend,
+    S: trogon_nats::jetstream::JetStreamKvGet
+        + trogon_nats::jetstream::JetStreamKvEntry
+        + trogon_nats::jetstream::JetStreamKvCreate
+        + trogon_nats::jetstream::JetStreamKeyValueUpdate
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    L: SessionLeaseFactory + Clone + 'static,
+{
+    let message_count = conversation.len();
+
+    let snapshot = if conversation.is_empty() {
+        let state = SessionSnapshotState {
+            session: MessageField::some(SessionMetadata {
+                id: session_id.as_str().to_string(),
+                cwd: cwd.to_string(),
+                ..SessionMetadata::default()
+            }),
+            config: portable_config.map(MessageField::some).unwrap_or_default(),
+            ..SessionSnapshotState::default()
+        };
+        let snapshot = SessionSnapshot {
+            session_id: session_id.as_str().to_string(),
+            last_applied_seq: 0,
+            state: MessageField::some(state),
+            ..SessionSnapshot::default()
+        };
+        kernel.snapshots().save_snapshot(&snapshot).await?;
+        snapshot
+    } else {
+        let mut snapshot = kernel
+            .record_conversation(session_id, conversation, shadow_actor(), Timestamp::default())
+            .await?;
+        if let Some(state) = snapshot.state.as_option_mut() {
+            let session = state.session.get_or_insert_default();
+            session.id = session_id.as_str().to_string();
+            session.cwd = cwd.to_string();
+            if let Some(config) = portable_config {
+                state.config = MessageField::some(config);
+            }
+        }
+        kernel.snapshots().save_snapshot(&snapshot).await?;
+        snapshot
+    };
+    let _ = &snapshot;
+    telemetry::metrics::record_shadow_sync(session_id.as_str(), message_count);
+
+    Ok(ShadowSyncReport {
+        message_count,
+        divergence_message_count: 0,
         snapshot_saved: true,
     })
 }
@@ -316,5 +451,87 @@ mod tests {
         let flags = SessionKernelFeatureFlags::default();
         let record = SessionMigrationRecord::default();
         assert!(!resolve_event_log_primary(&flags, &record));
+    }
+
+    fn tool_call(id: &str, input_json: &str) -> CanonicalToolCall {
+        CanonicalToolCall {
+            id: id.to_string(),
+            tool_execution_id: id.to_string(),
+            name: "bash".to_string(),
+            input_json: input_json.to_string(),
+            ..CanonicalToolCall::default()
+        }
+    }
+
+    #[test]
+    fn shadow_divergence_detects_summarized_tool_input() {
+        // Materialized snapshot holds the lossy (summarized) input; the baseline is
+        // the full input from state.messages. The comparison must surface the loss.
+        let materialized = SessionSnapshotState {
+            tool_calls: vec![tool_call("t1", "{\"cmd\":\"cargo te…")],
+            ..SessionSnapshotState::default()
+        };
+        let baseline = vec![tool_call("t1", "{\"cmd\":\"cargo test --workspace --all-features\"}")];
+
+        let report = compare_shadow_divergence(&materialized, "[]", &baseline).unwrap();
+        assert_eq!(report.baseline_tool_calls, 1);
+        assert_eq!(
+            report.mismatched_tool_io, 1,
+            "a summarized input must diverge from the full state.messages baseline"
+        );
+    }
+
+    #[test]
+    fn shadow_divergence_clean_when_tool_io_matches() {
+        let call = tool_call("t1", "{\"cmd\":\"ls\"}");
+        let materialized = SessionSnapshotState {
+            tool_calls: vec![call.clone()],
+            ..SessionSnapshotState::default()
+        };
+        let report = compare_shadow_divergence(&materialized, "[]", &[call]).unwrap();
+        assert_eq!(report.mismatched_tool_io, 0);
+    }
+
+    #[test]
+    fn shadow_divergence_treats_claim_checked_artifact_ref_as_preserved() {
+        use buffa::MessageField;
+        use trogonai_session_contracts::{ArtifactRef, TextToolResult, ToolCallResult};
+
+        // Baseline (legacy state.messages) holds the full inline text output.
+        let mut base = tool_call("t1", "{\"cmd\":\"ls\"}");
+        base.result = MessageField::some(ToolCallResult {
+            kind: Some(
+                TextToolResult {
+                    content: "a very large tool output...".to_string(),
+                    ..TextToolResult::default()
+                }
+                .into(),
+            ),
+            ..ToolCallResult::default()
+        });
+
+        // Materialized stored the same output out-of-line as a claim-checked artifact
+        // ref (§ No-Lossy: large outputs become artifact refs without truncating truth).
+        let mut materialized_call = tool_call("t1", "{\"cmd\":\"ls\"}");
+        materialized_call.result = MessageField::some(ToolCallResult {
+            kind: Some(
+                ArtifactRef {
+                    artifact_id: "art_1".to_string(),
+                    ..ArtifactRef::default()
+                }
+                .into(),
+            ),
+            ..ToolCallResult::default()
+        });
+        let materialized = SessionSnapshotState {
+            tool_calls: vec![materialized_call],
+            ..SessionSnapshotState::default()
+        };
+
+        let report = compare_shadow_divergence(&materialized, "[]", &[base]).unwrap();
+        assert_eq!(
+            report.mismatched_tool_io, 0,
+            "a claim-checked artifact ref preserves the full output and must not diverge"
+        );
     }
 }

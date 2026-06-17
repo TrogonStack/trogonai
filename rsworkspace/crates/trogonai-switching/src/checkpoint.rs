@@ -1,9 +1,9 @@
 use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogonai_session_contracts::{
-    ContextTwin, ContinuityCheckpointResult, ContinuityCheckpointStatus, ContinuityMismatch,
-    ContinuityRepair, PromptProjection, SessionSnapshotState, SwitchAdaptationPlan,
-    __buffa::oneof::content_block::Kind as BlockKind,
+    __buffa::oneof::content_block::Kind as BlockKind, ContextTwin, ContinuityCheckpointResult,
+    ContinuityCheckpointStatus, ContinuityMismatch, ContinuityRepair, PromptProjection, SessionSnapshotState,
+    SwitchAdaptationPlan,
 };
 use uuid::Uuid;
 
@@ -135,9 +135,7 @@ pub fn risky_tools_blocked(session: &SessionSnapshotState) -> bool {
     session
         .continuity_checkpoint
         .as_option()
-        .is_some_and(|checkpoint| {
-            checkpoint.status.as_known() == Some(ContinuityCheckpointStatus::Failed)
-        })
+        .is_some_and(|checkpoint| checkpoint.status.as_known() == Some(ContinuityCheckpointStatus::Failed))
 }
 
 /// Build acknowledgement request content from a compiled projection.
@@ -160,11 +158,7 @@ pub fn acknowledgement_from_context_twin(context_twin: &ContextTwin) -> Continui
         current_objective: context_twin.current_objective.clone(),
         active_plan: context_twin.active_plan.clone(),
         relevant_files: context_twin.relevant_files.clone(),
-        last_change: context_twin
-            .decisions
-            .last()
-            .cloned()
-            .unwrap_or_default(),
+        last_change: context_twin.decisions.last().cloned().unwrap_or_default(),
         recent_tests: context_twin
             .test_executions
             .iter()
@@ -192,11 +186,12 @@ pub async fn run_continuity_checkpoint<R: RunnerAcknowledgement>(
     } else {
         // A failure of the runner call itself is a runner failure (distinct from a
         // low-confidence checkpoint), so map it to a dedicated error variant.
-        runner.request_acknowledgement(&prompt).await.map_err(|err| {
-            SwitchingError::RunnerAcknowledgementFailed {
+        runner
+            .request_acknowledgement(&prompt)
+            .await
+            .map_err(|err| SwitchingError::RunnerAcknowledgementFailed {
                 detail: err.to_string(),
-            }
-        })?
+            })?
     };
     checkpoint_state = ContinuityCheckpointState::Acknowledged;
 
@@ -243,10 +238,7 @@ pub struct PassthroughCheckpointRunner;
 
 #[async_trait::async_trait]
 impl RunnerAcknowledgement for PassthroughCheckpointRunner {
-    async fn request_acknowledgement(
-        &self,
-        _prompt: &str,
-    ) -> Result<ContinuityAcknowledgement, SwitchingError> {
+    async fn request_acknowledgement(&self, _prompt: &str) -> Result<ContinuityAcknowledgement, SwitchingError> {
         Ok(ContinuityAcknowledgement::default())
     }
 }
@@ -254,10 +246,127 @@ impl RunnerAcknowledgement for PassthroughCheckpointRunner {
 /// Target runner/model acknowledgement interface.
 #[async_trait::async_trait]
 pub trait RunnerAcknowledgement: Send + Sync {
-    async fn request_acknowledgement(
-        &self,
-        prompt: &str,
-    ) -> Result<ContinuityAcknowledgement, SwitchingError>;
+    async fn request_acknowledgement(&self, prompt: &str) -> Result<ContinuityAcknowledgement, SwitchingError>;
+}
+
+/// Transport that sends a one-shot prompt to the **target** runner/model and returns
+/// the raw assistant text. The host (CLI) implements it over the ACP bridge; it is
+/// `Send + Sync` so it composes with `Arc<dyn RunnerAcknowledgement>` even though the
+/// underlying bridge is `!Send` (the host bridges across a channel).
+#[async_trait::async_trait]
+pub trait AckTransport: Send + Sync {
+    async fn ask(&self, prompt: &str) -> Result<String, SwitchingError>;
+}
+
+/// Real continuity-checkpoint runner: it asks the target model for a structured state
+/// acknowledgement and parses the JSON reply into a [`ContinuityAcknowledgement`]
+/// (§10 Continuity Checkpoint: *"ask target model for state acknowledgement, compare
+/// acknowledgement with Context Twin"*). This replaces [`PassthroughCheckpointRunner`]
+/// for high-risk / production switches where `continuity_checkpoint_internal_echo` is
+/// off, so the checkpoint validates against the real destination instead of echoing the
+/// Context Twin.
+pub struct JsonAcknowledgementRunner<T: AckTransport> {
+    transport: T,
+}
+
+impl<T: AckTransport> JsonAcknowledgementRunner<T> {
+    pub fn new(transport: T) -> Self {
+        Self { transport }
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: AckTransport> RunnerAcknowledgement for JsonAcknowledgementRunner<T> {
+    async fn request_acknowledgement(&self, prompt: &str) -> Result<ContinuityAcknowledgement, SwitchingError> {
+        let framed = frame_acknowledgement_request(prompt);
+        let reply = self.transport.ask(&framed).await?;
+        parse_acknowledgement(&reply).map_err(|detail| SwitchingError::RunnerAcknowledgementFailed { detail })
+    }
+}
+
+/// Wrap the compiled projection prompt with an instruction asking the target model to
+/// reply with ONLY a compact JSON acknowledgement covering the seven continuity fields
+/// (§10: *"El acknowledgement debe ser interno y breve"*).
+pub fn frame_acknowledgement_request(projection_prompt: &str) -> String {
+    format!(
+        "{projection_prompt}\n\n---\n\
+You are taking over this session. Reply with ONLY a single JSON object (no prose, no \
+markdown fences) acknowledging your understanding of the current state, with exactly \
+these keys:\n\
+{{\n  \"current_objective\": string,\n  \"active_plan\": string,\n  \"relevant_files\": [string],\n  \
+\"last_change\": string,\n  \"recent_tests\": [string],\n  \"open_errors\": [string],\n  \"next_step\": string\n}}"
+    )
+}
+
+/// Parse the target model's reply into a [`ContinuityAcknowledgement`]. Tolerant of the
+/// model wrapping the JSON object in prose or ```json fences: it extracts the first
+/// balanced `{...}` span and reads the known fields, ignoring unknown ones.
+pub fn parse_acknowledgement(reply: &str) -> Result<ContinuityAcknowledgement, String> {
+    let json = extract_json_object(reply).ok_or_else(|| "acknowledgement reply contained no JSON object".to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|err| format!("acknowledgement JSON parse error: {err}"))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "acknowledgement JSON was not an object".to_string())?;
+
+    Ok(ContinuityAcknowledgement {
+        current_objective: json_string(obj, "current_objective"),
+        active_plan: json_string(obj, "active_plan"),
+        relevant_files: json_string_list(obj, "relevant_files"),
+        last_change: json_string(obj, "last_change"),
+        recent_tests: json_string_list(obj, "recent_tests"),
+        open_errors: json_string_list(obj, "open_errors"),
+        next_step: json_string(obj, "next_step"),
+    })
+}
+
+fn extract_json_object(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, ch) in text[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[start..start + offset + ch.len_utf8()]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn json_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
+    obj.get(key).and_then(|value| value.as_str()).unwrap_or("").trim().to_string()
+}
+
+fn json_string_list(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Vec<String> {
+    obj.get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn compare_field(field: &str, expected: &str, actual: &str, mismatches: &mut Vec<ContinuityMismatch>) {
@@ -275,12 +384,7 @@ fn compare_field(field: &str, expected: &str, actual: &str, mismatches: &mut Vec
     });
 }
 
-fn compare_list(
-    field: &str,
-    expected: &[String],
-    actual: &[String],
-    mismatches: &mut Vec<ContinuityMismatch>,
-) {
+fn compare_list(field: &str, expected: &[String], actual: &[String], mismatches: &mut Vec<ContinuityMismatch>) {
     if expected.is_empty() && actual.is_empty() {
         return;
     }
@@ -327,10 +431,7 @@ pub mod mock {
 
     #[async_trait::async_trait]
     impl RunnerAcknowledgement for MockRunnerAcknowledgement {
-        async fn request_acknowledgement(
-            &self,
-            _prompt: &str,
-        ) -> Result<ContinuityAcknowledgement, SwitchingError> {
+        async fn request_acknowledgement(&self, _prompt: &str) -> Result<ContinuityAcknowledgement, SwitchingError> {
             let mut ack = acknowledgement_from_context_twin(&self.context_twin);
             if self.mismatch_objective {
                 ack.current_objective = "different objective".to_string();
@@ -379,10 +480,67 @@ mod tests {
         };
         let ack = acknowledgement_from_context_twin(&twin);
         let result = compare_acknowledgement(&twin, &ack, &SwitchingConfig::default());
-        assert_eq!(
-            result.status.as_known(),
-            Some(ContinuityCheckpointStatus::Passed)
-        );
+        assert_eq!(result.status.as_known(), Some(ContinuityCheckpointStatus::Passed));
+    }
+
+    #[test]
+    fn parse_acknowledgement_reads_known_fields() {
+        let reply = r#"Sure, here is my understanding:
+```json
+{
+  "current_objective": "  Fix the switch  ",
+  "active_plan": "Implement safety gate",
+  "relevant_files": ["src/safety.rs", "", "src/lib.rs"],
+  "last_change": "added gate",
+  "recent_tests": ["cargo test: ok"],
+  "open_errors": [],
+  "next_step": "wire checkpoint",
+  "unknown_field": "ignored"
+}
+```"#;
+        let ack = parse_acknowledgement(reply).unwrap();
+        assert_eq!(ack.current_objective, "Fix the switch");
+        assert_eq!(ack.active_plan, "Implement safety gate");
+        assert_eq!(ack.relevant_files, vec!["src/safety.rs", "src/lib.rs"]);
+        assert_eq!(ack.next_step, "wire checkpoint");
+        assert!(ack.open_errors.is_empty());
+    }
+
+    #[test]
+    fn parse_acknowledgement_rejects_replies_without_json() {
+        assert!(parse_acknowledgement("I am not going to answer in JSON").is_err());
+    }
+
+    #[tokio::test]
+    async fn json_acknowledgement_runner_parses_transport_reply() {
+        struct OkTransport;
+        #[async_trait::async_trait]
+        impl AckTransport for OkTransport {
+            async fn ask(&self, prompt: &str) -> Result<String, SwitchingError> {
+                assert!(prompt.contains("current_objective"));
+                Ok(r#"{"current_objective":"Fix switch","active_plan":"plan","relevant_files":["a.rs"],"last_change":"c","recent_tests":[],"open_errors":[],"next_step":"go"}"#.to_string())
+            }
+        }
+        let runner = JsonAcknowledgementRunner::new(OkTransport);
+        let ack = runner.request_acknowledgement("PROJECTION").await.unwrap();
+        assert_eq!(ack.current_objective, "Fix switch");
+        assert_eq!(ack.relevant_files, vec!["a.rs"]);
+    }
+
+    #[tokio::test]
+    async fn json_acknowledgement_runner_surfaces_transport_error() {
+        struct FailTransport;
+        #[async_trait::async_trait]
+        impl AckTransport for FailTransport {
+            async fn ask(&self, _prompt: &str) -> Result<String, SwitchingError> {
+                Err(SwitchingError::RunnerAcknowledgementFailed {
+                    detail: "boom".to_string(),
+                })
+            }
+        }
+        let runner = JsonAcknowledgementRunner::new(FailTransport);
+        let err = runner.request_acknowledgement("PROJECTION").await.unwrap_err();
+        assert!(matches!(err, SwitchingError::RunnerAcknowledgementFailed { .. }));
     }
 
     #[test]
@@ -406,9 +564,6 @@ mod tests {
             ..SwitchingConfig::default()
         };
         let result = compare_acknowledgement(&twin, &ack, &config);
-        assert_eq!(
-            result.status.as_known(),
-            Some(ContinuityCheckpointStatus::Failed)
-        );
+        assert_eq!(result.status.as_known(), Some(ContinuityCheckpointStatus::Failed));
     }
 }

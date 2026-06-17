@@ -281,10 +281,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     /// Mirror each turn's conversation into the canonical Session Kernel event log
     /// (shadow mode). Best-effort and non-fatal; leaves the legacy store
     /// authoritative. Wired only when the Session Kernel is enabled.
-    pub fn with_conversation_sink(
-        mut self,
-        sink: Arc<dyn crate::kernel_sink::ConversationSink>,
-    ) -> Self {
+    pub fn with_conversation_sink(mut self, sink: Arc<dyn crate::kernel_sink::ConversationSink>) -> Self {
         self.conversation_sink = Some(sink);
         self
     }
@@ -463,9 +460,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     }
                 }
             }
-            if dirty
-                && let Err(e) = self.store.save(&session_id, &state).await
-            {
+            if dirty && let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "agent: failed to persist C4 compactor-provider backfill");
             }
         }
@@ -897,14 +892,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
 
             // Shadow-mirror the conversation into the canonical event log when the
-            // Session Kernel is enabled (§3). V2 export preserves tool-call structure
-            // for structured tool events. Best-effort and non-fatal.
+            // Session Kernel is enabled (§3). Best-effort and non-fatal.
             if let Some(sink) = &self.conversation_sink {
-                let export_json = serde_json::to_string(
-                    &trogon_runner_tools::portable_session::messages_to_export_v2(&merged.messages),
-                )
-                .unwrap_or_else(|_| "{\"version\":2,\"messages\":[]}".to_string());
-                sink.sync(&session_id, &export_json, &merged.cwd).await;
+                // The sink builds the full, no-lossy canonical view of state.messages
+                // (structured content blocks, complete tool input/output, and — Fase 5 —
+                // large outputs / images as artifact refs) and records it as canonical
+                // truth (§11 Transcript no-lossy; § No-Lossy Contract).
+                sink.sync(&session_id, &merged.messages, &merged.cwd).await;
             }
         }
 

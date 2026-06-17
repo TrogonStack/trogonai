@@ -17,7 +17,7 @@ futures = { workspace = true }
 opentelemetry = { workspace = true }
 thiserror = "2"
 time = { workspace = true }
-tokio = { workspace = true, features = ["time", "sync"] }
+tokio = { workspace = true, features = ["time", "sync", "rt"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-service-config = { workspace = true }

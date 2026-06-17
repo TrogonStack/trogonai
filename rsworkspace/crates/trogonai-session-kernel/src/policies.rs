@@ -84,6 +84,31 @@ pub struct OperationalProductPolicy {
     pub raw_export_requires_confirmation: bool,
 }
 
+/// § Fallback budget y shadow divergence thresholds (cambio-modelo.md "Valores
+/// iniciales cerrados"). Canonical no se promueve a default si el fallback a handoff
+/// supera el presupuesto o si replay/snapshot divergen mas que el umbral. Ambos
+/// umbrales deben existir antes de activar default (§ Decisiones finales cerradas).
+#[derive(Config, Clone, Debug, PartialEq)]
+pub struct RolloutPromotionPolicy {
+    /// Max canonical/kernel-primary fallbacks to legacy handoff before promotion is
+    /// blocked. Default 0: ANY fallback in a canonical session blocks until corrected
+    /// (§ Fallback budget). Handoff stays allowed only in legacy/shadow/MVP.
+    #[config(env = "TROGON_ROLLOUT_MAX_CANONICAL_FALLBACKS", default = 0)]
+    pub max_canonical_fallbacks: usize,
+
+    /// Max recorded minor projection divergences allowed under rollout budget. Default
+    /// 0: zero tolerance. Canonical loss is NEVER under budget — only minor projection
+    /// divergences may be (§ Shadow divergence).
+    #[config(env = "TROGON_ROLLOUT_MAX_MINOR_PROJECTION_DIVERGENCES", default = 0)]
+    pub max_minor_projection_divergences: usize,
+}
+
+impl Default for RolloutPromotionPolicy {
+    fn default() -> Self {
+        Self::builder().load().expect("rollout promotion policy defaults")
+    }
+}
+
 /// Aggregated operational policy bundle for Session Kernel integration.
 #[derive(Config, Clone, Debug, PartialEq)]
 pub struct SessionKernelOperationalPolicy {
@@ -95,6 +120,9 @@ pub struct SessionKernelOperationalPolicy {
 
     #[config(nested)]
     pub product: OperationalProductPolicy,
+
+    #[config(nested)]
+    pub rollout_promotion: RolloutPromotionPolicy,
 }
 
 impl Default for SessionKernelOperationalPolicy {
@@ -182,10 +210,7 @@ impl SessionErrorUxState {
     pub fn safe_to_continue(self) -> bool {
         match self {
             // Blocked / busy / unsafe states require resolution first.
-            Self::SessionBusy
-            | Self::SwitchBlocked
-            | Self::CheckpointFailed
-            | Self::RequiresReconciliation => false,
+            Self::SessionBusy | Self::SwitchBlocked | Self::CheckpointFailed | Self::RequiresReconciliation => false,
             // Degradations and recoverable states: safe to continue, with awareness.
             Self::ConfirmationRequired
             | Self::CapabilityMissing
@@ -213,9 +238,11 @@ mod tests {
 
     #[test]
     fn error_ux_states_have_actionable_guidance() {
-        assert!(SessionErrorUxState::SwitchBlocked
-            .recommended_action()
-            .contains("pending"));
+        assert!(
+            SessionErrorUxState::SwitchBlocked
+                .recommended_action()
+                .contains("pending")
+        );
     }
 
     #[test]

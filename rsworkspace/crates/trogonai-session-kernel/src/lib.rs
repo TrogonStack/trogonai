@@ -10,6 +10,7 @@ pub mod materialize;
 pub mod migration;
 pub mod nats;
 pub mod policies;
+pub mod promotion;
 pub mod recovery;
 pub mod snapshot;
 pub mod state;
@@ -18,27 +19,25 @@ pub mod usage;
 
 pub use config::SessionKernelConfig;
 pub use error::SessionKernelError;
-pub use features::{
-    EventLogPrimaryMode, RunnerBindingMode, SessionKernelFeatureFlags,
+pub use event_log::{EventLog, EventLogBackend, InMemoryEventLog};
+pub use features::{EventLogPrimaryMode, RunnerBindingMode, SessionKernelFeatureFlags};
+pub use kernel::{
+    SessionKernel, SessionKvLeaseFactory, provision_lease_store, provision_snapshot_store, provision_usage_store,
+};
+pub use lease::{
+    LeaseRenewal, SessionKvLease, SessionLeaseFactory, SessionLeaseGuard, SessionLeaseManager,
+    SessionMutatingOperation, lease_bucket_config,
 };
 pub use migration::{
-    compare_shadow_divergence, conversation_from_legacy_export, resolve_event_log_primary,
-    shadow_sync_from_export, SessionMigrationRecord, ShadowDivergenceReport, ShadowSyncReport,
+    SessionMigrationRecord, ShadowDivergenceReport, ShadowSyncReport, compare_shadow_divergence,
+    conversation_from_legacy_export, resolve_event_log_primary, shadow_sync_from_conversation, shadow_sync_from_export,
     snapshot_from_legacy_export,
 };
 pub use policies::{
-    ContinuitySloPolicy, NatsOperationalPolicy, OperationalProductPolicy,
+    ContinuitySloPolicy, NatsOperationalPolicy, OperationalProductPolicy, RolloutPromotionPolicy,
     SessionErrorUxState, SessionKernelOperationalPolicy,
 };
-pub use event_log::{EventLog, EventLogBackend, InMemoryEventLog};
-pub use kernel::{
-    SessionKernel, SessionKvLeaseFactory, provision_lease_store, provision_snapshot_store,
-    provision_usage_store,
-};
-pub use lease::{
-    SessionLeaseFactory, SessionLeaseGuard, SessionLeaseManager, SessionMutatingOperation, SessionKvLease,
-    lease_bucket_config,
-};
+pub use promotion::{PromotionBlockReason, PromotionReadiness, evaluate_promotion_readiness};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use lease::{MockSessionLease, MockSessionLeaseFactory};

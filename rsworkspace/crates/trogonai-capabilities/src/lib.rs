@@ -21,7 +21,10 @@ pub use certification::{
 pub use config::CapabilityConfig;
 pub use error::CapabilityError;
 pub use freshness::{FreshnessStatus, apply_freshness_policy};
-pub use probe::{CapabilityProbe, ProbeKind, ProbeResult, StaticProbe, run_probe_battery};
+pub use probe::{
+    CapabilityProbe, CapabilityProbeTransport, PROBE_BATTERY, ProbeKind, ProbeResult, RunnerCapabilityProbe,
+    StaticProbe, run_probe_battery,
+};
 pub use registry::{CapabilityRegistry, METADATA_CAPABILITY_SCHEMAS};
 pub use resolve::{ResolvedCapabilities, resolve_model_capabilities};
 pub use seed::known_model_schema;

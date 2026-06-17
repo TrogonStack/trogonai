@@ -1,11 +1,10 @@
 use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogonai_session_contracts::{
-    ArtifactMetadata, AssistantMessageStartedPayload, CanonicalMessage, CanonicalToolCall,
-    ContinuityCheckpointResult, RunnerBinding, SCHEMA_VERSION_V1, SessionConfig, SessionCreatedPayload,
-    SessionEvent, SessionMetadata, SessionSnapshot, SessionSnapshotState, SessionSummary, SessionUsage,
-    SwitchAdaptationPlan, SwitchSafetyDecision, TokenUsage, ToolCallRequestedPayload, ToolCallStatus,
-    session_event_payload::Kind,
+    ArtifactMetadata, AssistantMessageStartedPayload, CanonicalMessage, CanonicalToolCall, ContinuityCheckpointResult,
+    RunnerBinding, SCHEMA_VERSION_V1, SessionConfig, SessionCreatedPayload, SessionEvent, SessionMetadata,
+    SessionSnapshot, SessionSnapshotState, SessionSummary, SessionUsage, SwitchAdaptationPlan, SwitchSafetyDecision,
+    TokenUsage, ToolCallRequestedPayload, ToolCallStatus, session_event_payload::Kind,
 };
 
 use crate::error::SessionKernelError;
@@ -57,15 +56,20 @@ fn apply_event(state: &mut SessionSnapshotState, event: &SessionEvent) -> Result
     apply_payload(state, event, kind)
 }
 
-fn apply_payload(
-    state: &mut SessionSnapshotState,
-    event: &SessionEvent,
-    kind: Kind,
-) -> Result<(), SessionKernelError> {
+fn apply_payload(state: &mut SessionSnapshotState, event: &SessionEvent, kind: Kind) -> Result<(), SessionKernelError> {
+    // Stamp event-derived timestamps with the EVENT's own time (when it happened),
+    // not the materialization time. This preserves timestamps in the canonical
+    // snapshot (§11 "timestamps") and makes replay deterministic — re-materializing
+    // the same events yields the same snapshot (§1999). Only `materialized_at` (the
+    // snapshot envelope) legitimately uses the materialization clock.
+    let event_ts = event.created_at.as_option().cloned().unwrap_or_default();
     match kind {
-        Kind::SessionCreated(payload) => apply_session_created(state, &payload),
+        Kind::SessionCreated(payload) => apply_session_created(state, &payload, event_ts.clone()),
         Kind::UserMessageAdded(payload) => {
-            append_message(state, payload.message.as_option().unwrap_or(&CanonicalMessage::default()));
+            append_message(
+                state,
+                payload.message.as_option().unwrap_or(&CanonicalMessage::default()),
+            );
             Ok(())
         }
         Kind::AssistantMessageStarted(payload) => {
@@ -73,7 +77,10 @@ fn apply_payload(
             Ok(())
         }
         Kind::AssistantMessageCompleted(payload) => {
-            append_message(state, payload.message.as_option().unwrap_or(&CanonicalMessage::default()));
+            append_message(
+                state,
+                payload.message.as_option().unwrap_or(&CanonicalMessage::default()),
+            );
             if let Some(usage) = payload.usage.as_option() {
                 merge_token_usage(state, usage);
             }
@@ -101,7 +108,7 @@ fn apply_payload(
             update_tool_call(state, &payload.tool_call_id, |tool| {
                 tool.status = EnumValue::Known(ToolCallStatus::Completed);
                 tool.result = payload.result.clone();
-                tool.completed_at = MessageField::some(now_timestamp());
+                tool.completed_at = MessageField::some(event_ts.clone());
             });
             Ok(())
         }
@@ -109,7 +116,7 @@ fn apply_payload(
             update_tool_call(state, &payload.tool_call_id, |tool| {
                 tool.status = EnumValue::Known(ToolCallStatus::Failed);
                 tool.error = Some(payload.error.clone());
-                tool.completed_at = MessageField::some(now_timestamp());
+                tool.completed_at = MessageField::some(event_ts.clone());
             });
             Ok(())
         }
@@ -126,7 +133,7 @@ fn apply_payload(
                 content: payload.content.clone(),
                 from_seq: payload.from_seq,
                 to_seq: payload.to_seq,
-                created_at: MessageField::some(now_timestamp()),
+                created_at: MessageField::some(event_ts.clone()),
                 ..SessionSummary::default()
             });
             Ok(())
@@ -144,7 +151,7 @@ fn apply_payload(
                 to_model: payload.to_model.clone(),
                 adaptations: payload.adaptations.clone(),
                 warnings: payload.warnings.clone(),
-                created_at: MessageField::some(now_timestamp()),
+                created_at: MessageField::some(event_ts.clone()),
                 ..SwitchAdaptationPlan::default()
             });
             Ok(())
@@ -155,7 +162,7 @@ fn apply_payload(
                 status: payload.status,
                 reasons: payload.reasons.clone(),
                 required_action: payload.required_action.clone(),
-                evaluated_at: MessageField::some(now_timestamp()),
+                evaluated_at: MessageField::some(event_ts.clone()),
                 ..SwitchSafetyDecision::default()
             });
             Ok(())
@@ -168,7 +175,7 @@ fn apply_payload(
                 confidence: payload.confidence,
                 mismatches: payload.mismatches.clone(),
                 repairs_applied: payload.repairs_applied.clone(),
-                completed_at: MessageField::some(now_timestamp()),
+                completed_at: MessageField::some(event_ts.clone()),
                 ..ContinuityCheckpointResult::default()
             });
             Ok(())
@@ -186,7 +193,7 @@ fn apply_payload(
                 runner_id: payload.runner_id.clone(),
                 model_id: payload.model_id.clone(),
                 status: EnumValue::Known(trogonai_session_contracts::RunnerBindingStatus::Attached),
-                attached_at: MessageField::some(now_timestamp()),
+                attached_at: MessageField::some(event_ts.clone()),
                 capability_snapshot_id: payload.capability_snapshot_id.clone(),
                 ..RunnerBinding::default()
             });
@@ -194,9 +201,8 @@ fn apply_payload(
         }
         Kind::RunnerDetached(payload) => {
             if let Some(binding) = state.active_runner_binding.as_option_mut() {
-                binding.status =
-                    EnumValue::Known(trogonai_session_contracts::RunnerBindingStatus::Detached);
-                binding.detached_at = MessageField::some(now_timestamp());
+                binding.status = EnumValue::Known(trogonai_session_contracts::RunnerBindingStatus::Detached);
+                binding.detached_at = MessageField::some(event_ts.clone());
                 binding.detach_reason = payload.reason.clone();
             }
             Ok(())
@@ -246,10 +252,9 @@ fn apply_payload(
         Kind::InvalidEventRejected(_) => Ok(()),
         // Event-log compaction/retention events are audit trail
         // (§ Event Log Compaction and Retention).
-        Kind::SnapshotCreated(_)
-        | Kind::EventsArchived(_)
-        | Kind::ArtifactGcMarked(_)
-        | Kind::ArtifactGcDeleted(_) => Ok(()),
+        Kind::SnapshotCreated(_) | Kind::EventsArchived(_) | Kind::ArtifactGcMarked(_) | Kind::ArtifactGcDeleted(_) => {
+            Ok(())
+        }
         // Redaction is recorded for audit (§ Security, Secrets and Sanitized Exports).
         Kind::RedactionApplied(_) => Ok(()),
         // Preserved terminal/process continuity (§ Terminal and Process Policy).
@@ -259,15 +264,20 @@ fn apply_payload(
         }
         // Compactor-model preservation/degradation events are audit trail; the
         // preserved value already lives in SessionConfig (§ Token Budget Policy).
-        Kind::CompactorModelPreserved(_)
-        | Kind::CompactorModelUnavailable(_)
-        | Kind::FallbackToDefaultCompactor(_) => Ok(()),
+        Kind::CompactorModelPreserved(_) | Kind::CompactorModelUnavailable(_) | Kind::FallbackToDefaultCompactor(_) => {
+            Ok(())
+        }
+        // Durable audit record of the normalized switch outcome (§ Contrato formal de
+        // resultado del switch). The event itself is the durable association; the
+        // materialized projection of session state is unchanged by it.
+        Kind::SwitchOutcomeRecorded(_) => Ok(()),
     }
 }
 
 fn apply_session_created(
     state: &mut SessionSnapshotState,
     payload: &SessionCreatedPayload,
+    event_ts: Timestamp,
 ) -> Result<(), SessionKernelError> {
     state.session = MessageField::some(SessionMetadata {
         id: state
@@ -277,8 +287,8 @@ fn apply_session_created(
             .unwrap_or_default(),
         title: payload.title.clone(),
         cwd: payload.cwd.clone(),
-        created_at: MessageField::some(now_timestamp()),
-        updated_at: MessageField::some(now_timestamp()),
+        created_at: MessageField::some(event_ts.clone()),
+        updated_at: MessageField::some(event_ts),
         ..SessionMetadata::default()
     });
     state.config = MessageField::some(SessionConfig {
@@ -328,18 +338,9 @@ fn merge_usage(state: &mut SessionSnapshotState, usage: &SessionUsage) {
     state.usage = MessageField::some(SessionUsage {
         input_tokens: state.usage.as_option().map(|u| u.input_tokens).unwrap_or(0) + usage.input_tokens,
         output_tokens: state.usage.as_option().map(|u| u.output_tokens).unwrap_or(0) + usage.output_tokens,
-        cache_creation_tokens: state
-            .usage
-            .as_option()
-            .map(|u| u.cache_creation_tokens)
-            .unwrap_or(0)
+        cache_creation_tokens: state.usage.as_option().map(|u| u.cache_creation_tokens).unwrap_or(0)
             + usage.cache_creation_tokens,
-        cache_read_tokens: state
-            .usage
-            .as_option()
-            .map(|u| u.cache_read_tokens)
-            .unwrap_or(0)
-            + usage.cache_read_tokens,
+        cache_read_tokens: state.usage.as_option().map(|u| u.cache_read_tokens).unwrap_or(0) + usage.cache_read_tokens,
         ..SessionUsage::default()
     });
 }
@@ -358,22 +359,14 @@ fn tool_call_from_requested(payload: &ToolCallRequestedPayload) -> CanonicalTool
 }
 
 fn upsert_tool_call(state: &mut SessionSnapshotState, tool_call: CanonicalToolCall) {
-    if let Some(existing) = state
-        .tool_calls
-        .iter_mut()
-        .find(|entry| entry.id == tool_call.id)
-    {
+    if let Some(existing) = state.tool_calls.iter_mut().find(|entry| entry.id == tool_call.id) {
         *existing = tool_call;
     } else {
         state.tool_calls.push(tool_call);
     }
 }
 
-fn update_tool_call(
-    state: &mut SessionSnapshotState,
-    tool_call_id: &str,
-    update: impl FnOnce(&mut CanonicalToolCall),
-) {
+fn update_tool_call(state: &mut SessionSnapshotState, tool_call_id: &str, update: impl FnOnce(&mut CanonicalToolCall)) {
     if let Some(tool) = state.tool_calls.iter_mut().find(|entry| entry.id == tool_call_id) {
         update(tool);
     }
@@ -436,6 +429,45 @@ mod tests {
             }),
             ..SessionEvent::default()
         }
+    }
+
+    #[test]
+    fn materialize_preserves_event_timestamps_not_replay_time() {
+        // §11 "timestamps" + §1999 determinism: the snapshot must carry the EVENT's
+        // timestamp, not the materialization clock.
+        let session_id = "sess_ts";
+        let fixed = Timestamp {
+            seconds: 1000,
+            nanos: 0,
+            ..Timestamp::default()
+        };
+        let mut event = sample_created_event(session_id, 1);
+        event.created_at = MessageField::some(fixed.clone());
+
+        let snapshot = materialize_from_events(session_id, &[event.clone()], None).unwrap();
+        let session = snapshot
+            .state
+            .as_option()
+            .and_then(|state| state.session.as_option())
+            .expect("session metadata");
+        assert_eq!(
+            session.created_at.as_option().map(|ts| ts.seconds),
+            Some(1000),
+            "session created_at must be the event timestamp, not replay/wall-clock time"
+        );
+
+        // Re-materializing the same event yields the same timestamp (deterministic).
+        let again = materialize_from_events(session_id, &[event], None).unwrap();
+        let session_again = again
+            .state
+            .as_option()
+            .and_then(|state| state.session.as_option())
+            .expect("session metadata");
+        assert_eq!(
+            session.created_at.as_option().map(|ts| ts.seconds),
+            session_again.created_at.as_option().map(|ts| ts.seconds),
+            "re-materialization must be deterministic for event timestamps"
+        );
     }
 
     #[test]

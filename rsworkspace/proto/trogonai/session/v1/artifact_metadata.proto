@@ -22,4 +22,20 @@ message ArtifactMetadata {
   string permission_scope = 13;
   EncryptionStatus encryption_status = 14;
   bool truncated = 15;
+
+  // § Politica para imagenes URL y Base64. Image artifacts carry their provenance so a
+  // URL/Base64 source is never the canonical truth: the bytes are stored and the source
+  // is kept only as metadata.
+  ArtifactSourceAvailability availability = 16;
+  // Original URL for fetched-image artifacts (§ Imagen por URL: "preservar source_url").
+  optional string source_url = 17;
+  // When the URL bytes were fetched (§ "fetched_at").
+  google.protobuf.Timestamp fetched_at = 18;
+  // Source transport encoding, e.g. "base64" for decoded Base64 images
+  // (§ Imagen Base64: "preservar source_encoding=base64").
+  optional string source_encoding = 19;
+  // MIME as declared by the source, before validation (§ "declared_mime").
+  optional string declared_mime = 20;
+  // Actual MIME validated from the stored bytes (§ "decoded_mime").
+  optional string decoded_mime = 21;
 }

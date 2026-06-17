@@ -1,6 +1,6 @@
 use buffa::Message as _;
 use bytes::Bytes;
-use trogon_nats::jetstream::{JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKeyValueUpdate};
+use trogon_nats::jetstream::{JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet};
 use trogonai_session_contracts::{SessionId, SessionUsage};
 
 use crate::config::SessionKernelConfig;
@@ -32,10 +32,7 @@ impl<S> UsageStore<S>
 where
     S: JetStreamKvGet + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate + Clone + Send + Sync + 'static,
 {
-    pub async fn load_usage(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionUsage>, SessionKernelError> {
+    pub async fn load_usage(&self, session_id: &SessionId) -> Result<Option<SessionUsage>, SessionKernelError> {
         let key = session_usage_key(session_id);
         let Some(bytes) = self
             .store
@@ -45,16 +42,12 @@ where
         else {
             return Ok(None);
         };
-        let usage = SessionUsage::decode_from_slice(&bytes)
-            .map_err(|err| SessionKernelError::Decode(err.to_string()))?;
+        let usage =
+            SessionUsage::decode_from_slice(&bytes).map_err(|err| SessionKernelError::Decode(err.to_string()))?;
         Ok(Some(usage))
     }
 
-    pub async fn save_usage(
-        &self,
-        session_id: &SessionId,
-        usage: &SessionUsage,
-    ) -> Result<(), SessionKernelError> {
+    pub async fn save_usage(&self, session_id: &SessionId, usage: &SessionUsage) -> Result<(), SessionKernelError> {
         let key = session_usage_key(session_id);
         let bytes = Bytes::from(usage.encode_to_vec());
         if let Some(entry) = self

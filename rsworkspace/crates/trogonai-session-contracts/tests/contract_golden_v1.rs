@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use buffa::Message as _;
 use support::{
     sample_artifact_metadata, sample_capability_schema, sample_context_twin,
-    sample_model_switched_event, sample_session_event, sample_session_snapshot, write_golden_fixtures,
+    sample_model_switched_event, sample_session_event, sample_session_snapshot,
+    sample_switch_outcome_recorded_event, write_golden_fixtures,
 };
 use trogonai_session_contracts::{
     ArtifactMetadata, CapabilitySchema, ContextTwin, SessionEvent, SessionSnapshot,
@@ -16,9 +17,10 @@ fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1")
 }
 
-const GOLDEN_FIXTURES: [&str; 6] = [
+const GOLDEN_FIXTURES: [&str; 7] = [
     "session_event_session_created_v1.bin",
     "session_event_model_switched_v1.bin",
+    "session_event_switch_outcome_recorded_v1.bin",
     "context_twin_v1.bin",
     "artifact_metadata_v1.bin",
     "capability_schema_v1.bin",
@@ -55,6 +57,18 @@ fn golden_session_event_model_switched_roundtrip() {
         .expect("read golden fixture");
     let decoded = SessionEvent::decode_from_slice(&bytes).expect("decode golden model switch event");
     let expected = sample_model_switched_event();
+
+    assert_eq!(decoded, expected);
+    assert!(ValidatedSessionEvent::try_from_event(decoded).is_ok());
+    assert_eq!(expected.encode_to_vec(), bytes);
+}
+
+#[test]
+fn golden_session_event_switch_outcome_recorded_roundtrip() {
+    let bytes = std::fs::read(fixture_dir().join("session_event_switch_outcome_recorded_v1.bin"))
+        .expect("read golden fixture");
+    let decoded = SessionEvent::decode_from_slice(&bytes).expect("decode golden switch outcome event");
+    let expected = sample_switch_outcome_recorded_event();
 
     assert_eq!(decoded, expected);
     assert!(ValidatedSessionEvent::try_from_event(decoded).is_ok());

@@ -120,6 +120,14 @@ message ModelSwitchedPayload {
   ModelSwitchReason reason = 5;
 }
 
+// Durable record of the single normalized outcome of a switch attempt
+// (§ Contrato formal de resultado del switch: "cada resultado debe tener evento
+// canonico o campo durable asociado"). Emitted for every result, including the ones
+// that have no ModelSwitchedPayload (blocked / requires_confirmation / failed*).
+message SwitchOutcomeRecordedPayload {
+  SwitchVisibleResult result = 1;
+}
+
 message RunnerAttachedPayload {
   string runner_id = 1;
   string model_id = 2;
@@ -315,6 +323,7 @@ message SessionEventPayload {
     CompactorModelPreservedPayload compactor_model_preserved = 43;
     CompactorModelUnavailablePayload compactor_model_unavailable = 44;
     FallbackToDefaultCompactorPayload fallback_to_default_compactor = 45;
+    SwitchOutcomeRecordedPayload switch_outcome_recorded = 46;
   }
 }
 

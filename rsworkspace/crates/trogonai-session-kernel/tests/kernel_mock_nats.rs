@@ -54,13 +54,84 @@ fn test_kernel(
 #[tokio::test]
 async fn acquire_release_session_lease_uses_mock_backend() {
     let session_id = SessionId::new("sess_lease").unwrap();
-    let kernel = test_kernel(InMemoryEventLog::new(), MockJetStreamKvStore::new(), MockSessionLease::new());
+    let kernel = test_kernel(
+        InMemoryEventLog::new(),
+        MockJetStreamKvStore::new(),
+        MockSessionLease::new(),
+    );
 
     let guard = kernel
         .acquire_session_lease(&session_id, SessionMutatingOperation::PromptTurn)
         .await
         .unwrap();
     kernel.release_session_lease(guard).await.unwrap();
+}
+
+/// Regression test for the shadow tool-I/O comparison ordering: the comparison must
+/// run AFTER the tool calls are materialized into the snapshot (§ Migration:
+/// materialize snapshot → compare). Comparing before `record_tool_calls` would
+/// report the turn's tool calls as missing (false divergence).
+#[tokio::test]
+async fn tool_io_divergence_is_measured_after_tool_calls_are_materialized() {
+    use trogonai_session_contracts::CanonicalToolCall;
+    use trogonai_session_kernel::compare_shadow_divergence;
+
+    fn actor() -> Actor {
+        Actor {
+            r#type: EnumValue::Known(ActorType::Kernel),
+            id: "shadow-sync".to_string(),
+            ..Actor::default()
+        }
+    }
+    fn call(id: &str, input_json: &str) -> CanonicalToolCall {
+        CanonicalToolCall {
+            id: id.to_string(),
+            tool_execution_id: id.to_string(),
+            name: "bash".to_string(),
+            input_json: input_json.to_string(),
+            ..CanonicalToolCall::default()
+        }
+    }
+
+    let session_id = SessionId::new("sess_toolio").unwrap();
+    let kernel = test_kernel(
+        InMemoryEventLog::new(),
+        MockJetStreamKvStore::new(),
+        MockSessionLease::new(),
+    );
+
+    // The materialized (lossy) tool call carries a summarized input.
+    let snapshot = kernel
+        .record_tool_calls(
+            &session_id,
+            &[call("t1", "{\"cmd\":\"cargo te…")],
+            actor(),
+            Timestamp::default(),
+        )
+        .await
+        .unwrap();
+    let state = snapshot.state.as_option().expect("snapshot state");
+
+    // Now that t1 is materialized, comparing against the FULL baseline surfaces the
+    // summarized input as a real divergence — not a false "missing".
+    let diverged =
+        compare_shadow_divergence(state, "[]", &[call("t1", "{\"cmd\":\"cargo test --workspace\"}")]).unwrap();
+    assert_eq!(
+        diverged.materialized_tool_calls, 1,
+        "the snapshot must contain the materialized tool call"
+    );
+    assert_eq!(
+        diverged.mismatched_tool_io, 1,
+        "a summarized input must diverge from the full baseline"
+    );
+
+    // A baseline that matches the materialized tool call yields NO divergence — the
+    // key regression check: the turn's tool call is present, not falsely missing.
+    let clean = compare_shadow_divergence(state, "[]", &[call("t1", "{\"cmd\":\"cargo te…")]).unwrap();
+    assert_eq!(
+        clean.mismatched_tool_io, 0,
+        "a tool call matching the snapshot must not diverge"
+    );
 }
 
 #[tokio::test]
@@ -115,10 +186,7 @@ async fn append_event_idempotent_deduplicates_retries_after_crash() {
         .unwrap();
 
     // Simulate crash after durable append but before downstream side effects complete.
-    let retry = kernel
-        .append_event_idempotent(event, "idem_retry")
-        .await
-        .unwrap();
+    let retry = kernel.append_event_idempotent(event, "idem_retry").await.unwrap();
 
     assert_eq!(first.event_id, retry.event_id);
     assert_eq!(first.seq, retry.seq);
@@ -152,7 +220,11 @@ async fn recovery_rebuilds_state_from_event_log_and_snapshot() {
 async fn fork_session_records_lineage_on_child_snapshot() {
     let parent_id = SessionId::new("sess_parent").unwrap();
     let child_id = SessionId::new("sess_child").unwrap();
-    let kernel = test_kernel(InMemoryEventLog::new(), MockJetStreamKvStore::new(), MockSessionLease::new());
+    let kernel = test_kernel(
+        InMemoryEventLog::new(),
+        MockJetStreamKvStore::new(),
+        MockSessionLease::new(),
+    );
 
     // Seed the parent with two events so it has a non-trivial history to branch from.
     kernel
@@ -268,7 +340,12 @@ async fn record_tool_calls_emits_structured_tool_events() {
     };
 
     let snap = kernel
-        .record_tool_calls(&session_id, std::slice::from_ref(&tool), actor.clone(), Timestamp::default())
+        .record_tool_calls(
+            &session_id,
+            std::slice::from_ref(&tool),
+            actor.clone(),
+            Timestamp::default(),
+        )
         .await
         .unwrap();
     let state = snap.state.as_option().unwrap();
@@ -277,7 +354,9 @@ async fn record_tool_calls_emits_structured_tool_events() {
 
     let events = event_log.read_session_events(&session_id).await.unwrap();
     let has = |pred: fn(&Kind) -> bool| {
-        events.iter().any(|e| e.payload.as_option().and_then(|p| p.kind.as_ref()).is_some_and(pred))
+        events
+            .iter()
+            .any(|e| e.payload.as_option().and_then(|p| p.kind.as_ref()).is_some_and(pred))
     };
     assert!(has(|k| matches!(k, Kind::ToolCallRequested(_))));
     assert!(has(|k| matches!(k, Kind::ToolCallCompleted(_))));
@@ -304,8 +383,14 @@ async fn retention_and_terminal_continuity_apis_emit_and_materialize() {
         ..Actor::default()
     };
 
-    kernel.append_event(created_event("sess_ret", 0, "idem_r1")).await.unwrap();
-    kernel.append_event(created_event("sess_ret", 0, "idem_r2")).await.unwrap();
+    kernel
+        .append_event(created_event("sess_ret", 0, "idem_r1"))
+        .await
+        .unwrap();
+    kernel
+        .append_event(created_event("sess_ret", 0, "idem_r2"))
+        .await
+        .unwrap();
 
     // Terminal continuity is captured and materialized onto state.terminal.
     let snap = kernel

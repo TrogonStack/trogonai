@@ -1,10 +1,10 @@
 use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use bytes::Bytes;
-use trogon_nats::jetstream::{JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKeyValueUpdate};
+use trogon_nats::jetstream::{JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet};
 use trogonai_session_contracts::{
-    NonPortableState, RunnerBinding, RunnerBindingStatus, SCHEMA_VERSION_V1, SessionEvent,
-    SessionId, SessionSnapshotState,
+    NonPortableState, RunnerBinding, RunnerBindingStatus, SCHEMA_VERSION_V1, SessionEvent, SessionId,
+    SessionSnapshotState,
 };
 
 use crate::config::SwitchingConfig;
@@ -47,10 +47,7 @@ impl<S> RunnerBindingStore<S>
 where
     S: JetStreamKvGet + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate + Clone + Send + Sync + 'static,
 {
-    pub async fn load_binding(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<RunnerBinding>, SwitchingError> {
+    pub async fn load_binding(&self, session_id: &SessionId) -> Result<Option<RunnerBinding>, SwitchingError> {
         let key = runner_binding_key(session_id);
         let Some(bytes) = self
             .store
@@ -60,8 +57,8 @@ where
         else {
             return Ok(None);
         };
-        let binding = RunnerBinding::decode_from_slice(&bytes)
-            .map_err(|err| SwitchingError::Decode(err.to_string()))?;
+        let binding =
+            RunnerBinding::decode_from_slice(&bytes).map_err(|err| SwitchingError::Decode(err.to_string()))?;
         Ok(Some(binding))
     }
 
@@ -69,12 +66,11 @@ where
         if binding.session_id.is_empty() {
             return Err(SwitchingError::MissingField("session_id"));
         }
-        let session_id = SessionId::new(&binding.session_id)
-            .map_err(|err| SwitchingError::Kernel(
-                trogonai_session_kernel::SessionKernelError::ContractValidation(
-                    trogonai_session_contracts::ContractValidationError::InvalidSessionId(err),
-                ),
-            ))?;
+        let session_id = SessionId::new(&binding.session_id).map_err(|err| {
+            SwitchingError::Kernel(trogonai_session_kernel::SessionKernelError::ContractValidation(
+                trogonai_session_contracts::ContractValidationError::InvalidSessionId(err),
+            ))
+        })?;
         let key = runner_binding_key(&session_id);
         let bytes = Bytes::from(binding.encode_to_vec());
         if let Some(entry) = self
@@ -121,12 +117,13 @@ where
         ..RunnerBinding::default()
     };
 
-    binding_store.save_binding(&binding).await.map_err(|err| {
-        SwitchingError::RunnerAttachFailed {
+    binding_store
+        .save_binding(&binding)
+        .await
+        .map_err(|err| SwitchingError::RunnerAttachFailed {
             runner_id: runner_id.to_string(),
             detail: err.to_string(),
-        }
-    })?;
+        })?;
 
     let event = runner_attached_event(context, runner_id, model_id, binding.capability_snapshot_id.clone());
     state = RunnerBindingState::Attached;
@@ -171,10 +168,7 @@ pub fn invalidate_nonportable_runner_state(session_state: &mut SessionSnapshotSt
     session_state.nonportable = MessageField::some(NonPortableState::default());
 }
 
-pub async fn provision_runner_binding_store<J, S>(
-    js: &J,
-    config: &SwitchingConfig,
-) -> Result<S, SwitchingError>
+pub async fn provision_runner_binding_store<J, S>(js: &J, config: &SwitchingConfig) -> Result<S, SwitchingError>
 where
     J: trogon_nats::jetstream::JetStreamGetKeyValue<Store = S>
         + trogon_nats::jetstream::JetStreamCreateKeyValue<Store = S>,

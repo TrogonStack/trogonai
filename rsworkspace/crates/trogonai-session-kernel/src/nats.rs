@@ -55,14 +55,8 @@ mod tests {
         assert_eq!(session_events_stream("ACP"), "ACP_SESSION_EVENTS");
         assert_eq!(session_snapshots_bucket("ACP"), "ACP_SESSION_SNAPSHOTS");
         assert_eq!(session_leases_bucket("ACP"), "ACP_SESSION_LEASES");
-        assert_eq!(
-            session_events_subject(&session_id),
-            "sessions.sess_test.events"
-        );
-        assert_eq!(
-            session_snapshot_key(&session_id),
-            "sessions.sess_test.state"
-        );
+        assert_eq!(session_events_subject(&session_id), "sessions.sess_test.events");
+        assert_eq!(session_snapshot_key(&session_id), "sessions.sess_test.state");
         assert_eq!(session_lease_key(&session_id), "sessions.sess_test.lock");
     }
 }

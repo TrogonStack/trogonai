@@ -80,17 +80,86 @@ impl CapabilityProbe for StaticProbe {
     }
 }
 
+/// The standard contract-test battery (§ Capability Registry Freshness).
+pub const PROBE_BATTERY: [ProbeKind; 6] = [
+    ProbeKind::ToolUse,
+    ProbeKind::ImageInput,
+    ProbeKind::JsonSchema,
+    ProbeKind::ContextLimits,
+    ProbeKind::Streaming,
+    ProbeKind::CompactionSupported,
+];
+
 /// Run the standard probe battery and collect contract test results.
 pub fn run_probe_battery(probe: &impl CapabilityProbe) -> Vec<ProbeResult> {
-    [
-        ProbeKind::ToolUse,
-        ProbeKind::ImageInput,
-        ProbeKind::JsonSchema,
-        ProbeKind::ContextLimits,
-        ProbeKind::Streaming,
-        ProbeKind::CompactionSupported,
-    ]
-    .into_iter()
-    .map(|kind| probe.probe(kind))
-    .collect()
+    PROBE_BATTERY.into_iter().map(|kind| probe.probe(kind)).collect()
+}
+
+/// Async transport that runs a single capability contract test against a **live**
+/// runner/model and reports whether the capability actually worked. The runner host
+/// implements it (e.g. over the ACP bridge); the capabilities crate stays transport
+/// agnostic. This is the runner-backed probe the registry-freshness policy asks for
+/// ("health checks/probes por runner"), distinct from the static [`StaticProbe`].
+pub trait CapabilityProbeTransport {
+    fn run_probe(&self, kind: ProbeKind) -> impl std::future::Future<Output = ProbeResult> + Send;
+}
+
+/// Runner-backed probe: issues the full contract-test battery against a live runner via
+/// a [`CapabilityProbeTransport`], producing results that
+/// [`crate::certification::ProviderCertificationMatrix::certify_from_probes`] turns into
+/// a verified certification level.
+pub struct RunnerCapabilityProbe<T> {
+    transport: T,
+}
+
+impl<T: CapabilityProbeTransport> RunnerCapabilityProbe<T> {
+    pub fn new(transport: T) -> Self {
+        Self { transport }
+    }
+
+    /// Run every probe in [`PROBE_BATTERY`] against the live runner, in order.
+    pub async fn run_battery(&self) -> Vec<ProbeResult> {
+        let mut results = Vec::with_capacity(PROBE_BATTERY.len());
+        for kind in PROBE_BATTERY {
+            results.push(self.transport.run_probe(kind).await);
+        }
+        results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockTransport {
+        fail: Option<ProbeKind>,
+    }
+
+    impl CapabilityProbeTransport for MockTransport {
+        async fn run_probe(&self, kind: ProbeKind) -> ProbeResult {
+            ProbeResult {
+                kind,
+                passed: self.fail != Some(kind),
+                detail: None,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn runner_probe_runs_full_battery() {
+        let probe = RunnerCapabilityProbe::new(MockTransport { fail: None });
+        let results = probe.run_battery().await;
+        assert_eq!(results.len(), PROBE_BATTERY.len());
+        assert!(results.iter().all(|r| r.passed));
+    }
+
+    #[tokio::test]
+    async fn runner_probe_reports_failed_capability() {
+        let probe = RunnerCapabilityProbe::new(MockTransport {
+            fail: Some(ProbeKind::ImageInput),
+        });
+        let results = probe.run_battery().await;
+        let image = results.iter().find(|r| r.kind == ProbeKind::ImageInput).unwrap();
+        assert!(!image.passed);
+    }
 }

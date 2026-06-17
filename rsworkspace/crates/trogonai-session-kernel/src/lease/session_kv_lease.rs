@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
-use trogon_nats::jetstream::{JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate};
+use trogon_nats::jetstream::{
+    JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate,
+};
 use trogon_nats::lease::{LeaseKey, ReleaseLease, RenewLease, TryAcquireLease};
 
 /// Per-session NATS KV lease implementing `trogon_nats::lease` traits.
@@ -26,9 +28,7 @@ where
     type Error = kv::CreateError;
 
     async fn try_acquire(&self, value: Bytes) -> Result<u64, Self::Error> {
-        self.store
-            .create_with_ttl(self.key.as_str(), value, self.ttl)
-            .await
+        self.store.create_with_ttl(self.key.as_str(), value, self.ttl).await
     }
 }
 
