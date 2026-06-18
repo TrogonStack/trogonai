@@ -104,14 +104,10 @@ mod tests {
     #[test]
     fn parses_nats_subject_scheme() {
         let target = PushNotificationTarget::parse("subject:a2a.push.acme.caller-42.task-9").unwrap();
-        match target {
-            PushNotificationTarget::Nats(subject) => {
-                assert_eq!(subject.as_str(), "a2a.push.acme.caller-42.task-9");
-            }
-            PushNotificationTarget::Http(_) | PushNotificationTarget::JetStream(_) => {
-                panic!("expected NATS subject target")
-            }
-        }
+        assert!(matches!(
+            &target,
+            PushNotificationTarget::Nats(subject) if subject.as_str() == "a2a.push.acme.caller-42.task-9"
+        ));
     }
 
     #[test]
@@ -127,12 +123,10 @@ mod tests {
     #[test]
     fn parses_jetstream_subject_scheme() {
         let target = PushNotificationTarget::parse("jetstream:a2a.push.acme.caller-42.task-9").unwrap();
-        match target {
-            PushNotificationTarget::JetStream(subject) => {
-                assert_eq!(subject.as_str(), "a2a.push.acme.caller-42.task-9");
-            }
-            _ => panic!("expected JetStream subject target"),
-        }
+        assert!(matches!(
+            &target,
+            PushNotificationTarget::JetStream(subject) if subject.as_str() == "a2a.push.acme.caller-42.task-9"
+        ));
     }
 
     #[test]
@@ -159,5 +153,38 @@ mod tests {
     fn error_display_unknown_scheme_includes_raw_value() {
         let err = PushNotificationTarget::parse("nats://broker").unwrap_err();
         assert!(err.to_string().contains("nats://broker"));
+    }
+
+    #[test]
+    fn display_roundtrips_http_target() {
+        let target = PushNotificationTarget::parse("https://example.com/hook").unwrap();
+        assert_eq!(target.to_string(), "https://example.com/hook");
+    }
+
+    #[test]
+    fn error_display_covers_every_variant() {
+        use std::error::Error as _;
+        let empty = PushNotificationTargetError::Empty;
+        assert!(empty.to_string().contains("must not be empty"));
+        assert!(empty.source().is_none());
+
+        let unknown = PushNotificationTarget::parse("ftp://example.com").unwrap_err();
+        assert!(matches!(unknown, PushNotificationTargetError::UnknownScheme { .. }));
+        assert!(unknown.to_string().contains("ftp://example.com"));
+        assert!(unknown.source().is_none());
+
+        let raw = PushNotificationTargetError::Http(WebhookUrl::new("ftp://x").unwrap_err());
+        assert!(raw.to_string().contains("webhook URL must start"));
+        assert!(raw.source().is_some());
+
+        let nats_err = PushNotificationTarget::parse("subject:bad subject").unwrap_err();
+        assert!(matches!(nats_err, PushNotificationTargetError::Nats(_)));
+        assert!(nats_err.to_string().contains("invalid NATS push subject"));
+        assert!(nats_err.source().is_some());
+
+        let js_err = PushNotificationTarget::parse("jetstream:bad subject").unwrap_err();
+        assert!(matches!(js_err, PushNotificationTargetError::JetStream(_)));
+        assert!(js_err.to_string().contains("invalid NATS push subject"));
+        assert!(js_err.source().is_some());
     }
 }

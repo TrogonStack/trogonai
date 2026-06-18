@@ -70,4 +70,10 @@ mod tests {
         let err = WebhookUrl::new("ftp://bad").unwrap_err();
         assert!(err.to_string().contains("ftp://bad"));
     }
+
+    #[test]
+    fn as_str_returns_inner_value() {
+        let url = WebhookUrl::new("https://example.com/hook").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/hook");
+    }
 }
