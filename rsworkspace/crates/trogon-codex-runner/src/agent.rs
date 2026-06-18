@@ -6,7 +6,8 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
+    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodEnvVar, AuthenticateRequest,
+    AuthenticateResponse, CancelNotification,
     CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
     ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
     InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
@@ -27,6 +28,12 @@ use uuid::Uuid;
 use crate::permissions::{ModeGateAction, mode_gate_action};
 use crate::process::{CodexEvent, RealProcessSpawner};
 use crate::traits::{CodexProcessClient, ProcessSpawner, SessionNotifier, SessionNotifierFactory};
+
+/// The single auth method codex advertises. The key itself is consumed by the
+/// `codex app-server` subprocess from the `OPENAI_API_KEY` env var; the method
+/// exists so clients can *discover* how auth is supplied, not so the runner
+/// captures a per-session key (unlike xai, which also accepts a key via meta).
+const OPENAI_AUTH_METHOD: &str = "openai-api-key";
 
 // ── ProcessGuard ──────────────────────────────────────────────────────────────
 
@@ -344,7 +351,23 @@ where
     ) -> agent_client_protocol::Result<InitializeResponse> {
         let mut caps_meta = serde_json::Map::new();
         caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
+        // C1: advertise the env-var auth method so clients can discover how
+        // codex auth is supplied (key read from OPENAI_API_KEY by the subprocess).
+        let auth_methods = vec![AuthMethod::EnvVar(
+            AuthMethodEnvVar::new(
+                OPENAI_AUTH_METHOD,
+                "OpenAI API Key",
+                vec![AuthEnvVar::new("OPENAI_API_KEY").label("OpenAI API Key")],
+            )
+            .link("https://platform.openai.com/api-keys")
+            .description("Set OPENAI_API_KEY for the codex app-server"),
+        )];
+        // C3: `embedded_context` and `branchAtIndex` are intentionally left OFF.
+        // Codex drops non-text prompt blocks, so advertising `embedded_context`
+        // would be a false claim; and codex owns thread history, so client-side
+        // index truncation (`branchAtIndex`) is not expressible against it.
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
+            .auth_methods(auth_methods)
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(true)
@@ -365,9 +388,18 @@ where
 
     async fn authenticate(
         &self,
-        _req: AuthenticateRequest,
+        req: AuthenticateRequest,
     ) -> agent_client_protocol::Result<AuthenticateResponse> {
-        // Codex uses the OPENAI_API_KEY env var — no per-session auth needed.
+        // C2: honor the advertised method instead of accepting any id. Codex's
+        // key still comes from OPENAI_API_KEY (the subprocess reads it), so there
+        // is nothing to capture here — but a client that selects an unknown
+        // method must be told auth is required, not handed a silent success.
+        if req.method_id.0.as_ref() != OPENAI_AUTH_METHOD {
+            return Err(Error::auth_required().data(serde_json::json!({
+                "requested": req.method_id.0.as_ref(),
+                "supported": [OPENAI_AUTH_METHOD],
+            })));
+        }
         Ok(AuthenticateResponse::new())
     }
 
@@ -1451,12 +1483,46 @@ mod tests {
     // ── authenticate ──────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn authenticate_returns_ok() {
+    async fn initialize_advertises_openai_env_var_auth_method() {
         let agent = make_agent().await;
-        agent
-            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any")))
+        let resp = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
             .await
             .unwrap();
+        let ids: Vec<String> = resp
+            .auth_methods
+            .iter()
+            .map(|m| match m {
+                AuthMethod::EnvVar(e) => e.id.0.to_string(),
+                AuthMethod::Agent(a) => a.id.0.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(
+            ids.contains(&OPENAI_AUTH_METHOD.to_string()),
+            "initialize must advertise the openai-api-key env-var method; got: {ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticate_accepts_advertised_method() {
+        let agent = make_agent().await;
+        agent
+            .authenticate(AuthenticateRequest::new(AuthMethodId::from(
+                OPENAI_AUTH_METHOD,
+            )))
+            .await
+            .expect("the advertised method must authenticate");
+    }
+
+    #[tokio::test]
+    async fn authenticate_rejects_unknown_method() {
+        let agent = make_agent().await;
+        let err = agent
+            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any")))
+            .await
+            .expect_err("an unknown method id must be rejected (C2)");
+        assert_eq!(err.code, ErrorCode::AuthRequired);
     }
 
     // ── set_session_mode ──────────────────────────────────────────────────────
