@@ -6,6 +6,14 @@ use crate::push::target::{WebhookUrl, WebhookUrlError};
 const SUBJECT_SCHEME_PREFIX: &str = "subject:";
 const JETSTREAM_SCHEME_PREFIX: &str = "jetstream:";
 
+/// Case-insensitive scheme prefix check — `WebhookUrl::new` (via `url::Url`)
+/// normalises the scheme anyway, so `HTTPS://…` should reach the webhook arm
+/// instead of falling through to `UnknownScheme`.
+fn has_http_scheme_prefix(raw: &str) -> bool {
+    let lc = raw.get(..8).unwrap_or("").to_ascii_lowercase();
+    lc.starts_with("https://") || lc.starts_with("http://")
+}
+
 /// Parsed push notification delivery target from `TaskPushNotificationConfig.url`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PushNotificationTarget {
@@ -29,7 +37,7 @@ impl PushNotificationTarget {
         if raw.is_empty() {
             return Err(PushNotificationTargetError::Empty);
         }
-        if raw.starts_with("https://") || raw.starts_with("http://") {
+        if has_http_scheme_prefix(&raw) {
             return WebhookUrl::new(raw)
                 .map(Self::Http)
                 .map_err(PushNotificationTargetError::Http);
@@ -153,6 +161,18 @@ mod tests {
     fn error_display_unknown_scheme_includes_raw_value() {
         let err = PushNotificationTarget::parse("nats://broker").unwrap_err();
         assert!(err.to_string().contains("nats://broker"));
+    }
+
+    #[test]
+    fn parses_https_uppercase_scheme() {
+        let target = PushNotificationTarget::parse("HTTPS://example.com/hook").unwrap();
+        assert!(matches!(target, PushNotificationTarget::Http(_)));
+    }
+
+    #[test]
+    fn parses_mixed_case_http_scheme() {
+        let target = PushNotificationTarget::parse("HtTp://localhost:8080/hook").unwrap();
+        assert!(matches!(target, PushNotificationTarget::Http(_)));
     }
 
     #[test]
