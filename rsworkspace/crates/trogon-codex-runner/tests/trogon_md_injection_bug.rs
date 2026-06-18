@@ -119,6 +119,16 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
         recorded.contains("first prompt"),
         "original user message must also be present; got: {recorded:?}"
     );
+    assert_eq!(
+        recorded.matches("Always use Rust").count(),
+        1,
+        "TROGON.md body must appear exactly once on first turn; got: {recorded:?}"
+    );
+    assert_eq!(
+        recorded.matches("# Project rules").count(),
+        1,
+        "TROGON.md heading must appear exactly once on first turn; got: {recorded:?}"
+    );
 }
 
 /// TROGON.md content must NOT be injected on the second turn of a session.

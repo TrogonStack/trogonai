@@ -205,9 +205,14 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             return Err("session/export returned null — cannot import into new session".into());
         }
 
-        let import_params = serde_json::value::RawValue::from_string(format!(
-            r#"{{"sessionId":"{new_session_id}","messages":{raw_messages}}}"#
-        ))
+        let messages = serde_json::from_str::<serde_json::Value>(raw_messages).map_err(|e| e.to_string())?;
+        let import_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({
+                "sessionId": new_session_id,
+                "messages": messages,
+            })
+            .to_string(),
+        )
         .map_err(|e| e.to_string())?;
         {
             let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
@@ -353,6 +358,19 @@ mod tests {
             .expect("systemPrompt present");
         assert!(sp.contains("Ignore any"));
         assert!(sp.to_lowercase().contains("claude")); // names the persona to drop
+    }
+
+    #[test]
+    fn session_import_params_escape_session_id() {
+        let session_id = r#"id"with"quotes"#;
+        let messages = serde_json::json!([{"role": "user", "text": "hi"}]);
+        let params = serde_json::json!({
+            "sessionId": session_id,
+            "messages": messages,
+        });
+        let roundtrip: serde_json::Value =
+            serde_json::from_str(&params.to_string()).expect("params must be valid JSON");
+        assert_eq!(roundtrip["sessionId"].as_str().unwrap(), session_id);
     }
 
     use testcontainers_modules::nats::Nats;

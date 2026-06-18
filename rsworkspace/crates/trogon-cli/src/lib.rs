@@ -1,3 +1,4 @@
+#![allow(clippy::manual_async_fn)]
 pub mod app;
 pub mod client_supervisor;
 pub mod commands;

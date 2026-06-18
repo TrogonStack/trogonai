@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use tracing::debug;
 
 use crate::client::{McpCallTool, McpTool, next_id};
 
@@ -46,7 +47,6 @@ struct StdioContentBlock {
 struct StdioConn {
     stdin: Box<dyn AsyncWrite + Send + Unpin>,
     stdout: Lines<BufReader<Box<dyn AsyncRead + Send + Unpin>>>,
-    timeout: Duration,
     /// Kept alive so the child isn't reaped while the client is in use (`kill_on_drop`
     /// then terminates it when the client is dropped). `None` in unit tests.
     _child: Option<Child>,
@@ -56,25 +56,24 @@ impl StdioConn {
     /// Send one JSON-RPC message. For a request (has `id`), read newline-delimited
     /// responses until one matches the request id, skipping server notifications.
     /// For a notification (no `id`), write and return immediately.
-    async fn request(&mut self, body: Value) -> Result<Value, String> {
+    async fn request(&mut self, body: Value, timeout: Duration) -> Result<Value, String> {
         let id = body.get("id").cloned();
         let mut line =
             serde_json::to_string(&body).map_err(|e| format!("MCP stdio encode error: {e}"))?;
         line.push('\n');
-        tokio::time::timeout(self.timeout, self.stdin.write_all(line.as_bytes()))
-            .await
-            .map_err(|_| "MCP stdio write timed out".to_string())?
-            .map_err(|e| format!("MCP stdio write error: {e}"))?;
-        self.stdin
-            .flush()
-            .await
-            .map_err(|e| format!("MCP stdio flush error: {e}"))?;
+        tokio::time::timeout(timeout, async {
+            self.stdin.write_all(line.as_bytes()).await?;
+            self.stdin.flush().await
+        })
+        .await
+        .map_err(|_| "MCP stdio write timed out".to_string())?
+        .map_err(|e| format!("MCP stdio write error: {e}"))?;
         // A notification expects no response.
         if id.is_none() {
             return Ok(Value::Null);
         }
         loop {
-            let next = tokio::time::timeout(self.timeout, self.stdout.next_line())
+            let next = tokio::time::timeout(timeout, self.stdout.next_line())
                 .await
                 .map_err(|_| "MCP stdio read timed out".to_string())?
                 .map_err(|e| format!("MCP stdio read error: {e}"))?;
@@ -84,8 +83,10 @@ impl StdioConn {
             if text.trim().is_empty() {
                 continue;
             }
-            let v: Value =
-                serde_json::from_str(&text).map_err(|e| format!("MCP stdio parse error: {e}"))?;
+            let Ok(v) = serde_json::from_str::<Value>(&text) else {
+                debug!(line = %text, "MCP stdio: skipping non-JSON stdout line");
+                continue;
+            };
             // Skip server-initiated notifications and id mismatches.
             if v.get("id") == id.as_ref() {
                 return Ok(v);
@@ -109,6 +110,7 @@ impl StdioConn {
 /// ```
 pub struct StdioMcpClient {
     conn: Mutex<StdioConn>,
+    timeout: Duration,
 }
 
 impl StdioMcpClient {
@@ -142,18 +144,16 @@ impl StdioMcpClient {
                 stdin: Box::new(stdin),
                 stdout: BufReader::new(Box::new(stdout) as Box<dyn AsyncRead + Send + Unpin>)
                     .lines(),
-                timeout: DEFAULT_STDIO_TIMEOUT,
                 _child: Some(child),
             }),
+            timeout: DEFAULT_STDIO_TIMEOUT,
         })
     }
 
     /// Override the per-request timeout (builder style).
     #[must_use]
-    pub fn with_timeout(self, timeout: Duration) -> Self {
-        if let Ok(mut conn) = self.conn.try_lock() {
-            conn.timeout = timeout;
-        }
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
         self
     }
 
@@ -161,8 +161,10 @@ impl StdioMcpClient {
     /// notification. Must be called once before `list_tools`/`call_tool`.
     pub async fn initialize(&self) -> Result<(), String> {
         let mut conn = self.conn.lock().await;
+        let timeout = self.timeout;
         let resp = conn
-            .request(json!({
+            .request(
+                json!({
                 "jsonrpc": "2.0",
                 "id": next_id(),
                 "method": "initialize",
@@ -171,16 +173,21 @@ impl StdioMcpClient {
                     "capabilities": {},
                     "clientInfo": { "name": "trogon", "version": "0.1.0" }
                 }
-            }))
+            }),
+                timeout,
+            )
             .await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP initialize error: {err}"));
         }
         // Per the MCP stdio spec, follow up with the initialized notification.
-        conn.request(json!({
+        conn.request(
+            json!({
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
-        }))
+        }),
+            timeout,
+        )
         .await?;
         Ok(())
     }
@@ -188,10 +195,14 @@ impl StdioMcpClient {
     /// Retrieve the list of tools the server exposes (`tools/list`).
     pub async fn list_tools(&self) -> Result<Vec<McpTool>, String> {
         let mut conn = self.conn.lock().await;
+        let timeout = self.timeout;
         let mut resp = conn
-            .request(json!({
+            .request(
+                json!({
                 "jsonrpc": "2.0", "id": next_id(), "method": "tools/list", "params": {}
-            }))
+            }),
+                timeout,
+            )
             .await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tools/list error: {err}"));
@@ -204,11 +215,15 @@ impl StdioMcpClient {
     /// Call a tool by its original (non-prefixed) name and return the text output.
     pub async fn call_tool(&self, name: &str, arguments: &Value) -> Result<String, String> {
         let mut conn = self.conn.lock().await;
+        let timeout = self.timeout;
         let mut resp = conn
-            .request(json!({
+            .request(
+                json!({
                 "jsonrpc": "2.0", "id": next_id(), "method": "tools/call",
                 "params": { "name": name, "arguments": arguments }
-            }))
+            }),
+                timeout,
+            )
             .await?;
         if let Some(err) = resp.get("error") {
             return Err(format!("MCP tool error: {err}"));
@@ -243,7 +258,7 @@ mod tests {
 
     /// Build a `StdioMcpClient` wired to an in-memory duplex pipe, plus the
     /// server-side halves a fake server task reads/writes.
-    fn wired_client() -> (
+    fn wired_client(timeout: Duration) -> (
         StdioMcpClient,
         impl AsyncWrite + Send + Unpin,
         impl tokio::io::AsyncRead + Send + Unpin,
@@ -254,10 +269,16 @@ mod tests {
         let conn = StdioConn {
             stdin: Box::new(cw),
             stdout: BufReader::new(Box::new(cr) as Box<dyn AsyncRead + Send + Unpin>).lines(),
-            timeout: Duration::from_secs(5),
             _child: None,
         };
-        (StdioMcpClient { conn: Mutex::new(conn) }, sw, sr)
+        (
+            StdioMcpClient {
+                conn: Mutex::new(conn),
+                timeout,
+            },
+            sw,
+            sr,
+        )
     }
 
     /// Minimal fake MCP server: answers initialize/tools/list/tools/call, echoing
@@ -302,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_list_and_call_round_trip() {
-        let (client, sw, sr) = wired_client();
+        let (client, sw, sr) = wired_client(Duration::from_secs(5));
         tokio::spawn(fake_server(sw, sr));
 
         client.initialize().await.expect("initialize");
@@ -321,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_tool_via_trait_object() {
-        let (client, sw, sr) = wired_client();
+        let (client, sw, sr) = wired_client(Duration::from_secs(5));
         tokio::spawn(fake_server(sw, sr));
         client.initialize().await.expect("initialize");
 
@@ -338,10 +359,65 @@ mod tests {
         let conn = StdioConn {
             stdin: Box::new(cw),
             stdout: BufReader::new(Box::new(cr) as Box<dyn AsyncRead + Send + Unpin>).lines(),
-            timeout: Duration::from_millis(80),
             _child: None,
         };
-        let client = StdioMcpClient { conn: Mutex::new(conn) };
+        let client = StdioMcpClient {
+            conn: Mutex::new(conn),
+            timeout: Duration::from_millis(80),
+        };
+        let err = client.list_tools().await.expect_err("should time out");
+        assert!(err.contains("timed out"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn skips_non_json_stdout_lines_before_response() {
+        let (client, mut sw, sr) = wired_client(Duration::from_secs(5));
+        tokio::spawn(async move {
+            let mut lines = TokBufReader::new(sr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let req: Value = serde_json::from_str(&line).unwrap();
+                let Some(id) = req.get("id").cloned() else {
+                    continue;
+                };
+                sw.write_all(b"Server starting...\n").await.unwrap();
+                sw.flush().await.unwrap();
+                let resp = json!({"jsonrpc":"2.0","id":id,"result":{"tools":[
+                    {"name":"echo","description":"","inputSchema":{"type":"object"}}
+                ]}});
+                let mut out = serde_json::to_string(&resp).unwrap();
+                out.push('\n');
+                sw.write_all(out.as_bytes()).await.unwrap();
+                sw.flush().await.unwrap();
+            }
+        });
+
+        client.initialize().await.expect("initialize");
+        let tools = client
+            .list_tools()
+            .await
+            .expect("list_tools after banner line");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "echo");
+    }
+
+    #[tokio::test]
+    async fn with_timeout_applies_to_requests() {
+        let (client_io, _server_io) = tokio::io::duplex(64);
+        let (cr, cw) = tokio::io::split(client_io);
+        let conn = StdioConn {
+            stdin: Box::new(cw),
+            stdout: BufReader::new(Box::new(cr) as Box<dyn AsyncRead + Send + Unpin>).lines(),
+            _child: None,
+        };
+        let client = StdioMcpClient {
+            conn: Mutex::new(conn),
+            timeout: DEFAULT_STDIO_TIMEOUT,
+        }
+        .with_timeout(Duration::from_millis(80));
+
         let err = client.list_tools().await.expect_err("should time out");
         assert!(err.contains("timed out"), "got: {err}");
     }

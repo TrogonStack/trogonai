@@ -1189,7 +1189,7 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
         .run_until(async move {
             agent
                 .prompt(PromptRequest::new(
-                    SessionId::from("s-compact"),
+                    "s-compact",
                     vec![ContentBlock::from("hi".to_string())],
                 ))
                 .await

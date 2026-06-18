@@ -64,7 +64,11 @@ fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max.saturating_sub(1)])
+        let mut idx = max.saturating_sub(1);
+        while idx > 0 && !s.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        format!("{}…", &s[..idx])
     }
 }
 
@@ -433,5 +437,13 @@ mod tests {
             }
             _ => panic!("expected ToolResult"),
         }
+    }
+
+    #[test]
+    fn truncate_str_does_not_panic_on_multibyte_boundary() {
+        let s = "日本語".repeat(100);
+        let truncated = truncate_str(&s, 50);
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.len() <= 50);
     }
 }

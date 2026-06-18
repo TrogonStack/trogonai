@@ -14,7 +14,7 @@ use trogon_tools::PermissionChecker;
 use crate::permission_rules::{
     extract_path_from_input, is_always_allowed, normalize_tool_name, PermissionRules, RuleDecision,
 };
-use crate::scope::Scope;
+use crate::scope::{Scope, ScopeWire};
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
 /// A single permission check request sent from the Runner to the ACP connection handler.
@@ -456,6 +456,14 @@ pub struct PermissionExtras {
     pub classifier: Option<Arc<dyn SafetyClassifier>>,
     /// PreToolUse hook matchers run before each tool (a blocking hook denies it).
     pub pre_tool_use: Vec<crate::hooks::HookMatcher>,
+    /// Per-session scope override (`SessionState.scope`). Highest precedence in
+    /// [`Scope::resolve`].
+    pub session_scope: Option<Scope>,
+    /// Scope from settings.json (`scope` object). Used when `session_scope` is absent.
+    pub settings_scope: Option<ScopeWire>,
+    /// Scope from TROGON.md bare `scope.*:` lines. Used when session and settings
+    /// scopes are absent.
+    pub trogon_md_scope: Option<ScopeWire>,
 }
 
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
@@ -546,6 +554,16 @@ impl ModePermissionChecker {
         std::iter::once(lexical_abs(cwd, "."))
             .chain(read_dirs.iter().map(|d| lexical_abs(cwd, d)))
             .any(|root| target.starts_with(&root))
+    }
+
+    /// Read-only tools and read-only bash that plan mode still auto-allows.
+    fn is_plan_read_only_exception(&self, tool_name: &str, tool_input: &Value) -> bool {
+        if is_read_only_tool(tool_name) && self.read_allowed(tool_input) {
+            return true;
+        }
+        normalize_tool_name(tool_name) == "bash"
+            && is_read_only_bash_command(tool_input)
+            && self.read_only_bash_allowed(tool_input)
     }
 }
 
@@ -718,6 +736,16 @@ impl PermissionChecker for ModePermissionChecker {
                 return self.inner.inner.check(tool_call_id, tool_name, tool_input).await;
             }
 
+            // Mode-based hard denies win over Scope InScope auto-allow. Plan mode must
+            // block side effects until ExitPlanMode even when baseline scope would allow.
+            if self.mode == "plan"
+                && is_plan_denied_tool(tool_name)
+                && !self.is_plan_read_only_exception(tool_name, tool_input)
+            {
+                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                return false;
+            }
+
             // Scope envelope (when active) governs the decision before mode logic.
             if let Some(scope) = &self.scope {
                 let cwd = self.cwd.as_deref().unwrap_or(".");
@@ -830,17 +858,36 @@ pub fn build_mode_permission_checker(
         tool_policies,
         inner,
     };
-    // Scope is on by default (Phase 5 / SCOPE-15): resolve the baseline before
-    // moving `extras.cwd` into the struct below. Active whenever a cwd is known;
-    // sessions without a cwd fall back to the legacy mode logic.
-    let scope = extras.cwd.as_deref().map(Scope::baseline);
+    // Scope is on by default (Phase 5 / SCOPE-15): resolve from session > settings >
+    // TROGON.md > baseline before moving `extras.cwd` into the struct below.
+    // Active whenever a cwd is known; sessions without a cwd fall back to legacy mode logic.
+    // TODO(RT-3): runners should populate `settings_scope` / `trogon_md_scope` from
+    // settings.json and loaded TROGON.md; only `session_scope` is wired today via extras.
+    let PermissionExtras {
+        cwd,
+        additional_read_dirs: read_dirs,
+        classifier,
+        pre_tool_use,
+        session_scope,
+        settings_scope,
+        trogon_md_scope,
+    } = extras;
+    let scope = cwd.as_deref().map(|cwd| {
+        match Scope::resolve(session_scope, settings_scope, trogon_md_scope, cwd) {
+            Ok(scope) => scope,
+            Err(err) => {
+                eprintln!("scope resolve failed ({err}), falling back to baseline for {cwd}");
+                Scope::baseline(cwd)
+            }
+        }
+    });
     Some(Arc::new(ModePermissionChecker {
         mode: mode.to_string(),
         inner: rules_checker,
-        cwd: extras.cwd,
-        read_dirs: extras.additional_read_dirs,
-        classifier: extras.classifier,
-        pre_tool_use: extras.pre_tool_use,
+        cwd,
+        read_dirs,
+        classifier,
+        pre_tool_use,
         scope,
     }))
 }
@@ -1370,6 +1417,46 @@ mod tests {
         assert!(checker.is_none());
     }
 
+    #[tokio::test]
+    async fn build_mode_permission_checker_resolves_session_scope() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let session_scope = Scope::from_wire(
+            ScopeWire {
+                network: Some("on".to_string()),
+                ..Default::default()
+            },
+            "/abs/cwd",
+        )
+        .expect("valid session scope");
+        let checker = build_mode_permission_checker(
+            "dontAsk",
+            "sess-1",
+            &tx,
+            vec![],
+            Arc::new(PermissionRules::default()),
+            vec![],
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(None)),
+            PermissionExtras {
+                cwd: Some("/abs/cwd".to_string()),
+                session_scope: Some(session_scope),
+                ..PermissionExtras::default()
+            },
+        )
+        .expect("checker");
+        assert!(
+            checker
+                .check(
+                    "tc-net",
+                    "fetch_url",
+                    &serde_json::json!({"url": "https://example.com"}),
+                )
+                .await,
+            "session scope with network on must allow fetch_url via Scope::resolve"
+        );
+    }
+
     // ── eval_tool_policies ────────────────────────────────────────────────────
 
     use crate::session_store::{PolicyAction, ToolPolicy};
@@ -1859,6 +1946,23 @@ mod tests {
                 )
                 .await,
             "in-cwd write_file must be auto-allowed by scope without prompting"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_in_cwd_write_file_denied_in_plan_mode() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = scoped_checker("plan", tx, "/abs/cwd");
+        assert!(
+            !checker
+                .check(
+                    "tc-pl-scope",
+                    "write_file",
+                    &serde_json::json!({"path": "src/x.rs", "content": "x"}),
+                )
+                .await,
+            "plan mode must deny in-cwd writes even when baseline scope would auto-allow"
         );
     }
 

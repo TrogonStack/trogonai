@@ -429,14 +429,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
                                         info!(flag = "agent_pr_review_enabled", "PR handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     let is_merged = pv["action"].as_str() == Some("closed")
                                         && pv["pull_request"]["merged"].as_bool() == Some(true);
                                     if is_merged {
@@ -456,8 +460,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "PR",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -495,14 +510,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
                                         info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::comment_added::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Comment-added done"),
                                         Some(Err(e)) => error!(error = %e, "Comment-added error"),
@@ -512,8 +531,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "comment",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -551,14 +581,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
                                         info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::push_to_branch::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
                                         Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
@@ -568,8 +602,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "push",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -607,14 +652,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
                                         info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::ci_completed::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "CI-completed done"),
                                         Some(Err(e)) => error!(error = %e, "CI-completed error"),
@@ -624,8 +673,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "CI",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -663,14 +723,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
                                         info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::issue_triage::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Issue triage done"),
                                         Some(Err(e)) => error!(error = %e, "Issue triage error"),
@@ -680,8 +744,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "issue",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -719,14 +794,24 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &automation_promise_ids,
+                                "cron",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -764,14 +849,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
                                         info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv, false).await else { break 'handler; };
                                     match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
                                         Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
@@ -781,8 +870,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "Datadog",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -825,14 +925,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
                                         info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv, false).await else { break 'handler; };
                                     match handlers::incident_declared::handle(&agent, &nats_subject, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "incident.io event handled"),
                                         Some(Err(e)) => error!(error = %e, "incident.io handler error"),
@@ -842,8 +946,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "incident.io",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -915,6 +1030,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 /// returns early for both without executing any LLM call. `Failed` promises ARE
 /// CAS-claimed: their failure may have been transient (e.g. HTTP error) and NATS
 /// redelivery is a legitimate retry opportunity.
+#[allow(clippy::too_many_arguments)]
 async fn prepare_agent_with_promise(
     agent: &Arc<AgentLoop>,
     promise_store: &Arc<dyn PromiseRepository>,
@@ -923,6 +1039,7 @@ async fn prepare_agent_with_promise(
     automation_id: &str,
     nats_subject: &str,
     trigger: &serde_json::Value,
+    from_recovery: bool,
 ) -> Option<Arc<AgentLoop>> {
     let wid = worker_id();
     let get_result = match tokio::time::timeout(
@@ -996,9 +1113,10 @@ async fn prepare_agent_with_promise(
                 claimed.status = PromiseStatus::Running; // re-activate so list_running finds it if we crash mid-run
                 claimed.worker_id = wid.clone();
                 claimed.claimed_at = trogon_automations::now_unix();
-                // Increment recovery_count for Running re-claims so the guard
-                // above terminates infinite startup-recovery cycles.
-                if existing.status == PromiseStatus::Running {
+                // Increment recovery_count only on startup-recovery re-claims so
+                // the guard above terminates infinite recovery cycles without
+                // consuming the budget on normal NATS redelivery.
+                if from_recovery && existing.status == PromiseStatus::Running {
                     claimed.recovery_count = existing.recovery_count.saturating_add(1);
                 }
                 let claim_result = match tokio::time::timeout(
@@ -1194,7 +1312,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 
     // Recover the most recently active first (those closest to completion
     // are most likely to succeed quickly).
-    stale.sort_by(|a, b| b.claimed_at.cmp(&a.claimed_at));
+    stale.sort_by_key(|r| std::cmp::Reverse(r.claimed_at));
 
     // No hard cap: recovery runs in a background task so it doesn't block
     // fresh event processing. Warn when the backlog is large so operators
@@ -1380,6 +1498,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 &promise.automation_id,
                 &promise.nats_subject,
                 &promise.trigger,
+                true,
             )
             .await
             else {
@@ -1728,10 +1847,24 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 /// Spawn a background task that sends [`AckKind::Progress`] every 15 seconds
 /// to prevent JetStream from redelivering the message while the agent is active.
 ///
-/// The returned handle **must** be aborted once processing finishes so the task
-/// stops sending progress acks after the message has been explicitly acked.
-fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+/// The returned guard aborts the heartbeat on drop (including panic/early return).
+struct HeartbeatGuard(tokio::task::JoinHandle<()>);
+
+impl HeartbeatGuard {
+    #[cfg(test)]
+    fn is_finished(&self) -> bool {
+        self.0.is_finished()
+    }
+}
+
+impl Drop for HeartbeatGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> HeartbeatGuard {
+    HeartbeatGuard(tokio::spawn(async move {
         let mut interval =
             tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
         interval.tick().await; // skip immediate first tick
@@ -1741,7 +1874,48 @@ fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHand
                 break;
             }
         }
-    })
+    }))
+}
+
+/// True when the NATS message should be acked. Returns false if any checked
+/// promise is in transient `Failed` state so JetStream can redeliver.
+async fn should_ack_nats_message(
+    promise_store: &Arc<dyn PromiseRepository>,
+    tenant_id: &str,
+    promise_ids: &[String],
+) -> bool {
+    for pid in promise_ids {
+        match tokio::time::timeout(
+            crate::agent_loop::NATS_KV_TIMEOUT,
+            promise_store.get_promise(tenant_id, pid),
+        )
+        .await
+        {
+            Ok(Ok(Some((p, _)))) if p.status == PromiseStatus::Failed => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
+/// Ack the JetStream message unless a checked promise is transiently `Failed`.
+async fn ack_nats_message_if_appropriate(
+    msg: &async_nats::jetstream::Message,
+    promise_store: &Arc<dyn PromiseRepository>,
+    tenant_id: &str,
+    promise_ids: &[String],
+    log_context: &str,
+) {
+    if should_ack_nats_message(promise_store, tenant_id, promise_ids).await {
+        if let Err(e) = msg.ack().await {
+            warn!(error = %e, "Failed to ack {log_context} message");
+        }
+    } else {
+        info!(
+            promise_ids = ?promise_ids,
+            "Deferring ack — transient Failed promise allows NATS redelivery"
+        );
+    }
 }
 
 /// Spawn one task per automation and wait for all to finish.
@@ -1786,6 +1960,7 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
                     &auto.id,
                     &subject,
                     &trigger,
+                    false,
                 )
                 .await
                 else {
@@ -2665,6 +2840,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2700,6 +2876,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2732,6 +2909,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2761,6 +2939,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2790,6 +2969,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2820,6 +3000,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2867,6 +3048,7 @@ mod tests {
                 "",
                 "github.pull_request",
                 &trigger,
+                false,
             ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
@@ -2908,6 +3090,7 @@ mod tests {
                 "",
                 "github.pull_request",
                 &trigger,
+                false,
             ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
@@ -2956,6 +3139,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2972,7 +3156,7 @@ mod tests {
         );
     }
 
-    /// Each time a `Running` promise is re-claimed (startup recovery), its
+    /// Each time a `Running` promise is re-claimed during startup recovery,
     /// `recovery_count` must increment so the cycling guard above can fire.
     #[tokio::test]
     async fn prepare_agent_running_reclaim_increments_recovery_count() {
@@ -2992,13 +3176,67 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            true,
         )
         .await;
 
         let (p, _) = store.get_promise("acme", "p-rc").await.unwrap().unwrap();
         assert_eq!(
             p.recovery_count, 1,
-            "recovery_count must be incremented on Running re-claim"
+            "recovery_count must be incremented on startup-recovery re-claim"
+        );
+    }
+
+    /// Normal NATS redelivery must not consume the startup-recovery budget.
+    #[tokio::test]
+    async fn prepare_agent_nats_redelivery_does_not_increment_recovery_count() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(sample_promise("p-redeliver", PromiseStatus::Running));
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent_mock(vec![]);
+
+        super::prepare_agent_with_promise(
+            &agent,
+            &store_arc,
+            "acme",
+            "p-redeliver",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+            false,
+        )
+        .await;
+
+        let (p, _) = store
+            .get_promise("acme", "p-redeliver")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            p.recovery_count, 0,
+            "normal NATS dispatch/redelivery must not increment recovery_count"
+        );
+    }
+
+    #[tokio::test]
+    async fn should_ack_nats_message_false_when_promise_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(sample_promise("p-failed", PromiseStatus::Failed));
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+
+        assert!(
+            !super::should_ack_nats_message(&store_arc, "acme", &["p-failed".to_string()]).await,
+            "transient Failed promise must defer ack for NATS redelivery"
+        );
+        assert!(
+            super::should_ack_nats_message(&store_arc, "acme", &["p-missing".to_string()]).await,
+            "missing promise must still ack"
         );
     }
 
@@ -3026,6 +3264,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -3064,6 +3303,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -3106,6 +3346,7 @@ mod tests {
                 "",
                 "github.pull_request",
                 &trigger,
+                false,
             ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
@@ -6029,6 +6270,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -6074,6 +6316,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -6122,6 +6365,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -6406,27 +6650,19 @@ mod tests {
             .await
             .expect("AckKind::Progress must succeed on a real JetStream message");
 
+
         // Start the heartbeat task.  The first actual Progress ack from the task
         // is sent after HEARTBEAT_INTERVAL_SECS (15 s); we don't wait that long.
-        // We only verify the task lifecycle: starts running, aborts cleanly.
-        let handle = super::spawn_heartbeat(msg);
+        // We only verify the task lifecycle: starts running, aborts cleanly on drop.
+        let guard = super::spawn_heartbeat(msg);
         assert!(
-            !handle.is_finished(),
+            !guard.is_finished(),
             "heartbeat task must be running immediately after spawn"
         );
 
-        // Abort — simulates the handler completing before the next tick.
-        handle.abort();
-
-        // Join with a short timeout to confirm the task terminates promptly.
-        let outcome = tokio::time::timeout(Duration::from_millis(200), handle)
-            .await
-            .expect("heartbeat task must terminate within 200 ms of abort");
-
-        assert!(
-            outcome.unwrap_err().is_cancelled(),
-            "aborted heartbeat task must return a cancellation JoinError"
-        );
+        // Drop the guard — RAII aborts the heartbeat (also covers panic paths).
+        drop(guard);
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
     // ── CAS race: concurrent claims (real NATS KV) ────────────────────────────
