@@ -26,15 +26,17 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[cfg(not(coverage))]
+use crate::constants::{CLAIM_CHECK_BUCKET, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
+#[cfg(not(coverage))]
 use anyhow::Context;
 #[cfg(not(coverage))]
 use tokio::task::JoinSet;
 #[cfg(not(coverage))]
 use tracing::{error, info};
 #[cfg(not(coverage))]
-use trogon_nats::connect;
-#[cfg(not(coverage))]
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore};
+#[cfg(not(coverage))]
+use trogon_nats::{connect, wait_for_server_info};
 #[cfg(not(coverage))]
 use trogon_std::args::{CliArgs, ParseArgs};
 #[cfg(not(coverage))]
@@ -43,17 +45,7 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 
 #[cfg(not(coverage))]
-const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-#[cfg(not(coverage))]
-const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
-
-#[cfg(not(coverage))]
 type SourceResult = (&'static str, anyhow::Result<()>);
-
-#[cfg(not(coverage))]
-#[derive(Debug, thiserror::Error)]
-#[error("NATS server info is unavailable")]
-struct MissingNatsServerInfo;
 
 #[cfg(not(coverage))]
 #[tokio::main]
@@ -88,7 +80,9 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     info!("trogon-gateway starting");
 
     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
-    let server_max_payload = nats.try_server_info().ok_or(MissingNatsServerInfo)?.max_payload;
+    let server_max_payload = wait_for_server_info(&nats, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL)
+        .await?
+        .max_payload;
     let max_payload = MaxPayload::from_server_limit(server_max_payload);
     info!(
         server_max_payload_bytes = server_max_payload,
