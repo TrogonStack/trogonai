@@ -8,9 +8,10 @@
 use std::fmt;
 
 use crate::push::authentication_header::AuthenticationHeaderBuildError;
+use crate::push::nats_push_subject::NatsPushSubject;
 use crate::push::push_notification_config_id::PushNotificationConfigIdError;
 use crate::push::push_notification_target::PushNotificationTargetError;
-use crate::push::target::WebhookUrlError;
+use crate::push::target::{WebhookUrl, WebhookUrlError};
 
 #[derive(Clone, Debug)]
 pub enum DispatchPrepError {
@@ -46,7 +47,7 @@ pub enum DispatchError {
     Http(Box<dyn std::error::Error + Send + Sync>),
     UnexpectedStatus {
         status: u16,
-        url: String,
+        url: WebhookUrl,
     },
     NatsPublish(NatsPublishDispatchError),
     JetStreamPublish(JetStreamPublishDispatchError),
@@ -54,38 +55,38 @@ pub enum DispatchError {
 
 #[derive(Debug)]
 pub struct NatsPublishDispatchError {
-    subject: String,
+    subject: NatsPushSubject,
     source: Box<dyn std::error::Error + Send + Sync>,
 }
 
 #[derive(Debug)]
 pub struct JetStreamPublishDispatchError {
-    subject: String,
+    subject: NatsPushSubject,
     source: Box<dyn std::error::Error + Send + Sync>,
 }
 
 impl NatsPublishDispatchError {
-    pub fn new(subject: impl Into<String>, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn new(subject: NatsPushSubject, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self {
-            subject: subject.into(),
+            subject,
             source: Box::new(source),
         }
     }
 
-    pub fn subject(&self) -> &str {
+    pub fn subject(&self) -> &NatsPushSubject {
         &self.subject
     }
 }
 
 impl JetStreamPublishDispatchError {
-    pub fn new(subject: impl Into<String>, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn new(subject: NatsPushSubject, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self {
-            subject: subject.into(),
+            subject,
             source: Box::new(source),
         }
     }
 
-    pub fn subject(&self) -> &str {
+    pub fn subject(&self) -> &NatsPushSubject {
         &self.subject
     }
 }
@@ -199,11 +200,19 @@ mod tests {
         ));
     }
 
+    fn subject() -> NatsPushSubject {
+        NatsPushSubject::new("a2a.push.t.caller.task").unwrap()
+    }
+
+    fn url() -> WebhookUrl {
+        WebhookUrl::new("https://example.com/hook").unwrap()
+    }
+
     #[test]
     fn dispatch_error_unexpected_status_display_contains_url_and_code() {
         let err = DispatchError::UnexpectedStatus {
             status: 503,
-            url: "https://example.com/hook".into(),
+            url: url(),
         };
         let s = err.to_string();
         assert!(s.contains("503"));
@@ -214,9 +223,9 @@ mod tests {
     fn nats_publish_dispatch_error_round_trips_subject_and_source() {
         use std::error::Error as _;
         let inner = std::io::Error::other("nats down");
-        let err = NatsPublishDispatchError::new("a2a.push.t1", inner);
-        assert_eq!(err.subject(), "a2a.push.t1");
-        assert!(err.to_string().contains("publish to a2a.push.t1 failed"));
+        let err = NatsPublishDispatchError::new(subject(), inner);
+        assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
+        assert!(err.to_string().contains("publish to a2a.push.t.caller.task failed"));
         assert!(err.to_string().contains("nats down"));
         assert!(err.source().is_some());
     }
@@ -225,8 +234,8 @@ mod tests {
     fn jetstream_publish_dispatch_error_round_trips_subject_and_source() {
         use std::error::Error as _;
         let inner = std::io::Error::other("jetstream down");
-        let err = JetStreamPublishDispatchError::new("a2a.push.t1", inner);
-        assert_eq!(err.subject(), "a2a.push.t1");
+        let err = JetStreamPublishDispatchError::new(subject(), inner);
+        assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
         assert!(err.to_string().contains("jetstream down"));
         assert!(err.source().is_some());
     }
@@ -247,20 +256,20 @@ mod tests {
         assert!(header.to_string().contains("invalid push notification outbound header"));
         assert!(header.source().is_some());
 
-        let nats = DispatchError::NatsPublish(NatsPublishDispatchError::new("a2a.x", std::io::Error::other("oops")));
-        assert!(nats.to_string().contains("NATS publish to a2a.x"));
+        let nats = DispatchError::NatsPublish(NatsPublishDispatchError::new(subject(), std::io::Error::other("oops")));
+        assert!(nats.to_string().contains("NATS publish to a2a.push.t.caller.task"));
         assert!(nats.source().is_some());
 
         let js = DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(
-            "a2a.x",
+            subject(),
             std::io::Error::other("oops"),
         ));
-        assert!(js.to_string().contains("JetStream publish to a2a.x"));
+        assert!(js.to_string().contains("JetStream publish to a2a.push.t.caller.task"));
         assert!(js.source().is_some());
 
         let status = DispatchError::UnexpectedStatus {
             status: 500,
-            url: "https://e/hook".into(),
+            url: url(),
         };
         assert!(status.source().is_none());
 
