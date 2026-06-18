@@ -46,18 +46,22 @@ impl CallerId {
 
 /// Resolves the push DLQ `{caller_id}` segment from an optional gateway principal.
 pub fn resolve_push_dlq_caller_id(principal: Option<&SpiceDbPrincipal>, fallback: &CallerId) -> CallerId {
-    match principal {
-        None => fallback.clone(),
-        Some(p) => match p.spicedb_subject() {
-            Some(_) => CallerId::from_principal(p),
-            None => {
-                warn!(
-                    fallback = %fallback.as_str(),
-                    "push DLQ caller_id: principal present but spicedb_subject absent; using fallback segment"
-                );
-                fallback.clone()
-            }
-        },
+    let Some(p) = principal else {
+        return fallback.clone();
+    };
+    // A whitespace-only `spicedb_subject` is treated as absent — letting it
+    // through to `from_principal` would silently sanitise to the
+    // DEFAULT_PUSH_DLQ_CALLER_SEGMENT instead of honouring the operator's
+    // configured fallback.
+    let has_subject = p
+        .spicedb_subject()
+        .map(|s| !s.as_str().trim().is_empty())
+        .unwrap_or(false);
+    if has_subject {
+        CallerId::from_principal(p)
+    } else {
+        warn!(%fallback, "push DLQ caller_id: principal present but spicedb_subject absent/blank; using fallback segment");
+        fallback.clone()
     }
 }
 
@@ -142,5 +146,29 @@ mod tests {
             resolve_push_dlq_caller_id(Some(&p), &CallerId::default()).as_str(),
             DEFAULT_PUSH_DLQ_CALLER_SEGMENT
         );
+    }
+
+    #[test]
+    fn sanitize_subject_token_blank_string_returns_default_segment() {
+        assert_eq!(sanitize_subject_token("").as_ref(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+        assert_eq!(sanitize_subject_token("   ").as_ref(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+    }
+
+    #[test]
+    fn default_caller_id_matches_segment_constant() {
+        assert_eq!(CallerId::default().to_string(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+    }
+
+    #[test]
+    fn resolve_push_dlq_caller_id_whitespace_only_subject_uses_fallback() {
+        let fallback = CallerId::from("env-seg");
+        for blank in ["   ", "\t", "\n"] {
+            let p = SpiceDbPrincipal(json!({"spicedb_subject": blank}));
+            assert_eq!(
+                resolve_push_dlq_caller_id(Some(&p), &fallback).as_str(),
+                "env-seg",
+                "whitespace-only subject {blank:?} must route to the configured fallback"
+            );
+        }
     }
 }
