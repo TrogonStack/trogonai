@@ -8,7 +8,9 @@
 //! without each one re-deriving the same validation.
 
 pub mod authentication_header;
+pub mod caller_id;
 pub mod delivery_semantics;
+pub mod dlq_dedup;
 pub mod idempotency_key_header;
 pub mod nats_push_subject;
 pub mod push_delivery_semantics_registry;
