@@ -12,7 +12,7 @@ use a2a_identity_types::MintedUserJwt;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
-use crate::constants::DEFAULT_OPERATION_TIMEOUT;
+use crate::constants::{DEFAULT_OPERATION_TIMEOUT, MIN_TIMEOUT_SECS};
 use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
 
 use super::error::ClientError;
@@ -52,7 +52,7 @@ impl<N, J> A2aClient<N, J> {
 
     #[must_use]
     pub fn with_operation_timeout(mut self, timeout: Duration) -> Self {
-        self.operation_timeout = timeout;
+        self.operation_timeout = timeout.max(Duration::from_secs(MIN_TIMEOUT_SECS));
         self
     }
 
@@ -143,6 +143,12 @@ mod tests {
     fn with_operation_timeout_overrides_default() {
         let client = A2aClient::new(prefix(), agent_id(), (), ()).with_operation_timeout(Duration::from_secs(7));
         assert_eq!(client.operation_timeout(), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn with_operation_timeout_clamps_below_minimum_to_minimum() {
+        let client = A2aClient::new(prefix(), agent_id(), (), ()).with_operation_timeout(Duration::ZERO);
+        assert_eq!(client.operation_timeout(), Duration::from_secs(MIN_TIMEOUT_SECS));
     }
 
     #[test]
