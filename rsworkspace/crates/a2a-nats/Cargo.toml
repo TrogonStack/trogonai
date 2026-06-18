@@ -35,6 +35,7 @@ tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

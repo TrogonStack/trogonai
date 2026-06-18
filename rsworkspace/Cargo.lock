@@ -48,6 +48,7 @@ dependencies = [
  "tracing",
  "trogon-nats",
  "trogon-std",
+ "url",
  "uuid",
 ]
 
