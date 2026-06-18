@@ -1930,7 +1930,7 @@ async fn fork_session_ignores_branch_at_index_in_list_sessions() {
                 fork_info
                     .meta
                     .as_ref()
-                    .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                    .is_none_or(|m| !m.contains_key("branchedAtIndex")),
                 "branchedAtIndex must not appear in _meta — branchAtIndex is not supported by codex-runner"
             );
         })
@@ -2300,13 +2300,41 @@ async fn codex_tool_events_written_as_portable_blocks_in_export() {
     unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
 }
 
+// ── approval auto-reply (MOCK_SEND_APPROVAL) ─────────────────────────────────
+
+/// When the mock emits an `execCommandApproval` server request mid-turn, the
+/// runner must auto-reply so the turn completes instead of hanging.
+#[tokio::test(flavor = "current_thread")]
+async fn prompt_completes_when_mock_sends_approval_request() {
+    let _guard = bin_env_lock().lock().await;
+    unsafe { std::env::set_var("MOCK_SEND_APPROVAL", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("approve me"))],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_APPROVAL") };
+}
+
 // ── Fix 5: pending_history content reaches subprocess ────────────────────────
 
 /// After `session/import`, the first `prompt` must prepend the imported history
-/// as "Prior conversation: ..." to the `userInput` sent to the subprocess in
-/// the `turn/start` JSON-RPC request.
+/// as "Prior conversation: ..." to the `input` text in the `turn/start` JSON-RPC request.
 ///
-/// Verified by having the mock binary record `params.userInput` from the first
+/// Verified by having the mock binary record `params.input` text from the first
 /// `turn/start` call to a temp file (`MOCK_RECORD_TURN_INPUT_FILE`).
 #[tokio::test(flavor = "current_thread")]
 async fn codex_pending_history_prepended_in_subprocess_turn_start() {
@@ -2354,18 +2382,18 @@ async fn codex_pending_history_prepended_in_subprocess_turn_start() {
     let recorded = std::fs::read_to_string(&record_path).unwrap_or_default();
     assert!(
         recorded.contains("Prior conversation:"),
-        "subprocess userInput must begin with 'Prior conversation:' prefix; got: {recorded:?}"
+        "subprocess turn input must begin with 'Prior conversation:' prefix; got: {recorded:?}"
     );
     assert!(
         recorded.contains("prior question"),
-        "subprocess userInput must include the imported user message; got: {recorded:?}"
+        "subprocess turn input must include the imported user message; got: {recorded:?}"
     );
     assert!(
         recorded.contains("prior answer"),
-        "subprocess userInput must include the imported assistant message; got: {recorded:?}"
+        "subprocess turn input must include the imported assistant message; got: {recorded:?}"
     );
     assert!(
         recorded.contains("follow-up question"),
-        "subprocess userInput must end with the actual user prompt; got: {recorded:?}"
+        "subprocess turn input must end with the actual user prompt; got: {recorded:?}"
     );
 }

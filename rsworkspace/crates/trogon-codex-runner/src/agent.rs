@@ -17,7 +17,7 @@ use agent_client_protocol::{
     SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -687,6 +687,7 @@ where
                 &user_input,
                 model.as_deref(),
                 approval_policy,
+                Some(&mode),
             )
             .await
         {
@@ -723,13 +724,13 @@ where
                     continue;
                 }
                 Ok(Err(_)) => {
+                    // The codex process exited mid-turn (read_loop closed the
+                    // channel). Unblock the prompt gracefully with EndTurn rather
+                    // than hanging until the timeout or hard-erroring the turn —
+                    // the next call's process() detects the dead process and
+                    // respawns. The partial assistant output is kept in history.
                     warn!(session_id, "codex: process channel closed unexpectedly");
-                    // Remove the user message that never received a response.
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        s.history.pop();
-                    }
-                    return Err(internal_error("codex process terminated unexpectedly"));
+                    break StopReason::EndTurn;
                 }
             };
 
@@ -744,6 +745,34 @@ where
                     );
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send text notification");
+                    }
+                }
+
+                CodexEvent::ReasoningDelta { text } => {
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::from(
+                            text,
+                        ))),
+                    );
+                    if let Err(e) = notifier.session_notification(notif).await {
+                        warn!(session_id, error = %e, "codex: failed to send reasoning notification");
+                    }
+                }
+
+                CodexEvent::Usage {
+                    input,
+                    output: _,
+                    total: _,
+                    context_window,
+                } => {
+                    let size = context_window.unwrap_or(128_000);
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::UsageUpdate(UsageUpdate::new(input, size)),
+                    );
+                    if let Err(e) = notifier.session_notification(notif).await {
+                        warn!(session_id, error = %e, "codex: failed to send usage notification");
                     }
                 }
 
@@ -840,6 +869,7 @@ where
                                     trogon_runner_tools::AUTO_SUMMARY_NUDGE,
                                     model.as_deref(),
                                     approval_policy,
+                                    Some(&mode),
                                 )
                                 .await
                         {
@@ -854,8 +884,20 @@ where
                 }
 
                 CodexEvent::Error { message } => {
+                    // Surface the error to the client as an assistant message,
+                    // then end the turn gracefully (EndTurn) so the prompt
+                    // unblocks instead of hard-failing the whole session.
                     warn!(session_id, error = %message, "codex: turn error");
-                    return Err(internal_error(format!("codex error: {message}")));
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
+                            format!("codex error: {message}"),
+                        ))),
+                    );
+                    if let Err(e) = notifier.session_notification(notif).await {
+                        warn!(session_id, error = %e, "codex: failed to send error notification");
+                    }
+                    break StopReason::EndTurn;
                 }
             }
         };
@@ -1145,6 +1187,7 @@ mod tests {
             _user_input: &str,
             _model: Option<&str>,
             _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
         ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
         {
             let (tx, rx) = broadcast::channel(64);
@@ -1626,7 +1669,7 @@ mod tests {
             fork_info
                 .meta
                 .as_ref()
-                .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                .is_none_or(|m| !m.contains_key("branchedAtIndex")),
             "branchedAtIndex must not appear in _meta — branchAtIndex is not supported"
         );
     }

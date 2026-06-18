@@ -8,7 +8,7 @@
 //! `s.first_turn = false`, and adds the `else if first_turn` arm.
 //!
 //! This test verifies the fix: TROGON.md content MUST appear in the
-//! `userInput` sent to the Codex subprocess on the first turn.
+//! `input` text sent to the Codex subprocess on the first turn.
 //!
 //! Run with:
 //!   cargo test -p trogon-codex-runner --test trogon_md_injection_bug
@@ -57,7 +57,7 @@ async fn fake_nats() -> async_nats::Client {
     async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
 }
 
-/// TROGON.md content MUST be prepended to the `userInput` sent to the Codex
+/// TROGON.md content MUST be prepended to the turn `input` text sent to the Codex
 /// subprocess on the first turn of a fresh session.
 ///
 /// Verified by setting `MOCK_RECORD_TURN_INPUT_FILE` so the mock binary writes
@@ -109,11 +109,11 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
     let recorded = std::fs::read_to_string(&record_path).unwrap_or_default();
     assert!(
         recorded.contains("# Project rules"),
-        "TROGON.md content must be prepended to userInput on first turn; got: {recorded:?}"
+        "TROGON.md content must be prepended to turn input on first turn; got: {recorded:?}"
     );
     assert!(
         recorded.contains("Always use Rust"),
-        "TROGON.md body must appear in subprocess userInput; got: {recorded:?}"
+        "TROGON.md body must appear in subprocess turn input; got: {recorded:?}"
     );
     assert!(
         recorded.contains("first prompt"),
@@ -125,7 +125,7 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
 ///
 /// `first_turn` is set to `false` after the first prompt, so subsequent prompts
 /// must send only the raw user message to the subprocess. Verified by running
-/// two prompts and checking that the recorded userInput from the second turn
+/// two prompts and checking that the recorded turn input from the second turn
 /// does not contain TROGON.md content.
 #[tokio::test(flavor = "current_thread")]
 async fn codex_second_turn_does_not_inject_trogon_md() {
@@ -171,7 +171,7 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
 
             // Second prompt: first_turn = false, TROGON.md must NOT be injected.
             // The mock overwrites the record file each turn/start, so after this
-            // call the file contains only the second turn's userInput.
+            // call the file contains only the second turn's input text.
             agent
                 .prompt(PromptRequest::new(
                     session_id,
@@ -192,10 +192,10 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
     );
     assert!(
         !recorded.contains("Always use Rust"),
-        "TROGON.md body must NOT appear in second turn userInput; got: {recorded:?}"
+        "TROGON.md body must NOT appear in second turn input; got: {recorded:?}"
     );
     assert!(
         recorded.contains("second message"),
-        "second turn userInput must contain the user message; got: {recorded:?}"
+        "second turn input must contain the user message; got: {recorded:?}"
     );
 }

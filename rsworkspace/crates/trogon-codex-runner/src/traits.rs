@@ -42,6 +42,7 @@ pub trait CodexProcessClient {
         user_input: &str,
         model: Option<&str>,
         approval_policy: Option<&str>,
+        permission_mode: Option<&str>,
     ) -> Result<broadcast::Receiver<CodexEvent>, DynError>;
 
     async fn turn_interrupt(&self, thread_id: &str) -> Result<(), DynError>;

@@ -161,8 +161,13 @@ async fn e2e_ext_session_get_state_returns_cwd() {
     .expect("NATS ext request failed");
 
     let state: Value = serde_json::from_slice(&ext_msg.payload).unwrap();
+    // The ext response is delivered over NATS inside a JSON-RPC `result`
+    // envelope; tolerate both the wrapped and bare shapes.
+    let cwd = state["result"]["cwd"]
+        .as_str()
+        .or_else(|| state["cwd"].as_str());
     assert_eq!(
-        state["cwd"].as_str(),
+        cwd,
         Some("/projects/myapp"),
         "session/get_state must return the session's cwd: {state}"
     );
@@ -393,7 +398,7 @@ async fn clear_creates_distinct_session_id_in_codex_runner() {
 /// Codex CLI protocol schema when `MOCK_VALIDATE_SCHEMA` is set.
 ///
 /// The mock rejects `turn/start` messages that have a missing or empty
-/// `params.threadId`, or a missing `params.userInput`. A rejection causes the
+/// `params.threadId`, or a missing/empty `params.input` array. A rejection causes the
 /// runner to propagate an error, which would cause the test to fail before
 /// the `stopReason: end_turn` assertion is reached.
 ///
