@@ -1,20 +1,24 @@
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebhookUrl(url::Url);
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebhookUrl(Url);
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WebhookUrlError {
     /// Couldn't parse the input as a URL at all.
+    #[error("webhook URL is not a valid URL ({reason}): {raw}")]
     Parse { raw: String, reason: String },
     /// Parsed cleanly but the scheme isn't `http`/`https`.
+    #[error("webhook URL must use http:// or https://, got {scheme}://: {raw}")]
     UnsupportedScheme { raw: String, scheme: String },
 }
 
 impl WebhookUrl {
     pub fn new(raw: impl Into<String>) -> Result<Self, WebhookUrlError> {
         let raw = raw.into();
-        let parsed = url::Url::parse(&raw).map_err(|e| WebhookUrlError::Parse {
+        let parsed = Url::parse(&raw).map_err(|e| WebhookUrlError::Parse {
             raw: raw.clone(),
             reason: e.to_string(),
         })?;
@@ -37,21 +41,6 @@ impl fmt::Display for WebhookUrl {
         f.write_str(self.0.as_str())
     }
 }
-
-impl fmt::Display for WebhookUrlError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Parse { raw, reason } => {
-                write!(f, "webhook URL is not a valid URL ({reason}): {raw}")
-            }
-            Self::UnsupportedScheme { raw, scheme } => {
-                write!(f, "webhook URL must use http:// or https://, got {scheme}://: {raw}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for WebhookUrlError {}
 
 #[cfg(test)]
 mod tests {

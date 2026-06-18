@@ -8,8 +8,9 @@ use trogon_nats::{DottedNatsToken, SubjectTokenViolation};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NatsPushSubject(DottedNatsToken);
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct NatsPushSubjectError(SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("invalid NATS push subject: {0}")]
+pub struct NatsPushSubjectError(#[source] SubjectTokenViolation);
 
 impl NatsPushSubject {
     pub fn new(subject: impl AsRef<str>) -> Result<Self, NatsPushSubjectError> {
@@ -30,14 +31,6 @@ impl fmt::Display for NatsPushSubject {
         f.write_str(self.as_str())
     }
 }
-
-impl fmt::Display for NatsPushSubjectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid NATS push subject: {}", self.0)
-    }
-}
-
-impl std::error::Error for NatsPushSubjectError {}
 
 #[cfg(test)]
 mod tests {

@@ -7,8 +7,9 @@ use http::HeaderName;
 #[derive(Clone, Eq, PartialEq)]
 pub struct IdempotencyKeyHeader(HeaderName);
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
 pub enum IdempotencyKeyHeaderError {
+    #[error("invalid HTTP header name token for idempotency key carrier")]
     InvalidToken,
 }
 
@@ -30,16 +31,6 @@ impl TryFrom<&str> for IdempotencyKeyHeader {
         Ok(Self(name))
     }
 }
-
-impl fmt::Display for IdempotencyKeyHeaderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidToken => write!(f, "invalid HTTP header name token for idempotency key carrier"),
-        }
-    }
-}
-
-impl std::error::Error for IdempotencyKeyHeaderError {}
 
 impl fmt::Display for IdempotencyKeyHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

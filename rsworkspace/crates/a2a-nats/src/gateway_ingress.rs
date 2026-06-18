@@ -6,8 +6,6 @@
 //! To target a gateway from code that builds agent-shaped subjects (`{prefix}.agents…`), use
 //! [`gateway_ingress_subject_from_agent_subject`] (swap **`agents` → `gateway`** on the segment after the prefix).
 
-use std::fmt;
-
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 use crate::server::wire::JsonRpcErrorResponse;
@@ -31,51 +29,30 @@ pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[
 ];
 
 /// Failure resolving a `{prefix}.gateway.` subject to an agent RPC subject.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayIngressError {
     /// Subject does not start with `{prefix}.gateway.`.
+    #[error("subject does not start with '{{prefix}}.gateway.' for the configured prefix")]
     NotGatewayIngress,
     /// No agent id / trailing tokens missing after stripping the gateway prefix.
+    #[error("expected '{{prefix}}.gateway.{{agent_id}}.{{method…}}'")]
     BadSubjectShape,
     /// Trailing tokens do not match a known A2A method suffix.
+    #[error("unknown method suffix after gateway segment")]
     UnknownMethodSuffix,
     /// Agent id segment is not NATS-safe (see [`A2aAgentId`]).
+    #[error("agent id segment fails NATS token validation")]
     InvalidAgentId,
 }
 
-impl std::fmt::Display for GatewayIngressError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotGatewayIngress => write!(
-                f,
-                "subject does not start with '{{prefix}}.gateway.' for the configured prefix"
-            ),
-            Self::BadSubjectShape => write!(f, "expected '{{prefix}}.gateway.{{agent_id}}.{{method…}}'"),
-            Self::UnknownMethodSuffix => write!(f, "unknown method suffix after gateway segment"),
-            Self::InvalidAgentId => write!(f, "agent id segment fails NATS token validation"),
-        }
-    }
-}
-
-impl std::error::Error for GatewayIngressError {}
-
 /// Invalid arguments when assembling `{prefix}.gateway.{agent}.{method…}`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayComposeError {
+    #[error("gateway ingress method suffix is empty")]
     EmptyMethodTail,
+    #[error("gateway ingress method suffix is not a recognised A2A operation")]
     UnknownMethodSuffix,
 }
-
-impl fmt::Display for GatewayComposeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyMethodTail => write!(f, "gateway ingress method suffix is empty"),
-            Self::UnknownMethodSuffix => write!(f, "gateway ingress method suffix is not a recognised A2A operation"),
-        }
-    }
-}
-
-impl std::error::Error for GatewayComposeError {}
 
 /// Builds `{prefix}.gateway.{agent_id}.{method…}`.
 ///

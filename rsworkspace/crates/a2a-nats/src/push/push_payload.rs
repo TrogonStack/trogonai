@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::fmt;
 
 use serde_json::Value;
 
@@ -8,44 +7,22 @@ use crate::push::push_idempotency_key::PushIdempotencyKey;
 
 pub const PUSH_IDEMPOTENCY_JSON_FIELD: &str = "_a2aPushIdempotencyKey";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PushPayloadAugmentError {
     /// Underlying payload bytes are not valid JSON.
-    Json(serde_json::Error),
+    #[error("push payload is not valid JSON: {0}")]
+    Json(#[source] serde_json::Error),
     /// Caller asked for an exactly-once idempotency key on a payload whose
     /// top-level JSON value isn't an object — there's nowhere to attach the
     /// key without rewriting the payload shape, so the dedup contract would
     /// be silently lost on the wire.
+    #[error("exactly-once idempotency key requires a JSON object payload to attach the key field")]
     NonObjectPayloadForIdempotencyKey,
     /// Delivery semantics require an idempotency key (exactly-once) but the
     /// caller didn't supply one — refusing to augment would silently downgrade
     /// to at-least-once on the wire.
+    #[error("exactly-once delivery semantics require an idempotency key but none was supplied")]
     MissingIdempotencyKey,
-}
-
-impl fmt::Display for PushPayloadAugmentError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "push payload is not valid JSON: {e}"),
-            Self::NonObjectPayloadForIdempotencyKey => write!(
-                f,
-                "exactly-once idempotency key requires a JSON object payload to attach the key field"
-            ),
-            Self::MissingIdempotencyKey => write!(
-                f,
-                "exactly-once delivery semantics require an idempotency key but none was supplied"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PushPayloadAugmentError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            Self::NonObjectPayloadForIdempotencyKey | Self::MissingIdempotencyKey => None,
-        }
-    }
 }
 
 pub fn augment_terminal_push_notification_bytes<'a>(

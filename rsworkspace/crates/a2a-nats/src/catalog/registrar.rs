@@ -41,33 +41,17 @@ pub fn register_subject_prefix(prefix: &A2aPrefix) -> String {
 }
 
 /// Why a wire subject failed `{prefix}.catalog.register.{agent_id}` parsing.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AgentSuffixError {
     /// The subject didn't carry the expected `{prefix}.catalog.register.` leader.
+    #[error("subject is not a `{{prefix}}.catalog.register.` register subject")]
     NotARegisterSubject,
     /// Subject had the right leader but no agent-id token after the dot.
+    #[error("register subject is missing the `{{agent_id}}` segment")]
     MissingAgentId,
     /// Agent-id token failed `A2aAgentId` validation.
-    InvalidAgentId(AgentIdError),
-}
-
-impl std::fmt::Display for AgentSuffixError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotARegisterSubject => write!(f, "subject is not a `{{prefix}}.catalog.register.` register subject"),
-            Self::MissingAgentId => write!(f, "register subject is missing the `{{agent_id}}` segment"),
-            Self::InvalidAgentId(e) => write!(f, "register subject agent_id is invalid: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for AgentSuffixError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidAgentId(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("register subject agent_id is invalid: {0}")]
+    InvalidAgentId(#[source] AgentIdError),
 }
 
 /// Extract a validated `A2aAgentId` from a `{prefix}.catalog.register.{agent_id}` subject.
@@ -103,11 +87,14 @@ pub fn error_reply(code: i32, message: &str) -> Option<Bytes> {
     serde_json::to_vec(&body).ok().map(Bytes::from)
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RegisterPayloadError {
-    JsonParse(serde_json::Error),
-    Schema(a2a_pack::AgentCardValidateError),
-    ValueParse(serde_json::Error),
+    #[error("JSON parse error: {0}")]
+    JsonParse(#[source] serde_json::Error),
+    #[error("AgentCard schema validation failed: {0}")]
+    Schema(#[source] a2a_pack::AgentCardValidateError),
+    #[error("AgentCard parse error: {0}")]
+    ValueParse(#[source] serde_json::Error),
 }
 
 impl RegisterPayloadError {
@@ -116,25 +103,6 @@ impl RegisterPayloadError {
             Self::JsonParse(e) => (-32700, format!("Parse error: {e}")),
             Self::Schema(e) => (-32602, format!("AgentCard rejected by JSON Schema: {e}")),
             Self::ValueParse(e) => (-32700, format!("Parse error: {e}")),
-        }
-    }
-}
-
-impl std::fmt::Display for RegisterPayloadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::JsonParse(e) => write!(f, "JSON parse error: {e}"),
-            Self::Schema(e) => write!(f, "AgentCard schema validation failed: {e}"),
-            Self::ValueParse(e) => write!(f, "AgentCard parse error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for RegisterPayloadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::JsonParse(e) | Self::ValueParse(e) => Some(e),
-            Self::Schema(e) => Some(e),
         }
     }
 }

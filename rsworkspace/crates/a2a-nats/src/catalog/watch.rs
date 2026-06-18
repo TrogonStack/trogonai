@@ -22,26 +22,17 @@ pub enum AgentCardWatchEvent {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AgentCardWatchError {
+    #[error("KV watch error: {0}")]
     Kv(String),
+    #[error("invalid catalog key: {0}")]
     InvalidKey(String),
-    Deserialize(serde_json::Error),
-    Schema(a2a_pack::AgentCardValidateError),
+    #[error("failed to deserialize AgentCard: {0}")]
+    Deserialize(#[source] serde_json::Error),
+    #[error("AgentCard schema validation failed: {0}")]
+    Schema(#[source] a2a_pack::AgentCardValidateError),
 }
-
-impl std::fmt::Display for AgentCardWatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Kv(msg) => write!(f, "KV watch error: {msg}"),
-            Self::InvalidKey(msg) => write!(f, "invalid catalog key: {msg}"),
-            Self::Deserialize(e) => write!(f, "failed to deserialize AgentCard: {e}"),
-            Self::Schema(e) => write!(f, "AgentCard schema validation failed: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for AgentCardWatchError {}
 
 pub fn map_kv_entry(entry: kv::Entry) -> Result<AgentCardWatchEvent, AgentCardWatchError> {
     let agent_id = A2aAgentId::new(entry.key.as_str()).map_err(|_| {

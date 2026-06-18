@@ -2,33 +2,18 @@
 //!
 //! Digest / mutual challenge schemes are intentionally rejected until a dedicated signing path exists.
 
-use std::fmt;
-
 use a2a::types::AuthenticationInfo;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthenticationHeaderBuildError {
+    #[error("push authentication.scheme must not be empty")]
     MissingScheme,
+    #[error("push authentication.credentials required for scheme")]
     EmptyCredentials,
     /// `Digest` (and challenge-based schemes) require a separate implementation.
-    UnsupportedScheme {
-        scheme: String,
-    },
+    #[error("push authentication scheme {scheme:?} not supported yet")]
+    UnsupportedScheme { scheme: String },
 }
-
-impl fmt::Display for AuthenticationHeaderBuildError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingScheme => f.write_str("push authentication.scheme must not be empty"),
-            Self::EmptyCredentials => f.write_str("push authentication.credentials required for scheme"),
-            Self::UnsupportedScheme { scheme } => {
-                write!(f, "push authentication scheme {scheme:?} not supported yet")
-            }
-        }
-    }
-}
-
-impl std::error::Error for AuthenticationHeaderBuildError {}
 
 /// Builds the RFC 9110 [`Authorization`] field value (`<scheme> <token>` for typical schemes).
 pub fn authorization_header_value(

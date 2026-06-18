@@ -11,24 +11,25 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::SubjectTokenViolation;
 
 /// Error returned when [`A2aPrefix`] validation fails.
-#[derive(Debug, Clone, PartialEq)]
-pub struct A2aPrefixError(pub SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum A2aPrefixError {
+    #[error("a2a_prefix must not be empty")]
+    Empty,
+    #[error("a2a_prefix contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("a2a_prefix is too long: {0} bytes (max 128)")]
+    TooLong(usize),
+}
 
-impl std::fmt::Display for A2aPrefixError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            SubjectTokenViolation::Empty => write!(f, "a2a_prefix must not be empty"),
-            SubjectTokenViolation::InvalidCharacter(ch) => {
-                write!(f, "a2a_prefix contains invalid character: {:?}", ch)
-            }
-            SubjectTokenViolation::TooLong(len) => {
-                write!(f, "a2a_prefix is too long: {} bytes (max 128)", len)
-            }
+impl From<SubjectTokenViolation> for A2aPrefixError {
+    fn from(violation: SubjectTokenViolation) -> Self {
+        match violation {
+            SubjectTokenViolation::Empty => Self::Empty,
+            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
         }
     }
 }
-
-impl std::error::Error for A2aPrefixError {}
 
 /// NATS-safe A2A prefix. Guarantees validity at construction — invalid instances are unrepresentable.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -37,7 +38,7 @@ pub struct A2aPrefix(DottedNatsToken);
 impl A2aPrefix {
     pub fn new(s: impl Into<String>) -> Result<Self, A2aPrefixError> {
         let s = s.into();
-        DottedNatsToken::new(s).map(Self).map_err(A2aPrefixError)
+        DottedNatsToken::new(s).map(Self).map_err(A2aPrefixError::from)
     }
 
     pub fn as_str(&self) -> &str {
@@ -84,16 +85,13 @@ mod tests {
 
     #[test]
     fn a2a_prefix_error_display() {
+        assert_eq!(A2aPrefixError::Empty.to_string(), "a2a_prefix must not be empty");
         assert_eq!(
-            format!("{}", A2aPrefixError(SubjectTokenViolation::Empty)),
-            "a2a_prefix must not be empty"
-        );
-        assert_eq!(
-            format!("{}", A2aPrefixError(SubjectTokenViolation::InvalidCharacter('*'))),
+            A2aPrefixError::InvalidCharacter('*').to_string(),
             "a2a_prefix contains invalid character: '*'"
         );
         assert_eq!(
-            format!("{}", A2aPrefixError(SubjectTokenViolation::TooLong(200))),
+            A2aPrefixError::TooLong(200).to_string(),
             "a2a_prefix is too long: 200 bytes (max 128)"
         );
     }

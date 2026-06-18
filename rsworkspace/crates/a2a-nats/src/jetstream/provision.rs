@@ -5,16 +5,9 @@ use super::stream_options::StreamProvisionOptions;
 use super::streams;
 use crate::a2a_prefix::A2aPrefix;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("stream provisioning failed: {0}")]
 pub struct ProvisionError(pub String);
-
-impl std::fmt::Display for ProvisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream provisioning failed: {}", self.0)
-    }
-}
-
-impl std::error::Error for ProvisionError {}
 
 pub async fn provision_streams<J: JetStreamContext>(js: &J, prefix: &A2aPrefix) -> Result<(), ProvisionError> {
     provision_streams_with_options(js, prefix, &StreamProvisionOptions::default()).await

@@ -5,63 +5,55 @@
 //! The dispatcher implementation + retry helpers + idempotency-key
 //! derivation land in follow-up PRs.
 
-use std::fmt;
-
 use crate::push::authentication_header::AuthenticationHeaderBuildError;
 use crate::push::nats_push_subject::NatsPushSubject;
 use crate::push::push_notification_config_id::PushNotificationConfigIdError;
 use crate::push::push_notification_target::PushNotificationTargetError;
 use crate::push::target::{WebhookUrl, WebhookUrlError};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum DispatchPrepError {
-    PushConfigId(PushNotificationConfigIdError),
+    #[error("{0}")]
+    PushConfigId(#[source] PushNotificationConfigIdError),
 }
 
-impl fmt::Display for DispatchPrepError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PushConfigId(inner) => std::fmt::Display::fmt(inner, f),
-        }
-    }
-}
-
-impl std::error::Error for DispatchPrepError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::PushConfigId(inner) => Some(inner),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
-    Prep(DispatchPrepError),
-    InvalidTarget(PushNotificationTargetError),
-    InvalidAuthorization(AuthenticationHeaderBuildError),
-    InvalidHeader(Box<dyn std::error::Error + Send + Sync>),
+    #[error("{0}")]
+    Prep(#[source] DispatchPrepError),
+    #[error("invalid push notification URL: {0}")]
+    InvalidTarget(#[source] PushNotificationTargetError),
+    #[error("invalid push notification authorization: {0}")]
+    InvalidAuthorization(#[source] AuthenticationHeaderBuildError),
+    #[error("invalid push notification outbound header value: {0}")]
+    InvalidHeader(#[source] Box<dyn std::error::Error + Send + Sync>),
     /// Boxed transport error from the webhook HTTP client. The dispatcher
     /// boxes the concrete `reqwest::Error` into this variant so this
     /// module can carry every dispatch-error shape without taking a direct
     /// dependency on the HTTP client crate.
-    Http(Box<dyn std::error::Error + Send + Sync>),
-    UnexpectedStatus {
-        status: u16,
-        url: WebhookUrl,
-    },
+    #[error("HTTP push request failed: {0}")]
+    Http(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("push notification to {url} returned status {status}")]
+    UnexpectedStatus { status: u16, url: WebhookUrl },
+    #[error(transparent)]
     NatsPublish(NatsPublishDispatchError),
+    #[error(transparent)]
     JetStreamPublish(JetStreamPublishDispatchError),
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("NATS publish to {subject} failed: {source}")]
 pub struct NatsPublishDispatchError {
     subject: NatsPushSubject,
+    #[source]
     source: Box<dyn std::error::Error + Send + Sync>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("JetStream publish to {subject} failed: {source}")]
 pub struct JetStreamPublishDispatchError {
     subject: NatsPushSubject,
+    #[source]
     source: Box<dyn std::error::Error + Send + Sync>,
 }
 
@@ -88,64 +80,6 @@ impl JetStreamPublishDispatchError {
 
     pub fn subject(&self) -> &NatsPushSubject {
         &self.subject
-    }
-}
-
-impl fmt::Display for DispatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Prep(inner) => std::fmt::Display::fmt(inner, f),
-            Self::InvalidTarget(e) => write!(f, "invalid push notification URL: {e}"),
-            Self::InvalidAuthorization(e) => write!(f, "invalid push notification authorization: {e}"),
-            Self::InvalidHeader(e) => write!(f, "invalid push notification outbound header value: {e}"),
-            Self::Http(e) => write!(f, "HTTP push request failed: {e}"),
-            Self::UnexpectedStatus { status, url } => {
-                write!(f, "push notification to {url} returned status {status}")
-            }
-            Self::NatsPublish(e) => write!(f, "NATS publish to {} failed: {}", e.subject, e.source),
-            Self::JetStreamPublish(e) => {
-                write!(f, "JetStream publish to {} failed: {}", e.subject, e.source)
-            }
-        }
-    }
-}
-
-impl fmt::Display for NatsPublishDispatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "publish to {} failed: {}", self.subject, self.source)
-    }
-}
-
-impl fmt::Display for JetStreamPublishDispatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "publish to {} failed: {}", self.subject, self.source)
-    }
-}
-
-impl std::error::Error for DispatchError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Prep(inner) => Some(inner),
-            Self::InvalidTarget(e) => Some(e),
-            Self::InvalidAuthorization(e) => Some(e),
-            Self::InvalidHeader(e) => Some(&**e),
-            Self::Http(e) => Some(&**e),
-            Self::UnexpectedStatus { .. } => None,
-            Self::NatsPublish(e) => Some(&*e.source),
-            Self::JetStreamPublish(e) => Some(&*e.source),
-        }
-    }
-}
-
-impl std::error::Error for NatsPublishDispatchError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
-    }
-}
-
-impl std::error::Error for JetStreamPublishDispatchError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
     }
 }
 
@@ -225,7 +159,10 @@ mod tests {
         let inner = std::io::Error::other("nats down");
         let err = NatsPublishDispatchError::new(subject(), inner);
         assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
-        assert!(err.to_string().contains("publish to a2a.push.t.caller.task failed"));
+        assert!(
+            err.to_string()
+                .contains("NATS publish to a2a.push.t.caller.task failed")
+        );
         assert!(err.to_string().contains("nats down"));
         assert!(err.source().is_some());
     }
