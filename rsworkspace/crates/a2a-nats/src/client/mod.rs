@@ -7,6 +7,7 @@ pub mod error;
 pub mod event_stream;
 pub mod gateway_headers;
 pub mod handle;
+pub mod streaming;
 pub mod unary;
 pub mod wire;
 
