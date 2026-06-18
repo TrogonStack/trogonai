@@ -1,8 +1,12 @@
 //! Push dispatcher trait + shared retry / idempotency-key helpers.
 //!
-//! Concrete impls (`HttpPushDispatcher`, NATS / JetStream publish dispatchers,
-//! the composite façade) land in dedicated follow-up PRs so each transport's
-//! wire contract is reviewed on its own and this slice stays small.
+//! Transport-specific impls live in sibling modules — `http` ships now, NATS /
+//! JetStream publish and the composite façade land in follow-up PRs so each
+//! transport's wire contract is reviewed on its own.
+
+pub mod http;
+
+pub use http::HttpPushDispatcher;
 
 use a2a::types::TaskPushNotificationConfig;
 
