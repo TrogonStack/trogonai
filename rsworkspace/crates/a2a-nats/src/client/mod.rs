@@ -4,7 +4,9 @@
 //! their dedicated PRs so each operation's wire contract is reviewed on its own.
 
 pub mod error;
+pub mod gateway_headers;
 pub mod handle;
+pub mod wire;
 
 pub use error::ClientError;
 pub use handle::A2aClient;
