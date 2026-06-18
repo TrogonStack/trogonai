@@ -16,38 +16,16 @@ pub enum DeliverySemantics {
     },
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum DeliverySemanticsParseError {
+    #[error(r#"expected "atLeastOnce", "exactlyOnce", {{ "atLeastOnce": ... }}, or {{ "exactlyOnce": ... }}"#)]
     UnknownShape,
     /// Both `atLeastOnce` and `exactlyOnce` keys present in the same object —
     /// caller intent is ambiguous, refuse to silently pick one.
+    #[error(r#"deliverySemantics object carries both "atLeastOnce" and "exactlyOnce" keys"#)]
     ConflictingShape,
-    InvalidIdempotencyHeaderName(IdempotencyKeyHeaderError),
-}
-
-impl std::fmt::Display for DeliverySemanticsParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownShape => write!(
-                f,
-                r#"expected "atLeastOnce", "exactlyOnce", {{ "atLeastOnce": ... }}, or {{ "exactlyOnce": ... }}"#
-            ),
-            Self::ConflictingShape => write!(
-                f,
-                r#"deliverySemantics object carries both "atLeastOnce" and "exactlyOnce" keys"#
-            ),
-            Self::InvalidIdempotencyHeaderName(inner) => std::fmt::Display::fmt(inner, f),
-        }
-    }
-}
-
-impl std::error::Error for DeliverySemanticsParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidIdempotencyHeaderName(inner) => Some(inner),
-            _ => None,
-        }
-    }
+    #[error("{0}")]
+    InvalidIdempotencyHeaderName(#[source] IdempotencyKeyHeaderError),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

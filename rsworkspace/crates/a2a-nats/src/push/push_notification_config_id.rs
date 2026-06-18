@@ -4,20 +4,11 @@ use std::fmt;
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct PushNotificationConfigId(String);
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum PushNotificationConfigIdError {
+    #[error("push notification config id cannot be empty")]
     Empty,
 }
-
-impl fmt::Display for PushNotificationConfigIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "push notification config id cannot be empty"),
-        }
-    }
-}
-
-impl std::error::Error for PushNotificationConfigIdError {}
 
 impl PushNotificationConfigId {
     pub fn new(raw: impl Into<String>) -> Result<Self, PushNotificationConfigIdError> {

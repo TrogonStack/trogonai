@@ -4,13 +4,16 @@
 /// validity. Unknown event types can be reported separately from payloads that
 /// match a known event type but are missing the concrete case or fail source
 /// deserialization.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EventPayloadError<Source> {
     /// The source serializer failed after the event type was accepted.
-    Decode(Source),
+    #[error("{0}")]
+    Decode(#[source] Source),
     /// The decoded payload did not contain the concrete event case.
+    #[error("event payload is missing its concrete event case")]
     MissingEvent,
     /// The envelope event type is not recognized by this payload decoder.
+    #[error("unknown event type '{event_type}'")]
     UnknownEventType { event_type: String },
 }
 
@@ -19,31 +22,6 @@ impl<Source> EventPayloadError<Source> {
     pub fn unknown_event_type(event_type: impl Into<String>) -> Self {
         Self::UnknownEventType {
             event_type: event_type.into(),
-        }
-    }
-}
-
-impl<Source> std::fmt::Display for EventPayloadError<Source>
-where
-    Source: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Decode(source) => write!(f, "{source}"),
-            Self::MissingEvent => f.write_str("event payload is missing its concrete event case"),
-            Self::UnknownEventType { event_type } => write!(f, "unknown event type '{event_type}'"),
-        }
-    }
-}
-
-impl<Source> std::error::Error for EventPayloadError<Source>
-where
-    Source: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Decode(source) => Some(source),
-            Self::MissingEvent | Self::UnknownEventType { .. } => None,
         }
     }
 }

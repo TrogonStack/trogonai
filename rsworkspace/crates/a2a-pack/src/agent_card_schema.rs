@@ -2,7 +2,6 @@
 //!
 //! Guards writes to the agent catalog KV bucket before cards are published.
 
-use std::fmt;
 use std::sync::OnceLock;
 
 use jsonschema::Validator;
@@ -52,7 +51,8 @@ impl Clone for AgentCardJsonSchema {
 }
 
 /// Validation failure for an AgentCard document.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
 pub struct AgentCardValidateError {
     message: String,
 }
@@ -77,14 +77,6 @@ impl AgentCardValidateError {
         }
     }
 }
-
-impl fmt::Display for AgentCardValidateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for AgentCardValidateError {}
 
 /// Validates an AgentCard value against the bundled schema.
 pub fn validate_agent_card_value(doc: &Value) -> Result<(), AgentCardValidateError> {

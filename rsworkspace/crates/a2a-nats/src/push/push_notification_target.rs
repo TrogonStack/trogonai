@@ -22,13 +22,20 @@ pub enum PushNotificationTarget {
     JetStream(NatsPushSubject),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum PushNotificationTargetError {
+    #[error("push notification URL must not be empty")]
     Empty,
+    #[error(
+        "push notification URL must start with http://, https://, {SUBJECT_SCHEME_PREFIX}, or {JETSTREAM_SCHEME_PREFIX}: {raw}"
+    )]
     UnknownScheme { raw: String },
-    Http(WebhookUrlError),
-    Nats(NatsPushSubjectError),
-    JetStream(NatsPushSubjectError),
+    #[error("{0}")]
+    Http(#[source] WebhookUrlError),
+    #[error("{0}")]
+    Nats(#[source] NatsPushSubjectError),
+    #[error("{0}")]
+    JetStream(#[source] NatsPushSubjectError),
 }
 
 impl PushNotificationTarget {
@@ -62,33 +69,6 @@ impl fmt::Display for PushNotificationTarget {
             Self::Http(url) => write!(f, "{url}"),
             Self::Nats(subject) => write!(f, "subject:{subject}"),
             Self::JetStream(subject) => write!(f, "jetstream:{subject}"),
-        }
-    }
-}
-
-impl fmt::Display for PushNotificationTargetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("push notification URL must not be empty"),
-            Self::UnknownScheme { raw } => {
-                write!(
-                    f,
-                    "push notification URL must start with http://, https://, {SUBJECT_SCHEME_PREFIX}, or {JETSTREAM_SCHEME_PREFIX}: {raw}"
-                )
-            }
-            Self::Http(e) => write!(f, "{e}"),
-            Self::Nats(e) => write!(f, "{e}"),
-            Self::JetStream(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for PushNotificationTargetError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Empty | Self::UnknownScheme { .. } => None,
-            Self::Http(e) => Some(e),
-            Self::Nats(e) | Self::JetStream(e) => Some(e),
         }
     }
 }

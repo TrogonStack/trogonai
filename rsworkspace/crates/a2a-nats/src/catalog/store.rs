@@ -1,5 +1,3 @@
-use std::fmt;
-
 use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -13,44 +11,25 @@ use crate::catalog::import_gate::{ImportGate, ImportGateError, ImportedAccountNa
 
 pub type BoxedKvError = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CatalogStoreError {
-    Serialize(serde_json::Error),
-    Deserialize(serde_json::Error),
+    #[error("failed to serialize agent card: {0}")]
+    Serialize(#[source] serde_json::Error),
+    #[error("failed to deserialize agent card: {0}")]
+    Deserialize(#[source] serde_json::Error),
     /// AgentCard document failed bundled JSON-Schema validation ([`a2a_pack`]).
-    AgentCardSchema(a2a_pack::AgentCardValidateError),
-    ImportGate(ImportGateError),
+    #[error("AgentCard rejected by JSON Schema: {0}")]
+    AgentCardSchema(#[source] a2a_pack::AgentCardValidateError),
+    #[error("{0}")]
+    ImportGate(#[source] ImportGateError),
     /// Wraps the underlying KV failure as a boxed source so callers keep the
     /// source-chain and can downcast to the concrete JetStream / async-nats
     /// error type instead of pattern-matching on a stringified message.
-    Kv(BoxedKvError),
+    #[error("KV store error: {0}")]
+    Kv(#[source] BoxedKvError),
     /// Catalog KV key segment failed `A2aAgentId` validation.
+    #[error("invalid catalog KV key: {0}")]
     InvalidKey(String),
-}
-
-impl fmt::Display for CatalogStoreError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Serialize(e) => write!(f, "failed to serialize agent card: {e}"),
-            Self::Deserialize(e) => write!(f, "failed to deserialize agent card: {e}"),
-            Self::AgentCardSchema(e) => write!(f, "AgentCard rejected by JSON Schema: {e}"),
-            Self::ImportGate(e) => write!(f, "{e}"),
-            Self::Kv(e) => write!(f, "KV store error: {e}"),
-            Self::InvalidKey(msg) => write!(f, "invalid catalog KV key: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for CatalogStoreError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Serialize(e) | Self::Deserialize(e) => Some(e),
-            Self::AgentCardSchema(e) => Some(e),
-            Self::ImportGate(e) => Some(e),
-            Self::Kv(e) => Some(e.as_ref()),
-            Self::InvalidKey(_) => None,
-        }
-    }
 }
 
 enum PutAttemptError {

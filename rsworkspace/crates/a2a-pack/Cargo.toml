@@ -10,6 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
+thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 serde_json = { workspace = true }
 tracing = { workspace = true }

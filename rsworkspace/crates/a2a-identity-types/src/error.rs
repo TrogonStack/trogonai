@@ -1,33 +1,15 @@
-use std::fmt;
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum JwtError {
+    #[error("JWT decode error: {0}")]
     Decode(String),
-    SystemTime(std::time::SystemTimeError),
+    #[error("system time error: {0}")]
+    SystemTime(#[source] std::time::SystemTimeError),
+    #[error("caller_id invalid for NATS subject token")]
     InvalidCallerId,
+    #[error("external subject must be non-empty")]
     InvalidExternalSubject,
+    #[error("issued-at timestamp out of portable range")]
     IssuedAtOutOfRange,
-}
-
-impl fmt::Display for JwtError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Decode(e) => write!(f, "JWT decode error: {e}"),
-            Self::SystemTime(e) => write!(f, "system time error: {e}"),
-            Self::InvalidCallerId => f.write_str("caller_id invalid for NATS subject token"),
-            Self::InvalidExternalSubject => f.write_str("external subject must be non-empty"),
-            Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
-        }
-    }
-}
-
-impl std::error::Error for JwtError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::SystemTime(e) => Some(e),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]

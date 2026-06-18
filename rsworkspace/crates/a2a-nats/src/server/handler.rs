@@ -17,7 +17,8 @@ use crate::error::{
 pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a::event::StreamResponse, A2aError>> + Send + 'static>>;
 
 /// Error returned by an `A2aExecutor` implementation and mapped to a JSON-RPC error response.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("[{code}] {message}")]
 pub struct A2aError {
     pub code: i32,
     pub message: String,
@@ -81,14 +82,6 @@ impl A2aError {
         Self::new(-32603, message)
     }
 }
-
-impl std::fmt::Display for A2aError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}", self.code, self.message)
-    }
-}
-
-impl std::error::Error for A2aError {}
 
 #[cfg(test)]
 mod tests {
