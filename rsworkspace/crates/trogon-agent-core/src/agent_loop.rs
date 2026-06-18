@@ -1523,7 +1523,7 @@ mod tests {
         assert_eq!(capped_retry_after(Some("soon")), MAX_RETRY_WAIT_SECS);
         // Worst-case total retry budget stays under the CLI's 180s prompt timeout.
         const MAX_RETRIES: u64 = 4;
-        assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180);
+        const { assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180) };
     }
 
     // ── MockAnthropicClient ───────────────────────────────────────────────────
@@ -1565,6 +1565,12 @@ mod tests {
 
     #[test]
     fn response_has_visible_text_detects_silent_endings() {
+        let tu = |id: &str, name: &str, arg: &str| ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input: serde_json::json!({ "path": arg }),
+            parent_tool_use_id: None,
+        };
         // A response with only tool calls (or only whitespace) is "silent".
         assert!(!response_has_visible_text(&[tu("id1", "bash", "x")]));
         assert!(!response_has_visible_text(&[ContentBlock::Text { text: "   ".into() }]));

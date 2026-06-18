@@ -64,6 +64,8 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         }
     }
 
@@ -128,6 +130,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = diff(&large_ctx, &json!({"args": "--staged"})).await;
         assert!(result.contains("truncated at 4KB"), "expected truncation, got: {result}");
@@ -141,6 +145,8 @@ mod tests {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
         };
         let result = status(&non_git_ctx, &json!({})).await;
         assert!(!result.is_empty());
