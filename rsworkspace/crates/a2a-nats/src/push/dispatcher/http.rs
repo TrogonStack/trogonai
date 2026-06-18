@@ -229,11 +229,48 @@ mod tests {
         assert!(matches!(err, DispatchError::Prep(_)));
     }
 
-    #[test]
-    fn push_transport_retryable_handles_zero_attempts_corner_case() {
-        // Sanity: the helper just delegates to reqwest's classifiers — we
-        // can't construct a reqwest::Error directly, but we can confirm the
-        // matcher compiles into a small no-op on a fresh client error by
-        // exercising it through dispatch above. Direct test placeholder.
+    #[tokio::test]
+    async fn dispatch_returns_invalid_header_when_idempotency_key_carries_control_chars() {
+        // PushNotificationConfigId currently accepts arbitrary non-empty
+        // strings, so a config id with control characters propagates into
+        // the derived idempotency key and fails reqwest's HeaderValue parse.
+        let dispatcher = HttpPushDispatcher::new(reqwest::Client::new());
+        let config = TaskPushNotificationConfig {
+            url: "https://example.invalid/hook".into(),
+            id: Some("cfg\r\n-1".into()),
+            task_id: String::new(),
+            token: None,
+            authentication: None,
+            tenant: None,
+        };
+        let err = dispatcher
+            .dispatch(
+                &A2aTaskId::new("task-1").unwrap(),
+                &config,
+                DeliverySemantics::ExactlyOnce {
+                    idempotency_key_header: None,
+                },
+                TerminalPushTaskState::Completed,
+                b"{}",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DispatchError::InvalidHeader(_)));
+    }
+
+    #[tokio::test]
+    async fn push_transport_retryable_classifies_a_real_connect_failure() {
+        // Use port 1 (reserved) so the connect attempt fails immediately.
+        // The classifier must mark the resulting error as retryable so the
+        // dispatcher backs off + retries rather than treating it as terminal.
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .unwrap();
+        let err = client.get("http://127.0.0.1:1/hook").send().await.unwrap_err();
+        assert!(
+            push_transport_retryable(&err),
+            "connect refusal to a reserved port must classify as retryable"
+        );
     }
 }
