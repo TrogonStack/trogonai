@@ -5,6 +5,7 @@ use std::task::{Context, Poll};
 use a2a::event::StreamResponse;
 use futures::channel::mpsc;
 use futures::{Stream, StreamExt};
+use tokio::task::AbortHandle;
 use trogon_nats::jetstream::{JetStreamConsumer, JsAck, JsMessageRef};
 
 use super::error::ClientError;
@@ -12,6 +13,7 @@ use super::error::ClientError;
 pub struct TypedEventStream {
     receiver: mpsc::UnboundedReceiver<Result<StreamResponse, ClientError>>,
     last_seq: Arc<Mutex<u64>>,
+    abort: AbortHandle,
 }
 
 impl TypedEventStream {
@@ -28,6 +30,15 @@ impl Stream for TypedEventStream {
     }
 }
 
+impl Drop for TypedEventStream {
+    fn drop(&mut self) {
+        // Without this, the spawned pull loop survives the receiver drop and
+        // sits awaiting `msgs.next()` until JetStream delivers another message,
+        // holding the consumer open as a zombie task.
+        self.abort.abort();
+    }
+}
+
 pub fn build_event_stream<C>(consumer: C, last_seq_cell: Arc<Mutex<u64>>) -> TypedEventStream
 where
     C: JetStreamConsumer + Send + 'static,
@@ -39,51 +50,63 @@ where
     let (tx, receiver) = mpsc::unbounded();
     let last_seq_for_task = last_seq_cell.clone();
 
-    tokio::spawn(async move {
-        let mut msgs = match consumer.messages().await {
-            Ok(m) => m,
-            Err(e) => {
-                let _ = tx.unbounded_send(Err(ClientError::ConsumerSetup(e.to_string())));
-                return;
-            }
-        };
-
-        while let Some(item) = msgs.next().await {
-            match item {
-                Err(e) => {
-                    let _ = tx.unbounded_send(Err(ClientError::JetStream(e.to_string())));
-                    return;
-                }
-                Ok(js_msg) => {
-                    let stream_seq = stream_sequence_from_reply(js_msg.message().reply.as_deref());
-                    let payload = js_msg.message().payload.as_ref();
-                    let send_result = match serde_json::from_slice::<StreamResponse>(payload) {
-                        Ok(event) => tx.unbounded_send(Ok(event)),
-                        Err(e) => tx.unbounded_send(Err(ClientError::Deserialize(e))),
-                    };
-
-                    if send_result.is_err() {
-                        return;
-                    }
-
-                    if let Some(seq) = stream_seq {
-                        let mut guard = through_poison(last_seq_for_task.lock());
-                        if seq > *guard {
-                            *guard = seq;
-                        }
-                    }
-
-                    if let Err(e) = js_msg.ack().await {
-                        tracing::warn!(error = %e, "JetStream ack failed; event already delivered downstream");
-                    }
-                }
-            }
-        }
-    });
+    let join = tokio::spawn(pull_loop(consumer, tx, last_seq_for_task));
 
     TypedEventStream {
         receiver,
         last_seq: last_seq_cell,
+        abort: join.abort_handle(),
+    }
+}
+
+async fn pull_loop<C>(
+    consumer: C,
+    tx: mpsc::UnboundedSender<Result<StreamResponse, ClientError>>,
+    last_seq: Arc<Mutex<u64>>,
+) where
+    C: JetStreamConsumer,
+    C::Message: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
+    C::MessagesError: std::fmt::Display,
+    C::StreamError: std::fmt::Display,
+{
+    let mut msgs = match consumer.messages().await {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = tx.unbounded_send(Err(ClientError::ConsumerSetup(e.to_string())));
+            return;
+        }
+    };
+
+    while let Some(item) = msgs.next().await {
+        match item {
+            Err(e) => {
+                let _ = tx.unbounded_send(Err(ClientError::JetStream(e.to_string())));
+                return;
+            }
+            Ok(js_msg) => {
+                let stream_seq = stream_sequence_from_reply(js_msg.message().reply.as_deref());
+                let payload = js_msg.message().payload.as_ref();
+                let send_result = match serde_json::from_slice::<StreamResponse>(payload) {
+                    Ok(event) => tx.unbounded_send(Ok(event)),
+                    Err(e) => tx.unbounded_send(Err(ClientError::Deserialize(e))),
+                };
+
+                if send_result.is_err() {
+                    return;
+                }
+
+                if let Some(seq) = stream_seq {
+                    let mut guard = through_poison(last_seq.lock());
+                    if seq > *guard {
+                        *guard = seq;
+                    }
+                }
+
+                if let Err(e) = js_msg.ack().await {
+                    tracing::warn!(error = %e, "JetStream ack failed; event already delivered downstream");
+                }
+            }
+        }
     }
 }
 
@@ -259,25 +282,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn last_seq_does_not_advance_when_receiver_dropped_before_send() {
-        let (consumer, tx) = MockJetStreamConsumer::new();
+    async fn pull_loop_returns_early_when_receiver_dropped() {
+        let (consumer, msg_tx) = MockJetStreamConsumer::new();
         let last_seq = Arc::new(Mutex::new(0u64));
-        let stream = build_event_stream(consumer, last_seq.clone());
 
-        // Drop receiver before feeding any messages so unbounded_send fails.
-        drop(stream);
+        let (tx, receiver) = mpsc::unbounded::<Result<StreamResponse, ClientError>>();
+        drop(receiver); // Channel closed before pull_loop sees the message.
 
         let event = make_status_event("task-1");
         let payload = serde_json::to_vec(&event).unwrap();
         let reply = ack_reply(42);
-        tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, Some(&reply)))))
+        msg_tx
+            .unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, Some(&reply)))))
             .unwrap();
-        drop(tx);
+        drop(msg_tx);
 
-        // Give the spawned task a chance to run and observe the dropped receiver.
+        pull_loop(consumer, tx, last_seq.clone()).await;
+
+        // Send failed, so the loop returned without advancing the cursor or acking.
+        assert_eq!(*through_poison(last_seq.lock()), 0);
+    }
+
+    #[tokio::test]
+    async fn dropping_stream_aborts_pull_loop() {
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        let last_seq = Arc::new(Mutex::new(0u64));
+        let stream = build_event_stream(consumer, last_seq);
+
+        // Drop the stream while the consumer is still alive and idle — the
+        // spawned task should be aborted rather than sitting on msgs.next().
+        drop(stream);
+
+        // Sending after drop should not block forever; receiver is gone and the
+        // task is aborted, so the channel is closed.
         tokio::task::yield_now().await;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        assert_eq!(*through_poison(last_seq.lock()), 0);
+        assert!(tx.is_closed());
     }
 
     #[tokio::test]
