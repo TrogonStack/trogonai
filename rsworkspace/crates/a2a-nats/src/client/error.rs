@@ -35,6 +35,10 @@ pub enum ClientError {
     InvalidRpcSubjectOverlay,
     /// Gateway ingress publish attempted with an expired minted User JWT (refresh before retrying).
     GatewayCallerJwtExpired(String),
+    /// Minted User JWT failed freshness validation for a reason other than
+    /// expiry (missing `exp`, not-yet-valid `nbf`, decode failure, clock skew).
+    /// Callers should re-mint or investigate rather than treat as expired.
+    GatewayCallerJwtInvalid(String),
 }
 
 impl ClientError {
@@ -78,6 +82,7 @@ impl fmt::Display for ClientError {
             Self::StreamClosed => write!(f, "event stream closed unexpectedly"),
             Self::InvalidRpcSubjectOverlay => write!(f, "internal error deriving gateway ingress subject"),
             Self::GatewayCallerJwtExpired(msg) => write!(f, "gateway caller JWT expired: {msg}"),
+            Self::GatewayCallerJwtInvalid(msg) => write!(f, "gateway caller JWT failed freshness check: {msg}"),
         }
     }
 }
@@ -297,6 +302,12 @@ mod tests {
     fn display_gateway_caller_jwt_expired() {
         let err = ClientError::GatewayCallerJwtExpired("user JWT expired".into());
         assert!(err.to_string().contains("expired"));
+    }
+
+    #[test]
+    fn display_gateway_caller_jwt_invalid() {
+        let err = ClientError::GatewayCallerJwtInvalid("user JWT missing exp".into());
+        assert!(err.to_string().contains("failed freshness check"));
     }
 
     #[test]
