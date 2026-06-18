@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -50,6 +52,79 @@ struct IncomingMessage {
     pub params: Option<Value>,
 }
 
+// ── Errors ─────────────────────────────────────────────────────────────────────
+
+const SPAWN_MAX_ATTEMPTS: u32 = 3;
+const SPAWN_RETRY_BACKOFF_MS: u64 = 200;
+
+/// Typed errors from the codex app-server subprocess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodexError {
+    /// Child exited or a reply channel closed unexpectedly.
+    ProcessDead,
+    /// A request or handshake timed out.
+    Timeout { what: String },
+    /// App-server returned a JSON-RPC error object.
+    Rpc { code: i64, message: String },
+    /// A turn/* or wire-shape call failed.
+    Turn { message: String },
+    /// Failed to spawn or handshake the subprocess.
+    Spawn { message: String },
+}
+
+impl fmt::Display for CodexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ProcessDead => write!(f, "codex process closed unexpectedly"),
+            Self::Timeout { what } => write!(f, "codex timed out: {what}"),
+            Self::Rpc { code, message } => write!(f, "codex rpc error {code}: {message}"),
+            Self::Turn { message } => write!(f, "codex turn error: {message}"),
+            Self::Spawn { message } => write!(f, "codex spawn error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for CodexError {}
+
+impl From<std::io::Error> for CodexError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Spawn {
+            message: value.to_string(),
+        }
+    }
+}
+
+impl From<serde_json::Error> for CodexError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Turn {
+            message: value.to_string(),
+        }
+    }
+}
+
+impl CodexError {
+    fn rpc_from_value(err: Value) -> Self {
+        let code = err.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let message = err
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown rpc error")
+            .to_string();
+        Self::Rpc { code, message }
+    }
+
+    fn is_transient_spawn_failure(&self) -> bool {
+        matches!(self, Self::Spawn { .. } | Self::Timeout { .. })
+    }
+}
+
+fn env_u64(var: &str, default: u64) -> u64 {
+    std::env::var(var)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
 // ── Codex event types ──────────────────────────────────────────────────────────
 
 /// Parsed event emitted by the Codex app-server during a turn.
@@ -82,7 +157,7 @@ pub enum CodexEvent {
 
 // ── CodexProcess ─────────────────────────────────────────────────────────────
 
-type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
+type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, CodexError>>>>>;
 
 /// Per-thread event channels. Keyed by Codex `thread_id`.
 type TurnSenders = Arc<Mutex<HashMap<String, broadcast::Sender<CodexEvent>>>>;
@@ -119,7 +194,31 @@ impl CodexProcess {
         Arc::clone(&self.alive)
     }
 
-    pub async fn spawn() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn spawn() -> Result<Self, CodexError> {
+        let mut last_err = None;
+        for attempt in 1..=SPAWN_MAX_ATTEMPTS {
+            match Self::try_spawn_once().await {
+                Ok(process) => return Ok(process),
+                Err(e) if e.is_transient_spawn_failure() && attempt < SPAWN_MAX_ATTEMPTS => {
+                    warn!(
+                        attempt,
+                        max_attempts = SPAWN_MAX_ATTEMPTS,
+                        error = %e,
+                        "codex: transient spawn/handshake failure; retrying"
+                    );
+                    last_err = Some(e);
+                    tokio::time::sleep(Duration::from_millis(
+                        SPAWN_RETRY_BACKOFF_MS * u64::from(attempt),
+                    ))
+                    .await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.expect("spawn loop always records last error"))
+    }
+
+    async fn try_spawn_once() -> Result<Self, CodexError> {
         let bin = std::env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string());
         let mut child = Command::new(&bin)
             .arg("app-server")
@@ -157,23 +256,22 @@ impl CodexProcess {
             alive,
         ));
 
-        let spawn_timeout_secs = std::env::var("CODEX_SPAWN_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(30);
-        tokio::time::timeout(
-            std::time::Duration::from_secs(spawn_timeout_secs),
+        let spawn_timeout_secs = env_u64("CODEX_SPAWN_TIMEOUT_SECS", 30);
+        match tokio::time::timeout(
+            Duration::from_secs(spawn_timeout_secs),
             process.initialize(),
         )
         .await
-        .map_err(|_| {
-            format!("codex app-server handshake timed out after {spawn_timeout_secs} s")
-        })??;
-
-        Ok(process)
+        {
+            Ok(Ok(())) => Ok(process),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(CodexError::Timeout {
+                what: format!("app-server handshake after {spawn_timeout_secs}s"),
+            }),
+        }
     }
 
-    async fn initialize(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn initialize(&self) -> Result<(), CodexError> {
         let params = serde_json::json!({
             "clientInfo": {
                 "name": "trogon-codex-runner",
@@ -186,30 +284,21 @@ impl CodexProcess {
     }
 
     /// Start a new thread (ACP session). Returns the Codex thread `id`.
-    pub async fn thread_start(
-        &self,
-        cwd: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn thread_start(&self, cwd: &str) -> Result<String, CodexError> {
         let params = serde_json::json!({ "cwd": cwd });
         let result = self.request("thread/start", Some(params)).await?;
         Self::thread_id_from_result(&result)
     }
 
     /// Resume an existing thread. Returns the same `thread_id`.
-    pub async fn thread_resume(
-        &self,
-        thread_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn thread_resume(&self, thread_id: &str) -> Result<String, CodexError> {
         let params = serde_json::json!({ "threadId": thread_id });
         let result = self.request("thread/resume", Some(params)).await?;
         Self::thread_id_from_result(&result).or(Ok(thread_id.to_string()))
     }
 
     /// Fork a thread. Returns the new thread `id`.
-    pub async fn thread_fork(
-        &self,
-        thread_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn thread_fork(&self, thread_id: &str) -> Result<String, CodexError> {
         let params = serde_json::json!({ "threadId": thread_id });
         let result = self.request("thread/fork", Some(params)).await?;
         Self::thread_id_from_result(&result)
@@ -223,7 +312,7 @@ impl CodexProcess {
         model: Option<&str>,
         approval_policy: Option<&str>,
         permission_mode: Option<&str>,
-    ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<broadcast::Receiver<CodexEvent>, CodexError> {
         let (tx, rx) = broadcast::channel(256);
         self.turn_senders
             .lock()
@@ -261,10 +350,7 @@ impl CodexProcess {
         Ok(rx)
     }
 
-    pub async fn turn_interrupt(
-        &self,
-        thread_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn turn_interrupt(&self, thread_id: &str) -> Result<(), CodexError> {
         let params = serde_json::json!({ "threadId": thread_id });
         self.request("turn/interrupt", Some(params)).await?;
         self.turn_senders.lock().await.remove(thread_id);
@@ -272,13 +358,13 @@ impl CodexProcess {
         Ok(())
     }
 
-    fn thread_id_from_result(
-        result: &Value,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    fn thread_id_from_result(result: &Value) -> Result<String, CodexError> {
         result["thread"]["id"]
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| "codex response: missing thread.id".into())
+            .ok_or_else(|| CodexError::Turn {
+                message: "codex response: missing thread.id".to_string(),
+            })
     }
 
     async fn next_id(&self) -> u64 {
@@ -288,11 +374,7 @@ impl CodexProcess {
         current
     }
 
-    async fn request(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, CodexError> {
         let id = self.next_id().await;
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -300,21 +382,25 @@ impl CodexProcess {
         let msg = Request { id, method, params };
         self.send_line(&serde_json::to_string(&msg)?).await?;
 
-        rx.await
-            .map_err(|_| "codex process closed unexpectedly".into())
-            .and_then(|r| r.map_err(|e| e.into()))
+        let request_timeout_secs = env_u64("CODEX_REQUEST_TIMEOUT_SECS", 120);
+        match tokio::time::timeout(Duration::from_secs(request_timeout_secs), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(CodexError::ProcessDead),
+            Err(_) => {
+                self.pending.lock().await.remove(&id);
+                Err(CodexError::Timeout {
+                    what: format!("json-rpc {method} after {request_timeout_secs}s"),
+                })
+            }
+        }
     }
 
-    async fn notify(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), CodexError> {
         let msg = Notification { method, params };
         self.send_line(&serde_json::to_string(&msg)?).await
     }
 
-    async fn send_line(&self, line: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn send_line(&self, line: &str) -> Result<(), CodexError> {
         let mut stdin = self.stdin.lock().await;
         stdin.write_all(line.as_bytes()).await?;
         stdin.write_all(b"\n").await?;
@@ -371,7 +457,7 @@ impl CodexProcess {
                 let tx = pending.lock().await.remove(&id_u64);
                 if let Some(tx) = tx {
                     let result = if let Some(err) = msg.error {
-                        Err(err.to_string())
+                        Err(CodexError::rpc_from_value(err))
                     } else {
                         Ok(msg.result.unwrap_or(Value::Null))
                     };
@@ -407,7 +493,7 @@ impl CodexProcess {
         alive.store(false, Ordering::Relaxed);
         let mut pending = pending.lock().await;
         for (_, tx) in pending.drain() {
-            let _ = tx.send(Err("codex process terminated".to_string()));
+            let _ = tx.send(Err(CodexError::ProcessDead));
         }
         drop(pending);
         let mut senders = turn_senders.lock().await;
@@ -658,15 +744,15 @@ impl CodexProcessClient for CodexProcess {
     }
 
     async fn thread_start(&self, cwd: &str) -> Result<String, DynError> {
-        self.thread_start(cwd).await
+        self.thread_start(cwd).await.map_err(Into::into)
     }
 
     async fn thread_resume(&self, thread_id: &str) -> Result<String, DynError> {
-        self.thread_resume(thread_id).await
+        self.thread_resume(thread_id).await.map_err(Into::into)
     }
 
     async fn thread_fork(&self, thread_id: &str) -> Result<String, DynError> {
-        self.thread_fork(thread_id).await
+        self.thread_fork(thread_id).await.map_err(Into::into)
     }
 
     async fn turn_start(
@@ -685,10 +771,11 @@ impl CodexProcessClient for CodexProcess {
             permission_mode,
         )
         .await
+        .map_err(Into::into)
     }
 
     async fn turn_interrupt(&self, thread_id: &str) -> Result<(), DynError> {
-        self.turn_interrupt(thread_id).await
+        self.turn_interrupt(thread_id).await.map_err(Into::into)
     }
 }
 
@@ -699,7 +786,7 @@ impl ProcessSpawner for RealProcessSpawner {
     type Process = CodexProcess;
 
     async fn spawn(&self) -> Result<CodexProcess, DynError> {
-        CodexProcess::spawn().await
+        CodexProcess::spawn().await.map_err(Into::into)
     }
 }
 
@@ -712,7 +799,47 @@ mod tests {
     }
 
     #[test]
-    fn text_delta_from_agent_message_delta() {
+    fn rpc_error_from_json_rpc_object() {
+        let err = serde_json::json!({"code": -32600, "message": "Invalid Request"});
+        let parsed = CodexError::rpc_from_value(err);
+        assert_eq!(
+            parsed,
+            CodexError::Rpc {
+                code: -32600,
+                message: "Invalid Request".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn transient_spawn_failures_are_spawn_and_timeout_only() {
+        assert!(CodexError::Spawn {
+            message: "io".to_string()
+        }
+        .is_transient_spawn_failure());
+        assert!(CodexError::Timeout {
+            what: "handshake".to_string()
+        }
+        .is_transient_spawn_failure());
+        assert!(!CodexError::Rpc {
+            code: 1,
+            message: "nope".to_string()
+        }
+        .is_transient_spawn_failure());
+        assert!(!CodexError::ProcessDead.is_transient_spawn_failure());
+    }
+
+    #[test]
+    fn codex_error_display_includes_rpc_code() {
+        let err = CodexError::Rpc {
+            code: 42,
+            message: "bad turn".to_string(),
+        };
+        assert!(err.to_string().contains("42"));
+        assert!(err.to_string().contains("bad turn"));
+    }
+
+    #[test]
         let params = serde_json::json!({
             "threadId": "t1",
             "turnId": "turn-1",

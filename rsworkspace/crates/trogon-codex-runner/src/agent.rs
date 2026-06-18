@@ -21,7 +21,7 @@ use agent_client_protocol::{
     ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -189,6 +189,8 @@ pub struct CodexAgent<N: SessionNotifierFactory, P: ProcessSpawner> {
     spawner: P,
     process: Arc<Mutex<Option<P::Process>>>,
     sessions: Arc<Mutex<HashMap<String, CodexSession>>>,
+    /// Per-session cancel handles for the in-flight prompt loop.
+    cancel_notifies: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
@@ -260,9 +262,18 @@ where
             spawner,
             process: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            cancel_notifies: Arc::new(Mutex::new(HashMap::new())),
             default_model,
             prompt_timeout,
             available_models,
+        }
+    }
+
+    async fn interrupt_turn_best_effort(&self, thread_id: &str, session_id: &str) {
+        if let Ok(proc) = self.process().await
+            && let Err(e) = proc.turn_interrupt(thread_id).await
+        {
+            warn!(session_id, error = %e, "codex: turn_interrupt failed");
         }
     }
 
@@ -744,18 +755,47 @@ where
         // Auto-summary guarantee: nudged the model once for a recap after a
         // silent (tools-ran, no-text) turn, so we nudge at most once.
         let mut auto_summary_done = false;
+        let cancel_notify = Arc::new(Notify::new());
+        self.cancel_notifies
+            .lock()
+            .await
+            .insert(session_id.clone(), Arc::clone(&cancel_notify));
         let stop_reason = loop {
-            let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
-                Err(_elapsed) => {
+            enum PromptWait {
+                Codex(CodexEvent),
+                TimedOut,
+                Cancelled,
+                ChannelClosed,
+            }
+
+            let wait = tokio::select! {
+                biased;
+                _ = cancel_notify.notified() => PromptWait::Cancelled,
+                recv = tokio::time::timeout(self.prompt_timeout, event_rx.recv()) => match recv {
+                    Err(_elapsed) => PromptWait::TimedOut,
+                    Ok(Ok(event)) => PromptWait::Codex(event),
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
+                        warn!(session_id, lagged = n, "codex: event channel lagged");
+                        continue;
+                    }
+                    Ok(Err(_)) => PromptWait::ChannelClosed,
+                },
+            };
+
+            match wait {
+                PromptWait::TimedOut => {
                     warn!(session_id, "codex: prompt timed out");
+                    self.interrupt_turn_best_effort(&thread_id, &session_id)
+                        .await;
                     break StopReason::EndTurn;
                 }
-                Ok(Ok(e)) => e,
-                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
-                    warn!(session_id, lagged = n, "codex: event channel lagged");
-                    continue;
+                PromptWait::Cancelled => {
+                    info!(session_id, "codex: prompt cancelled");
+                    self.interrupt_turn_best_effort(&thread_id, &session_id)
+                        .await;
+                    break StopReason::Cancelled;
                 }
-                Ok(Err(_)) => {
+                PromptWait::ChannelClosed => {
                     // The codex process exited mid-turn (read_loop closed the
                     // channel). Unblock the prompt gracefully with EndTurn rather
                     // than hanging until the timeout or hard-erroring the turn —
@@ -764,9 +804,7 @@ where
                     warn!(session_id, "codex: process channel closed unexpectedly");
                     break StopReason::EndTurn;
                 }
-            };
-
-            match event {
+                PromptWait::Codex(event) => match event {
                 CodexEvent::TextDelta { text } => {
                     assistant_text.push_str(&text);
                     let notif = SessionNotification::new(
@@ -931,14 +969,20 @@ where
                     }
                     break StopReason::EndTurn;
                 }
+                },
             }
         };
+        self.cancel_notifies.lock().await.remove(&session_id);
 
         Ok(PromptResponse::new(stop_reason))
     }
 
     async fn cancel(&self, req: CancelNotification) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
+
+        if let Some(notify) = self.cancel_notifies.lock().await.get(&session_id) {
+            notify.notify_one();
+        }
 
         let thread_id = {
             let sessions = self.sessions.lock().await;
@@ -951,9 +995,10 @@ where
             let guard = Arc::clone(&self.process).lock_owned().await;
             if let Some(p) = guard.as_ref()
                 && p.is_alive()
-                && let Err(e) = p.turn_interrupt(&thread_id).await
             {
-                warn!(session_id, error = %e, "codex: turn_interrupt failed");
+                p.turn_interrupt(&thread_id)
+                    .await
+                    .map_err(|e| internal_error(e.to_string()))?;
             }
         }
 
@@ -1124,6 +1169,10 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
             .await
             .get(id)
             .and_then(|s| s.pending_history.clone())
+    }
+
+    async fn test_cancel_notifies_len(&self) -> usize {
+        self.cancel_notifies.lock().await.len()
     }
 }
 
@@ -1929,6 +1978,211 @@ mod tests {
             .cancel(CancelNotification::new("nonexistent"))
             .await
             .unwrap();
+    }
+
+    struct HangingMockCodexProcess {
+        event_tx: broadcast::Sender<CodexEvent>,
+    }
+
+    #[async_trait(?Send)]
+    impl CodexProcessClient for HangingMockCodexProcess {
+        fn is_alive(&self) -> bool {
+            true
+        }
+
+        async fn thread_start(
+            &self,
+            _cwd: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("mock-thread-id".to_string())
+        }
+
+        async fn thread_resume(
+            &self,
+            thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(thread_id.to_string())
+        }
+
+        async fn thread_fork(
+            &self,
+            _thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("fork-thread".to_string())
+        }
+
+        async fn turn_start(
+            &self,
+            _thread_id: &str,
+            _user_input: &str,
+            _model: Option<&str>,
+            _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            Ok(self.event_tx.subscribe())
+        }
+
+        async fn turn_interrupt(
+            &self,
+            _thread_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    struct HangingMockProcessSpawner {
+        event_tx: broadcast::Sender<CodexEvent>,
+    }
+
+    #[async_trait(?Send)]
+    impl ProcessSpawner for HangingMockProcessSpawner {
+        type Process = HangingMockCodexProcess;
+
+        async fn spawn(
+            &self,
+        ) -> Result<HangingMockCodexProcess, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(HangingMockCodexProcess {
+                event_tx: self.event_tx.clone(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn prompt_cancel_returns_cancelled_stop_reason() {
+        let (event_tx, _) = broadcast::channel(8);
+        let agent = Arc::new(CodexAgent::new(
+            MockNotifierFactory::new(),
+            HangingMockProcessSpawner {
+                event_tx: event_tx.clone(),
+            },
+            "o4-mini",
+        ));
+        agent.test_insert_session("cancel-me", "/tmp", None).await;
+
+        let agent_prompt = Arc::clone(&agent);
+        let agent_cancel = Arc::clone(&agent);
+        let prompt_fut = async move {
+            agent_prompt
+                .prompt(PromptRequest::new(
+                    "cancel-me",
+                    vec![ContentBlock::from("wait forever")],
+                ))
+                .await
+        };
+        let cancel_fut = async move {
+            for _ in 0..50 {
+                if agent_cancel.test_cancel_notifies_len().await > 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(agent_cancel.test_cancel_notifies_len().await, 1);
+            agent_cancel
+                .cancel(CancelNotification::new("cancel-me"))
+                .await
+        };
+
+        let (prompt_result, cancel_result) = tokio::join!(prompt_fut, cancel_fut);
+        cancel_result.unwrap();
+        let resp = prompt_result.unwrap();
+        assert_eq!(resp.stop_reason, StopReason::Cancelled);
+        assert_eq!(agent.test_cancel_notifies_len().await, 0);
+    }
+
+    struct FailingInterruptMockCodexProcess {
+        fail_interrupt: bool,
+    }
+
+    #[async_trait(?Send)]
+    impl CodexProcessClient for FailingInterruptMockCodexProcess {
+        fn is_alive(&self) -> bool {
+            true
+        }
+
+        async fn thread_start(
+            &self,
+            _cwd: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("mock-thread-id".to_string())
+        }
+
+        async fn thread_resume(
+            &self,
+            thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(thread_id.to_string())
+        }
+
+        async fn thread_fork(
+            &self,
+            _thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("fork-thread".to_string())
+        }
+
+        async fn turn_start(
+            &self,
+            _thread_id: &str,
+            _user_input: &str,
+            _model: Option<&str>,
+            _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            let (tx, rx) = broadcast::channel(8);
+            drop(tx);
+            Ok(rx)
+        }
+
+        async fn turn_interrupt(
+            &self,
+            _thread_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            if self.fail_interrupt {
+                Err("interrupt failed".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    struct FailingInterruptMockProcessSpawner {
+        fail_interrupt: bool,
+    }
+
+    #[async_trait(?Send)]
+    impl ProcessSpawner for FailingInterruptMockProcessSpawner {
+        type Process = FailingInterruptMockCodexProcess;
+
+        async fn spawn(
+            &self,
+        ) -> Result<FailingInterruptMockCodexProcess, Box<dyn std::error::Error + Send + Sync>>
+        {
+            Ok(FailingInterruptMockCodexProcess {
+                fail_interrupt: self.fail_interrupt,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_propagates_turn_interrupt_failure() {
+        let agent = CodexAgent::new(
+            MockNotifierFactory::new(),
+            FailingInterruptMockProcessSpawner {
+                fail_interrupt: true,
+            },
+            "o4-mini",
+        );
+        agent.test_insert_session("fail-int", "/tmp", None).await;
+        agent.process().await.unwrap();
+
+        let err = agent
+            .cancel(CancelNotification::new("fail-int"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InternalError);
+        assert!(err.message.contains("interrupt failed"));
     }
 
     // ── prompt ────────────────────────────────────────────────────────────────
