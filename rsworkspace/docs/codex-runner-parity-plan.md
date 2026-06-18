@@ -201,3 +201,27 @@ Treat these as **P50**. The big change from the pre-Phase-0 estimate: **the ~7-w
 **Recommended order:** **0 → (B1 anytime) → 1 → 2 → 3 → 4 → 6 → 5 → 7.** Phase 0 first because its output (the real-protocol delta + PG-4 verdict) re-baselines every later phase; B1 is protocol-independent and can land in parallel as a quick win. Persistence (5) after the loop work so the snapshot captures the final session shape; Phase 7 is now validation rather than discovery.
 
 **Honest bottom line:** for one dev, plan on **~4 weeks to parity built against the real 0.138 schema** and **~4.5–5.5 weeks to live-validated real-codex parity** — with a **~6-week** outcome only if Phase 0 surfaces a foundational protocol bump. The pre-Phase-0 "~7-week tail" is largely retired because we now build against ground truth instead of the mock. **Do Phase 0 first** (~2–3 calendar days, ~$0.10): it's the cheapest possible way to confirm the whole estimate before committing.
+
+---
+
+## ADR compliance (PR #207 — architecture taxonomy)
+
+The repo adopted a set of architecture ADRs in [PR #207](https://github.com/TrogonStack/trogonai/pull/207). This branch was cut **before** that PR merged, so `docs/adr/` and `AGENTS.md` are not present here — none of the existing codex work was willful non-compliance. The work done so far (Phase 0 + Phase 0.5) was reviewed against the ADRs:
+
+**Compliant on what it exercises:**
+- **ADR 0004 (protocol/transport layering)** — clean pass. `process.rs` owns transport (spawn, framing, timeouts, connection lifecycle, inbound `ServerRequest` routing); `parse_event`→`CodexEvent` is the protocol dispatcher; `agent.rs` converts `CodexEvent`→ACP `SessionUpdate` at the application boundary; approval requests bridge to permissions at the boundary. Keep this layering as Phases 1–7 land.
+- **ADR 0009 (protobuf wire contracts)** — the codex app-server JSON-RPC wire is an **explicit exception** ("JSON-RPC … third-party API surfaces with protocol-defined JSON contracts"). `serde_json` for the codex protocol is correct.
+
+**Pre-existing, workspace-wide deviations (inherited, not introduced here; out of scope to fix in this campaign):**
+- **ADR 0002 (crate boundaries)** — the `-runner` suffix isn't an approved role suffix and `trogon-` vs `trogonai-` is arguable, but every sibling runner shares this and ADR 0003 puts renaming out of scope. Phase 0.5 added no new sub-crates.
+- **ADR 0007 (configuration sources)** — env vars lack the `TROGON_` prefix and there's no TOML/precedence chain (defaults+env only). Family-wide.
+- **ADR 0008 (OpenTelemetry)** — uses `tracing`, not OTel. Family-wide; ADR allows "migrate when touched."
+
+**⚠️ Action required — Phase 5 / Phase 6 persistence (not yet built):**
+ADR 0009's schemaless-persistence rule states KV records and state snapshots "should still be encoded from a versioned Protocol Buffers contract." When implementing **S1–S4 (session KV store) and E1 (compaction snapshots)**, choose one and state it at the boundary:
+- encode the `CodexSession` / session snapshot from a **versioned protobuf contract** (strict ADR 0009), **or**
+- follow the existing JSON `SessionState` pattern shared with the xai/openrouter runners and add the **"migrate-when-touched" exception note** ADR 0009 explicitly permits, documented near the KV boundary.
+
+This is the only place future codex parity work could *introduce* a genuine deviation rather than inherit one — decide it during Phase 5 design, not after.
+
+**Env-var naming follow-on:** the planned Phase 3 **R1** timeout knob should be named `TROGON_CODEX_REQUEST_TIMEOUT_SECS` (per ADR 0007) rather than extending the prefix-less `CODEX_*` family, if/when the runner config is reconciled onto main.
