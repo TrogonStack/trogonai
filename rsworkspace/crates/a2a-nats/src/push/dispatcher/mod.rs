@@ -4,10 +4,12 @@
 //! JetStream publish and the composite façade land in follow-up PRs so each
 //! transport's wire contract is reviewed on its own.
 
+pub mod composite;
 pub mod http;
 pub mod jetstream;
 pub mod nats;
 
+pub use composite::{CompositePushDispatcher, composite_push_dispatcher};
 pub use http::HttpPushDispatcher;
 pub use jetstream::JetStreamPublishPushDispatcher;
 pub use nats::NatsPublishPushDispatcher;
