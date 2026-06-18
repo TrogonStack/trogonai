@@ -103,6 +103,10 @@ fn parse_delivery_semantics_object(
     let exactly = exactly.ok_or(DeliverySemanticsParseError::UnknownShape)?;
 
     match exactly {
+        // `exactlyOnce: false` matches the legacy `exactlyOnceDelivery: false`
+        // wire path and degrades to at-least-once; `null` / `true` opt into
+        // exactly-once with the default header carrier.
+        Value::Bool(false) => Ok(DeliverySemantics::AtLeastOnce),
         Value::Null | Value::Bool(true) => Ok(DeliverySemantics::ExactlyOnce {
             idempotency_key_header: None,
         }),
@@ -368,6 +372,14 @@ mod tests {
         let err =
             parse_delivery_semantics_value(&serde_json::json!({"atLeastOnce": {}, "exactlyOnce": null})).unwrap_err();
         assert!(matches!(err, DeliverySemanticsParseError::ConflictingShape));
+    }
+
+    #[test]
+    fn parse_object_exactlyonce_false_degrades_to_at_least_once() {
+        let parsed = parse_delivery_semantics_value(&serde_json::json!({"exactlyOnce": false})).unwrap();
+        assert_eq!(parsed, DeliverySemantics::AtLeastOnce);
+        let parsed = parse_delivery_semantics_value(&serde_json::json!({"exactly_once": false})).unwrap();
+        assert_eq!(parsed, DeliverySemantics::AtLeastOnce);
     }
 
     #[test]
