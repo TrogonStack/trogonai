@@ -10,12 +10,17 @@ allowed-tools:
 
 Refactor manual Rust error boilerplate to `#[derive(thiserror::Error)]`.
 
-1. Find candidates (from `rsworkspace/`):
-   ```bash
-   grep -rln "impl std::error::Error\|impl fmt::Display for\|impl std::fmt::Display for" --include="*.rs" crates
-   ```
+All paths and commands below are relative to the Rust workspace root — run `cd rsworkspace` first.
 
-2. Refactor each error type to the codebase idiom (see `crates/trogon-decider-runtime/src/snapshot/codec/snapshot_decode_error.rs`):
+1. Find candidates:
+   ```bash
+   rg -l 'impl std::error::Error|impl (std::)?fmt::Display for' --type rust crates
+   ```
+   Over-matches on purpose — it also catches value-object `Display` impls, which step 3 filters out.
+
+2. Refactor each error type to the codebase idiom. Read a canonical, test-backed example first
+   (`crates/trogon-decider-runtime/src/snapshot/codec/snapshot_decode_error.rs`, or find current ones
+   with `rg -l 'derive\(.*thiserror::Error' --type rust crates`):
    - `#[derive(Debug, thiserror::Error)]` enum; keep existing derives.
    - One `#[error("...")]` per variant — copy the old `Display` text verbatim so `to_string()` is unchanged.
    - `#[source]` for wrapped errors; `#[from]` to replace an `impl From`; `#[error(transparent)]` for pass-throughs.
