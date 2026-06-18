@@ -1,3 +1,4 @@
+use crate::constants::MIN_SERVER_INFO_POLL_INTERVAL;
 use async_nats::{Client, ServerInfo};
 use std::time::Duration;
 
@@ -41,7 +42,7 @@ pub async fn wait_for_server_info<S>(
 where
     S: ServerInfoSource + ?Sized,
 {
-    let poll_interval = poll_interval.max(Duration::from_millis(1));
+    let poll_interval = poll_interval.max(MIN_SERVER_INFO_POLL_INTERVAL);
 
     tokio::time::timeout(timeout, async {
         loop {

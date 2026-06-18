@@ -26,6 +26,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[cfg(not(coverage))]
+use crate::constants::{CLAIM_CHECK_BUCKET, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
+#[cfg(not(coverage))]
 use anyhow::Context;
 #[cfg(not(coverage))]
 use tokio::task::JoinSet;
@@ -41,14 +43,6 @@ use trogon_std::args::{CliArgs, ParseArgs};
 use trogon_std::env::SystemEnv;
 #[cfg(not(coverage))]
 use trogon_std::fs::SystemFs;
-
-#[cfg(not(coverage))]
-const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-#[cfg(not(coverage))]
-const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
-
-#[cfg(not(coverage))]
-const NATS_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[cfg(not(coverage))]
 type SourceResult = (&'static str, anyhow::Result<()>);
