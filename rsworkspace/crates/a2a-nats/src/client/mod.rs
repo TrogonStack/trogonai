@@ -6,6 +6,7 @@
 pub mod error;
 pub mod gateway_headers;
 pub mod handle;
+pub mod unary;
 pub mod wire;
 
 pub use error::ClientError;
