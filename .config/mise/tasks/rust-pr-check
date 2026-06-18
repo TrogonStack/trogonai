@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+#MISE description="Local mirror of the rsworkspace PR CI gate (fmt + clippy + tests + coverage diff vs main)"
+#
+# Usage: mise run rust-pr-check <crate-name>
+#
+# Mirrors .github/workflows/ci-rust.yml on a single crate so a green run
+# locally means a green run in CI. Each step prints PASS/FAIL on its own
+# line so the failing gate is unambiguous before pushing.
+set -u
+set -o pipefail
+
+CRATE="${1:-}"
+if [[ -z "$CRATE" ]]; then
+    echo "usage: mise run rust-pr-check <crate-name>" >&2
+    exit 2
+fi
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+RSWS="$ROOT/rsworkspace"
+
+if [[ ! -d "$RSWS/crates/$CRATE" ]]; then
+    echo "FAIL: crate '$CRATE' not found under $RSWS/crates/" >&2
+    exit 2
+fi
+
+cd "$RSWS"
+
+step() {
+    local name="$1"; shift
+    echo
+    echo "================================================================"
+    echo "STEP: $name"
+    echo "  cmd: $*"
+    echo "================================================================"
+    if "$@"; then
+        echo "  RESULT: PASS — $name"
+    else
+        local rc=$?
+        echo "  RESULT: FAIL — $name (exit $rc)"
+        echo
+        echo "OVERALL: FAIL ($name)"
+        exit "$rc"
+    fi
+}
+
+# 1. fmt --check — mirrors CI 'Check formatting'.
+step "fmt-check" cargo fmt --all -- --check
+
+# 2. clippy from a clean cache — workspace lints (deny warnings, unwrap_used,
+#    expect_used, panic) only fire on a real rebuild; cached builds skip them.
+step "clean-crate" cargo clean -p "$CRATE"
+step "clippy" cargo clippy -p "$CRATE" --all-targets --all-features
+
+# 3. Unit tests.
+step "test" cargo test -p "$CRATE" --all-targets
+
+# 4. doc tests — CI runs these too.
+step "doc-test" cargo test -p "$CRATE" --doc
+
+# 5. Coverage gate — delegate to rust-coverage-check which runs cargo cov +
+#    pycobertura diff against the main baseline (same comparison CI uses for
+#    the "new uncovered statements" failure mode).
+cd "$ROOT"
+step "coverage-diff-vs-main" mise run rust-coverage-check
+
+echo
+echo "================================================================"
+echo "OVERALL: PASS — all CI-mirrored gates green for $CRATE"
+echo "================================================================"

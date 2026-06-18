@@ -50,6 +50,7 @@ pub mod jetstream;
 pub mod lease;
 pub mod messaging;
 pub mod nats_token;
+pub mod server_info;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
 pub(crate) mod token;
@@ -73,6 +74,7 @@ pub use messaging::{
     request_with_timeout,
 };
 pub use nats_token::{DottedNatsToken, NatsToken};
+pub use server_info::{ServerInfoSource, ServerInfoTimeout, wait_for_server_info};
 pub use subject_token_violation::SubjectTokenViolation;
 
 #[cfg(any(test, feature = "test-support"))]

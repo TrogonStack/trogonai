@@ -28,25 +28,18 @@ pub enum ConnectionError {
     JetStream(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum DispatchError {
+    #[error("no reply subject")]
     NoReplySubject,
-    DeserializeRequest(serde_json::Error),
-    DeserializeNotification(serde_json::Error),
-    Reply(trogon_nats::NatsError),
-    NotificationHandler(agent_client_protocol::Error),
-}
-
-impl std::fmt::Display for DispatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoReplySubject => write!(f, "no reply subject"),
-            Self::DeserializeRequest(e) => write!(f, "deserialize request: {}", e),
-            Self::DeserializeNotification(e) => write!(f, "deserialize notification: {}", e),
-            Self::Reply(e) => write!(f, "reply: {}", e),
-            Self::NotificationHandler(e) => write!(f, "notification handler: {}", e),
-        }
-    }
+    #[error("deserialize request: {0}")]
+    DeserializeRequest(#[source] serde_json::Error),
+    #[error("deserialize notification: {0}")]
+    DeserializeNotification(#[source] serde_json::Error),
+    #[error("reply: {0}")]
+    Reply(#[source] trogon_nats::NatsError),
+    #[error("notification handler: {0}")]
+    NotificationHandler(#[source] agent_client_protocol::Error),
 }
 
 use crate::constants::{DEFAULT_OPERATION_TIMEOUT, KEEPALIVE_INTERVAL};

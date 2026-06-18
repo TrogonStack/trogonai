@@ -37,22 +37,19 @@ use crate::constants::{
 use crate::source_status::SourceStatus;
 
 #[derive(Debug, thiserror::Error)]
-struct DurationTooLong {
-    max_secs: u64,
+enum DurationTooLong {
+    #[error("must not exceed 1 second")]
+    OneSecond,
+    #[error("must not exceed {0} seconds")]
+    Many(u64),
 }
 
 impl DurationTooLong {
     fn new(max_secs: u64) -> Self {
-        Self { max_secs }
-    }
-}
-
-impl fmt::Display for DurationTooLong {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.max_secs == 1 {
-            f.write_str("must not exceed 1 second")
+        if max_secs == 1 {
+            Self::OneSecond
         } else {
-            write!(f, "must not exceed {} seconds", self.max_secs)
+            Self::Many(max_secs)
         }
     }
 }

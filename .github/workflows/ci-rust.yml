@@ -12,6 +12,7 @@ on:
       - '.mise.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/enforce-cargo-license/**'
+      - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
 
 env:
@@ -31,13 +32,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt,clippy
 
       - name: Enforce crate licenses
         uses: ./.github/actions/enforce-cargo-license
-
-      - name: Install Rust components
-        run: rustup component add rustfmt clippy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -69,10 +70,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
-
-      - name: Install Rust components
-        run: rustup component add llvm-tools-preview
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          components: llvm-tools-preview
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -82,13 +83,17 @@ jobs:
           cache-on-failure: true
           cache-workspace-crates: true
 
-      - name: Install cargo-llvm-cov
+      - name: Install coverage tools
         uses: taiki-e/install-action@25435dc8dd3baed7417e0c96d3fe89013a5b2e09 # v2.81.3
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,nextest
+
+      - name: Run documentation tests
+        run: cargo test --doc
+        working-directory: rsworkspace
 
       - name: Run tests with coverage
-        run: cargo cov --cobertura --output-path coverage.xml
+        run: cargo cov nextest --cobertura --output-path coverage.xml
         working-directory: rsworkspace
         env:
           RUSTC_BOOTSTRAP: "1"
@@ -120,7 +125,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1

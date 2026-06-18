@@ -77,31 +77,14 @@ pub async fn resolve_claim<S: ObjectStoreGet>(
     Ok(Bytes::from(buf))
 }
 
-#[derive(Debug)]
-pub enum ClaimResolveError<E: fmt::Display> {
+#[derive(Debug, thiserror::Error)]
+pub enum ClaimResolveError<E> {
+    #[error("claim message missing {} header", HEADER_CLAIM_KEY)]
     MissingKey,
-    StoreFailed(E),
-    ReadFailed(std::io::Error),
-}
-
-impl<E: fmt::Display> fmt::Display for ClaimResolveError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingKey => write!(f, "claim message missing {} header", HEADER_CLAIM_KEY),
-            Self::StoreFailed(e) => write!(f, "failed to resolve claim from object store: {e}"),
-            Self::ReadFailed(e) => write!(f, "failed to read claim payload: {e}"),
-        }
-    }
-}
-
-impl<E: std::error::Error + Send + Sync + 'static> std::error::Error for ClaimResolveError<E> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::MissingKey => None,
-            Self::StoreFailed(e) => Some(e),
-            Self::ReadFailed(e) => Some(e),
-        }
-    }
+    #[error("failed to resolve claim from object store: {0}")]
+    StoreFailed(#[source] E),
+    #[error("failed to read claim payload: {0}")]
+    ReadFailed(#[from] std::io::Error),
 }
 
 #[derive(Clone)]

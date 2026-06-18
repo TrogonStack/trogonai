@@ -7,31 +7,32 @@
 use trogon_nats::NatsToken;
 use trogon_nats::SubjectTokenViolation;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct AgentIdError(pub SubjectTokenViolation);
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum AgentIdError {
+    #[error("agent_id must not be empty")]
+    Empty,
+    #[error("agent_id contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("agent_id is too long: {0} characters (max 128)")]
+    TooLong(usize),
+}
 
-impl std::fmt::Display for AgentIdError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            SubjectTokenViolation::Empty => write!(f, "agent_id must not be empty"),
-            SubjectTokenViolation::InvalidCharacter(ch) => {
-                write!(f, "agent_id contains invalid character: {:?}", ch)
-            }
-            SubjectTokenViolation::TooLong(len) => {
-                write!(f, "agent_id is too long: {} characters (max 128)", len)
-            }
+impl From<SubjectTokenViolation> for AgentIdError {
+    fn from(violation: SubjectTokenViolation) -> Self {
+        match violation {
+            SubjectTokenViolation::Empty => Self::Empty,
+            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
         }
     }
 }
-
-impl std::error::Error for AgentIdError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct A2aAgentId(NatsToken);
 
 impl A2aAgentId {
     pub fn new(s: impl AsRef<str>) -> Result<Self, AgentIdError> {
-        NatsToken::new(s).map(Self).map_err(AgentIdError)
+        NatsToken::new(s).map(Self).map_err(AgentIdError::from)
     }
 
     pub fn as_str(&self) -> &str {
@@ -89,10 +90,7 @@ mod tests {
 
     #[test]
     fn a2a_agent_id_empty_returns_err() {
-        assert_eq!(
-            A2aAgentId::new("").err().unwrap(),
-            AgentIdError(SubjectTokenViolation::Empty)
-        );
+        assert_eq!(A2aAgentId::new("").err().unwrap(), AgentIdError::Empty);
     }
 
     #[test]
@@ -113,16 +111,13 @@ mod tests {
 
     #[test]
     fn agent_id_error_display() {
+        assert_eq!(AgentIdError::Empty.to_string(), "agent_id must not be empty");
         assert_eq!(
-            format!("{}", AgentIdError(SubjectTokenViolation::Empty)),
-            "agent_id must not be empty"
-        );
-        assert_eq!(
-            format!("{}", AgentIdError(SubjectTokenViolation::InvalidCharacter('.'))),
+            AgentIdError::InvalidCharacter('.').to_string(),
             "agent_id contains invalid character: '.'"
         );
         assert_eq!(
-            format!("{}", AgentIdError(SubjectTokenViolation::TooLong(129))),
+            AgentIdError::TooLong(129).to_string(),
             "agent_id is too long: 129 characters (max 128)"
         );
     }
