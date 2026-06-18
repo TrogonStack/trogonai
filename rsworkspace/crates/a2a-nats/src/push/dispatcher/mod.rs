@@ -5,8 +5,12 @@
 //! transport's wire contract is reviewed on its own.
 
 pub mod http;
+pub mod jetstream;
+pub mod nats;
 
 pub use http::HttpPushDispatcher;
+pub use jetstream::JetStreamPublishPushDispatcher;
+pub use nats::NatsPublishPushDispatcher;
 
 use a2a::types::TaskPushNotificationConfig;
 
