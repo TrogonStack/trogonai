@@ -8,14 +8,20 @@
 
 use std::time::Duration;
 
+use a2a::agent_card::AgentCard;
+use a2a::types::GetExtendedAgentCardRequest;
 use a2a_identity_types::MintedUserJwt;
+use trogon_nats::RequestClient;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 use crate::constants::{DEFAULT_OPERATION_TIMEOUT, MIN_TIMEOUT_SECS};
 use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
+use crate::nats::subjects::agents::AgentCardSubject;
+use crate::req_id::ReqId;
 
 use super::error::ClientError;
+use super::unary::send_unary;
 
 /// Whether `A2aClient` publishes to `{prefix}.agents.{agent_id}.…` (talking to the
 /// agent directly on a trusted NATS connection) or to `{prefix}.gateway.…` with a
@@ -28,7 +34,7 @@ enum ClientIngressTarget {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)] // prefix/nats/js/ingress are read by per-operation methods that land afterward
+#[allow(dead_code)] // js is read by per-operation methods that land afterward
 pub struct A2aClient<N, J> {
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
@@ -80,17 +86,14 @@ impl<N, J> A2aClient<N, J> {
         &self.agent_id
     }
 
-    #[allow(dead_code)] // called by per-operation methods that land afterward
     pub(super) fn prefix(&self) -> &A2aPrefix {
         &self.prefix
     }
 
-    #[allow(dead_code)] // called by per-operation methods that land afterward
     pub(super) fn operation_timeout(&self) -> Duration {
         self.operation_timeout
     }
 
-    #[allow(dead_code)] // called by per-operation methods that land afterward
     pub(super) fn gateway_caller_jwt(&self) -> Option<&MintedUserJwt> {
         match &self.ingress {
             ClientIngressTarget::AgentSubjects => None,
@@ -98,7 +101,6 @@ impl<N, J> A2aClient<N, J> {
         }
     }
 
-    #[allow(dead_code)] // called by per-operation methods that land afterward
     pub(super) fn outbound_rpc_subject(&self, agent_subject: String) -> Result<String, ClientError> {
         match &self.ingress {
             ClientIngressTarget::AgentSubjects => Ok(agent_subject),
@@ -107,6 +109,27 @@ impl<N, J> A2aClient<N, J> {
                     .ok_or(ClientError::InvalidRpcSubjectOverlay)
             }
         }
+    }
+}
+
+impl<N, J> A2aClient<N, J>
+where
+    N: RequestClient,
+{
+    pub async fn agent_card(&self) -> Result<AgentCard, ClientError> {
+        let subject = self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let req_id = ReqId::new();
+        let req = GetExtendedAgentCardRequest { tenant: None };
+        send_unary(
+            &self.nats,
+            &subject,
+            "agent/getAuthenticatedExtendedCard",
+            &req,
+            &req_id,
+            self.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
     }
 }
 
@@ -203,5 +226,66 @@ mod tests {
     fn prefix_accessor_returns_constructor_value() {
         let client = A2aClient::new(prefix(), agent_id(), (), ());
         assert_eq!(client.prefix().as_str(), "a2a");
+    }
+
+    mod agent_card_op {
+        use bytes::Bytes;
+        use trogon_nats::AdvancedMockNatsClient;
+
+        use super::*;
+
+        fn agent_card_payload(name: &str) -> Bytes {
+            let card = a2a::agent_card::AgentCard {
+                name: name.to_string(),
+                description: String::new(),
+                version: String::new(),
+                supported_interfaces: vec![a2a::agent_card::AgentInterface {
+                    url: "https://example.com/a2a".to_string(),
+                    protocol_binding: "JSONRPC".to_string(),
+                    protocol_version: "0.2.0".to_string(),
+                    tenant: None,
+                }],
+                capabilities: a2a::agent_card::AgentCapabilities::default(),
+                default_input_modes: vec![],
+                default_output_modes: vec![],
+                skills: vec![],
+                provider: None,
+                documentation_url: None,
+                icon_url: None,
+                security_schemes: None,
+                security_requirements: None,
+                signatures: None,
+            };
+            let json = serde_json::json!({"jsonrpc":"2.0","id":"any","result":card});
+            serde_json::to_vec(&json).unwrap().into()
+        }
+
+        #[tokio::test]
+        async fn agent_card_targets_agent_subject_by_default() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.agents.test-agent.card", agent_card_payload("bot"));
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            let card = client.agent_card().await.unwrap();
+            assert_eq!(card.name, "bot");
+        }
+
+        #[tokio::test]
+        async fn agent_card_targets_gateway_subject_under_gateway_routing() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.gateway.test-agent.card", agent_card_payload("via-gw"));
+            let jwt =
+                MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
+            let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
+            let card = client.agent_card().await.unwrap();
+            assert_eq!(card.name, "via-gw");
+        }
+
+        #[tokio::test]
+        async fn agent_card_propagates_transport_errors() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.fail_next_request();
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            assert!(matches!(client.agent_card().await, Err(ClientError::Transport(_))));
+        }
     }
 }
