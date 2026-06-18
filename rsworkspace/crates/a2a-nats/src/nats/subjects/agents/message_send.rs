@@ -39,3 +39,21 @@ impl super::super::markers::Requestable for MessageSendSubject {}
 impl super::super::stream::StreamAssignment for MessageSendSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_prefix_agent_message_send_subject() {
+        let s = MessageSendSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
+        assert_eq!(s.to_string(), "a2a.agents.planner.message.send");
+    }
+
+    #[test]
+    fn to_subject_round_trips_display_form() {
+        use async_nats::subject::ToSubject;
+        let s = MessageSendSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
+        assert_eq!(s.to_subject().as_str(), "a2a.agents.planner.message.send");
+    }
+}

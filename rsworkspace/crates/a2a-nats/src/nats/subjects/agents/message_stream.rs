@@ -2,7 +2,7 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
 /// `message/stream` — bootstrap subject. The agent responds with the task envelope
-/// (containing `task_id`) and then publishes events to `{prefix}.task.{task_id}.events.{req_id}`.
+/// (containing `task_id`) and then publishes events to `{prefix}.tasks.{task_id}.events.{req_id}`.
 #[derive(Debug)]
 pub struct MessageStreamSubject {
     prefix: A2aPrefix,
@@ -39,4 +39,22 @@ impl super::super::markers::Requestable for MessageStreamSubject {}
 
 impl super::super::stream::StreamAssignment for MessageStreamSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_prefix_agent_message_stream_subject() {
+        let s = MessageStreamSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
+        assert_eq!(s.to_string(), "a2a.agents.planner.message.stream");
+    }
+
+    #[test]
+    fn to_subject_round_trips_display_form() {
+        use async_nats::subject::ToSubject;
+        let s = MessageStreamSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
+        assert_eq!(s.to_subject().as_str(), "a2a.agents.planner.message.stream");
+    }
 }
