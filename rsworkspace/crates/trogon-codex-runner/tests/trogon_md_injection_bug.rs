@@ -119,6 +119,19 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
         recorded.contains("first prompt"),
         "original user message must also be present; got: {recorded:?}"
     );
+    // B1 regression: TROGON.md must be injected EXACTLY ONCE on the first turn.
+    // A `.contains()` check passes even when the content is double-injected, so
+    // assert an occurrence count of 1 on a marker line from the TROGON.md body.
+    assert_eq!(
+        recorded.matches("# Project rules").count(),
+        1,
+        "TROGON.md must be injected exactly once on the first turn (B1); got: {recorded:?}"
+    );
+    assert_eq!(
+        recorded.matches("Always use Rust").count(),
+        1,
+        "TROGON.md body must appear exactly once on the first turn (B1); got: {recorded:?}"
+    );
 }
 
 /// TROGON.md content must NOT be injected on the second turn of a session.

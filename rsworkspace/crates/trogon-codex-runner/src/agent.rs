@@ -643,15 +643,15 @@ where
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("Prior conversation:\n{formatted}\n\n---\n\n{user_input}")
-        } else if first_turn {
-            match trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                Some(md) => format!("{md}\n\n{user_input}"),
-                None => user_input,
-            }
         } else {
             user_input
         };
 
+        // TROGON.md is injected exactly once per session. `prepend_trogon` is
+        // true on the first turn and on the first turn after a resume
+        // (pending_history), so this single block covers both cases. (Previously
+        // a separate `else if first_turn` branch above also injected it, which
+        // double-injected TROGON.md on the first turn — B1.)
         if prepend_trogon
             && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
         {
