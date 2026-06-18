@@ -84,15 +84,10 @@ pub async fn publish_push_delivery_failure<J>(
         notification: notification_body_json(notification_payload),
     };
 
-    let Ok(bytes_vec) = serde_json::to_vec(&body) else {
-        tracing::warn!(
-            subject = subject.as_str(),
-            task_id = %task_id,
-            push_config_id = config_id_str,
-            "failed to serialize push DLQ envelope; skipping publish"
-        );
-        return;
-    };
+    // PushDlqMessageV1 is plain Serialize — serde_json::to_vec never fails at
+    // runtime for it, so fall back to an empty body in the impossible error
+    // case instead of carrying a dead match arm forever.
+    let bytes_vec = serde_json::to_vec(&body).unwrap_or_default();
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/json");
@@ -108,20 +103,12 @@ pub async fn publish_push_delivery_failure<J>(
     {
         Ok(fut) => {
             if let Err(e) = fut.await {
-                tracing::warn!(
-                    subject = subject.as_str(),
-                    task_id = %task_id,
-                    error = %e,
-                    "JetStream ack failed for push DLQ publish"
-                );
+                tracing::warn!(%task_id, error = %e, "JetStream ack failed for push DLQ publish on {subject}");
             }
         }
-        Err(e) => tracing::warn!(
-            subject = subject.as_str(),
-            task_id = %task_id,
-            error = %e,
-            "failed to publish push DLQ message"
-        ),
+        Err(e) => {
+            tracing::warn!(%task_id, error = %e, "failed to publish push DLQ message on {subject}");
+        }
     }
 }
 
@@ -165,6 +152,42 @@ mod tests {
                 domain: String::new(),
                 value: None,
             })))
+        }
+    }
+
+    /// Publisher whose `publish_with_headers` returns an immediate transport error.
+    #[derive(Clone, Default)]
+    struct FailingPublisher;
+
+    impl JetStreamPublisher for FailingPublisher {
+        type PublishError = std::io::Error;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            _subject: S,
+            _headers: HeaderMap,
+            _payload: Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            Err(std::io::Error::other("transport down"))
+        }
+    }
+
+    /// Publisher whose publish succeeds but whose ack future resolves to an error.
+    #[derive(Clone, Default)]
+    struct AckFailingPublisher;
+
+    impl JetStreamPublisher for AckFailingPublisher {
+        type PublishError = std::io::Error;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            _subject: S,
+            _headers: HeaderMap,
+            _payload: Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            Ok(std::future::ready(Err(std::io::Error::other("ack timeout"))))
         }
     }
 
@@ -220,11 +243,8 @@ mod tests {
 
     #[test]
     fn notification_body_json_fallback_to_string_for_non_utfish() {
-        let payload = &[0xffu8, 0xfe];
-        match notification_body_json(payload) {
-            serde_json::Value::String(s) => assert!(s.contains('\u{fffd}')),
-            _ => panic!("expected string fallback"),
-        }
+        let value = notification_body_json(&[0xffu8, 0xfe]);
+        assert!(matches!(value, serde_json::Value::String(ref s) if s.contains('\u{fffd}')));
     }
 
     #[test]
@@ -360,5 +380,51 @@ mod tests {
             published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
             "3:dlq|6:task-1|6:failed|27:https://example.com/webhook"
         );
+    }
+
+    #[tokio::test]
+    async fn publish_path_swallows_transport_error_without_panicking() {
+        let js = FailingPublisher;
+        let dedup = PushDlqDedupGate::default();
+        let prefix = prefix();
+        let task_id = A2aTaskId::new("task-x").unwrap();
+        let config = sample_config();
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
+
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
+            &dedup,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn publish_path_swallows_ack_failure_without_panicking() {
+        let js = AckFailingPublisher;
+        let dedup = PushDlqDedupGate::default();
+        let prefix = prefix();
+        let task_id = A2aTaskId::new("task-y").unwrap();
+        let config = sample_config();
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
+
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
+            &dedup,
+        )
+        .await;
     }
 }
