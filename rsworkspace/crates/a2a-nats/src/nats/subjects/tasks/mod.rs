@@ -1,3 +1,5 @@
 //! Task-scoped subjects (`{prefix}.tasks.{task_id}.events.{seq}`).
-//!
-//! `TaskEventsSubject` lands with the `message/stream` per-operation PR.
+
+pub mod events;
+
+pub use events::TaskEventsSubject;
