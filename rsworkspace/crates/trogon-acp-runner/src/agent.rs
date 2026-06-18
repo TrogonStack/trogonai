@@ -47,17 +47,17 @@ pub struct GatewayConfig {
 }
 
 /// Returns the context window token limit for a given model ID.
+///
+/// Claude exposes a 1M-token window for Sonnet via the `[1m]` model-id suffix
+/// (the convention Claude Code uses); every other Claude model is the standard
+/// 200K window. Unknown models fall back to 200K so the usage meter degrades to
+/// a sane value rather than 0 (which would render a broken "/0" meter and risk a
+/// divide-by-zero downstream).
 fn context_window_tokens(model: &str) -> u64 {
-    let model = model.to_ascii_lowercase();
-    if model.contains("opus-4")
-        || model.contains("sonnet-4")
-        || model.contains("haiku")
-        || model.contains("claude-3")
-        || model.contains("claude-2")
-    {
-        200_000
+    if model.contains("[1m]") {
+        1_000_000
     } else {
-        0
+        200_000
     }
 }
 
@@ -276,6 +276,10 @@ pub struct TrogonAgent<
     /// `auto`-mode LLM safety classifier. `None` makes `auto` prompt for
     /// side-effecting tools instead of classifying them.
     classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
+    /// Auto-compaction trigger as a percentage of the session token budget.
+    /// Read once from `COMPACT_THRESHOLD_PCT` so the env override is honored on
+    /// the hot path (NEW-22), matching the compactor service's own default.
+    compact_threshold_pct: u8,
 }
 
 // Manual `Clone` so the spawn handler can hold a cheap, shared handle to the
@@ -301,6 +305,7 @@ impl<S: Clone, A, N: Clone, M: Clone> Clone for TrogonAgent<S, A, N, M> {
             registry: self.registry.clone(),
             execution_nats: self.execution_nats.clone(),
             classifier: self.classifier.clone(),
+            compact_threshold_pct: self.compact_threshold_pct,
         }
     }
 }
@@ -336,6 +341,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
             registry: None,
             execution_nats: None,
             classifier: None,
+            compact_threshold_pct: trogon_runner_tools::compaction_settings_from_env().1,
         }
     }
 }
@@ -361,6 +367,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             registry: self.registry,
             execution_nats: self.execution_nats,
             classifier: self.classifier,
+            compact_threshold_pct: self.compact_threshold_pct,
         }
     }
 
@@ -581,9 +588,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             vec![ContentBlock::from(prompt)],
         );
 
-        const SPAWN_SAFETY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
+        // Shared with the caller-side NATS request timeout in
+        // `spawn_agent_tool` so the two can't drift (NEW-23).
+        let spawn_safety_timeout = trogon_runner_tools::spawn_agent_tool::SPAWN_AGENT_SAFETY_TIMEOUT;
         let run = tokio::time::timeout(
-            SPAWN_SAFETY_TIMEOUT,
+            spawn_safety_timeout,
             self.run_prompt(&req, &client, None, None),
         )
         .await;
@@ -639,7 +648,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         match run {
             Err(_elapsed) => Err(format!(
                 "spawn_agent error: safety-net timeout after {}s",
-                SPAWN_SAFETY_TIMEOUT.as_secs()
+                spawn_safety_timeout.as_secs()
             )),
             Ok(Err(e)) => Err(format!("spawn_agent error: {e}")),
             Ok(Ok(_)) => Ok(format_result(if text.is_empty() {
@@ -710,10 +719,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        // Compact history when token estimate exceeds 85 % of the session budget.
+        // Compact history when token estimate exceeds the configured threshold
+        // (COMPACT_THRESHOLD_PCT, default 85%) of the session budget.
         // Degrades gracefully — if trogon-compactor is not running, continues unchanged.
         if let Some(ref nats) = self.compactor_nats
-            && estimate_token_count(&state.messages) > state.token_budget * 85 / 100
+            && estimate_token_count(&state.messages)
+                > state.token_budget * self.compact_threshold_pct as u64 / 100
         {
             let model = state
                 .model
@@ -2167,9 +2178,12 @@ mod tests {
     }
 
     #[test]
-    fn context_window_tokens_returns_unknown_for_unmapped_models() {
+    fn context_window_tokens_defaults_to_200k_and_honors_1m_suffix() {
         assert_eq!(context_window_tokens("claude-sonnet-4-6"), 200_000);
-        assert_eq!(context_window_tokens("some-future-model"), 0);
+        // Unknown models default to 200K (sane meter), never 0.
+        assert_eq!(context_window_tokens("some-future-model"), 200_000);
+        // The `[1m]` suffix selects the 1M-token window.
+        assert_eq!(context_window_tokens("claude-sonnet-4-6[1m]"), 1_000_000);
     }
 
     // ── build_compact_payload: wire contract ──────────────────────────────────

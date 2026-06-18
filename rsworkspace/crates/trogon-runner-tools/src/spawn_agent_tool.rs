@@ -7,7 +7,17 @@ use serde_json::Value;
 use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
 
-const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);
+/// Maximum wall-clock a spawned sub-agent may run before the in-process driver
+/// (the spawn responder) aborts it with a safety-net timeout. The responder
+/// (`trogon-acp-runner`) uses this directly so the two sides share one source of
+/// truth.
+pub const SPAWN_AGENT_SAFETY_TIMEOUT: Duration = Duration::from_secs(3600);
+
+/// Caller-side NATS request timeout. Derived to sit just beyond the responder's
+/// safety timeout so the responder's own timeout fires first and returns a clean
+/// error, rather than the caller abandoning a sub-agent that is still executing
+/// (NEW-23 — previously a hardcoded 120s while the responder ran for up to 1h).
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(SPAWN_AGENT_SAFETY_TIMEOUT.as_secs() + 30);
 
 /// Implements `spawn_agent` by sending a NATS request-reply to
 /// `{prefix}.spawn`. The dedicated spawn responder runs the sub-agent and
