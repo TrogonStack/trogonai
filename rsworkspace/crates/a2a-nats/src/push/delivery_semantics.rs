@@ -19,6 +19,9 @@ pub enum DeliverySemantics {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum DeliverySemanticsParseError {
     UnknownShape,
+    /// Both `atLeastOnce` and `exactlyOnce` keys present in the same object —
+    /// caller intent is ambiguous, refuse to silently pick one.
+    ConflictingShape,
     InvalidIdempotencyHeaderName(IdempotencyKeyHeaderError),
 }
 
@@ -28,6 +31,10 @@ impl std::fmt::Display for DeliverySemanticsParseError {
             Self::UnknownShape => write!(
                 f,
                 r#"expected "atLeastOnce", "exactlyOnce", {{ "atLeastOnce": ... }}, or {{ "exactlyOnce": ... }}"#
+            ),
+            Self::ConflictingShape => write!(
+                f,
+                r#"deliverySemantics object carries both "atLeastOnce" and "exactlyOnce" keys"#
             ),
             Self::InvalidIdempotencyHeaderName(inner) => std::fmt::Display::fmt(inner, f),
         }
@@ -80,14 +87,17 @@ pub fn parse_delivery_semantics_value(value: &Value) -> Result<DeliverySemantics
 fn parse_delivery_semantics_object(
     map: &serde_json::Map<String, Value>,
 ) -> Result<DeliverySemantics, DeliverySemanticsParseError> {
-    if map.contains_key("atLeastOnce") || map.contains_key("at_least_once") {
-        return Ok(DeliverySemantics::AtLeastOnce);
+    let has_at_least_once = map.contains_key("atLeastOnce") || map.contains_key("at_least_once");
+    let exactly = map.get("exactlyOnce").or_else(|| map.get("exactly_once"));
+
+    match (has_at_least_once, exactly) {
+        (true, Some(_)) => return Err(DeliverySemanticsParseError::ConflictingShape),
+        (true, None) => return Ok(DeliverySemantics::AtLeastOnce),
+        (false, None) => return Err(DeliverySemanticsParseError::UnknownShape),
+        (false, Some(_)) => {}
     }
 
-    let exactly = map
-        .get("exactlyOnce")
-        .or_else(|| map.get("exactly_once"))
-        .ok_or(DeliverySemanticsParseError::UnknownShape)?;
+    let exactly = exactly.ok_or(DeliverySemanticsParseError::UnknownShape)?;
 
     match exactly {
         Value::Null | Value::Bool(true) => Ok(DeliverySemantics::ExactlyOnce {
@@ -351,6 +361,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_object_with_both_at_least_once_and_exactly_once_is_conflicting() {
+        let err =
+            parse_delivery_semantics_value(&serde_json::json!({"atLeastOnce": {}, "exactlyOnce": null})).unwrap_err();
+        assert!(matches!(err, DeliverySemanticsParseError::ConflictingShape));
+    }
+
+    #[test]
+    fn parse_object_with_snake_case_both_keys_is_conflicting() {
+        let err = parse_delivery_semantics_value(&serde_json::json!({"at_least_once": null, "exactly_once": true}))
+            .unwrap_err();
+        assert!(matches!(err, DeliverySemanticsParseError::ConflictingShape));
+    }
+
+    #[test]
     fn upsert_at_least_once_removes_field() {
         let mut map = serde_json::Map::new();
         map.insert("deliverySemantics".into(), serde_json::json!({"existing": "x"}));
@@ -394,6 +418,10 @@ mod tests {
         let unknown = DeliverySemanticsParseError::UnknownShape;
         assert!(unknown.to_string().contains("atLeastOnce"));
         assert!(unknown.source().is_none());
+
+        let conflicting = DeliverySemanticsParseError::ConflictingShape;
+        assert!(conflicting.to_string().contains("both"));
+        assert!(conflicting.source().is_none());
 
         let invalid = DeliverySemanticsParseError::InvalidIdempotencyHeaderName(
             IdempotencyKeyHeader::try_from("not a valid header").unwrap_err(),

@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::fmt;
 
 use serde_json::Value;
 
@@ -7,25 +8,57 @@ use crate::push::push_idempotency_key::PushIdempotencyKey;
 
 pub const PUSH_IDEMPOTENCY_JSON_FIELD: &str = "_a2aPushIdempotencyKey";
 
+#[derive(Debug)]
+pub enum PushPayloadAugmentError {
+    /// Underlying payload bytes are not valid JSON.
+    Json(serde_json::Error),
+    /// Caller asked for an exactly-once idempotency key on a payload whose
+    /// top-level JSON value isn't an object — there's nowhere to attach the
+    /// key without rewriting the payload shape, so the dedup contract would
+    /// be silently lost on the wire.
+    NonObjectPayloadForIdempotencyKey,
+}
+
+impl fmt::Display for PushPayloadAugmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(e) => write!(f, "push payload is not valid JSON: {e}"),
+            Self::NonObjectPayloadForIdempotencyKey => write!(
+                f,
+                "exactly-once idempotency key requires a JSON object payload to attach the key field"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PushPayloadAugmentError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(e) => Some(e),
+            Self::NonObjectPayloadForIdempotencyKey => None,
+        }
+    }
+}
+
 pub fn augment_terminal_push_notification_bytes<'a>(
     base: &'a [u8],
     delivery_semantics: &DeliverySemantics,
     idempotency_key: Option<&PushIdempotencyKey>,
-) -> Result<Cow<'a, [u8]>, serde_json::Error> {
-    if delivery_semantics.idempotency_key_required() && idempotency_key.is_some() {
-        let mut v: Value = serde_json::from_slice(base)?;
-        if let Value::Object(ref mut map) = v
-            && let Some(k) = idempotency_key
-        {
-            map.insert(
-                PUSH_IDEMPOTENCY_JSON_FIELD.to_owned(),
-                Value::String(k.as_str().to_owned()),
-            );
-        }
-        Ok(Cow::Owned(serde_json::to_vec(&v)?))
-    } else {
-        Ok(Cow::Borrowed(base))
-    }
+) -> Result<Cow<'a, [u8]>, PushPayloadAugmentError> {
+    let (Some(key), true) = (idempotency_key, delivery_semantics.idempotency_key_required()) else {
+        return Ok(Cow::Borrowed(base));
+    };
+
+    let mut value: Value = serde_json::from_slice(base).map_err(PushPayloadAugmentError::Json)?;
+    let Value::Object(ref mut map) = value else {
+        return Err(PushPayloadAugmentError::NonObjectPayloadForIdempotencyKey);
+    };
+    map.insert(
+        PUSH_IDEMPOTENCY_JSON_FIELD.to_owned(),
+        Value::String(key.as_str().to_owned()),
+    );
+    let bytes = serde_json::to_vec(&value).map_err(PushPayloadAugmentError::Json)?;
+    Ok(Cow::Owned(bytes))
 }
 
 #[cfg(test)]
@@ -78,14 +111,17 @@ mod tests {
     }
 
     #[test]
-    fn non_object_base_passes_through_unchanged_under_required_semantics() {
+    fn non_object_base_rejected_when_idempotency_key_required() {
         let semantics = DeliverySemantics::ExactlyOnce {
             idempotency_key_header: None,
         };
-        let base = b"[1,2,3]";
-        let augmented = augment_terminal_push_notification_bytes(base, &semantics, Some(&key())).unwrap();
-        let parsed: Value = serde_json::from_slice(&augmented).unwrap();
-        assert!(parsed.is_array());
+        for base in [b"[1,2,3]".as_ref(), b"\"hi\"", b"42", b"null"] {
+            let err = augment_terminal_push_notification_bytes(base, &semantics, Some(&key())).unwrap_err();
+            assert!(matches!(
+                err,
+                PushPayloadAugmentError::NonObjectPayloadForIdempotencyKey
+            ));
+        }
     }
 
     #[test]
@@ -94,6 +130,20 @@ mod tests {
             idempotency_key_header: None,
         };
         let base = b"not json";
-        assert!(augment_terminal_push_notification_bytes(base, &semantics, Some(&key())).is_err());
+        let err = augment_terminal_push_notification_bytes(base, &semantics, Some(&key())).unwrap_err();
+        assert!(matches!(err, PushPayloadAugmentError::Json(_)));
+    }
+
+    #[test]
+    fn augment_error_display_and_source_covers_every_variant() {
+        use std::error::Error as _;
+        let non_object = PushPayloadAugmentError::NonObjectPayloadForIdempotencyKey;
+        assert!(non_object.to_string().contains("JSON object payload"));
+        assert!(non_object.source().is_none());
+
+        let json_err = serde_json::from_slice::<Value>(b"not json").unwrap_err();
+        let wrapped = PushPayloadAugmentError::Json(json_err);
+        assert!(wrapped.to_string().contains("not valid JSON"));
+        assert!(wrapped.source().is_some());
     }
 }
