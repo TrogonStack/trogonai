@@ -28,9 +28,11 @@ bytes = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 moka = { workspace = true, optional = true }
+reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
@@ -40,6 +42,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 time = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+wiremock = { workspace = true }
