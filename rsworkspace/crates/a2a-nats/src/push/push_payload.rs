@@ -17,6 +17,10 @@ pub enum PushPayloadAugmentError {
     /// key without rewriting the payload shape, so the dedup contract would
     /// be silently lost on the wire.
     NonObjectPayloadForIdempotencyKey,
+    /// Delivery semantics require an idempotency key (exactly-once) but the
+    /// caller didn't supply one — refusing to augment would silently downgrade
+    /// to at-least-once on the wire.
+    MissingIdempotencyKey,
 }
 
 impl fmt::Display for PushPayloadAugmentError {
@@ -27,6 +31,10 @@ impl fmt::Display for PushPayloadAugmentError {
                 f,
                 "exactly-once idempotency key requires a JSON object payload to attach the key field"
             ),
+            Self::MissingIdempotencyKey => write!(
+                f,
+                "exactly-once delivery semantics require an idempotency key but none was supplied"
+            ),
         }
     }
 }
@@ -35,7 +43,7 @@ impl std::error::Error for PushPayloadAugmentError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Json(e) => Some(e),
-            Self::NonObjectPayloadForIdempotencyKey => None,
+            Self::NonObjectPayloadForIdempotencyKey | Self::MissingIdempotencyKey => None,
         }
     }
 }
@@ -45,9 +53,13 @@ pub fn augment_terminal_push_notification_bytes<'a>(
     delivery_semantics: &DeliverySemantics,
     idempotency_key: Option<&PushIdempotencyKey>,
 ) -> Result<Cow<'a, [u8]>, PushPayloadAugmentError> {
-    let (Some(key), true) = (idempotency_key, delivery_semantics.idempotency_key_required()) else {
+    if !delivery_semantics.idempotency_key_required() {
+        // At-least-once: idempotency key is optional and the payload is shipped
+        // verbatim regardless of whether the caller passed one.
         return Ok(Cow::Borrowed(base));
-    };
+    }
+
+    let key = idempotency_key.ok_or(PushPayloadAugmentError::MissingIdempotencyKey)?;
 
     let mut value: Value = serde_json::from_slice(base).map_err(PushPayloadAugmentError::Json)?;
     let Value::Object(ref mut map) = value else {
@@ -86,11 +98,21 @@ mod tests {
     }
 
     #[test]
-    fn pass_through_when_no_idempotency_key_supplied() {
-        let semantics = DeliverySemantics::default();
+    fn pass_through_when_at_least_once_and_no_key_supplied() {
+        let semantics = DeliverySemantics::AtLeastOnce;
         let base = br#"{"hello":"world"}"#;
         let augmented = augment_terminal_push_notification_bytes(base, &semantics, None).unwrap();
         assert!(matches!(augmented, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn exactly_once_without_key_is_rejected_instead_of_silently_downgraded() {
+        let semantics = DeliverySemantics::ExactlyOnce {
+            idempotency_key_header: None,
+        };
+        let base = br#"{"hello":"world"}"#;
+        let err = augment_terminal_push_notification_bytes(base, &semantics, None).unwrap_err();
+        assert!(matches!(err, PushPayloadAugmentError::MissingIdempotencyKey));
     }
 
     #[test]
@@ -140,6 +162,10 @@ mod tests {
         let non_object = PushPayloadAugmentError::NonObjectPayloadForIdempotencyKey;
         assert!(non_object.to_string().contains("JSON object payload"));
         assert!(non_object.source().is_none());
+
+        let missing = PushPayloadAugmentError::MissingIdempotencyKey;
+        assert!(missing.to_string().contains("require an idempotency key"));
+        assert!(missing.source().is_none());
 
         let json_err = serde_json::from_slice::<Value>(b"not json").unwrap_err();
         let wrapped = PushPayloadAugmentError::Json(json_err);
