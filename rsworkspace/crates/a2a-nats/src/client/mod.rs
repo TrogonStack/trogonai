@@ -4,6 +4,7 @@
 //! their dedicated PRs so each operation's wire contract is reviewed on its own.
 
 pub mod error;
+pub mod event_stream;
 pub mod gateway_headers;
 pub mod handle;
 pub mod unary;
