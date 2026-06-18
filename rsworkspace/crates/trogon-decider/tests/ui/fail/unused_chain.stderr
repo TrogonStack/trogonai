@@ -1,0 +1,16 @@
+error: unused `TestCase` that must be used
+  --> tests/ui/fail/unused_chain.rs:10:5
+   |
+10 |     TestCase::<TestCommand>::new().given_no_history();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: test cases must be completed with .then(...) or .then_error(...)
+note: the lint level is defined here
+  --> tests/ui/fail/unused_chain.rs:1:9
+   |
+ 1 | #![deny(unused_must_use)]
+   |         ^^^^^^^^^^^^^^^
+help: use `let _ = ...` to ignore the resulting value
+   |
+10 |     let _ = TestCase::<TestCommand>::new().given_no_history();
+   |     +++++++

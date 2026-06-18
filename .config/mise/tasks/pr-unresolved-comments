@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+#MISE description="List unresolved PR review threads (auto-detects PR from current branch unless one is passed)"
+#
+# Usage:
+#   mise run pr-unresolved-comments              # uses PR for current branch
+#   mise run pr-unresolved-comments 308          # explicit PR number
+#   mise run pr-unresolved-comments --json 308   # raw JSON (for piping)
+#
+# Exits 0 with "no unresolved threads" if clean; exits 1 if any unresolved
+# threads remain so it can gate a follow-up step.
+set -euo pipefail
+
+JSON_OUT=0
+PR=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --json) JSON_OUT=1 ;;
+        -h|--help)
+            sed -n '2,12p' "$0"
+            exit 0
+            ;;
+        --*)
+            echo "FAIL: unknown flag '$arg' (expected --json, -h, or --help)" >&2
+            exit 2
+            ;;
+        *)
+            if [[ -n "$PR" ]]; then
+                echo "FAIL: multiple PR numbers given ('$PR' and '$arg'); pass exactly one" >&2
+                exit 2
+            fi
+            if [[ ! "$arg" =~ ^[0-9]+$ ]]; then
+                echo "FAIL: PR number must be a positive integer, got '$arg'" >&2
+                exit 2
+            fi
+            PR="$arg"
+            ;;
+    esac
+done
+
+if [[ -z "$PR" ]]; then
+    if ! PR="$(gh pr view --json number --jq .number 2>/dev/null)" || [[ -z "$PR" ]]; then
+        echo "FAIL: no PR detected for current branch; pass a PR number explicitly" >&2
+        exit 2
+    fi
+fi
+
+if ! REPO_NWO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"; then
+    echo "FAIL: unable to detect repository (check 'gh auth status' and current working directory)." >&2
+    exit 2
+fi
+OWNER="${REPO_NWO%/*}"
+NAME="${REPO_NWO#*/}"
+
+QUERY='
+query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 5) {
+            nodes { author { login } url body }
+          }
+        }
+      }
+    }
+  }
+}
+'
+
+# Paginate through every review thread page so PRs with >100 threads can't
+# silently hide unresolved comments past the first page.
+THREADS_JSON='[]'
+CURSOR=""
+while :; do
+    if [[ -z "$CURSOR" ]]; then
+        if ! PAGE="$(gh api graphql -f query="$QUERY" -F owner="$OWNER" -F name="$NAME" -F pr="$PR" 2>/dev/null)"; then
+            echo "FAIL: GitHub GraphQL request failed for PR #$PR — check 'gh auth status' / network / PR visibility." >&2
+            exit 2
+        fi
+    else
+        if ! PAGE="$(gh api graphql -f query="$QUERY" -F owner="$OWNER" -F name="$NAME" -F pr="$PR" -F cursor="$CURSOR" 2>/dev/null)"; then
+            echo "FAIL: GitHub GraphQL pagination failed for PR #$PR." >&2
+            exit 2
+        fi
+    fi
+    if [[ -z "$PAGE" ]] || ! jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1 <<<"$PAGE"; then
+        echo "FAIL: GitHub GraphQL returned no review-thread payload for PR #$PR — check 'gh auth status' and PR visibility." >&2
+        exit 2
+    fi
+    THREADS_JSON="$(jq -s '
+        (.[0] + (.[1].data.repository.pullRequest.reviewThreads.nodes | map(select(.isResolved == false))))
+    ' <(echo "$THREADS_JSON") <(echo "$PAGE"))"
+    HAS_NEXT="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<<"$PAGE")"
+    if [[ "$HAS_NEXT" != "true" ]]; then
+        break
+    fi
+    CURSOR="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<<"$PAGE")"
+done
+
+if [[ "$JSON_OUT" == 1 ]]; then
+    echo "$THREADS_JSON"
+    [[ "$THREADS_JSON" == "[]" ]] && exit 0 || exit 1
+fi
+
+if [[ "$THREADS_JSON" == "[]" || -z "$THREADS_JSON" ]]; then
+    echo "PR #$PR ($REPO_NWO): no unresolved review threads."
+    exit 0
+fi
+
+COUNT="$(echo "$THREADS_JSON" | jq 'length')"
+echo "PR #$PR ($REPO_NWO): $COUNT unresolved review thread(s)"
+echo
+
+echo "$THREADS_JSON" | jq -r '
+    to_entries[] |
+    "─── [\(.key + 1)] \(.value.path):\(.value.line)  (outdated=\(.value.isOutdated))",
+    (.value.comments.nodes[] |
+        "    @\(.author.login)  \(.url)",
+        (.body | split("\n") | map("      " + .) | join("\n")),
+        ""
+    )
+'
+
+echo
+echo "To resolve a thread once addressed:"
+echo "  gh api graphql -f query='mutation { resolveReviewThread(input: { threadId: \"<THREAD_ID>\" }) { thread { isResolved } } }'"
+echo "Thread IDs:"
+echo "$THREADS_JSON" | jq -r '.[] | "  \(.id)  \(.path):\(.line)"'
+
+exit 1

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Local only: cargo cov + path-scoped coverage gate vs main"
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+baseline="$root/tmp/_xml_coverage_reports/data/main/coverage.xml"
+
+if [[ ! -f "$baseline" ]]; then
+  echo "Fetching main coverage baseline from origin/_xml_coverage_reports..."
+  mkdir -p "$(dirname "$baseline")"
+  git -C "$root" fetch origin _xml_coverage_reports
+  git -C "$root" show origin/_xml_coverage_reports:data/main/coverage.xml >"$baseline"
+fi
+
+echo "Running Rust tests with coverage (cargo cov)..."
+(cd "$root/rsworkspace" && cargo cov --cobertura --output-path coverage.xml)
+
+echo ""
+cd "$root"
+exec mise run rust-coverage-gate

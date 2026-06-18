@@ -1,0 +1,44 @@
+[package]
+name = "trogon-scheduler"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
+base64 = { workspace = true }
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+bytes = { workspace = true }
+chrono = { version = "0.4" }
+chrono-tz = "0.10"
+cron = "0.15"
+futures = { workspace = true }
+opentelemetry = { workspace = true }
+rrule = "0.14"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+trogon-decider-runtime = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+trogonai-proto = { path = "../trogonai-proto", features = ["schedules"] }
+uuid = { workspace = true, features = ["v5"] }
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true }
+proptest = "1"
+testcontainers-modules = { version = "0.15", features = ["nats"] }
+time = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+trogon-decider = { path = "../trogon-decider", features = ["test-support"] }
+trogon-decider-nats = { path = "../trogon-decider-nats" }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

@@ -1,0 +1,41 @@
+[package]
+name = "trogon-std"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[features]
+test-support = []
+clap = ["dep:clap"]
+uuid = ["dep:uuid"]
+signal = ["dep:tokio", "dep:tracing"]
+telemetry-http = [
+    "dep:axum",
+    "dep:opentelemetry",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:tower-http",
+    "dep:tracing",
+    "dep:tracing-opentelemetry",
+]
+
+[dependencies]
+thiserror = { workspace = true }
+axum = { workspace = true, optional = true }
+bytesize = "2.3.1"
+clap = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, optional = true, features = ["macros", "signal"] }
+tower-http = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tower = { version = "0.5", features = ["util"] }

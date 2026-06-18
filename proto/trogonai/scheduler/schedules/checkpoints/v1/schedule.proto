@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.checkpoints.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "google/type/datetime.proto";
+
+// Schedule chooses exactly one scheduling strategy for a checkpointed definition.
+message Schedule {
+  oneof kind {
+    At at = 1;
+    Every every = 2;
+    Cron cron = 3;
+    RRule rrule = 4;
+  }
+
+  message At {
+    google.protobuf.Timestamp at = 1 [features.field_presence = LEGACY_REQUIRED];
+  }
+
+  message Every {
+    google.protobuf.Duration every = 1 [features.field_presence = LEGACY_REQUIRED];
+  }
+
+  message Cron {
+    string expr = 1 [features.field_presence = LEGACY_REQUIRED];
+    google.type.TimeZone timezone = 2 [features.field_presence = LEGACY_REQUIRED];
+  }
+
+  message RRule {
+    google.protobuf.Timestamp dtstart = 1 [features.field_presence = LEGACY_REQUIRED];
+    string rrule = 2 [features.field_presence = LEGACY_REQUIRED];
+    google.type.TimeZone timezone = 3 [features.field_presence = LEGACY_REQUIRED];
+    repeated google.protobuf.Timestamp rdate = 4;
+    repeated google.protobuf.Timestamp exdate = 5;
+  }
+}
