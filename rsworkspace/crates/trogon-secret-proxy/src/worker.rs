@@ -503,7 +503,6 @@ impl std::error::Error for WorkerError {}
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::pin::Pin;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -563,13 +562,17 @@ mod tests {
     ///
     /// Wrapped in `Arc` so it satisfies the `Clone` bound required by
     /// [`crate::traits::HttpClient`].
+    /// One queued streaming response: `(status, headers, chunks)` where each
+    /// chunk may itself be an `Err` to simulate a mid-stream failure.
+    type MockStreamResponse = Result<(u16, Vec<(String, String)>, Vec<Result<Vec<u8>, String>>), String>;
+
     #[derive(Clone)]
     struct MockHttpClient {
         responses: Arc<Mutex<VecDeque<Result<HttpResponse, String>>>>,
         /// Each entry is either a connection-level Err or a successful response
         /// whose chunk list may contain per-chunk Err items to simulate mid-stream
         /// failures.
-        streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Result<Vec<u8>, String>>), String>>>>,
+        streaming: Arc<Mutex<VecDeque<MockStreamResponse>>>,
     }
 
     impl MockHttpClient {
@@ -1271,27 +1274,19 @@ mod tests {
         impl VaultStoreTrait for ErrorVault {
             type Error = std::io::Error;
 
-            fn store(
-                &self,
-                _token: &VaultToken,
-                _plaintext: &str,
-            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-                async { Ok(()) }
+            async fn store(&self, _token: &VaultToken, _plaintext: &str) -> Result<(), Self::Error> {
+                Ok(())
             }
 
-            fn resolve(
+            async fn resolve(
                 &self,
                 _token: &VaultToken,
-            ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
-            {
-                async { Err(std::io::Error::other("vault backend unavailable")) }
+            ) -> Result<Option<String>, Self::Error> {
+                Err(std::io::Error::other("vault backend unavailable"))
             }
 
-            fn revoke(
-                &self,
-                _token: &VaultToken,
-            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-                async { Ok(()) }
+            async fn revoke(&self, _token: &VaultToken) -> Result<(), Self::Error> {
+                Ok(())
             }
         }
 
@@ -1648,27 +1643,19 @@ mod tests {
         impl VaultStoreTrait for ExactErrorVault {
             type Error = std::io::Error;
 
-            fn store(
-                &self,
-                _token: &VaultToken,
-                _plaintext: &str,
-            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-                async { Ok(()) }
+            async fn store(&self, _token: &VaultToken, _plaintext: &str) -> Result<(), Self::Error> {
+                Ok(())
             }
 
-            fn resolve(
+            async fn resolve(
                 &self,
                 _token: &VaultToken,
-            ) -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
-            {
-                async { Err(std::io::Error::other("simulated backend failure")) }
+            ) -> Result<Option<String>, Self::Error> {
+                Err(std::io::Error::other("simulated backend failure"))
             }
 
-            fn revoke(
-                &self,
-                _token: &VaultToken,
-            ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-                async { Ok(()) }
+            async fn revoke(&self, _token: &VaultToken) -> Result<(), Self::Error> {
+                Ok(())
             }
         }
 
@@ -2329,18 +2316,21 @@ mod tests {
         struct VaultWithPrevious;
         impl VaultStoreTrait for VaultWithPrevious {
             type Error = std::io::Error;
-            fn store(&self, _: &VaultToken, _: &str)
-                -> impl std::future::Future<Output = Result<(), Self::Error>> + Send
-            { async { Ok(()) } }
-            fn resolve(&self, _: &VaultToken)
-                -> impl std::future::Future<Output = Result<Option<String>, Self::Error>> + Send
-            { async { Ok(Some("sk-current".to_string())) } }
-            fn revoke(&self, _: &VaultToken)
-                -> impl std::future::Future<Output = Result<(), Self::Error>> + Send
-            { async { Ok(()) } }
-            fn resolve_with_previous(&self, _: &VaultToken)
-                -> impl std::future::Future<Output = Result<(Option<String>, Option<String>), Self::Error>> + Send
-            { async { Ok((Some("sk-current".to_string()), Some("sk-previous".to_string()))) } }
+            async fn store(&self, _: &VaultToken, _: &str) -> Result<(), Self::Error> {
+                Ok(())
+            }
+            async fn resolve(&self, _: &VaultToken) -> Result<Option<String>, Self::Error> {
+                Ok(Some("sk-current".to_string()))
+            }
+            async fn revoke(&self, _: &VaultToken) -> Result<(), Self::Error> {
+                Ok(())
+            }
+            async fn resolve_with_previous(
+                &self,
+                _: &VaultToken,
+            ) -> Result<(Option<String>, Option<String>), Self::Error> {
+                Ok((Some("sk-current".to_string()), Some("sk-previous".to_string())))
+            }
         }
 
         let vault = VaultWithPrevious;
