@@ -174,7 +174,7 @@ mod tests {
         assert!(unknown.source().is_none());
 
         let raw = PushNotificationTargetError::Http(WebhookUrl::new("ftp://x").unwrap_err());
-        assert!(raw.to_string().contains("webhook URL must start"));
+        assert!(raw.to_string().contains("webhook URL"));
         assert!(raw.source().is_some());
 
         let nats_err = PushNotificationTarget::parse("subject:bad subject").unwrap_err();

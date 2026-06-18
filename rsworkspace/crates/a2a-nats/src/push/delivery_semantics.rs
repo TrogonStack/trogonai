@@ -53,7 +53,10 @@ impl std::error::Error for DeliverySemanticsParseError {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExactlyOnceWire {
-    #[serde(default)]
+    // Accept both `idempotencyKeyHeader` and `idempotency_key_header` so callers
+    // that picked snake-case on the outer object (we accept `exactly_once` as
+    // well as `exactlyOnce`) can't lose the header through inner-shape drift.
+    #[serde(default, alias = "idempotency_key_header")]
     idempotency_key_header: Option<String>,
 }
 
@@ -365,6 +368,18 @@ mod tests {
         let err =
             parse_delivery_semantics_value(&serde_json::json!({"atLeastOnce": {}, "exactlyOnce": null})).unwrap_err();
         assert!(matches!(err, DeliverySemanticsParseError::ConflictingShape));
+    }
+
+    #[test]
+    fn parse_object_exactlyonce_inner_object_parses_snake_case_header() {
+        let parsed = parse_delivery_semantics_value(
+            &serde_json::json!({"exactlyOnce": {"idempotency_key_header": "X-Push-Key"}}),
+        )
+        .unwrap();
+        let expected = DeliverySemantics::ExactlyOnce {
+            idempotency_key_header: Some(IdempotencyKeyHeader::try_from("X-Push-Key").unwrap()),
+        };
+        assert_eq!(parsed, expected);
     }
 
     #[test]
