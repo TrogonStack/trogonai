@@ -7,6 +7,7 @@ use crate::server::handler::{A2aError, A2aExecutor};
 #[derive(Default)]
 pub struct StubHandler {
     pub agent_card_result: Option<Result<a2a::agent_card::AgentCard, A2aError>>,
+    pub message_send_result: Option<Result<a2a::types::SendMessageResponse, A2aError>>,
 }
 
 fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T, A2aError> {
@@ -21,6 +22,13 @@ impl A2aExecutor for std::sync::Mutex<StubHandler> {
         _req: a2a::types::GetExtendedAgentCardRequest,
     ) -> Result<a2a::agent_card::AgentCard, A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().agent_card_result)
+    }
+
+    async fn message_send(
+        &self,
+        _req: a2a::types::SendMessageRequest,
+    ) -> Result<a2a::types::SendMessageResponse, A2aError> {
+        take_or_unimplemented(&mut self.lock().unwrap().message_send_result)
     }
 }
 

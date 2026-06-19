@@ -5,6 +5,7 @@
 
 pub mod agent_card;
 pub mod handler;
+pub mod message_send;
 #[cfg(test)]
 pub mod test_support;
 pub mod wire;

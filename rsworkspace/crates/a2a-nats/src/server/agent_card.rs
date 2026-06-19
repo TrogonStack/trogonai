@@ -3,7 +3,7 @@ use tracing::{instrument, warn};
 
 use crate::jsonrpc::extract_request_id;
 use crate::server::handler::{A2aError, A2aExecutor};
-use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, is_notification, parse_request};
 
 #[instrument(name = "a2a.server.agent_card", skip(handler, payload, reply_subject, nats))]
 pub async fn handle<H, N>(handler: &H, payload: &[u8], reply_subject: Option<String>, nats: &N)
@@ -63,17 +63,6 @@ where
 
 fn parse_error() -> A2aError {
     A2aError::new(-32700, "Parse error")
-}
-
-/// True only when the payload is a parseable JSON object that omits the `id`
-/// key, matching JSON-RPC 2.0's definition of a notification. Anything else —
-/// non-JSON, non-object, or an `id` value the extractor couldn't decode — is a
-/// malformed request that still warrants an error reply.
-fn is_notification(payload: &[u8]) -> bool {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
-        return false;
-    };
-    matches!(value, serde_json::Value::Object(ref map) if !map.contains_key("id"))
 }
 
 #[cfg(test)]
