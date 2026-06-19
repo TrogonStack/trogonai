@@ -43,9 +43,9 @@ pub async fn handle<H, N, J>(
         return;
     }
 
-    let prepared = prepare_bootstrap(handler, payload).await;
-    let (task, mut events) = match prepared {
-        Ok(p) => p,
+    let prepared = prepare_bootstrap(handler, payload, &id).await;
+    let (task, mut events, req_id) = match prepared {
+        Ok(triple) => triple,
         Err(err) => {
             let bytes = JsonRpcErrorResponse::new(id, err.code, err.message).to_bytes();
             publish(nats, &reply, bytes, "message/stream error reply").await;
@@ -62,9 +62,6 @@ pub async fn handle<H, N, J>(
             return;
         }
     };
-    // Bridge PR threads the caller's req id from the gateway-ingress headers; until
-    // that landed, fall back to a freshly minted server-side id.
-    let req_id = ReqId::new();
 
     // The client deserializes message/stream's bootstrap reply as
     // `SendMessageResponse` (same shape as `message/send`), which wraps the
@@ -105,14 +102,29 @@ pub async fn handle<H, N, J>(
 async fn prepare_bootstrap<H: A2aExecutor>(
     handler: &H,
     payload: &[u8],
-) -> Result<(a2a::types::Task, crate::server::handler::TaskEventStream), A2aError> {
+    id: &Option<crate::jsonrpc::JsonRpcId>,
+) -> Result<(a2a::types::Task, crate::server::handler::TaskEventStream, ReqId), A2aError> {
     let envelope = parse_request::<serde_json::Value>(payload).map_err(|_| A2aError::new(-32700, "Parse error"))?;
+    // The client subscribes to `{prefix}.tasks.*.events.{req_id}` using the JSON-RPC
+    // `id` string it sent; we must publish on that exact suffix or the consumer's
+    // filter rejects every event. Validate before calling the handler so a bad id
+    // doesn't burn a stream construction we can't ever route.
+    let req_id = match id {
+        Some(crate::jsonrpc::JsonRpcId::String(s)) => ReqId::from_header(s.clone()),
+        _ => {
+            return Err(A2aError::new(
+                -32602,
+                "Invalid params: message/stream requires a string JSON-RPC id (client req_id)",
+            ));
+        }
+    };
     let raw = envelope
         .params
         .ok_or_else(|| A2aError::new(-32602, "Invalid params: missing params"))?;
     let req = serde_json::from_value::<a2a::types::SendMessageRequest>(raw)
         .map_err(|e| A2aError::new(-32602, format!("Invalid params: {e}")))?;
-    handler.message_stream(req).await
+    let (task, events) = handler.message_stream(req).await?;
+    Ok((task, events, req_id))
 }
 
 /// Publish `bytes` to `reply`. Returns `true` if the publish succeeded.
@@ -154,7 +166,23 @@ mod tests {
         A2aPrefix::new("a2a").unwrap()
     }
 
-    fn stream_payload(req_id: i64) -> Vec<u8> {
+    fn stream_payload(req_id: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": "message/stream",
+            "params": {
+                "message": {
+                    "messageId": "m-1",
+                    "role": "ROLE_USER",
+                    "parts": []
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn stream_payload_numeric_id(req_id: i64) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": req_id,
@@ -207,17 +235,45 @@ mod tests {
             Box::pin(stream::iter(vec![Ok(working_status_event("task-1"))]));
         handler.lock().unwrap().message_stream_result = Some(Ok((task("task-1"), events)));
 
-        handle(&handler, &stream_payload(1), Some("r".into()), &nats, &js, &prefix()).await;
+        handle(
+            &handler,
+            &stream_payload("call-1"),
+            Some("r".into()),
+            &nats,
+            &js,
+            &prefix(),
+        )
+        .await;
 
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(body["result"]["task"]["id"].as_str(), Some("task-1"));
         let subjects = js.published_subjects();
-        assert_eq!(subjects.len(), 1);
-        assert!(
-            subjects[0].starts_with("a2a.tasks.task-1.events."),
-            "unexpected subject {}",
-            subjects[0]
-        );
+        // The event subject MUST use the caller's JSON-RPC id as the suffix so it
+        // matches `stream_events_consumer`'s `{prefix}.tasks.*.events.{req_id}` filter
+        // on the client side; otherwise streamed events never reach the subscriber.
+        assert_eq!(subjects, vec!["a2a.tasks.task-1.events.call-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn numeric_jsonrpc_id_rejected_with_invalid_params() {
+        let nats = AdvancedMockNatsClient::new();
+        let js = MockJetStreamPublisher::new();
+        let handler = stub();
+        // Handler should not even be called; if it were, this would yield a panic on
+        // the unwrap-stub default. We just want to confirm the error reply shape.
+        handle(
+            &handler,
+            &stream_payload_numeric_id(42),
+            Some("r".into()),
+            &nats,
+            &js,
+            &prefix(),
+        )
+        .await;
+        let body = parse_response(&nats.published_payloads()[0]);
+        assert_eq!(body["error"]["code"], -32602);
+        assert_eq!(body["id"], 42);
+        assert!(js.published_subjects().is_empty());
     }
 
     #[tokio::test]
@@ -227,7 +283,15 @@ mod tests {
         let handler = stub();
         handler.lock().unwrap().message_stream_result = Some(Err(A2aError::agent_unavailable("down")));
 
-        handle(&handler, &stream_payload(2), Some("r".into()), &nats, &js, &prefix()).await;
+        handle(
+            &handler,
+            &stream_payload("call-2"),
+            Some("r".into()),
+            &nats,
+            &js,
+            &prefix(),
+        )
+        .await;
 
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(
@@ -242,7 +306,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let js = MockJetStreamPublisher::new();
         let handler = stub();
-        handle(&handler, &stream_payload(3), None, &nats, &js, &prefix()).await;
+        handle(&handler, &stream_payload("call-3"), None, &nats, &js, &prefix()).await;
         assert!(nats.published_messages().is_empty());
     }
 
@@ -331,7 +395,15 @@ mod tests {
         let events: crate::server::handler::TaskEventStream = Box::pin(stream::iter(vec![]));
         handler.lock().unwrap().message_stream_result = Some(Ok((task(""), events)));
 
-        handle(&handler, &stream_payload(8), Some("r".into()), &nats, &js, &prefix()).await;
+        handle(
+            &handler,
+            &stream_payload("call-8"),
+            Some("r".into()),
+            &nats,
+            &js,
+            &prefix(),
+        )
+        .await;
 
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(
