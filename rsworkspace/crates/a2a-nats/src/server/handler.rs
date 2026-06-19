@@ -114,6 +114,11 @@ pub trait A2aExecutor: Send + Sync + 'static {
         &self,
         request: a2a::types::SubscribeToTaskRequest,
     ) -> Result<a2a::types::Task, A2aError>;
+
+    async fn push_notification_set(
+        &self,
+        request: a2a::types::TaskPushNotificationConfig,
+    ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError>;
 }
 
 #[cfg(test)]
