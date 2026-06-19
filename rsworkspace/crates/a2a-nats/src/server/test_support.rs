@@ -9,6 +9,7 @@ pub struct StubHandler {
     pub agent_card_result: Option<Result<a2a::agent_card::AgentCard, A2aError>>,
     pub message_send_result: Option<Result<a2a::types::SendMessageResponse, A2aError>>,
     pub tasks_get_result: Option<Result<a2a::types::Task, A2aError>>,
+    pub tasks_list_result: Option<Result<a2a::types::ListTasksResponse, A2aError>>,
 }
 
 fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T, A2aError> {
@@ -34,6 +35,10 @@ impl A2aExecutor for std::sync::Mutex<StubHandler> {
 
     async fn tasks_get(&self, _req: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().tasks_get_result)
+    }
+
+    async fn tasks_list(&self, _req: a2a::types::ListTasksRequest) -> Result<a2a::types::ListTasksResponse, A2aError> {
+        take_or_unimplemented(&mut self.lock().unwrap().tasks_list_result)
     }
 }
 
