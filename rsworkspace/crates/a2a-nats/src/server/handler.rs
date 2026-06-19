@@ -83,6 +83,68 @@ impl A2aError {
     }
 }
 
+/// Handler trait implemented by agent authors.
+///
+/// Methods land per operation in their own PR so each operation's request/response
+/// contract is reviewed on its own. `#[async_trait]` is applied so handler objects can be
+/// stored as `Box<dyn A2aExecutor>` or referenced generically without hand-rolling the
+/// trait bounds.
+#[async_trait::async_trait]
+pub trait A2aExecutor: Send + Sync + 'static {
+    async fn agent_card(
+        &self,
+        request: a2a::types::GetExtendedAgentCardRequest,
+    ) -> Result<a2a::agent_card::AgentCard, A2aError>;
+
+    async fn message_send(
+        &self,
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<a2a::types::SendMessageResponse, A2aError>;
+
+    async fn tasks_get(&self, request: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError>;
+
+    async fn tasks_list(
+        &self,
+        request: a2a::types::ListTasksRequest,
+    ) -> Result<a2a::types::ListTasksResponse, A2aError>;
+
+    async fn tasks_cancel(&self, request: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError>;
+
+    async fn tasks_resubscribe(
+        &self,
+        request: a2a::types::SubscribeToTaskRequest,
+    ) -> Result<a2a::types::Task, A2aError>;
+
+    async fn push_notification_set(
+        &self,
+        request: a2a::types::TaskPushNotificationConfig,
+    ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError>;
+
+    async fn push_notification_get(
+        &self,
+        request: a2a::types::GetTaskPushNotificationConfigRequest,
+    ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError>;
+
+    async fn push_notification_list(
+        &self,
+        request: a2a::types::ListTaskPushNotificationConfigsRequest,
+    ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError>;
+
+    async fn push_notification_delete(
+        &self,
+        request: a2a::types::DeleteTaskPushNotificationConfigRequest,
+    ) -> Result<(), A2aError>;
+
+    /// Bootstrap a streaming task. Returns the initial task envelope (used as the
+    /// JSON-RPC bootstrap reply) and a stream of [`a2a::event::StreamResponse`] items;
+    /// the dispatch handler publishes each item on the JetStream task-events subject
+    /// until the task reaches a terminal state.
+    async fn message_stream(
+        &self,
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

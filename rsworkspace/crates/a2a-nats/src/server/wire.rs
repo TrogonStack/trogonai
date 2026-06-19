@@ -121,6 +121,18 @@ pub fn parse_request<P: serde::de::DeserializeOwned>(raw: &[u8]) -> Result<JsonR
     serde_json::from_slice(raw)
 }
 
+/// True only when the payload is a parseable JSON object that omits the `id`
+/// key, matching JSON-RPC 2.0's definition of a notification. Anything else —
+/// non-JSON, non-object, or an `id` value the extractor couldn't decode — is a
+/// malformed request that still warrants an error reply so request/reply
+/// clients don't hang.
+pub fn is_notification(payload: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return false;
+    };
+    matches!(value, serde_json::Value::Object(ref map) if !map.contains_key("id"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

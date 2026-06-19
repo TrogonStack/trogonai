@@ -50,6 +50,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
  "url",

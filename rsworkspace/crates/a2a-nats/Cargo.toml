@@ -47,4 +47,5 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 wiremock = { workspace = true }
