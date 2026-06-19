@@ -15,17 +15,20 @@ use a2a::types::{
 };
 use a2a_identity_types::MintedUserJwt;
 use trogon_nats::RequestClient;
+use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 use crate::constants::{DEFAULT_OPERATION_TIMEOUT, MIN_TIMEOUT_SECS};
 use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
 use crate::nats::subjects::agents::{
-    AgentCardSubject, MessageSendSubject, TasksCancelSubject, TasksGetSubject, TasksListSubject,
+    AgentCardSubject, MessageSendSubject, MessageStreamSubject, TasksCancelSubject, TasksGetSubject, TasksListSubject,
 };
 use crate::req_id::ReqId;
 
 use super::error::ClientError;
+use super::event_stream::TypedEventStream;
+use super::streaming::{StreamingRequest, send_streaming};
 use super::unary::send_unary;
 
 /// Whether `A2aClient` publishes to `{prefix}.agents.{agent_id}.…` (talking to the
@@ -195,6 +198,37 @@ where
             self.gateway_caller_jwt(),
         )
         .await
+    }
+}
+
+impl<N, J> A2aClient<N, J>
+where
+    N: RequestClient,
+    J: JetStreamGetStream,
+    JsMessageOf<J>: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
+    <J as JetStreamGetStream>::Stream: Send + 'static,
+    <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer: Send + 'static,
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages: Send + 'static,
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
+{
+    pub async fn message_stream(
+        &self,
+        req: &SendMessageRequest,
+    ) -> Result<(SendMessageResponse, TypedEventStream), ClientError> {
+        let subject = self.outbound_rpc_subject(MessageStreamSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let req_id = ReqId::new();
+        let ctx = StreamingRequest {
+            nats: &self.nats,
+            js: &self.js,
+            subject: subject.as_str(),
+            method: "message/stream",
+            req_id: &req_id,
+            prefix: self.prefix(),
+            op_timeout: self.operation_timeout(),
+            gateway_caller_jwt: self.gateway_caller_jwt(),
+        };
+        send_streaming(ctx, req).await
     }
 }
 
@@ -679,6 +713,91 @@ mod tests {
             let client = A2aClient::new(prefix(), agent_id(), nats, ());
             assert!(matches!(
                 client.tasks_cancel(&cancel_task_request("t")).await,
+                Err(ClientError::Transport(_))
+            ));
+        }
+    }
+
+    mod message_stream_op {
+        use a2a::types::{Message, Role, SendMessageRequest, SendMessageResponse, Task, TaskState, TaskStatus};
+        use bytes::Bytes;
+        use trogon_nats::AdvancedMockNatsClient;
+        use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
+
+        use super::*;
+
+        fn send_message_request() -> SendMessageRequest {
+            SendMessageRequest {
+                message: Message {
+                    message_id: "m-1".to_string(),
+                    role: Role::User,
+                    parts: vec![],
+                    context_id: None,
+                    task_id: None,
+                    reference_task_ids: None,
+                    extensions: None,
+                    metadata: None,
+                },
+                configuration: None,
+                metadata: None,
+                tenant: None,
+            }
+        }
+
+        fn bootstrap_response(task_id: &str) -> Bytes {
+            let task = Task {
+                id: task_id.to_string(),
+                context_id: String::new(),
+                status: TaskStatus {
+                    state: TaskState::Working,
+                    message: None,
+                    timestamp: None,
+                },
+                artifacts: None,
+                history: None,
+                metadata: None,
+            };
+            let response = SendMessageResponse::Task(task);
+            let json = serde_json::json!({"jsonrpc":"2.0","id":"any","result":response});
+            serde_json::to_vec(&json).unwrap().into()
+        }
+
+        #[tokio::test]
+        async fn message_stream_targets_agent_subject_by_default() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.agents.test-agent.message.stream", bootstrap_response("t-1"));
+            let js = MockJetStreamConsumerFactory::new();
+            let (consumer, _tx) = MockJetStreamConsumer::new();
+            js.add_consumer(consumer);
+            let client = A2aClient::new(prefix(), agent_id(), nats, js);
+            let (envelope, _stream) = client.message_stream(&send_message_request()).await.unwrap();
+            assert!(matches!(envelope, SendMessageResponse::Task(_)));
+        }
+
+        #[tokio::test]
+        async fn message_stream_targets_gateway_subject_under_gateway_routing() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.gateway.test-agent.message.stream", bootstrap_response("t-gw"));
+            let js = MockJetStreamConsumerFactory::new();
+            let (consumer, _tx) = MockJetStreamConsumer::new();
+            js.add_consumer(consumer);
+            let jwt =
+                MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
+            let client = A2aClient::new(prefix(), agent_id(), nats, js).routing_via_gateway_ingress(jwt);
+            let (envelope, _stream) = client.message_stream(&send_message_request()).await.unwrap();
+            assert!(matches!(envelope, SendMessageResponse::Task(_)));
+        }
+
+        #[tokio::test]
+        async fn message_stream_propagates_transport_errors() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.fail_next_request();
+            let js = MockJetStreamConsumerFactory::new();
+            let (consumer, _tx) = MockJetStreamConsumer::new();
+            js.add_consumer(consumer);
+            let client = A2aClient::new(prefix(), agent_id(), nats, js);
+            assert!(matches!(
+                client.message_stream(&send_message_request()).await,
                 Err(ClientError::Transport(_))
             ));
         }
