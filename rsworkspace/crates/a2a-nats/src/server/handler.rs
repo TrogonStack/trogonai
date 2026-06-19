@@ -83,6 +83,20 @@ impl A2aError {
     }
 }
 
+/// Handler trait implemented by agent authors.
+///
+/// Methods land per operation in their own PR so each operation's request/response
+/// contract is reviewed on its own. `#[async_trait]` is applied so handler objects can be
+/// stored as `Box<dyn A2aExecutor>` or referenced generically without hand-rolling the
+/// trait bounds.
+#[async_trait::async_trait]
+pub trait A2aExecutor: Send + Sync + 'static {
+    async fn agent_card(
+        &self,
+        request: a2a::types::GetExtendedAgentCardRequest,
+    ) -> Result<a2a::agent_card::AgentCard, A2aError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
