@@ -129,6 +129,11 @@ pub trait A2aExecutor: Send + Sync + 'static {
         &self,
         request: a2a::types::ListTaskPushNotificationConfigsRequest,
     ) -> Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError>;
+
+    async fn push_notification_delete(
+        &self,
+        request: a2a::types::DeleteTaskPushNotificationConfigRequest,
+    ) -> Result<(), A2aError>;
 }
 
 #[cfg(test)]
