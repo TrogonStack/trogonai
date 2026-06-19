@@ -1,0 +1,5 @@
+# git blame --ignore-revs-file .git-blame-ignore-revs
+# Configure once locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply rustfmt max_width=120 across workspace
+3dbdf1c3
