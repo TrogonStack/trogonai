@@ -29,13 +29,24 @@ where
 
     let result = match parse_request::<serde_json::Value>(payload) {
         Err(_) => Err(parse_error()),
-        Ok(envelope) => match envelope.params {
-            None => call_handler_and_validate(handler, a2a::types::GetExtendedAgentCardRequest { tenant: None }).await,
-            Some(raw) => match serde_json::from_value::<a2a::types::GetExtendedAgentCardRequest>(raw) {
-                Err(e) => Err(A2aError::new(-32602, format!("Invalid params: {e}"))),
-                Ok(params) => call_handler_and_validate(handler, params).await,
-            },
-        },
+        Ok(envelope) => {
+            let params = match envelope.params {
+                None => Ok(a2a::types::GetExtendedAgentCardRequest { tenant: None }),
+                Some(raw) => serde_json::from_value::<a2a::types::GetExtendedAgentCardRequest>(raw)
+                    .map_err(|e| A2aError::new(-32602, format!("Invalid params: {e}"))),
+            };
+            match params {
+                Err(e) => Err(e),
+                Ok(p) => match handler.agent_card(p).await {
+                    Ok(card) => match serde_json::to_value(&card) {
+                        Ok(v) if accept_agent_card_on_read(&v, AgentCardSource::AgentHandler) => Ok(card),
+                        Ok(_) => Err(A2aError::invalid_agent_response("AgentCard failed read validation")),
+                        Err(_) => Err(A2aError::internal("failed to serialize agent card for validation")),
+                    },
+                    Err(e) => Err(e),
+                },
+            }
+        }
     };
     let bytes = match result {
         Ok(resp) => JsonRpcResponse::new(id, resp).to_bytes(),
@@ -57,20 +68,6 @@ where
 
 fn parse_error() -> A2aError {
     A2aError::new(-32700, "Parse error")
-}
-
-async fn call_handler_and_validate<H: A2aExecutor>(
-    handler: &H,
-    params: a2a::types::GetExtendedAgentCardRequest,
-) -> Result<a2a::agent_card::AgentCard, A2aError> {
-    match handler.agent_card(params).await {
-        Ok(card) => match serde_json::to_value(&card) {
-            Ok(v) if accept_agent_card_on_read(&v, AgentCardSource::AgentHandler) => Ok(card),
-            Ok(_) => Err(A2aError::invalid_agent_response("AgentCard failed read validation")),
-            Err(_) => Err(A2aError::internal("failed to serialize agent card for validation")),
-        },
-        Err(e) => Err(e),
-    }
 }
 
 #[cfg(test)]
