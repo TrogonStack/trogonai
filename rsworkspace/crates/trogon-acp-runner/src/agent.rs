@@ -686,6 +686,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let agent: Arc<A> = {
             let needs_clone = state.model.is_some()
                 || !state.mcp_servers.is_empty()
+                || !state.openapi_servers.is_empty()
                 || needs_perm
                 || needs_elic
                 || gateway.is_some()
@@ -724,6 +725,31 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     };
                     if !mcp_defs.is_empty() {
                         a.add_mcp_tools(mcp_defs, mcp_dispatch);
+                    }
+                }
+                if !state.openapi_servers.is_empty() {
+                    let policy = state
+                        .egress_policy
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(EgressPolicy::default_safe);
+                    let (api_defs, api_dispatch) =
+                        trogon_runner_tools::build_session_openapi(&self.http, &state.openapi_servers, &policy).await;
+                    // OpenAPI operations dispatch through the same MCP path, so honor
+                    // the per-session tool allowlist exactly as MCP tools do.
+                    let (api_defs, api_dispatch): (Vec<_>, Vec<_>) = if state.tool_allowlist.is_empty() {
+                        (api_defs, api_dispatch)
+                    } else {
+                        api_defs
+                            .into_iter()
+                            .zip(api_dispatch)
+                            .filter(|(def, _)| {
+                                trogon_runner_tools::is_tool_in_allowlist(&state.tool_allowlist, &def.name)
+                            })
+                            .unzip()
+                    };
+                    if !api_defs.is_empty() {
+                        a.add_mcp_tools(api_defs, api_dispatch);
                     }
                 }
                 if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats)
@@ -1376,6 +1402,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|m| m.get("toolHooks"))
             .and_then(|v| serde_json::from_value::<trogon_runner_tools::HooksConfig>(v.clone()).ok())
             .unwrap_or_default();
+        // OpenAPI connections (Eve-style): each spec operation becomes a tool.
+        let openapi_servers = meta
+            .and_then(|m| m.get("openapiServers"))
+            .and_then(|v| serde_json::from_value::<Vec<trogon_runner_tools::StoredOpenApiServer>>(v.clone()).ok())
+            .unwrap_or_default();
         let mode = meta
             .and_then(|m| m.get("mode"))
             .and_then(|v| v.as_str())
@@ -1403,6 +1434,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             permission_rules_text,
             tool_hooks,
             mcp_servers,
+            openapi_servers,
             allowed_tools,
             tool_allowlist,
             env,
@@ -1442,6 +1474,16 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
         if !req.mcp_servers.is_empty() {
             state.mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
+            state.updated_at = now_iso8601();
+            needs_save = true;
+        }
+        if let Some(servers) = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("openapiServers"))
+            .and_then(|v| serde_json::from_value::<Vec<trogon_runner_tools::StoredOpenApiServer>>(v.clone()).ok())
+        {
+            state.openapi_servers = servers;
             state.updated_at = now_iso8601();
             needs_save = true;
         }

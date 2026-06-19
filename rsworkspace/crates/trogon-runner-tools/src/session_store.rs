@@ -134,6 +134,10 @@ pub struct SessionState {
     /// Per-session MCP server configurations (HTTP/SSE only).
     #[serde(default)]
     pub mcp_servers: Vec<StoredMcpServer>,
+    /// Per-session OpenAPI connections. Each spec operation becomes a callable
+    /// tool (`{name}__{operationId}`) dispatched through the MCP path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub openapi_servers: Vec<crate::openapi::StoredOpenApiServer>,
     /// Optional system prompt set at session creation via `_meta.systemPrompt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
@@ -263,6 +267,7 @@ impl Default for SessionState {
             updated_at: String::new(),
             title: String::new(),
             mcp_servers: Vec::new(),
+            openapi_servers: Vec::new(),
             system_prompt: None,
             system_prompt_override: None,
             additional_roots: Vec::new(),
