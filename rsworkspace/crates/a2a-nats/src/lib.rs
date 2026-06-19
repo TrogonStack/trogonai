@@ -11,6 +11,7 @@ pub mod agent_id;
 pub mod audit;
 pub mod catalog;
 pub mod client;
+pub mod config;
 pub mod constants;
 pub mod context_id;
 pub mod error;
@@ -25,6 +26,7 @@ pub mod task_id;
 
 pub use a2a_prefix::{A2aPrefix, A2aPrefixError};
 pub use agent_id::{A2aAgentId, AgentIdError};
+pub use config::{Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use context_id::{A2aContextId, ContextIdError};
 pub use error::{AGENT_UNAVAILABLE, TASK_NOT_CANCELABLE, TASK_NOT_FOUND};
 pub use gateway_ingress::{
@@ -37,3 +39,4 @@ pub use gateway_ingress::{
 pub use jsonrpc::{JsonRpcId, extract_request_id};
 pub use req_id::ReqId;
 pub use task_id::{A2aTaskId, TaskIdError};
+pub use trogon_nats::NatsConfig;
