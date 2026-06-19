@@ -425,7 +425,7 @@ pub async fn request_reviewers(
 /// Prefix each line of a unified-diff `patch` field with its 1-based position
 /// number so the LLM can pass those numbers directly to `post_pr_review`.
 ///
-/// ```
+/// ```text
 /// 1  @@ -10,6 +10,8 @@
 /// 2   fn existing_line() {
 /// 3  +    let x = dangerous_call();

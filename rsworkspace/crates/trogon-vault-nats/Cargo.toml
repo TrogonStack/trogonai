@@ -2,6 +2,7 @@
 name = "trogon-vault-nats"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
 
 [dependencies]
 aes-gcm      = "0.10"

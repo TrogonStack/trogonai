@@ -2,6 +2,7 @@
 name = "trogon-wasm-runtime"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 description = "ACP execution runtime backed by wasmtime — sandboxed terminals and filesystem per session"
 
 [lib]
