@@ -102,6 +102,11 @@ pub trait A2aExecutor: Send + Sync + 'static {
     ) -> Result<a2a::types::SendMessageResponse, A2aError>;
 
     async fn tasks_get(&self, request: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError>;
+
+    async fn tasks_list(
+        &self,
+        request: a2a::types::ListTasksRequest,
+    ) -> Result<a2a::types::ListTasksResponse, A2aError>;
 }
 
 #[cfg(test)]
