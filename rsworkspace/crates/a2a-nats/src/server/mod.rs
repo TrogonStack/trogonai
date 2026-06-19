@@ -6,6 +6,7 @@
 pub mod agent_card;
 pub mod handler;
 pub mod message_send;
+pub mod push_get;
 pub mod push_set;
 pub mod tasks_cancel;
 pub mod tasks_get;
