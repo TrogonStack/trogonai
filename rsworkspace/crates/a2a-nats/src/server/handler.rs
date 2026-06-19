@@ -100,6 +100,8 @@ pub trait A2aExecutor: Send + Sync + 'static {
         &self,
         request: a2a::types::SendMessageRequest,
     ) -> Result<a2a::types::SendMessageResponse, A2aError>;
+
+    async fn tasks_get(&self, request: a2a::types::GetTaskRequest) -> Result<a2a::types::Task, A2aError>;
 }
 
 #[cfg(test)]
