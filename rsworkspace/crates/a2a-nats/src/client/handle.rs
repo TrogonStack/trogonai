@@ -11,7 +11,8 @@ use std::time::Duration;
 use a2a::agent_card::AgentCard;
 use a2a::types::{
     CancelTaskRequest, GetExtendedAgentCardRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
-    ListTasksRequest, ListTasksResponse, SendMessageRequest, SendMessageResponse, SubscribeToTaskRequest, Task,
+    ListTaskPushNotificationConfigsRequest, ListTaskPushNotificationConfigsResponse, ListTasksRequest,
+    ListTasksResponse, SendMessageRequest, SendMessageResponse, SubscribeToTaskRequest, Task,
     TaskPushNotificationConfig,
 };
 use a2a_identity_types::MintedUserJwt;
@@ -23,8 +24,8 @@ use crate::agent_id::A2aAgentId;
 use crate::constants::{DEFAULT_OPERATION_TIMEOUT, MIN_TIMEOUT_SECS};
 use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
 use crate::nats::subjects::agents::{
-    AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushGetSubject, PushSetSubject, TasksCancelSubject,
-    TasksGetSubject, TasksListSubject, TasksResubscribeSubject,
+    AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushGetSubject, PushListSubject, PushSetSubject,
+    TasksCancelSubject, TasksGetSubject, TasksListSubject, TasksResubscribeSubject,
 };
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
@@ -180,6 +181,24 @@ where
             &self.nats,
             &subject,
             "message/send",
+            req,
+            &req_id,
+            self.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
+    }
+
+    pub async fn push_list(
+        &self,
+        req: &ListTaskPushNotificationConfigsRequest,
+    ) -> Result<ListTaskPushNotificationConfigsResponse, ClientError> {
+        let subject = self.outbound_rpc_subject(PushListSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let req_id = ReqId::new();
+        send_unary(
+            &self.nats,
+            &subject,
+            "tasks/pushNotificationConfig/list",
             req,
             &req_id,
             self.operation_timeout(),
@@ -1102,6 +1121,81 @@ mod tests {
             let client = A2aClient::new(prefix(), agent_id(), nats, ());
             assert!(matches!(
                 client.push_get(&get_request("c")).await,
+                Err(ClientError::Transport(_))
+            ));
+        }
+    }
+
+    mod push_list_op {
+        use a2a::types::{ListTaskPushNotificationConfigsRequest, ListTaskPushNotificationConfigsResponse};
+        use bytes::Bytes;
+        use trogon_nats::AdvancedMockNatsClient;
+
+        use super::*;
+
+        fn list_request() -> ListTaskPushNotificationConfigsRequest {
+            ListTaskPushNotificationConfigsRequest {
+                task_id: "task-1".to_string(),
+                page_size: None,
+                page_token: None,
+                tenant: None,
+            }
+        }
+
+        fn list_response() -> Bytes {
+            let response = ListTaskPushNotificationConfigsResponse {
+                configs: vec![],
+                next_page_token: None,
+            };
+            let json = serde_json::json!({"jsonrpc":"2.0","id":"any","result":response});
+            serde_json::to_vec(&json).unwrap().into()
+        }
+
+        fn error_response(code: i32, msg: &str) -> Bytes {
+            let json = serde_json::json!({"jsonrpc":"2.0","id":"any","error":{"code":code,"message":msg}});
+            serde_json::to_vec(&json).unwrap().into()
+        }
+
+        #[tokio::test]
+        async fn push_list_targets_agent_subject_by_default() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.agents.test-agent.push.list", list_response());
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            let resp = client.push_list(&list_request()).await.unwrap();
+            assert!(resp.configs.is_empty());
+        }
+
+        #[tokio::test]
+        async fn push_list_targets_gateway_subject_under_gateway_routing() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.gateway.test-agent.push.list", list_response());
+            let jwt =
+                MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
+            let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
+            client.push_list(&list_request()).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn push_list_propagates_typed_jsonrpc_errors() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response(
+                "a2a.agents.test-agent.push.list",
+                error_response(-32003, "not supported"),
+            );
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            assert!(matches!(
+                client.push_list(&list_request()).await,
+                Err(ClientError::PushNotificationNotSupported)
+            ));
+        }
+
+        #[tokio::test]
+        async fn push_list_propagates_transport_errors() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.fail_next_request();
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            assert!(matches!(
+                client.push_list(&list_request()).await,
                 Err(ClientError::Transport(_))
             ));
         }
