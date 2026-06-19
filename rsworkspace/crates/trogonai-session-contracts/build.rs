@@ -10,6 +10,7 @@ fn main() {
         )
         .files(&[
             session_v1.join("common.proto"),
+            session_v1.join("migration.proto"),
             session_v1.join("artifact_metadata.proto"),
             session_v1.join("context_twin.proto"),
             session_v1.join("capability_schema.proto"),

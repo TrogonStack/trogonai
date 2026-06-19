@@ -153,6 +153,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 warn!(error = %e, "xai: failed to open SESSIONS KV bucket — session persistence disabled");
             }
         }
+
+        // Fase 4 (§1875): provision the canonical shadow recorder. Off by default (gated
+        // by the kernel feature flags); when enabled, each completed turn is mirrored into
+        // the Session Kernel event log/snapshot in parallel with the KV snapshot above.
+        if let Some(shadow) = trogon_xai_runner::provision_kernel_shadow(&js).await {
+            agent = agent.with_kernel_shadow(shadow);
+        }
     }
 
     {

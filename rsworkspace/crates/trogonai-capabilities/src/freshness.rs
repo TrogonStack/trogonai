@@ -28,11 +28,7 @@ pub fn apply_freshness_policy(
     (degraded, status, true)
 }
 
-fn evaluate_freshness(
-    schema: &CapabilitySchema,
-    now: OffsetDateTime,
-    config: &CapabilityConfig,
-) -> FreshnessStatus {
+fn evaluate_freshness(schema: &CapabilitySchema, now: OffsetDateTime, config: &CapabilityConfig) -> FreshnessStatus {
     let source = schema.source.as_known();
     if matches!(source, Some(CapabilitySource::Unspecified) | None) {
         return FreshnessStatus::Unverified;
@@ -45,7 +41,7 @@ fn evaluate_freshness(
     let ttl = if schema.ttl_seconds > 0 {
         schema.ttl_seconds
     } else {
-        config.default_ttl.as_secs()
+        config.default_ttl_secs
     };
 
     let Some(verified_at) = schema.last_verified_at.as_option() else {

@@ -898,7 +898,24 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 // (structured content blocks, complete tool input/output, and — Fase 5 —
                 // large outputs / images as artifact refs) and records it as canonical
                 // truth (§11 Transcript no-lossy; § No-Lossy Contract).
-                sink.sync(&session_id, &merged.messages, &merged.cwd).await;
+                let todos: Vec<trogonai_session_contracts::TodoItem> = merged
+                    .todos
+                    .iter()
+                    .map(|todo| trogonai_session_contracts::TodoItem {
+                        id: todo.id.clone(),
+                        content: todo.content.clone(),
+                        status: todo.status.clone(),
+                        ..Default::default()
+                    })
+                    .collect();
+                sink.sync(
+                    &session_id,
+                    &merged.messages,
+                    &merged.cwd,
+                    merged.terminal_cwd.as_deref(),
+                    &todos,
+                )
+                .await;
             }
         }
 

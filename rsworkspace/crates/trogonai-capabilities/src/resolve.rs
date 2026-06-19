@@ -43,10 +43,8 @@ pub async fn resolve_model_capabilities<S: RegistryStore>(
             }
             schema
         }
-        None => crate::seed::known_model_schema(model_id, now).ok_or_else(|| {
-            CapabilityError::ModelNotFound {
-                model_id: model_id.to_string(),
-            }
+        None => crate::seed::known_model_schema(model_id, now).ok_or_else(|| CapabilityError::ModelNotFound {
+            model_id: model_id.to_string(),
         })?,
     };
 

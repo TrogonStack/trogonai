@@ -11,14 +11,14 @@ use bytes::Bytes;
 use trogon_tools::{ContentBlock as ToolContentBlock, ImageSource, Message};
 use trogonai_artifacts::{
     ArtifactEventContext, ArtifactStore, FetchLimits, ImageFetcher, StoreArtifactRequest, UrlImageOutcome,
-    record_external_ref_image, resolve_url_image, store_and_emit_artifact_created,
+    record_external_ref_image, resolve_url_image, run_session_maintenance, store_and_emit_artifact_created,
 };
 use trogonai_session_contracts::__buffa::oneof::content_block::Kind as BlockKind;
 use trogonai_session_contracts::__buffa::oneof::tool_call_result::Kind as ToolResultKind;
 use trogonai_session_contracts::{
     Actor, ActorType, CanonicalMessage, CanonicalToolCall, ContentBlock, CorrelationId, EventId, IdempotencyKey,
-    OperationId, SessionConfig, SessionId, TextToolResult, ToolCallResult, ToolCallStatus, ToolResultBlock,
-    ToolUseBlock,
+    OperationId, SessionConfig, SessionId, TerminalContinuity, TextToolResult, TodoItem, ToolCallResult,
+    ToolCallStatus, ToolResultBlock, ToolUseBlock,
 };
 use trogonai_session_kernel::{
     EventLogBackend, SessionKernel, SessionKernelError, SessionLeaseFactory, SessionMutatingOperation,
@@ -443,7 +443,18 @@ pub trait ConversationSink: Send + Sync {
     /// and (Fase 5) large outputs / images persisted as artifact refs — and records it
     /// into the canonical log, so nothing is summarized as canonical truth (§11
     /// Transcript no-lossy; § No-Lossy Contract: summaries belong only in projections).
-    async fn sync(&self, session_id: &str, messages: &[Message], cwd: &str);
+    ///
+    /// `terminal_cwd` is the runner's tracked terminal working directory (post-`cd`), if
+    /// any, captured as terminal continuity (§ Terminal and Process Policy). `todos` is the
+    /// session's current todo list, captured as `todo_updated` when it changes.
+    async fn sync(
+        &self,
+        session_id: &str,
+        messages: &[Message],
+        cwd: &str,
+        terminal_cwd: Option<&str>,
+        todos: &[TodoItem],
+    );
 }
 
 /// Kernel-backed sink: records each turn's authoritative messages into the canonical
@@ -456,15 +467,20 @@ pub struct KernelConversationSink<E, S, L, Os, F> {
     fetcher: F,
     artifacts_enabled: bool,
     inline_limit: usize,
+    maintenance_enabled: bool,
+    event_archive_retention_days: u64,
 }
 
 impl<E, S, L, Os, F> KernelConversationSink<E, S, L, Os, F> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         kernel: SessionKernel<E, S, L>,
         store: ArtifactStore<Os>,
         fetcher: F,
         artifacts_enabled: bool,
         inline_limit: usize,
+        maintenance_enabled: bool,
+        event_archive_retention_days: u64,
     ) -> Self {
         Self {
             kernel,
@@ -472,6 +488,8 @@ impl<E, S, L, Os, F> KernelConversationSink<E, S, L, Os, F> {
             fetcher,
             artifacts_enabled,
             inline_limit,
+            maintenance_enabled,
+            event_archive_retention_days,
         }
     }
 }
@@ -491,13 +509,21 @@ where
     L: SessionLeaseFactory + Clone + Send + Sync + 'static,
     Os: trogon_nats::jetstream::ObjectStorePut
         + trogon_nats::jetstream::ObjectStoreGet
+        + trogon_nats::jetstream::ObjectStoreDelete
         + Clone
         + Send
         + Sync
         + 'static,
     F: ImageFetcher + Send + Sync,
 {
-    async fn sync(&self, session_id: &str, messages: &[Message], cwd: &str) {
+    async fn sync(
+        &self,
+        session_id: &str,
+        messages: &[Message],
+        cwd: &str,
+        terminal_cwd: Option<&str>,
+        todos: &[TodoItem],
+    ) {
         let Ok(sid) = SessionId::new(session_id) else {
             return;
         };
@@ -566,11 +592,147 @@ where
             tracing::warn!(session_id, error = %err, "kernel conversation sink: tool-call sync failed");
         }
 
+        // § Terminal and Process Policy: capture the runner's terminal continuity into the
+        // canonical record so terminal_cwd survives a switch. Only terminal_cwd is tracked
+        // by the runner today; dirty files / running-process / last-commands summaries
+        // require runtime instrumentation not yet available. Best-effort, non-fatal.
+        if let Err(err) = self
+            .kernel
+            .record_terminal_continuity(
+                &sid,
+                TerminalContinuity {
+                    terminal_cwd: terminal_cwd.unwrap_or(cwd).to_string(),
+                    ..TerminalContinuity::default()
+                },
+                &format!("op_term_{}", uuid::Uuid::new_v4()),
+                shadow_actor(),
+                buffa_types::google::protobuf::Timestamp::default(),
+            )
+            .await
+        {
+            tracing::warn!(session_id, error = %err, "kernel conversation sink: terminal continuity capture failed");
+        }
+
+        // § event `todo_updated`: capture the session's todo list when it changed since the
+        // last snapshot (the payload is a full-list snapshot, so this records on change, not
+        // per todo). Best-effort, non-fatal.
+        if !todos.is_empty() {
+            let canonical_todos = self
+                .kernel
+                .materialize_state(&sid)
+                .await
+                .ok()
+                .and_then(|snapshot| snapshot.state.into_option())
+                .map(|state| state.todos)
+                .unwrap_or_default();
+            if canonical_todos.as_slice() != todos
+                && let Err(err) = self
+                    .kernel
+                    .record_todos(
+                        &sid,
+                        todos.to_vec(),
+                        &format!("op_todo_{}", uuid::Uuid::new_v4()),
+                        shadow_actor(),
+                        buffa_types::google::protobuf::Timestamp::default(),
+                    )
+                    .await
+            {
+                tracing::warn!(session_id, error = %err, "kernel conversation sink: todo capture failed");
+            }
+        }
+
+        // § Event Log Compaction and Retention: when enabled, run one best-effort
+        // retention pass under the held lease (archive past the retention cutoff + GC
+        // unreferenced ephemeral artifacts). Failures are logged and never block the turn.
+        if self.maintenance_enabled {
+            self.run_maintenance_pass(&sid).await;
+        }
+
         // Release the lease explicitly so the next turn's sync is not blocked until
         // TTL (Session Lease flow). Non-fatal: TTL still cleans up on failure.
         if let Err(err) = self.kernel.release_session_lease_renewing(guard, renewal).await {
             tracing::warn!(session_id, error = %err, "kernel conversation sink: lease release failed");
         }
+    }
+}
+
+impl<E, S, L, Os, F> KernelConversationSink<E, S, L, Os, F>
+where
+    E: EventLogBackend,
+    S: trogon_nats::jetstream::JetStreamKvGet
+        + trogon_nats::jetstream::JetStreamKvEntry
+        + trogon_nats::jetstream::JetStreamKvCreate
+        + trogon_nats::jetstream::JetStreamKeyValueUpdate
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    L: SessionLeaseFactory + Clone + Send + Sync + 'static,
+    Os: trogon_nats::jetstream::ObjectStoreDelete + Clone + Send + Sync + 'static,
+{
+    /// One best-effort Event Log Compaction & Retention pass for `sid`, run under the
+    /// held lease. Materializes the current snapshot, archives events past the retention
+    /// cutoff, and GCs unreferenced ephemeral artifacts (§ Event Log Compaction and
+    /// Retention). Errors are logged, never propagated.
+    async fn run_maintenance_pass(&self, sid: &SessionId) {
+        let now = now_timestamp();
+        let context = artifact_context();
+        // § Event Log Compaction and Retention rule order (§1347): take a periodic snapshot
+        // checkpoint FIRST (emits `snapshot_created` as the retention audit trail); it
+        // returns the freshly materialized snapshot, reused for the archive + GC pass.
+        let snapshot = match self
+            .kernel
+            .checkpoint_snapshot(sid, context.operation_id.as_str(), context.actor.clone(), now.clone())
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                tracing::warn!(session_id = sid.as_str(), error = %err, "kernel maintenance: snapshot checkpoint failed");
+                return;
+            }
+        };
+        let Some(state) = snapshot.state.as_option() else {
+            return;
+        };
+        let cutoff = retention_cutoff(&now, self.event_archive_retention_days);
+        match run_session_maintenance(&self.kernel, &self.store, sid, state, cutoff, now, &context).await {
+            Ok(report) => {
+                if report.archived_count > 0 || !report.gc_deleted.is_empty() {
+                    tracing::info!(
+                        session_id = sid.as_str(),
+                        archived = report.archived_count,
+                        gc_deleted = report.gc_deleted.len(),
+                        "kernel maintenance: retention pass applied"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(session_id = sid.as_str(), error = %err, "kernel maintenance: retention pass failed");
+            }
+        }
+    }
+}
+
+/// Current wall-clock time as a protobuf timestamp.
+fn now_timestamp() -> buffa_types::google::protobuf::Timestamp {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    buffa_types::google::protobuf::Timestamp {
+        seconds: elapsed.as_secs() as i64,
+        nanos: elapsed.subsec_nanos() as i32,
+        ..Default::default()
+    }
+}
+
+/// The oldest timestamp to keep unarchived: `now - retention_days`.
+fn retention_cutoff(
+    now: &buffa_types::google::protobuf::Timestamp,
+    retention_days: u64,
+) -> buffa_types::google::protobuf::Timestamp {
+    buffa_types::google::protobuf::Timestamp {
+        seconds: now.seconds - (retention_days as i64).saturating_mul(86_400),
+        ..Default::default()
     }
 }
 
@@ -586,7 +748,14 @@ mod tests {
 
     #[async_trait]
     impl ConversationSink for RecordingSink {
-        async fn sync(&self, session_id: &str, messages: &[Message], _cwd: &str) {
+        async fn sync(
+            &self,
+            session_id: &str,
+            messages: &[Message],
+            _cwd: &str,
+            _terminal_cwd: Option<&str>,
+            _todos: &[TodoItem],
+        ) {
             self.calls
                 .lock()
                 .unwrap()
@@ -601,7 +770,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![],
         }];
-        sink.sync("sess_1", &messages, "/repo").await;
+        sink.sync("sess_1", &messages, "/repo", None, &[]).await;
         let calls = sink.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "sess_1");

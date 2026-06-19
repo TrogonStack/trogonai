@@ -43,6 +43,7 @@ pub fn evaluate_switch_safety(input: &SwitchSafetyInput<'_>) -> SwitchSafetyDeci
     evaluate_artifacts(input, &mut reasons, &mut blocked);
     evaluate_external_ref_artifacts(input, &mut reasons, &mut needs_confirmation);
     evaluate_nonportable_runtime(input.session, &mut reasons, &mut blocked, &mut needs_confirmation);
+    evaluate_dirty_state(input.session, &mut reasons, &mut needs_confirmation);
     evaluate_context_twin_freshness(input, &mut reasons, &mut needs_confirmation);
     evaluate_adaptation_plan(input, &mut reasons, &mut blocked, &mut needs_confirmation);
     evaluate_indispensable_capabilities(input, &mut reasons, &mut blocked, &mut needs_confirmation);
@@ -211,6 +212,31 @@ fn evaluate_nonportable_runtime(
         reasons.push(reason(
             "destructive_operation_pending",
             "destructive operation still running".to_string(),
+        ));
+    }
+}
+
+/// § Terminal and Process Policy (§1161): "si hay dirty state no persistido, bloquear
+/// hasta guardar artifact/ref o confirmar degradacion". Uncommitted/dirty files captured
+/// in the session's terminal continuity must require explicit confirmation before the
+/// switch proceeds, so unpersisted work is never silently carried across a model change.
+fn evaluate_dirty_state(
+    session: &SessionSnapshotState,
+    reasons: &mut Vec<SwitchSafetyReason>,
+    needs_confirmation: &mut bool,
+) {
+    let Some(terminal) = session.terminal.as_option() else {
+        return;
+    };
+    if !terminal.dirty_files.is_empty() {
+        *needs_confirmation = true;
+        reasons.push(reason(
+            "dirty_state_unpersisted",
+            format!(
+                "{} uncommitted file(s) in the terminal are not persisted: {}",
+                terminal.dirty_files.len(),
+                terminal.dirty_files.join(", ")
+            ),
         ));
     }
 }
@@ -799,6 +825,30 @@ mod tests {
                 .iter()
                 .any(|reason| reason.kind == "compactor_model_degraded"),
             "explicit compactor_model degradation must be recorded as a gate reason"
+        );
+        assert_eq!(
+            decision.status.as_known(),
+            Some(SwitchSafetyStatus::RequiresUserConfirmation)
+        );
+    }
+
+    #[test]
+    fn dirty_state_requires_confirmation() {
+        // § Terminal and Process Policy (§1161): unpersisted dirty files in the captured
+        // terminal continuity must require explicit confirmation before the switch.
+        let mut session = clean_session();
+        session.terminal = MessageField::some(trogonai_session_contracts::TerminalContinuity {
+            terminal_cwd: "/repo".to_string(),
+            dirty_files: vec!["src/lib.rs".to_string()],
+            ..trogonai_session_contracts::TerminalContinuity::default()
+        });
+        let caps = target_capabilities(true);
+        let config = SwitchingConfig::default();
+        let certification = certified_matrix();
+        let decision = evaluate_switch_safety(&safety_input(&session, &caps, None, &config, &certification));
+        assert!(
+            decision.reasons.iter().any(|reason| reason.kind == "dirty_state_unpersisted"),
+            "dirty terminal state must be recorded as a gate reason"
         );
         assert_eq!(
             decision.status.as_known(),

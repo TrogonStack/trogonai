@@ -238,9 +238,32 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let resumed = resume.is_some();
     let mut session = if let Some(entry) = resume {
         prefix = entry.prefix.clone();
-        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd).await {
+        // Fase 11: if the session is event-log-primary, reconstruct it from the kernel
+        // event log and hydrate a fresh runner session, instead of loading the runner's
+        // own (possibly stale) state. Returns None in the default legacy mode, so the
+        // common path is unchanged.
+        let event_primary_id = match switcher
+            .resume_event_primary(&prefix, &entry.session_id, &cwd.to_string_lossy())
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("warning: kernel-primary resume failed ({e}) — falling back to runner load");
+                None
+            }
+        };
+        let resume_id = event_primary_id.as_deref().unwrap_or(&entry.session_id);
+        match activate_session(&factory, &mut mcp_manager, &prefix, resume_id, &cwd).await {
             Ok(s) => {
-                eprintln!("resumed session {} on {prefix}", s.session_id());
+                if event_primary_id.is_some() {
+                    eprintln!(
+                        "resumed session {} from event log on {prefix} (kernel-primary runner session {})",
+                        entry.session_id,
+                        s.session_id()
+                    );
+                } else {
+                    eprintln!("resumed session {} on {prefix}", s.session_id());
+                }
                 s
             }
             Err(e) => {
@@ -259,6 +282,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         if resumed && let Err(e) = sup.rebind(&prefix, session.session_id()).await {
             eprintln!("warning: permission client rebind failed: {e}");
         }
+    }
+
+    // Fase 11: mark a freshly created session's routing record so it is event-log-primary
+    // per the configured mode (no-op when the kernel is inactive — the default). This is
+    // what `resume_event_primary` reads to decide whether to reconstruct from the event log.
+    if !resumed && let Err(e) = switcher.mark_session_event_primary(session.session_id()).await {
+        eprintln!("warning: could not mark session routing record: {e}");
     }
 
     let history_path = expand_tilde(HISTORY_PATH);
@@ -399,6 +429,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     session.session_id(),
                                     &session.current_model(),
                                 );
+                                // Fase 11: mark the freshly cleared session's routing record
+                                // (no-op when the kernel is inactive).
+                                if let Err(e) = switcher.mark_session_event_primary(session.session_id()).await {
+                                    eprintln!("warning: could not mark session routing record: {e}");
+                                }
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
                             Err(e) => eprintln!(
@@ -501,6 +536,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             .or_else(|| std::env::var("TROGON_NATS_URL").ok())
                             .unwrap_or_else(|| "nats://localhost:4222".to_string());
                         crate::doctor::print_checks(&url).await;
+                    } else if cmd == "/probe" {
+                        // § Capability Registry Freshness: run the contract-test battery
+                        // against the current model/runner and certify it from the verified
+                        // results (promotes out of the unverified `Basic` baseline). Requires
+                        // the session kernel to be enabled.
+                        let model_id = session.current_model();
+                        let cwd_str = cwd
+                            .canonicalize()
+                            .unwrap_or_else(|_| cwd.clone())
+                            .to_string_lossy()
+                            .into_owned();
+                        println!("Probing capabilities of {model_id} on {prefix} …");
+                        match switcher.certify_model(&prefix, &model_id, &cwd_str).await {
+                            Ok(level) => println!("Certified {model_id} → {level}"),
+                            Err(e) => eprintln!("probe failed: {e}"),
+                        }
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = resolve_model_alias(arg.trim());
                         let cwd_str = cwd
@@ -508,8 +559,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             .unwrap_or_else(|_| cwd.clone())
                             .to_string_lossy()
                             .into_owned();
-                        match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, &cwd_str)
-                            .await
+                        // The from_model for the visible result; captured before the switch
+                        // replaces the active session.
+                        let current_model = session.current_model();
+                        match apply_model_switch(
+                            &mut switcher,
+                            &prefix,
+                            session.session_id(),
+                            &current_model,
+                            &model_id,
+                            &cwd_str,
+                        )
+                        .await
                         {
                             Ok(outcome) => {
                                 if outcome.same_runner {
@@ -569,7 +630,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     }
                                     match session.set_model(&model_id).await {
                                         Ok(()) => {
-                                            println!("Switched to {model_id}");
+                                            render_switch_visible(&outcome.visible);
                                             persist_session_index(
                                                 &fs,
                                                 &project_dir,
@@ -1088,6 +1149,9 @@ pub(crate) struct ModelSwitchOutcome {
     pub same_runner: bool,
     pub new_prefix: String,
     pub new_session_id: String,
+    /// The single durable visible switch result (§ Contrato de resultado visible del
+    /// switch). The REPL renders THIS so it never shows false continuity (§2084/§2289).
+    pub visible: trogonai_session_contracts::SwitchVisibleResult,
 }
 
 pub fn resolve_model_alias(input: &str) -> String {
@@ -1116,17 +1180,82 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     switcher: &mut SW,
     current_prefix: &str,
     current_session_id: &str,
+    current_model: &str,
     model_id: &str,
     cwd: &str,
 ) -> Result<ModelSwitchOutcome, String> {
-    let (new_prefix, new_session_id) = switcher
-        .switch_model(current_prefix, current_session_id, model_id, cwd)
+    let surface = switcher
+        .switch_model(current_prefix, current_session_id, current_model, model_id, cwd)
         .await?;
     Ok(ModelSwitchOutcome {
-        same_runner: new_prefix == current_prefix,
-        new_prefix,
-        new_session_id,
+        same_runner: surface.new_prefix == current_prefix,
+        new_prefix: surface.new_prefix,
+        new_session_id: surface.new_session_id,
+        visible: surface.visible,
     })
+}
+
+/// Render the visible switch result for the CLI (§ Contrato de resultado visible del
+/// switch, §2072-2079). A clean canonical `switched` prints a plain confirmation; a
+/// `degraded`/handoff, `repaired` or any fallback is shown explicitly so the user never
+/// reads a switch as more complete than it was (§2289: a visible `switched` cannot hide a
+/// handoff, a pending checkpoint or an unacknowledged degradation).
+pub(crate) fn render_switch_visible(visible: &trogonai_session_contracts::SwitchVisibleResult) {
+    use trogonai_session_contracts::SwitchResult;
+    let to = &visible.to_model;
+    match visible.result.as_known() {
+        Some(SwitchResult::Switched) => println!("Switched to {to}"),
+        Some(SwitchResult::Repaired) => {
+            println!("Switched to {to} — context repaired before continuing");
+        }
+        Some(SwitchResult::Degraded) => {
+            if visible.fallback_used {
+                println!("Switched to {to} via handoff (canonical session state not migrated)");
+            } else {
+                println!("Switched to {to} — with degradations");
+            }
+        }
+        other => {
+            // blocked / requires_confirmation / rolled_back / failed_* — surfaced verbatim
+            // so the user sees exactly what happened rather than a false "Switched".
+            let label = other
+                .map(switch_result_label_cli)
+                .unwrap_or("unknown");
+            println!("Model switch: {label}");
+        }
+    }
+    for degradation in &visible.degradations {
+        println!("  ⚠ {degradation}");
+    }
+    if !visible.lost_capabilities.is_empty() {
+        println!("  ⚠ lost capabilities: {}", visible.lost_capabilities.join(", "));
+    }
+    if let Some(checkpoint) = visible.checkpoint.as_option()
+        && checkpoint.required
+    {
+        println!("  continuity checkpoint: {}", checkpoint.status);
+    }
+    if let Some(reason) = &visible.fallback_reason {
+        println!("  fallback reason: {reason}");
+    }
+    if let Some(next) = &visible.next_action {
+        println!("  next: {next}");
+    }
+}
+
+fn switch_result_label_cli(result: trogonai_session_contracts::SwitchResult) -> &'static str {
+    use trogonai_session_contracts::SwitchResult;
+    match result {
+        SwitchResult::Unspecified => "unspecified",
+        SwitchResult::Switched => "switched",
+        SwitchResult::Blocked => "blocked",
+        SwitchResult::RequiresConfirmation => "requires confirmation",
+        SwitchResult::Degraded => "degraded",
+        SwitchResult::Repaired => "repaired",
+        SwitchResult::RolledBack => "rolled back",
+        SwitchResult::FailedRecoverable => "failed (recoverable)",
+        SwitchResult::FailedTerminal => "failed (terminal)",
+    }
 }
 
 pub fn handle_slash_command<F: Fs>(
@@ -1146,6 +1275,7 @@ pub fn handle_slash_command<F: Fs>(
 Commands:
   {m}/help{r}               show this help
   {m}/doctor{r}             run health checks (same as `trogon doctor`)
+  {m}/probe{r}              probe + certify the current model's capabilities
   {m}/status{r}             prefix, model, tokens, registered runners
   {m}/cost{r}               show token usage for this session
   {m}/clear{r}              start a new session (clears conversation history)
@@ -2457,7 +2587,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_same_runner_sets_same_runner_flag() {
         let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
-        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-sonnet-4-6", "claude-opus-4-7", "/ws")
             .await
             .unwrap();
         assert!(outcome.same_runner);
@@ -2468,7 +2598,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_cross_runner_returns_new_prefix_and_session() {
         let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "new-sess-99");
-        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "claude-sonnet-4-6", "grok-3", "/ws")
             .await
             .unwrap();
         assert!(!outcome.same_runner);
@@ -2479,7 +2609,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_error_propagates() {
         let mut switcher = MockRunnerSwitcher::error("no runner found for model: unknown");
-        let err = apply_model_switch(&mut switcher, "acp", "sess-1", "unknown", "/ws")
+        let err = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-sonnet-4-6", "unknown", "/ws")
             .await
             .unwrap_err();
         assert!(err.contains("no runner found for model: unknown"), "got: {err}");
@@ -2488,7 +2618,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_cross_runner_different_from_current_prefix() {
         let mut switcher = MockRunnerSwitcher::cross_runner("acp.openrouter", "s-42");
-        let outcome = apply_model_switch(&mut switcher, "acp", "s-old", "gpt-4o", "/workspace")
+        let outcome = apply_model_switch(&mut switcher, "acp", "s-old", "claude-sonnet-4-6", "gpt-4o", "/workspace")
             .await
             .unwrap();
         assert!(!outcome.same_runner, "cross-runner must not be same_runner");
@@ -2735,7 +2865,7 @@ mod tests {
         let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "xai-sess-99");
         let factory = MockSessionFactory::new("default");
 
-        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "claude-sonnet-4-6", "grok-3", "/ws")
             .await
             .unwrap();
 
@@ -2754,7 +2884,7 @@ mod tests {
         let session = std::sync::Arc::new(MockSession::new("sess-1"));
         let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
 
-        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-sonnet-4-6", "claude-opus-4-7", "/ws")
             .await
             .unwrap();
 

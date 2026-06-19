@@ -1,17 +1,21 @@
 //! Session Kernel: leases, append-only event log, snapshot materialization, and recovery.
 
+pub mod audit;
 pub mod config;
 pub mod error;
 pub mod event_log;
 pub mod features;
+pub mod inspector;
 pub mod kernel;
 pub mod lease;
 pub mod materialize;
 pub mod migration;
+pub mod migration_store;
 pub mod nats;
 pub mod policies;
 pub mod promotion;
 pub mod recovery;
+pub mod rollout;
 pub mod snapshot;
 pub mod state;
 pub mod telemetry;
@@ -33,11 +37,14 @@ pub use migration::{
     conversation_from_legacy_export, resolve_event_log_primary, shadow_sync_from_conversation, shadow_sync_from_export,
     snapshot_from_legacy_export,
 };
+pub use migration_store::MigrationStore;
+pub use nats::SessionKernelNamespacePlan;
 pub use policies::{
-    ContinuitySloPolicy, NatsOperationalPolicy, OperationalProductPolicy, RolloutPromotionPolicy,
-    SessionErrorUxState, SessionKernelOperationalPolicy,
+    ContinuitySloPolicy, NatsOperationalPolicy, OperationalProductPolicy, RolloutPromotionPolicy, SessionErrorUxState,
+    SessionKernelOperationalPolicy,
 };
 pub use promotion::{PromotionBlockReason, PromotionReadiness, evaluate_promotion_readiness};
+pub use rollout::{RolloutDecision, RolloutEnforcementOutcome, RolloutMetrics, enforce_rollout};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use lease::{MockSessionLease, MockSessionLeaseFactory};

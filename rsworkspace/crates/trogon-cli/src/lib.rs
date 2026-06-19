@@ -1,4 +1,7 @@
 pub mod app;
+pub mod cancellation;
+pub mod capability_probe;
+pub mod checkpoint_transport;
 pub mod client_supervisor;
 pub mod doctor;
 pub mod env_local;
@@ -27,7 +30,7 @@ pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_k
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;
-pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher};
+pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher, SwitchSurface};
 
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};

@@ -218,7 +218,38 @@ async fn main() -> anyhow::Result<()> {
     let registry_relay = registry.clone();
     let base_config_relay = base_config.clone();
     let embedded_prefix_relay = embedded_prefix.clone();
-    let acp_agent = multi_runner::MultiRunnerAgent::new(
+
+    let kernel_flags = trogonai_session_kernel::SessionKernelFeatureFlags::default();
+    let kernel_policies = trogonai_session_kernel::SessionKernelOperationalPolicy::default();
+    let kernel_stack = if kernel_flags.session_kernel_enabled || kernel_flags.event_log_shadow_mode {
+        match trogon_cli::session_kernel::SessionKernelStack::provision(
+            nats.clone(),
+            kernel_flags.clone(),
+            kernel_policies,
+        )
+        .await
+        {
+            Ok(stack) => Some(stack),
+            Err(err) if kernel_flags.session_kernel_enabled => {
+                return Err(anyhow::anyhow!("session kernel provisioning failed: {err}"));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "session kernel shadow provisioning failed — continuing without shadow sync"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let canonical_switcher = kernel_stack.map(|stack| {
+        trogon_cli::CrossRunnerSwitcher::new(nats.clone(), base_config.clone(), registry.clone())
+            .with_kernel_stack(stack)
+    });
+
+    let mut acp_agent = multi_runner::MultiRunnerAgent::new(
         acp_agent_inner,
         store.clone(), // for post_prompt_sync_kv (Gap 2)
         nats.clone(),
@@ -229,6 +260,9 @@ async fn main() -> anyhow::Result<()> {
         notification_tx.clone(),
         embedded_prefix,
     );
+    if let Some(switcher) = canonical_switcher {
+        acp_agent = acp_agent.with_canonical_switcher(switcher);
+    }
     let id_remap = acp_agent.id_remap_handle();
 
     // ── ACP connection over stdio ─────────────────────────────────────────────

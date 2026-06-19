@@ -19,4 +19,13 @@ pub enum CapabilityError {
 
     #[error("invalid certification matrix entry: {detail}")]
     InvalidCertification { detail: String },
+
+    #[error("failed to load certification matrix: {0}")]
+    CertificationLoad(String),
+
+    #[error("failed to store certification matrix: {0}")]
+    CertificationStore(String),
+
+    #[error("failed to decode certification matrix: {0}")]
+    CertificationDecode(String),
 }

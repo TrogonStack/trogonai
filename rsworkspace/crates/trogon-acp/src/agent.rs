@@ -1103,6 +1103,7 @@ where
             model: src_state.model.clone(),
             compactor_provider: src_state.compactor_provider.clone(),
             compactor_model: src_state.compactor_model.clone(),
+            needs_compactor_migration: src_state.needs_compactor_migration,
             mode: src_state.mode.clone(),
             cwd,
             created_at: now_iso8601(),

@@ -38,13 +38,7 @@ fn adaptation_plan_created_counter() -> &'static Counter<u64> {
     })
 }
 
-pub fn record_capability_resolved(
-    model_id: &str,
-    runner_id: &str,
-    freshness: &str,
-    degraded: bool,
-    confidence: f64,
-) {
+pub fn record_capability_resolved(model_id: &str, runner_id: &str, freshness: &str, degraded: bool, confidence: f64) {
     capability_resolved_counter().add(
         1,
         &[

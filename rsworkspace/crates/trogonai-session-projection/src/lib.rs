@@ -3,6 +3,7 @@
 pub mod compiler;
 pub mod config;
 pub mod context_twin;
+pub mod diff;
 pub mod error;
 pub mod event;
 pub mod input;
@@ -16,6 +17,7 @@ pub mod update_context;
 pub use compiler::{DefaultPromptCompiler, PromptCompiler};
 pub use config::ProjectionConfig;
 pub use context_twin::derive_context_twin;
+pub use diff::{ProjectionBlockDelta, ProjectionDiff, diff_projections};
 pub use error::ProjectionError;
 pub use input::ProjectionInput;
 pub use kernel::update_context_twin;

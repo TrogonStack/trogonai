@@ -7,9 +7,9 @@ use trogonai_capabilities::{
     CapabilityConfig, ProviderCertificationMatrix, create_switch_adaptation_plan, resolve_model_capabilities,
 };
 use trogonai_session_contracts::{
-    __buffa::oneof::content_block::Kind as BlockKind, Actor, ActorType, CanonicalMessage, ContentBlock,
-    ContinuityCheckpointStatus, ModelSwitchReason, PromptProjection, SessionId, SessionSnapshot,
-    SessionSnapshotState, SwitchResult, SwitchSafetyDecision, SwitchSafetyStatus,
+    __buffa::oneof::content_block::Kind as BlockKind, Actor, ActorType, CanonicalMessage, CapabilityAdaptationAction,
+    ContentBlock, ContinuityCheckpointStatus, ModelSwitchReason, PromptProjection, SessionId, SessionSnapshot,
+    SessionSnapshotState, SwitchAdaptation, SwitchAdaptationPlan, SwitchResult, SwitchSafetyDecision, SwitchSafetyStatus,
 };
 use trogonai_session_kernel::{
     EventLogBackend, SessionKernel, SessionLeaseFactory, SessionMutatingOperation, SnapshotStore,
@@ -19,7 +19,9 @@ use trogonai_session_projection::{
     PromptCompiler, update_context_twin,
 };
 
-use crate::checkpoint::{RunnerAcknowledgement, requires_continuity_checkpoint, run_continuity_checkpoint};
+use crate::checkpoint::{
+    RunnerAcknowledgement, is_high_risk_switch, requires_continuity_checkpoint, run_continuity_checkpoint,
+};
 use crate::config::SwitchingConfig;
 use crate::error::SwitchingError;
 use crate::event::{
@@ -96,6 +98,7 @@ pub fn classify_switch_result(
         }
         Ok(Err(SwitchGateOutcome::Blocked(_))) => SwitchResult::Blocked,
         Ok(Err(SwitchGateOutcome::ConfirmationRequired(_))) => SwitchResult::RequiresConfirmation,
+        Err(SwitchingError::SwitchRolledBack { .. }) => SwitchResult::RolledBack,
         Err(err) if switch_error_is_terminal(err) => SwitchResult::FailedTerminal,
         Err(_) => SwitchResult::FailedRecoverable,
     }
@@ -126,6 +129,30 @@ fn switch_error_is_terminal(err: &SwitchingError) -> bool {
                 trogonai_session_kernel::SessionKernelError::ContractValidation(_)
             )
     )
+}
+
+/// §598-604 / §1897 self-healing: the repair adaptation plan used to RECOMPILE the
+/// projection with more context when a continuity checkpoint comes back `Repaired`. It
+/// forces the Context-Twin-plus-recent-turns projection (the §478 `context_window`
+/// adaptation) so the destination model receives the session state prominently instead of
+/// the borderline projection that triggered the repair. Pure + deterministic.
+fn context_twin_repair_plan(base: &SwitchAdaptationPlan) -> SwitchAdaptationPlan {
+    let mut plan = base.clone();
+    let repair_action = EnumValue::Known(CapabilityAdaptationAction::UseContextTwinPlusRecentTurns);
+    if let Some(existing) = plan.adaptations.iter_mut().find(|a| a.capability == "context_window") {
+        existing.action = repair_action;
+    } else {
+        plan.adaptations.push(SwitchAdaptation {
+            capability: "context_window".to_string(),
+            action: repair_action,
+            ..SwitchAdaptation::default()
+        });
+    }
+    let repair_warning = "context repaired: recompiled with Context Twin + recent turns".to_string();
+    if !plan.warnings.contains(&repair_warning) {
+        plan.warnings.push(repair_warning);
+    }
+    plan
 }
 
 /// Orchestrates the 22-step canonical model switch flow.
@@ -364,6 +391,16 @@ where
             events_appended += 1;
             session_state.switch_safety = MessageField::some(safety.clone());
 
+            // § Continuity Metrics and Evals (§1165): a degraded-but-allowed switch is a
+            // continuity signal worth measuring.
+            if safety.status.as_known() == Some(SwitchSafetyStatus::AllowedWithWarning) {
+                telemetry::metrics::record_switch_allowed_with_warning(
+                    request.session_id.as_str(),
+                    request.operation_id.as_str(),
+                    &request.target_model,
+                );
+            }
+
             if request.force {
                 self.kernel
                     .append_event(force_switch_requested_event(&flow, &request.force_acknowledged_losses))
@@ -464,13 +501,22 @@ where
                 &request.target_model,
                 capability_snapshot_id,
             )
-            .await?;
+            .await
+            .inspect_err(|_err| {
+                // § Continuity Metrics and Evals (§1165): a failed runner attach is a
+                // switch-failure signal.
+                telemetry::metrics::record_runner_attach_failure(
+                    request.session_id.as_str(),
+                    &target_runner,
+                    &request.target_model,
+                );
+            })?;
             self.kernel.append_event(attach_event).await?;
             events_appended += 1;
             switch_state = switch_state.transition_to(SwitchState::RunnerAttached)?;
             session_state.active_runner_binding = MessageField::some(binding);
 
-            let continuity_warnings = safety
+            let continuity_warnings: Vec<String> = safety
                 .reasons
                 .iter()
                 .map(|reason| format!("{}: {}", reason.kind, reason.detail))
@@ -486,7 +532,7 @@ where
 
             ensure_projection_prerequisites(&mut session_state);
 
-            let projection = self.compiler.compile(ProjectionInput {
+            let mut projection = self.compiler.compile(ProjectionInput {
                 session_id: request.session_id.as_str().to_string(),
                 model_id: request.target_model.clone(),
                 snapshot: session_state.clone(),
@@ -494,8 +540,8 @@ where
                 adaptation_plan: Some(adaptation_plan.clone()),
                 capabilities: target_capabilities.clone(),
                 token_budget: target_capabilities.schema.max_context_tokens,
-                current_request,
-                continuity_warnings,
+                current_request: current_request.clone(),
+                continuity_warnings: continuity_warnings.clone(),
                 config: self.projection_config.clone(),
                 created_at: Some(created_at.clone()),
                 projection_id: Some(format!("proj_{}", uuid::Uuid::now_v7())),
@@ -516,6 +562,11 @@ where
                 self.kernel.append_event(started).await?;
                 events_appended += 1;
 
+                // § Checkpoint strictness (§1986/§2280): escalate a high-risk switch to a
+                // real destination checkpoint per the configured policy, even when the
+                // global echo default is on.
+                let high_risk = is_high_risk_switch(&session_state, &from_runner, &target_runner);
+                let use_real = self.switching_config.requires_real_checkpoint(high_risk);
                 let (result, _) = match run_continuity_checkpoint(
                     self.runner.as_ref(),
                     request.session_id.as_str(),
@@ -523,6 +574,7 @@ where
                     &context_twin,
                     &projection,
                     &self.switching_config,
+                    use_real,
                 )
                 .await
                 {
@@ -542,8 +594,74 @@ where
                             .await?;
                         return Err(err);
                     }
+                    Err(err @ SwitchingError::CheckpointFailed { .. }) => {
+                        // § rolled_back: the continuity checkpoint — a stage AFTER
+                        // runner_attached — failed. Restore the previous runner binding so
+                        // the canonical session stays consistent on the prior model, then
+                        // surface `rolled_back` (§2032; § Rollback Strategy; §604: a failed
+                        // checkpoint may resolve by rollback). Detach the just-attached
+                        // target and re-attach the source binding. The rollback events use a
+                        // distinct `_rollback` idempotency key so they are not deduplicated
+                        // against the forward detach/attach (whose keys derive from the same
+                        // operation).
+                        let mut rollback_flow = flow.clone();
+                        rollback_flow.idempotency_key = trogonai_session_contracts::IdempotencyKey::new(format!(
+                            "{}_rollback",
+                            flow.idempotency_key.as_str()
+                        ))
+                        .map_err(|key_err| {
+                            SwitchingError::Kernel(trogonai_session_kernel::SessionKernelError::ContractValidation(
+                                trogonai_session_contracts::ContractValidationError::InvalidIdempotencyKey(key_err),
+                            ))
+                        })?;
+                        let binding_context = rollback_flow.runner_binding_context();
+                        let (rollback_detach, _) = detach_runner(
+                            &self.runner_bindings,
+                            &binding_context,
+                            &target_runner,
+                            &request.target_model,
+                            "rollback_checkpoint_failed",
+                            &mut session_state,
+                        )
+                        .await?;
+                        self.kernel.append_event(rollback_detach).await?;
+                        let (restored_binding, rollback_attach, _) =
+                            attach_runner(&self.runner_bindings, &binding_context, &from_runner, &from_model, None)
+                                .await?;
+                        self.kernel.append_event(rollback_attach).await?;
+                        session_state.active_runner_binding = MessageField::some(restored_binding);
+                        self.persist_snapshot_with_nonportable_cleared(&request.session_id, &mut session_state)
+                            .await?;
+                        return Err(SwitchingError::SwitchRolledBack { detail: err.to_string() });
+                    }
                     Err(err) => return Err(err),
                 };
+                // §598-604 / §1897 self-healing: a `Repaired` checkpoint means the
+                // destination's understanding was borderline. Recompile the projection with
+                // more context (Context Twin + recent turns) so the continuation actually
+                // carries the repaired context — not just the recorded
+                // `recompile_with_more_context` marker. Best-effort: if the recompile fails
+                // we keep the original projection (the checkpoint already passed as repaired).
+                if result.status.as_known() == Some(ContinuityCheckpointStatus::Repaired) {
+                    let repair_plan = context_twin_repair_plan(&adaptation_plan);
+                    if let Ok(repaired) = self.compiler.compile(ProjectionInput {
+                        session_id: request.session_id.as_str().to_string(),
+                        model_id: request.target_model.clone(),
+                        snapshot: session_state.clone(),
+                        context_twin: context_twin.clone(),
+                        adaptation_plan: Some(repair_plan),
+                        capabilities: target_capabilities.clone(),
+                        token_budget: target_capabilities.schema.max_context_tokens,
+                        current_request: current_request.clone(),
+                        continuity_warnings: continuity_warnings.clone(),
+                        config: self.projection_config.clone(),
+                        created_at: Some(created_at.clone()),
+                        projection_id: Some(format!("proj_repair_{}", uuid::Uuid::now_v7())),
+                    }) {
+                        projection = repaired;
+                    }
+                }
+
                 let completed = continuity_checkpoint_completed_event(&flow, &result);
                 self.kernel.append_event(completed).await?;
                 events_appended += 1;
@@ -694,6 +812,42 @@ fn ensure_projection_prerequisites(state: &mut SessionSnapshotState) {
     }
     if config.permission_rules_text.is_none() {
         config.permission_rules_text = Some("Apply portable session permission rules.".to_string());
+    }
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+
+    #[test]
+    fn context_twin_repair_plan_forces_context_twin_and_warns() {
+        // §598-604/§1897: the repair plan must force the Context-Twin-plus-recent-turns
+        // projection and record that context was repaired — even from an empty base plan.
+        let repaired = context_twin_repair_plan(&SwitchAdaptationPlan::default());
+        let ctx = repaired
+            .adaptations
+            .iter()
+            .find(|a| a.capability == "context_window")
+            .expect("context_window adaptation must be present");
+        assert_eq!(ctx.action.as_known(), Some(CapabilityAdaptationAction::UseContextTwinPlusRecentTurns));
+        assert!(repaired.warnings.iter().any(|w| w.contains("context repaired")));
+    }
+
+    #[test]
+    fn context_twin_repair_plan_overrides_existing_context_window_action() {
+        let base = SwitchAdaptationPlan {
+            adaptations: vec![SwitchAdaptation {
+                capability: "context_window".to_string(),
+                action: EnumValue::Known(CapabilityAdaptationAction::Omit),
+                ..SwitchAdaptation::default()
+            }],
+            ..SwitchAdaptationPlan::default()
+        };
+        let repaired = context_twin_repair_plan(&base);
+        // Still exactly one context_window adaptation, now forced to the repair action.
+        let ctx: Vec<_> = repaired.adaptations.iter().filter(|a| a.capability == "context_window").collect();
+        assert_eq!(ctx.len(), 1);
+        assert_eq!(ctx[0].action.as_known(), Some(CapabilityAdaptationAction::UseContextTwinPlusRecentTurns));
     }
 }
 

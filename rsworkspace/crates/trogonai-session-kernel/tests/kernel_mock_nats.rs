@@ -292,11 +292,13 @@ async fn record_conversation_emits_transcript_events_and_materializes() {
     assert_eq!(state.conversation.len(), 2);
     assert_eq!(state.conversation[0].role, "user");
     assert_eq!(state.conversation[1].role, "assistant");
-    assert_eq!(snapshot.last_applied_seq, 2);
+    // user_message_added + (assistant_message_started + assistant_message_completed) = 3.
+    assert_eq!(snapshot.last_applied_seq, 3);
 
-    // Transcript events are durably in the log (one user, one assistant).
+    // Transcript events are durably in the log: one user_message_added, and the assistant
+    // message's started + completed lifecycle pair.
     let events = event_log.read_session_events(&session_id).await.unwrap();
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 3);
 
     // Re-running is idempotent: stable per-index keys mean no duplicate events.
     kernel
@@ -304,7 +306,7 @@ async fn record_conversation_emits_transcript_events_and_materializes() {
         .await
         .unwrap();
     let events_after = event_log.read_session_events(&session_id).await.unwrap();
-    assert_eq!(events_after.len(), 2);
+    assert_eq!(events_after.len(), 3);
 }
 
 #[tokio::test]
@@ -359,14 +361,133 @@ async fn record_tool_calls_emits_structured_tool_events() {
             .any(|e| e.payload.as_option().and_then(|p| p.kind.as_ref()).is_some_and(pred))
     };
     assert!(has(|k| matches!(k, Kind::ToolCallRequested(_))));
+    assert!(has(|k| matches!(k, Kind::ToolCallApproved(_))));
+    assert!(has(|k| matches!(k, Kind::ToolCallStarted(_))));
     assert!(has(|k| matches!(k, Kind::ToolCallCompleted(_))));
 
-    // Idempotent: re-running appends no new events.
+    // Idempotent: re-running appends no new events. An executed tool emits the full
+    // lifecycle: requested + approved + started + completed.
     kernel
         .record_tool_calls(&session_id, std::slice::from_ref(&tool), actor, Timestamp::default())
         .await
         .unwrap();
-    assert_eq!(event_log.read_session_events(&session_id).await.unwrap().len(), 2);
+    assert_eq!(event_log.read_session_events(&session_id).await.unwrap().len(), 4);
+}
+
+// §273/§374 + §1048-1053: a FAILED tool emits `tool_call_failed` (with its error), never
+// `tool_call_completed`, and records no file_changed.
+#[tokio::test]
+async fn record_tool_calls_emits_tool_call_failed_for_failed_tool() {
+    use trogonai_session_contracts::session_event_payload::Kind;
+    use trogonai_session_contracts::{CanonicalToolCall, ToolCallStatus};
+
+    let session_id = SessionId::new("sess_toolfail").unwrap();
+    let event_log = InMemoryEventLog::new();
+    let kernel = test_kernel(event_log.clone(), MockJetStreamKvStore::new(), MockSessionLease::new());
+    let actor = Actor {
+        r#type: EnumValue::Known(ActorType::Kernel),
+        id: "kernel".to_string(),
+        ..Actor::default()
+    };
+
+    // A file-modifying tool that FAILED (no result, carries an error).
+    let tool = CanonicalToolCall {
+        id: "tool_x".to_string(),
+        tool_execution_id: "exec_x".to_string(),
+        name: "fs_write".to_string(),
+        input_json: "{\"path\":\"out.txt\"}".to_string(),
+        status: EnumValue::Known(ToolCallStatus::Failed),
+        error: Some("permission denied".to_string()),
+        ..CanonicalToolCall::default()
+    };
+
+    kernel
+        .record_tool_calls(&session_id, std::slice::from_ref(&tool), actor, Timestamp::default())
+        .await
+        .unwrap();
+
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    let has = |pred: fn(&Kind) -> bool| {
+        events
+            .iter()
+            .any(|e| e.payload.as_option().and_then(|p| p.kind.as_ref()).is_some_and(pred))
+    };
+    assert!(has(|k| matches!(k, Kind::ToolCallRequested(_))));
+    assert!(has(|k| matches!(k, Kind::ToolCallStarted(_))));
+    assert!(has(|k| matches!(k, Kind::ToolCallFailed(_))), "a failed tool must emit tool_call_failed");
+    assert!(!has(|k| matches!(k, Kind::ToolCallCompleted(_))), "a failed tool must NOT emit completed");
+    assert!(!has(|k| matches!(k, Kind::FileChanged(_))), "a failed tool records no file_changed");
+    // The error is preserved on the failed event.
+    let failed_error = events.iter().find_map(|e| match e.payload.as_option().and_then(|p| p.kind.as_ref()) {
+        Some(Kind::ToolCallFailed(p)) => Some(p.error.clone()),
+        _ => None,
+    });
+    assert_eq!(failed_error.as_deref(), Some("permission denied"));
+}
+
+// § event file_changed: a completed file-modifying tool (write/edit/str_replace) records
+// the path it touched; other tools (bash) do not.
+#[tokio::test]
+async fn record_tool_calls_emits_file_changed_for_file_tools() {
+    use trogonai_session_contracts::session_event_payload::Kind;
+    use trogonai_session_contracts::{CanonicalToolCall, FileChangeKind, TextToolResult, ToolCallResult};
+
+    let session_id = SessionId::new("sess_filechg").unwrap();
+    let event_log = InMemoryEventLog::new();
+    let kernel = test_kernel(event_log.clone(), MockJetStreamKvStore::new(), MockSessionLease::new());
+    let actor = Actor {
+        r#type: EnumValue::Known(ActorType::Kernel),
+        id: "kernel".to_string(),
+        ..Actor::default()
+    };
+    let result = || {
+        MessageField::some(ToolCallResult {
+            kind: Some(
+                TextToolResult {
+                    content: "ok".to_string(),
+                    ..TextToolResult::default()
+                }
+                .into(),
+            ),
+            ..ToolCallResult::default()
+        })
+    };
+    let tools = vec![
+        CanonicalToolCall {
+            id: "t1".to_string(),
+            tool_execution_id: "exec_w".to_string(),
+            name: "write".to_string(),
+            input_json: "{\"path\":\"src/lib.rs\",\"content\":\"...\"}".to_string(),
+            result: result(),
+            ..CanonicalToolCall::default()
+        },
+        CanonicalToolCall {
+            id: "t2".to_string(),
+            tool_execution_id: "exec_b".to_string(),
+            name: "bash".to_string(),
+            input_json: "{\"cmd\":\"ls\"}".to_string(),
+            result: result(),
+            ..CanonicalToolCall::default()
+        },
+    ];
+
+    kernel
+        .record_tool_calls(&session_id, &tools, actor, Timestamp::default())
+        .await
+        .unwrap();
+
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    let file_changes: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e.payload.as_option().and_then(|p| p.kind.as_ref()) {
+            Some(Kind::FileChanged(payload)) => Some(payload),
+            _ => None,
+        })
+        .collect();
+    // Only the write tool emits file_changed; bash does not.
+    assert_eq!(file_changes.len(), 1);
+    assert_eq!(file_changes[0].path, "src/lib.rs");
+    assert_eq!(file_changes[0].change_kind.as_known(), Some(FileChangeKind::Modified));
 }
 
 #[tokio::test]
@@ -435,6 +556,123 @@ async fn retention_and_terminal_continuity_apis_emit_and_materialize() {
     assert!(present(|k| matches!(k, Kind::TerminalContinuityCaptured(_))));
     assert!(present(|k| matches!(k, Kind::SnapshotCreated(_))));
     assert!(present(|k| matches!(k, Kind::EventsArchived(_))));
+}
+
+// §1888 Compaction incremental: snapshot at the applied seq + archive events through it,
+// in one operation, recording both snapshot_created and events_archived.
+#[tokio::test]
+async fn compact_session_incrementally_snapshots_and_archives() {
+    use trogonai_session_contracts::session_event_payload::Kind;
+
+    let session_id = SessionId::new("sess_compact").unwrap();
+    let event_log = InMemoryEventLog::new();
+    let kernel = test_kernel(event_log.clone(), MockJetStreamKvStore::new(), MockSessionLease::new());
+
+    kernel.append_event(created_event("sess_compact", 0, "idem_c1")).await.unwrap();
+
+    let actor = Actor {
+        r#type: EnumValue::Known(ActorType::Kernel),
+        id: "session-kernel".to_string(),
+        ..Actor::default()
+    };
+    let report = kernel
+        .compact_session_incrementally(&session_id, "op_compact1", actor, Timestamp::default())
+        .await
+        .unwrap();
+    assert!(report.snapshot_seq >= 1, "snapshot at the applied seq");
+    assert_eq!(report.archived_count, 1, "the single pre-snapshot event is archived");
+
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    let present = |pred: fn(&Kind) -> bool| {
+        events
+            .iter()
+            .any(|e| e.payload.as_option().and_then(|p| p.kind.as_ref()).is_some_and(pred))
+    };
+    assert!(present(|k| matches!(k, Kind::SnapshotCreated(_))));
+    assert!(present(|k| matches!(k, Kind::EventsArchived(_))));
+}
+
+// § Schema Governance: "runner event invalido se rechaza y registra
+// `invalid_event_rejected`". The invalid event is rejected via error AND an
+// invalid_event_rejected audit event is recorded for the session.
+#[tokio::test]
+async fn invalid_event_is_rejected_and_recorded() {
+    use trogonai_session_contracts::session_event_payload::Kind;
+
+    let session_id = SessionId::new("sess_invalid").unwrap();
+    let event_log = InMemoryEventLog::new();
+    let kernel = test_kernel(event_log.clone(), MockJetStreamKvStore::new(), MockSessionLease::new());
+
+    // Valid session_id but an empty operation_id -> fails contract validation on append.
+    let mut bad = created_event("sess_invalid", 0, "bad1");
+    bad.operation_id = String::new();
+
+    let result = kernel.append_event(bad).await;
+    assert!(result.is_err(), "an invalid event must be rejected");
+
+    // The rejection is recorded as an invalid_event_rejected audit event referencing the
+    // rejected event id and a non-empty reason.
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    let rejection = events
+        .iter()
+        .find_map(|e| match e.payload.as_option().and_then(|p| p.kind.as_ref()) {
+            Some(Kind::InvalidEventRejected(payload)) => Some(payload),
+            _ => None,
+        });
+    let rejection = rejection.expect("an invalid_event_rejected event must be recorded");
+    assert_eq!(rejection.event_id, "evt_bad1");
+    assert!(!rejection.reason.is_empty(), "the rejection reason must be recorded");
+}
+
+// § Event Log Compaction and Retention: archival is wired to the retention policy via a
+// time cutoff. `archive_events_older_than` selects the highest seq still within the cutoff
+// (the retention watermark) and is a no-op when nothing is old enough.
+#[tokio::test]
+async fn archive_events_older_than_selects_retention_watermark() {
+    use trogonai_session_contracts::session_event_payload::Kind;
+
+    let session_id = SessionId::new("sess_retain").unwrap();
+    let event_log = InMemoryEventLog::new();
+    let kernel = test_kernel(event_log.clone(), MockJetStreamKvStore::new(), MockSessionLease::new());
+
+    let kernel_actor = || Actor {
+        r#type: EnumValue::Known(ActorType::Kernel),
+        id: "session-kernel".to_string(),
+        ..Actor::default()
+    };
+    let at = |seconds: i64| Timestamp {
+        seconds,
+        ..Timestamp::default()
+    };
+
+    // Three events at t=10s, 20s, 30s (seq auto-assigned 1, 2, 3).
+    for (i, secs) in [(1u64, 10i64), (2, 20), (3, 30)] {
+        let mut event = created_event("sess_retain", 0, &format!("idem_{i}"));
+        event.created_at = MessageField::some(at(secs));
+        kernel.append_event(event).await.unwrap();
+    }
+
+    // Cutoff before the oldest event: nothing is old enough -> no-op, no archive event.
+    let none = kernel
+        .archive_events_older_than(&session_id, at(5), "op_retain_noop", kernel_actor(), Timestamp::default())
+        .await
+        .unwrap();
+    assert_eq!(none, 0);
+
+    // Cutoff at t=20s: archives the events at 10s and 20s (watermark seq 2).
+    let archived = kernel
+        .archive_events_older_than(&session_id, at(20), "op_retain", kernel_actor(), Timestamp::default())
+        .await
+        .unwrap();
+    assert_eq!(archived, 2, "events at t<=20s are within the retention cutoff");
+
+    // The retention pass emitted an events_archived audit event.
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    assert!(events.iter().any(|e| e
+        .payload
+        .as_option()
+        .and_then(|p| p.kind.as_ref())
+        .is_some_and(|k| matches!(k, Kind::EventsArchived(_)))));
 }
 
 #[tokio::test]

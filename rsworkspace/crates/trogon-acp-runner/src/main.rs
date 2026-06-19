@@ -48,8 +48,9 @@ use trogon_acp_runner::{ElicitationReq, PermissionReq, ReqwestImageFetcher};
 use trogonai_artifacts::{ArtifactStore, ArtifactStoreConfig, FetchLimits, provision_artifact_object_store};
 use trogon_runner_tools::session_store::SessionStore as _;
 use trogonai_session_kernel::{
-    EventLog, SessionKernel, SessionKernelConfig, SessionKernelFeatureFlags, SessionKernelOperationalPolicy,
-    SessionKvLeaseFactory, SessionLeaseManager, SnapshotStore, provision_lease_store, provision_snapshot_store,
+    EventLog, RolloutMetrics, SessionKernel, SessionKernelConfig, SessionKernelFeatureFlags,
+    SessionKernelOperationalPolicy, SessionKvLeaseFactory, SessionLeaseManager, SnapshotStore, enforce_rollout,
+    provision_lease_store, provision_snapshot_store,
 };
 
 use trogon_agent_core::agent_loop::AgentLoop;
@@ -470,7 +471,23 @@ async fn build_conversation_sink(js: &jetstream::Context) -> Option<std::sync::A
     // folds in the master `session_kernel_enabled` flag. Disabling either prerequisite
     // (`TROGON_SESSION_LEASE_ENABLED` / `TROGON_CANONICAL_SNAPSHOT_ENABLED` = false)
     // disables the kernel recording path rather than running it half-wired.
-    let flags = SessionKernelFeatureFlags::default();
+    // § "enforcement de promocion/rollback basada en metricas" (§2240: both thresholds
+    // must exist before activating default): before honoring the configured rollout flags,
+    // run them through the promotion gate against the measured rollout metrics. With no
+    // adverse metrics observed yet this is a no-op (Promote); a breached threshold forces
+    // canonical/event-primary back to the conservative defaults (the automatic rollback).
+    // The gate, thresholds and rollback live here; feeding the live cross-session metrics
+    // aggregate is the operational data-plane the doc defers.
+    let configured_flags = SessionKernelFeatureFlags::default();
+    let rollout_policy = SessionKernelOperationalPolicy::default().rollout_promotion;
+    let enforcement = enforce_rollout(&RolloutMetrics::clean(), &configured_flags, &rollout_policy);
+    if enforcement.decision.is_rollback() {
+        tracing::warn!(
+            decision = ?enforcement.decision,
+            "session kernel: rollout enforcement rolled back canonical/event-primary to conservative defaults"
+        );
+    }
+    let flags = enforcement.effective_flags;
     if !flags.lease_enabled() || !flags.snapshot_enabled() {
         return None;
     }
@@ -527,14 +544,23 @@ async fn build_conversation_sink(js: &jetstream::Context) -> Option<std::sync::A
     };
     let inline_limit = config.inline_artifact_limit_bytes;
     let artifacts_enabled = flags.artifact_store_enabled;
+    // § Event Log Compaction and Retention: per-session retention maintenance is gated by
+    // its own flag (off by default) and uses the configured archive retention window.
+    let maintenance_enabled = flags.maintenance_enabled();
+    let retention_days = operational_policy.nats.event_archive_retention_days;
 
     let kernel = SessionKernel::new(config, event_log, snapshots, leases);
-    info!(artifacts_enabled, "session kernel: conversation shadow sink enabled");
+    info!(
+        artifacts_enabled,
+        maintenance_enabled, "session kernel: conversation shadow sink enabled"
+    );
     Some(std::sync::Arc::new(KernelConversationSink::new(
         kernel,
         artifact_store,
         image_fetcher,
         artifacts_enabled,
         inline_limit,
+        maintenance_enabled,
+        retention_days,
     )))
 }

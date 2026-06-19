@@ -10,8 +10,8 @@ use trogonai_capabilities::{
 };
 use trogonai_session_contracts::{
     Actor, ActorType, CapabilitySchema, CapabilitySource, IdempotencyKey, ModelSwitchReason, OperationId,
-    SCHEMA_VERSION_V1, SessionCreatedPayload, SessionEvent, SessionEventPayload, SessionId, SwitchSafetyStatus,
-    ToolResultFormat,
+    SCHEMA_VERSION_V1, SessionCreatedPayload, SessionEvent, SessionEventPayload, SessionId, SwitchResult,
+    SwitchSafetyStatus, ToolResultFormat,
 };
 use trogonai_session_kernel::{
     InMemoryEventLog, MockSessionLease, MockSessionLeaseFactory, SessionKernel, SessionKernelConfig,
@@ -20,7 +20,7 @@ use trogonai_session_kernel::{
 use trogonai_session_projection::{ContextTwinStore, ProjectionConfig};
 use trogonai_switching::{
     MockRunnerAcknowledgement, RunnerBindingStore, SwitchModelRequest, SwitchOrchestrator, SwitchSafetyInput,
-    SwitchState, SwitchingConfig, evaluate_switch_safety,
+    SwitchState, SwitchingConfig, classify_switch_result, evaluate_switch_safety,
 };
 
 fn timestamp() -> Timestamp {
@@ -485,4 +485,108 @@ async fn switch_records_runner_failed_when_runner_fails_after_attach() {
                 )
             })
     }));
+}
+
+/// Runner whose acknowledgement SUCCEEDS but mismatches the Context Twin on every field,
+/// driving checkpoint confidence below the failure threshold (a low-confidence checkpoint
+/// is distinct from a runner failure).
+struct MismatchingRunner;
+
+#[async_trait::async_trait]
+impl trogonai_switching::RunnerAcknowledgement for MismatchingRunner {
+    async fn request_acknowledgement(
+        &self,
+        _prompt: &str,
+    ) -> Result<trogonai_switching::ContinuityAcknowledgement, trogonai_switching::SwitchingError> {
+        Ok(trogonai_switching::ContinuityAcknowledgement {
+            current_objective: "totally different objective".to_string(),
+            active_plan: "unrelated plan".to_string(),
+            relevant_files: vec!["wrong_file.rs".to_string()],
+            next_step: "do something unrelated".to_string(),
+            ..Default::default()
+        })
+    }
+}
+
+/// § rolled_back: when the continuity checkpoint (a stage AFTER `runner_attached`) fails,
+/// Trogonai restores the previous runner binding and the switch result is `rolled_back`
+/// (§2032; § Rollback Strategy). Verifies the structured result and that the rollback
+/// detached the target and re-attached the source binding in the event log.
+#[tokio::test]
+async fn switch_rolls_back_to_previous_binding_when_checkpoint_fails() {
+    let session_id = SessionId::new("sess_rollback").unwrap();
+    let event_log = InMemoryEventLog::new();
+    event_log.append(created_event(session_id.as_str())).await.unwrap();
+    let registry = registry_with_schemas().await;
+
+    let kernel_config = SessionKernelConfig::default();
+    let snap_store = SnapshotStore::new(
+        trogon_nats::jetstream::MockJetStreamKvStore::new(),
+        kernel_config.clone(),
+    );
+    let leases = SessionLeaseManager::new(MockSessionLeaseFactory::new(MockSessionLease::new()), "switch-test");
+    let kernel = SessionKernel::new(kernel_config, event_log.clone(), snap_store.clone(), leases);
+    let orchestrator = SwitchOrchestrator::new(
+        kernel,
+        snap_store,
+        RunnerBindingStore::new(
+            trogon_nats::jetstream::MockJetStreamKvStore::new(),
+            SwitchingConfig::default(),
+        ),
+        ContextTwinStore::new(
+            trogon_nats::jetstream::MockJetStreamKvStore::new(),
+            ProjectionConfig::default(),
+        ),
+        registry,
+        Arc::new(MismatchingRunner),
+        // internal_echo off so the real (mismatching) runner ack is used, and a high
+        // confidence floor so the mismatch fails rather than repairs.
+        SwitchingConfig {
+            continuity_checkpoint_internal_echo: false,
+            checkpoint_min_confidence: 0.9,
+            checkpoint_mismatch_threshold: 0.2,
+            ..SwitchingConfig::default()
+        },
+        CapabilityConfig::default(),
+        ProjectionConfig::default(),
+        certification_matrix(),
+    );
+
+    let outcome = orchestrator
+        .switch_model(SwitchModelRequest {
+            session_id: session_id.clone(),
+            target_model: "xai/grok-code-fast".to_string(),
+            reason: ModelSwitchReason::UserRequested,
+            user_confirmed: true,
+            force: false,
+            force_acknowledged_losses: Vec::new(),
+            operation_id: OperationId::new("op_rollback").unwrap(),
+            correlation_id: "corr_rollback".to_string(),
+            idempotency_key: IdempotencyKey::new("idem_rollback").unwrap(),
+        })
+        .await;
+
+    // The normalized, structured result is `rolled_back`.
+    assert_eq!(classify_switch_result(&outcome), SwitchResult::RolledBack);
+    assert!(matches!(
+        outcome,
+        Err(trogonai_switching::SwitchingError::SwitchRolledBack { .. })
+    ));
+
+    // The rollback detached the target runner with the rollback reason (restoring the
+    // previous binding), durably recorded in the event log.
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    let rolled_back_detach = events.iter().any(|event| {
+        event
+            .payload
+            .as_option()
+            .and_then(|payload| payload.kind.as_ref())
+            .is_some_and(|kind| match kind {
+                trogonai_session_contracts::session_event_payload::Kind::RunnerDetached(detached) => {
+                    detached.reason.as_deref() == Some("rollback_checkpoint_failed")
+                }
+                _ => false,
+            })
+    });
+    assert!(rolled_back_detach, "rollback must detach the target with the rollback reason");
 }

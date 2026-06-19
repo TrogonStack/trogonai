@@ -3,9 +3,8 @@ use buffa_types::google::protobuf::Timestamp;
 use time::OffsetDateTime;
 use trogon_registry::{Registry, RegistryStore};
 use trogonai_session_contracts::{
-    CapabilityAdaptationAction, ContentBlock, SessionSnapshotState, SwitchAdaptation,
-    SwitchAdaptationPlan, __buffa::oneof::content_block::Kind as BlockKind,
-    __buffa::oneof::tool_call_result::Kind as ToolResultKind,
+    __buffa::oneof::content_block::Kind as BlockKind, __buffa::oneof::tool_call_result::Kind as ToolResultKind,
+    CapabilityAdaptationAction, ContentBlock, SessionSnapshotState, SwitchAdaptation, SwitchAdaptationPlan,
 };
 use uuid::Uuid;
 
@@ -34,9 +33,13 @@ pub fn detect_session_capability_usage(session: &SessionSnapshotState) -> Sessio
         for block in &message.content {
             inspect_content_block(block, &mut usage);
         }
-        usage.estimated_context_tokens = usage
-            .estimated_context_tokens
-            .saturating_add(message.usage.as_option().map(|u| u.input_tokens + u.output_tokens).unwrap_or(0));
+        usage.estimated_context_tokens = usage.estimated_context_tokens.saturating_add(
+            message
+                .usage
+                .as_option()
+                .map(|u| u.input_tokens + u.output_tokens)
+                .unwrap_or(0),
+        );
     }
 
     if !session.tool_calls.is_empty() {
@@ -160,12 +163,7 @@ pub async fn create_switch_adaptation_plan<S: RegistryStore>(
                 adaptation_action_label(&adaptation.action),
             );
         }
-        metrics::record_adaptation_plan_created(
-            &session_meta.id,
-            &from_model,
-            target_model,
-            plan.adaptations.len(),
-        );
+        metrics::record_adaptation_plan_created(&session_meta.id, &from_model, target_model, plan.adaptations.len());
     }
 
     if let Some(compactor_model) = session
@@ -191,12 +189,7 @@ fn compare_image_input(
 ) {
     if usage.uses_images {
         if target.schema.image_input {
-            push_adaptation(
-                adaptations,
-                "image_input",
-                CapabilityAdaptationAction::Preserve,
-                None,
-            );
+            push_adaptation(adaptations, "image_input", CapabilityAdaptationAction::Preserve, None);
         } else {
             push_adaptation(
                 adaptations,
@@ -205,8 +198,7 @@ fn compare_image_input(
                 Some("images converted to artifact references or descriptions".to_string()),
             );
             warnings.push(
-                "This model does not support image input; image references were preserved but not sent"
-                    .to_string(),
+                "This model does not support image input; image references were preserved but not sent".to_string(),
             );
         }
     } else if current.schema.image_input && !target.schema.image_input {
@@ -252,7 +244,8 @@ fn compare_tool_use(
             CapabilityAdaptationAction::Textualize,
             Some("past tool calls converted to transcript text".to_string()),
         );
-        warnings.push("Target model does not support structured tools; past tool calls will be textualized".to_string());
+        warnings
+            .push("Target model does not support structured tools; past tool calls will be textualized".to_string());
     }
 
     let _ = current;
@@ -287,8 +280,8 @@ fn compare_context_window(
     warnings: &mut Vec<String>,
 ) {
     let target_window = target.schema.max_context_tokens;
-    let needs_projection = usage.estimated_context_tokens > target_window
-        || current.schema.max_context_tokens > target_window;
+    let needs_projection =
+        usage.estimated_context_tokens > target_window || current.schema.max_context_tokens > target_window;
 
     if needs_projection {
         push_adaptation(
@@ -319,12 +312,7 @@ fn compare_json_schema(
 ) {
     if usage.uses_json_schema || current.schema.json_schema {
         if target.schema.json_schema {
-            push_adaptation(
-                adaptations,
-                "json_schema",
-                CapabilityAdaptationAction::Preserve,
-                None,
-            );
+            push_adaptation(adaptations, "json_schema", CapabilityAdaptationAction::Preserve, None);
         } else {
             push_adaptation(
                 adaptations,
@@ -346,12 +334,7 @@ fn compare_reasoning(
 ) {
     if usage.uses_reasoning || _current.schema.reasoning {
         if target.schema.reasoning {
-            push_adaptation(
-                adaptations,
-                "reasoning",
-                CapabilityAdaptationAction::Preserve,
-                None,
-            );
+            push_adaptation(adaptations, "reasoning", CapabilityAdaptationAction::Preserve, None);
         } else {
             push_adaptation(
                 adaptations,
@@ -373,12 +356,7 @@ fn compare_file_input(
 ) {
     if usage.uses_files {
         if target.schema.file_input {
-            push_adaptation(
-                adaptations,
-                "file_input",
-                CapabilityAdaptationAction::Preserve,
-                None,
-            );
+            push_adaptation(adaptations, "file_input", CapabilityAdaptationAction::Preserve, None);
         } else {
             push_adaptation(
                 adaptations,
@@ -451,9 +429,7 @@ fn adaptation_action_label(action: &EnumValue<CapabilityAdaptationAction>) -> &'
         Some(CapabilityAdaptationAction::Preserve) => "preserve",
         Some(CapabilityAdaptationAction::UseArtifactRefs) => "use_artifact_refs",
         Some(CapabilityAdaptationAction::PreserveStructuredTools) => "preserve_structured_tools",
-        Some(CapabilityAdaptationAction::UseContextTwinPlusRecentTurns) => {
-            "use_context_twin_plus_recent_turns"
-        }
+        Some(CapabilityAdaptationAction::UseContextTwinPlusRecentTurns) => "use_context_twin_plus_recent_turns",
         Some(CapabilityAdaptationAction::Textualize) => "textualize",
         Some(CapabilityAdaptationAction::Omit) => "omit",
         Some(CapabilityAdaptationAction::NotPortable) => "not_portable",

@@ -21,9 +21,7 @@
 use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use time::OffsetDateTime;
-use trogonai_session_contracts::{
-    CapabilitySchema, CapabilitySource, SCHEMA_VERSION_V1, ToolResultFormat,
-};
+use trogonai_session_contracts::{CapabilitySchema, CapabilitySource, SCHEMA_VERSION_V1, ToolResultFormat};
 
 /// Confidence for the manually-curated baseline. Intentionally below a verified
 /// registry/probe schema (`0.9`+) but above the default freshness `min_confidence`
@@ -115,7 +113,10 @@ mod tests {
         assert_eq!(schema.max_context_tokens, 200_000);
         assert!(matches!(schema.source.as_known(), Some(CapabilitySource::Manual)));
         // Stamped fresh at resolution time.
-        assert_eq!(schema.last_verified_at.as_option().unwrap().seconds, now().unix_timestamp());
+        assert_eq!(
+            schema.last_verified_at.as_option().unwrap().seconds,
+            now().unix_timestamp()
+        );
     }
 
     #[test]

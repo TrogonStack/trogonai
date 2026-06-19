@@ -127,6 +127,32 @@ pub fn requires_continuity_checkpoint(
     false
 }
 
+/// Whether a switch is high-risk for the purposes of checkpoint strictness (§ Checkpoint
+/// strictness, §1986: "switches con tools, artifacts, terminal o cambios de proveedor
+/// deben usar checkpoint real contra destino"): a provider/runner change, any recorded
+/// tool calls, persisted artifacts, relevant tool results in the Context Twin, or a live
+/// terminal (running process or dirty files). Used by [`SwitchingConfig::requires_real_checkpoint`]
+/// to escalate a high-risk switch from a Context-Twin echo to a real destination checkpoint.
+pub fn is_high_risk_switch(session: &SessionSnapshotState, from_runner: &str, to_runner: &str) -> bool {
+    if from_runner != to_runner {
+        return true;
+    }
+    if !session.tool_calls.is_empty() || !session.artifacts.is_empty() {
+        return true;
+    }
+    if session
+        .context_twin
+        .as_option()
+        .is_some_and(|twin| !twin.relevant_tool_results.is_empty())
+    {
+        return true;
+    }
+    session
+        .terminal
+        .as_option()
+        .is_some_and(|terminal| !terminal.running_process_summary.is_empty() || !terminal.dirty_files.is_empty())
+}
+
 /// Whether risky tool calls must be blocked because the most recent continuity
 /// checkpoint failed and has not been repaired/confirmed (§ Failure Mode Policy:
 /// "si falla Continuity Checkpoint, no ejecutar tool calls riesgosos hasta reparar,
@@ -170,6 +196,12 @@ pub fn acknowledgement_from_context_twin(context_twin: &ContextTwin) -> Continui
 }
 
 /// Run continuity checkpoint against target model acknowledgement.
+///
+/// `use_real` selects the acknowledgement source per the configured checkpoint strictness
+/// (§ Checkpoint strictness, §2280): when `true` the checkpoint asks the REAL destination
+/// runner/model (`runner`); when `false` it echoes the Context Twin internally
+/// (MVP/shadow/tests). The caller derives `use_real` from
+/// [`SwitchingConfig::requires_real_checkpoint`] and [`is_high_risk_switch`].
 #[allow(unused_assignments)]
 pub async fn run_continuity_checkpoint<R: RunnerAcknowledgement>(
     runner: &R,
@@ -178,12 +210,11 @@ pub async fn run_continuity_checkpoint<R: RunnerAcknowledgement>(
     context_twin: &ContextTwin,
     projection: &PromptProjection,
     config: &SwitchingConfig,
+    use_real: bool,
 ) -> Result<(ContinuityCheckpointResult, ContinuityCheckpointState), SwitchingError> {
     let mut checkpoint_state = ContinuityCheckpointState::Started;
     let prompt = acknowledgement_prompt_from_projection(projection);
-    let acknowledgement = if config.continuity_checkpoint_internal_echo {
-        acknowledgement_from_context_twin(context_twin)
-    } else {
+    let acknowledgement = if use_real {
         // A failure of the runner call itself is a runner failure (distinct from a
         // low-confidence checkpoint), so map it to a dedicated error variant.
         runner
@@ -192,6 +223,8 @@ pub async fn run_continuity_checkpoint<R: RunnerAcknowledgement>(
             .map_err(|err| SwitchingError::RunnerAcknowledgementFailed {
                 detail: err.to_string(),
             })?
+    } else {
+        acknowledgement_from_context_twin(context_twin)
     };
     checkpoint_state = ContinuityCheckpointState::Acknowledged;
 
@@ -445,6 +478,36 @@ pub mod mock {
 mod tests {
     use super::*;
     use trogonai_session_contracts::ContinuityCheckpointResult;
+
+    #[test]
+    fn is_high_risk_switch_matches_strictness_criteria() {
+        use trogonai_session_contracts::{ArtifactMetadata, CanonicalToolCall, TerminalContinuity};
+
+        // Same runner, no tools/artifacts/terminal → low risk.
+        let low = SessionSnapshotState::default();
+        assert!(!is_high_risk_switch(&low, "acp.claude", "acp.claude"));
+
+        // Provider/runner change → high risk (§1986 "cambios de proveedor").
+        assert!(is_high_risk_switch(&low, "acp.claude", "acp.grok"));
+
+        // Tools recorded → high risk.
+        let mut with_tools = SessionSnapshotState::default();
+        with_tools.tool_calls.push(CanonicalToolCall::default());
+        assert!(is_high_risk_switch(&with_tools, "acp.claude", "acp.claude"));
+
+        // Artifacts persisted → high risk.
+        let mut with_artifacts = SessionSnapshotState::default();
+        with_artifacts.artifacts.push(ArtifactMetadata::default());
+        assert!(is_high_risk_switch(&with_artifacts, "acp.claude", "acp.claude"));
+
+        // Live terminal (running process) → high risk.
+        let mut with_terminal = SessionSnapshotState::default();
+        with_terminal.terminal = MessageField::some(TerminalContinuity {
+            running_process_summary: "cargo test (running)".to_string(),
+            ..TerminalContinuity::default()
+        });
+        assert!(is_high_risk_switch(&with_terminal, "acp.claude", "acp.claude"));
+    }
 
     #[test]
     fn risky_tools_blocked_only_when_checkpoint_failed() {

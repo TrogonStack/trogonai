@@ -57,6 +57,95 @@ pub fn build_visible_result(
     }
 }
 
+/// Visible result for an in-place model change on the same runner: no canonical
+/// orchestration ran and the active binding did not change, so it is a clean
+/// `switched` with no degradations, no fallback and no checkpoint.
+pub fn same_runner_visible_result(session_id: &str, from_model: &str, to_model: &str, runner: &str) -> SwitchVisibleResult {
+    SwitchVisibleResult {
+        session_id: session_id.to_string(),
+        result: EnumValue::Known(SwitchResult::Switched),
+        from_model: from_model.to_string(),
+        to_model: to_model.to_string(),
+        from_runner: runner.to_string(),
+        to_runner: runner.to_string(),
+        runner_changed: false,
+        checkpoint: MessageField::some(SwitchCheckpointSummary {
+            required: false,
+            status: "not_required".to_string(),
+            ..SwitchCheckpointSummary::default()
+        }),
+        ..SwitchVisibleResult::default()
+    }
+}
+
+/// Visible result for a legacy `session/export` + `session/import` handoff. Per
+/// § Contrato de resultado visible (§2074) a handoff MUST surface `fallback_used = true`
+/// so no surface presents it as a complete canonical switch; per § Reglas de
+/// interpretacion semantica (§2319) a handoff is NOT a clean `switched`, so it is
+/// reported as `degraded` with the un-migrated canonical state called out as the
+/// degradation (§2288: handoff/export-import must be visible in events, metrics and UX).
+pub fn handoff_visible_result(
+    session_id: &str,
+    from_model: &str,
+    from_runner: &str,
+    to_model: &str,
+    to_runner: &str,
+    fallback_reason: Option<String>,
+) -> SwitchVisibleResult {
+    SwitchVisibleResult {
+        session_id: session_id.to_string(),
+        result: EnumValue::Known(SwitchResult::Degraded),
+        from_model: from_model.to_string(),
+        to_model: to_model.to_string(),
+        from_runner: from_runner.to_string(),
+        to_runner: to_runner.to_string(),
+        runner_changed: from_runner != to_runner,
+        degradations: vec![
+            "legacy handoff: canonical session state (full tool I/O, artifacts, context twin) not migrated".to_string(),
+        ],
+        fallback_used: true,
+        fallback_reason,
+        checkpoint: MessageField::some(SwitchCheckpointSummary {
+            required: false,
+            status: "not_run".to_string(),
+            ..SwitchCheckpointSummary::default()
+        }),
+        ..SwitchVisibleResult::default()
+    }
+}
+
+/// Visible result for a switch that failed before (or independently of) the
+/// orchestrator outcome — e.g. an id/validation error or a post-attach hydration
+/// failure. The canonical session stays consistent, so per § Reglas del contrato
+/// visible the `session_id` stays stable; a `failed_terminal` reports the concrete
+/// cause as `next_action`, a `failed_recoverable` carries none (retryable).
+pub fn failed_visible_result(
+    session_id: &str,
+    from_model: &str,
+    from_runner: &str,
+    to_model: &str,
+    to_runner: &str,
+    result: SwitchResult,
+    reason: String,
+) -> SwitchVisibleResult {
+    SwitchVisibleResult {
+        session_id: session_id.to_string(),
+        result: EnumValue::Known(result),
+        from_model: from_model.to_string(),
+        to_model: to_model.to_string(),
+        from_runner: from_runner.to_string(),
+        to_runner: to_runner.to_string(),
+        runner_changed: false,
+        next_action: (result == SwitchResult::FailedTerminal).then_some(reason),
+        checkpoint: MessageField::some(SwitchCheckpointSummary {
+            required: false,
+            status: "not_run".to_string(),
+            ..SwitchCheckpointSummary::default()
+        }),
+        ..SwitchVisibleResult::default()
+    }
+}
+
 /// Visible, recorded degradations: capability adaptation warnings plus every safety
 /// reason. Both are surfaced so `degraded`/`requires_confirmation` are explainable.
 fn collect_degradations(
@@ -328,10 +417,34 @@ mod golden_tests {
     }
 
     #[test]
+    fn handoff_is_degraded_with_fallback_used_not_a_clean_switched() {
+        // §2074/§2319/§2288: a legacy export/import handoff must surface fallback_used=true
+        // and must NOT be reported as a clean `switched`; the un-migrated canonical state is
+        // called out as a degradation so no surface fakes full continuity.
+        let v = handoff_visible_result("sess_1", "claude-sonnet", "acp.claude", "grok-3", "acp.grok", None);
+        assert_eq!(v.result.as_known(), Some(SwitchResult::Degraded));
+        assert!(v.fallback_used);
+        assert!(v.runner_changed);
+        assert!(!v.degradations.is_empty(), "handoff must report the un-migrated state as a degradation");
+        assert_eq!(v.checkpoint.as_option().unwrap().status, "not_run");
+    }
+
+    #[test]
+    fn same_runner_is_clean_switched_without_runner_change() {
+        let v = same_runner_visible_result("sess_1", "claude-sonnet", "claude-opus", "acp.claude");
+        assert_eq!(v.result.as_known(), Some(SwitchResult::Switched));
+        assert!(!v.runner_changed);
+        assert!(!v.fallback_used);
+        assert!(v.degradations.is_empty());
+        assert_eq!(v.checkpoint.as_option().unwrap().status, "not_required");
+    }
+
+    #[test]
     fn rolled_back_is_representable_in_the_contract() {
-        // The classifier does not yet PRODUCE rolled_back (no rollback path exists in
-        // the orchestrator — tracked as a separate gap), but §2032 requires the visible
-        // contract to cover it. This pins the field shape a surface would render.
+        // The orchestrator now PRODUCES rolled_back when a post-attach stage (the
+        // continuity checkpoint) fails and the previous binding is restored (§2032; see
+        // `switch_rolls_back_to_previous_binding_when_checkpoint_fails`). This pins the
+        // field shape a surface renders for that result.
         let v = SwitchVisibleResult {
             session_id: "sess_golden".to_string(),
             result: EnumValue::Known(SwitchResult::RolledBack),

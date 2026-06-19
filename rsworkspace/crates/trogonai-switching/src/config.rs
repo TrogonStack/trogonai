@@ -47,6 +47,44 @@ impl DegradationPolicy {
     }
 }
 
+/// § Checkpoint strictness — configurable risk policy for whether a continuity
+/// checkpoint validates against the REAL destination runner/model or echoes the Context
+/// Twin internally (§1986: "switches con tools, artifacts, terminal o cambios de
+/// proveedor deben usar checkpoint real contra destino"; §2280: `internal_echo` is valid
+/// only for tests/shadow/MVP). Default = `InternalEcho` (current behavior, no regression);
+/// production sets `RealForHighRisk` so high-risk switches escalate to a real checkpoint
+/// even when the global echo default is on. Change criterion / rollback: flip the env var.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CheckpointStrictness {
+    /// MVP / shadow / tests: the legacy `continuity_checkpoint_internal_echo` flag governs
+    /// echo-vs-real for ALL switches (echo by default; explicitly off ⇒ real for all).
+    #[default]
+    InternalEcho,
+    /// Production: HIGH-RISK switches (provider change, tools, artifacts, live terminal)
+    /// validate against the real destination; low-risk switches may echo.
+    RealForHighRisk,
+    /// Every checkpoint validates against the real destination.
+    AlwaysReal,
+}
+
+impl CheckpointStrictness {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "real_for_high_risk" | "high_risk" | "high-risk" => Self::RealForHighRisk,
+            "always_real" | "always" | "real" => Self::AlwaysReal,
+            _ => Self::InternalEcho,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InternalEcho => "internal_echo",
+            Self::RealForHighRisk => "real_for_high_risk",
+            Self::AlwaysReal => "always_real",
+        }
+    }
+}
+
 /// Switch orchestration configuration loaded via ADR 0007 precedence.
 #[derive(Config, Clone, Debug, PartialEq)]
 pub struct SwitchingConfig {
@@ -80,6 +118,11 @@ pub struct SwitchingConfig {
     /// Default `confirm` keeps the closed rule (degradation requires explicit confirmation).
     #[config(env = "TROGON_SWITCHING_DEGRADATION_POLICY", default = "confirm")]
     pub degradation_policy_raw: String,
+
+    /// § Checkpoint strictness. Raw value parsed via [`SwitchingConfig::checkpoint_strictness`].
+    /// Default `internal_echo` preserves current behavior (echo governed by the legacy flag).
+    #[config(env = "TROGON_SWITCHING_CHECKPOINT_STRICTNESS", default = "real_for_high_risk")]
+    pub checkpoint_strictness_raw: String,
 }
 
 impl SwitchingConfig {
@@ -102,6 +145,30 @@ impl SwitchingConfig {
         self.degradation_policy_raw = policy.as_str().to_string();
         self
     }
+
+    /// Configurable risk policy for checkpoint strictness (§ Checkpoint strictness).
+    pub fn checkpoint_strictness(&self) -> CheckpointStrictness {
+        CheckpointStrictness::parse(&self.checkpoint_strictness_raw)
+    }
+
+    /// Programmatically set the checkpoint strictness policy.
+    pub fn with_checkpoint_strictness(mut self, strictness: CheckpointStrictness) -> Self {
+        self.checkpoint_strictness_raw = strictness.as_str().to_string();
+        self
+    }
+
+    /// Whether a continuity checkpoint must validate against the REAL destination
+    /// runner/model (vs a Context-Twin echo), given the switch's risk (§ Checkpoint
+    /// strictness, §2280). Real for `AlwaysReal`; for `RealForHighRisk` only when the
+    /// switch is high-risk; under `InternalEcho` echo unless the legacy
+    /// `continuity_checkpoint_internal_echo` flag is explicitly off (real for all).
+    pub fn requires_real_checkpoint(&self, is_high_risk: bool) -> bool {
+        match self.checkpoint_strictness() {
+            CheckpointStrictness::AlwaysReal => true,
+            CheckpointStrictness::RealForHighRisk => is_high_risk,
+            CheckpointStrictness::InternalEcho => !self.continuity_checkpoint_internal_echo,
+        }
+    }
 }
 
 impl Default for SwitchingConfig {
@@ -121,5 +188,60 @@ mod tests {
         assert!(config.switch_safety_gate_enabled);
         assert!(config.continuity_checkpoint_enabled);
         assert_eq!(config.checkpoint_min_confidence, DEFAULT_CHECKPOINT_MIN_CONFIDENCE);
+        // Default strictness escalates high-risk switches to a real destination checkpoint.
+        assert_eq!(config.checkpoint_strictness(), CheckpointStrictness::RealForHighRisk);
+        assert!(config.continuity_checkpoint_internal_echo);
+        assert!(
+            config.requires_real_checkpoint(true),
+            "default uses real checkpoint for high-risk switches"
+        );
+        assert!(
+            !config.requires_real_checkpoint(false),
+            "low-risk switches may still echo by default"
+        );
+    }
+
+    #[test]
+    fn requires_real_checkpoint_follows_strictness_and_risk() {
+        // § Checkpoint strictness (§1986/§2280): the real-vs-echo decision is risk-based.
+        // InternalEcho (default) + echo on → echo for all.
+        let echo = SwitchingConfig::default().with_checkpoint_strictness(CheckpointStrictness::InternalEcho);
+        assert!(!echo.requires_real_checkpoint(true));
+        assert!(!echo.requires_real_checkpoint(false));
+
+        // RealForHighRisk → real ONLY for high-risk switches, even with the echo default on.
+        let risk = SwitchingConfig::default().with_checkpoint_strictness(CheckpointStrictness::RealForHighRisk);
+        assert!(risk.continuity_checkpoint_internal_echo, "global echo default still on");
+        assert!(
+            risk.requires_real_checkpoint(true),
+            "high-risk escalates to a real checkpoint"
+        );
+        assert!(!risk.requires_real_checkpoint(false), "low-risk may still echo");
+
+        // AlwaysReal → real for every switch.
+        let always = SwitchingConfig::default().with_checkpoint_strictness(CheckpointStrictness::AlwaysReal);
+        assert!(always.requires_real_checkpoint(true));
+        assert!(always.requires_real_checkpoint(false));
+
+        // Legacy back-compat: InternalEcho with the echo flag explicitly off ⇒ real for all.
+        let mut legacy_real = SwitchingConfig::default().with_checkpoint_strictness(CheckpointStrictness::InternalEcho);
+        legacy_real.continuity_checkpoint_internal_echo = false;
+        assert!(legacy_real.requires_real_checkpoint(false));
+        assert!(legacy_real.requires_real_checkpoint(true));
+    }
+
+    #[test]
+    fn checkpoint_strictness_parse_roundtrips() {
+        for s in [
+            CheckpointStrictness::InternalEcho,
+            CheckpointStrictness::RealForHighRisk,
+            CheckpointStrictness::AlwaysReal,
+        ] {
+            assert_eq!(CheckpointStrictness::parse(s.as_str()), s);
+        }
+        assert_eq!(
+            CheckpointStrictness::parse("nonsense"),
+            CheckpointStrictness::InternalEcho
+        );
     }
 }

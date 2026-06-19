@@ -33,7 +33,10 @@ impl CapabilityRegistry {
     }
 
     /// Read a capability schema from an agent registry entry.
-    pub fn schema_from_agent(agent: &AgentCapability, model_id: &str) -> Result<Option<CapabilitySchema>, CapabilityError> {
+    pub fn schema_from_agent(
+        agent: &AgentCapability,
+        model_id: &str,
+    ) -> Result<Option<CapabilitySchema>, CapabilityError> {
         let Some(encoded) = agent
             .metadata
             .get(METADATA_CAPABILITY_SCHEMAS)
@@ -79,12 +82,14 @@ impl CapabilityRegistry {
         registry: &Registry<S>,
         model_id: &str,
     ) -> Result<Option<(AgentCapability, CapabilitySchema)>, CapabilityError> {
-        let Some(agent) = registry.find_by_model(model_id).await.map_err(|err| {
-            CapabilityError::SchemaDecode {
+        let Some(agent) = registry
+            .find_by_model(model_id)
+            .await
+            .map_err(|err| CapabilityError::SchemaDecode {
                 model_id: model_id.to_string(),
                 detail: err,
-            }
-        })? else {
+            })?
+        else {
             return Ok(None);
         };
 

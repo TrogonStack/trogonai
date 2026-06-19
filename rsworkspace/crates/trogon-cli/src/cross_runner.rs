@@ -11,13 +11,25 @@ use tokio::sync::mpsc;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
 use trogonai_session_contracts::{
-    IdempotencyKey, ModelSwitchReason, OperationId, SessionConfig, SessionId, SwitchResult,
+    IdempotencyKey, ModelSwitchReason, OperationId, PromptProjection, SessionConfig, SessionId, SwitchResult,
+    SwitchVisibleResult,
 };
-use trogonai_session_kernel::{SessionKernelFeatureFlags, shadow_sync_from_export};
+use trogonai_session_kernel::{SessionKernelFeatureFlags, resolve_event_log_primary, shadow_sync_from_export};
 use trogonai_switching::{
-    PassthroughCheckpointRunner, SwitchGateOutcome, SwitchModelRequest, SwitchOrchestrator, SwitchingError,
-    classify_switch_result, messages_json_for_runner_hydration, portable_config_from_snapshot,
+    JsonAcknowledgementRunner, RunnerAcknowledgement, SwitchCompletion, SwitchGateOutcome, SwitchModelRequest,
+    SwitchOrchestrator, SwitchingError, VisibleResultContext, build_visible_result, classify_switch_result,
+    failed_visible_result, handoff_visible_result, messages_json_for_runner_hydration, portable_config_from_snapshot,
+    same_runner_visible_result,
 };
+
+use time::OffsetDateTime;
+use trogonai_capabilities::{CertificationLevel, RunnerCapabilityProbe};
+
+use trogonai_switching::{CancelContext, CancelOutcome, cancel_operation, tool_states_from_session};
+
+use crate::cancellation::SessionRunnerCancellation;
+use crate::capability_probe::SessionCapabilityProbe;
+use crate::checkpoint_transport::SessionAckTransport;
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
 
@@ -31,14 +43,60 @@ type BridgeSlot = (ConcreteBridge, mpsc::Receiver<SessionNotification>);
 
 // ── RunnerSwitcher trait ──────────────────────────────────────────────────────
 
+/// The single surface every caller of a model switch consumes (§ Contrato de
+/// resultado visible del switch, §2043-2086). It carries the binding to attach to plus
+/// the durable [`SwitchVisibleResult`] so CLI/TUI/events render the SAME contract and no
+/// surface can fake continuity (§2084, §2289). `new_prefix == current_prefix` means the
+/// active binding did not change (same-runner in-place model set).
+#[derive(Debug, PartialEq)]
+pub struct SwitchSurface {
+    pub new_prefix: String,
+    pub new_session_id: String,
+    pub visible: SwitchVisibleResult,
+}
+
 pub trait RunnerSwitcher {
     fn switch_model<'a>(
         &'a mut self,
         current_prefix: &'a str,
         current_session_id: &'a str,
+        current_model: &'a str,
         model_id: &'a str,
         cwd: &'a str,
-    ) -> impl std::future::Future<Output = Result<(String, String), String>> + 'a;
+    ) -> impl std::future::Future<Output = Result<SwitchSurface, String>> + 'a;
+
+    /// Reconstruct + hydrate an event-log-primary session on resume (Fase 11). The
+    /// default treats every session as legacy (returns `None`), so callers fall back to
+    /// the runner's own `load_session`; the canonical switcher overrides it.
+    fn resume_event_primary<'a>(
+        &'a mut self,
+        _prefix: &'a str,
+        _session_id: &'a str,
+        _cwd: &'a str,
+    ) -> impl std::future::Future<Output = Result<Option<String>, String>> + 'a {
+        async { Ok(None) }
+    }
+
+    /// Mark a freshly created session as event-log-primary per the configured mode
+    /// (Fase 11). Default is a no-op for switchers without a kernel.
+    fn mark_session_event_primary<'a>(
+        &'a self,
+        _session_id: &'a str,
+    ) -> impl std::future::Future<Output = Result<(), String>> + 'a {
+        async { Ok(()) }
+    }
+
+    /// Run the capability-probe battery against `model` on `prefix` and certify it from
+    /// the verified results (§ Capability Registry Freshness), returning the resulting
+    /// certification level label. Default: unsupported (no kernel).
+    fn certify_model<'a>(
+        &'a mut self,
+        _prefix: &'a str,
+        _model: &'a str,
+        _cwd: &'a str,
+    ) -> impl std::future::Future<Output = Result<String, String>> + 'a {
+        async { Err("capability probing is not supported by this switcher".to_string()) }
+    }
 }
 
 // ── CrossRunnerSwitcher ───────────────────────────────────────────────────────
@@ -76,6 +134,171 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             .unwrap_or_default()
     }
 
+    /// Drive the canonical cancellation flow for an in-flight kernel operation
+    /// (§ Cancellation and Abort Semantics): request cancel, ask the runner to stop via the
+    /// ACP cancel, then append the terminal cancel events (`operation_cancelled` /
+    /// `operation_cancel_failed` / `operation_requires_reconciliation`) to the event log —
+    /// so a caller only releases the Session Lease after a terminal state is durably
+    /// recorded. Tool execution states come from the canonical snapshot, deciding
+    /// cancel-before-tools vs await-runner-receipt. Returns the structured outcome.
+    pub async fn cancel_session_operation(
+        &self,
+        prefix: &str,
+        session_id: &str,
+        operation_id: &str,
+    ) -> Result<CancelOutcome, String> {
+        let stack = self
+            .kernel_stack
+            .as_ref()
+            .ok_or_else(|| "session kernel not active — cannot cancel canonically".to_string())?;
+        let sid = SessionId::new(session_id).map_err(|err| err.to_string())?;
+        let op = OperationId::new(operation_id).map_err(|err| err.to_string())?;
+        let idempotency_key =
+            IdempotencyKey::new(format!("idem_cancel_{}", uuid::Uuid::now_v7())).map_err(|err| err.to_string())?;
+
+        let tool_states = stack
+            .kernel
+            .load_snapshot(&sid)
+            .await
+            .map_err(|err| err.to_string())?
+            .as_ref()
+            .and_then(|snapshot| snapshot.state.as_option())
+            .map(|state| tool_states_from_session(&state.tool_calls))
+            .unwrap_or_default();
+
+        let context = CancelContext::for_cli(
+            sid,
+            op,
+            format!("corr_cancel_{}", uuid::Uuid::now_v7()),
+            idempotency_key,
+            prefix.to_string(),
+            OffsetDateTime::now_utc().unix_timestamp(),
+        );
+        let cancellation =
+            SessionRunnerCancellation::new(self.nats.clone(), prefix.to_string(), session_id.to_string());
+
+        let (outcome, _state, events) = cancel_operation(Some(&cancellation), &context, &tool_states)
+            .await
+            .map_err(|err| err.to_string())?;
+        // Durably record every terminal cancel event before the caller releases the lease
+        // ("no liberar Session Lease hasta registrar cancelled/failed/requires_reconciliation").
+        for event in events {
+            stack.kernel.append_event(event).await.map_err(|err| err.to_string())?;
+        }
+        Ok(outcome)
+    }
+
+    /// Run the live capability-probe battery against `model` on `prefix` and certify the
+    /// model in the kernel stack's certification matrix from the verified results
+    /// (§ Capability Registry Freshness: probes promote a model out of the unverified
+    /// `Basic` baseline; only what was actually verified is certified). Returns the
+    /// resulting certification level. The upgraded matrix is then used by the Switch
+    /// Safety Gate on subsequent switches.
+    pub async fn probe_and_certify(
+        &mut self,
+        prefix: &str,
+        model: &str,
+        cwd: &str,
+    ) -> Result<CertificationLevel, String> {
+        // Resolve the runner id (agent type) the certification matrix is keyed by, from the
+        // registry; fall back to the prefix tail if the model is not registered.
+        let runner_id = self
+            .registry
+            .find_by_model(model)
+            .await
+            .map_err(|err| err.to_string())?
+            .map(|cap| cap.agent_type)
+            .unwrap_or_else(|| prefix.trim_start_matches("acp.").to_string());
+
+        let probe = SessionCapabilityProbe::new(
+            self.nats.clone(),
+            prefix.to_string(),
+            model.to_string(),
+            std::path::PathBuf::from(cwd),
+        );
+        let results = RunnerCapabilityProbe::new(probe).run_battery().await;
+        let now = OffsetDateTime::now_utc();
+        let stack = self
+            .kernel_stack
+            .as_mut()
+            .ok_or_else(|| "session kernel not active — cannot certify".to_string())?;
+        let level = stack
+            .certification
+            .certify_from_probes(model, &runner_id, &results, now)
+            .map_err(|err| err.to_string())?;
+        stack
+            .certification_store
+            .save_matrix(&stack.certification)
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(level)
+    }
+
+    async fn certify_model_label(&mut self, prefix: &str, model: &str, cwd: &str) -> Result<String, String> {
+        let level = self.probe_and_certify(prefix, model, cwd).await?;
+        Ok(format!("{level:?}"))
+    }
+
+    /// Mark a freshly created session's routing record per the configured
+    /// event-log-primary mode (Fase 11). No-op when the kernel stack is absent.
+    async fn mark_session_event_primary_inner(&self, session_id: &str) -> Result<(), String> {
+        let Some(stack) = self.kernel_stack.as_ref() else {
+            return Ok(());
+        };
+        let sid = SessionId::new(session_id).map_err(|e| e.to_string())?;
+        stack
+            .migration
+            .mark_new_session(&sid, &stack.flags)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// If `session_id` is event-log-primary, reconstruct its canonical conversation from
+    /// the event log and produce `session/import` messages JSON to hydrate a runner
+    /// (Fase 11: "Usar replay + snapshots como fuente de verdad para sesiones opt-in").
+    /// Returns `None` when the kernel is inactive, the session has no routing record, or
+    /// the mode is legacy — callers then fall back to the runner's own load_session.
+    pub async fn recover_event_primary_messages(&self, session_id: &str) -> Result<Option<String>, String> {
+        let Some(stack) = self.kernel_stack.as_ref() else {
+            return Ok(None);
+        };
+        let sid = SessionId::new(session_id).map_err(|e| e.to_string())?;
+        let Some(record) = stack.migration.load_routing(&sid).await.map_err(|e| e.to_string())? else {
+            return Ok(None);
+        };
+        if !resolve_event_log_primary(&stack.flags, &record) {
+            return Ok(None);
+        }
+        let recovered = stack.kernel.recover(&sid).await.map_err(|e| e.to_string())?;
+        let conversation = recovered
+            .snapshot
+            .state
+            .as_option()
+            .map(|state| state.conversation.clone())
+            .unwrap_or_default();
+        // No projection for resume: hydrate from the full canonical conversation.
+        let messages = messages_json_for_runner_hydration(&PromptProjection::default(), &conversation)
+            .map_err(|e| e.to_string())?;
+        Ok(Some(messages))
+    }
+
+    /// Resume an event-log-primary session by reconstructing it from the kernel and
+    /// hydrating a fresh runner session. Returns the new runner session id, or `None`
+    /// when the session is not event-log-primary (caller uses the legacy resume path).
+    async fn resume_event_primary_inner(
+        &mut self,
+        prefix: &str,
+        session_id: &str,
+        cwd: &str,
+    ) -> Result<Option<String>, String> {
+        let Some(messages) = self.recover_event_primary_messages(session_id).await? else {
+            return Ok(None);
+        };
+        let new_session_id = self.hydrate_new_runner_session(prefix, cwd, &messages).await?;
+        Ok(Some(new_session_id))
+    }
+
     /// Switch the active session to whichever runner owns `model_id`.
     /// Returns `(target_prefix, new_session_id)`.
     /// Returns the original pair unchanged if the model is already on the current runner.
@@ -85,9 +308,65 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         &mut self,
         current_prefix: &str,
         current_session_id: &str,
+        current_model: &str,
         model_id: &str,
         cwd: &str,
-    ) -> Result<(String, String), String> {
+    ) -> Result<SwitchSurface, String> {
+        self.switch_model_for_session(
+            current_prefix,
+            current_session_id,
+            current_session_id,
+            current_model,
+            model_id,
+            cwd,
+        )
+        .await
+    }
+
+    /// Switch a model while keeping `trogon_session_id` as the canonical visible
+    /// session identity and using `current_runner_session_id` only to talk to the
+    /// currently attached runtime binding.
+    ///
+    /// ACP multi-runner sessions have two IDs once routed externally: the IDE-visible
+    /// Trogon session id (`acp_sid`) and the runner-local binding id (`runner_sid`).
+    /// The Session Kernel must use the former for events/snapshots/leases; NATS
+    /// `session/export` must use the latter. The plain CLI path passes the same value
+    /// for both, preserving existing behavior.
+    pub async fn switch_model_for_session(
+        &mut self,
+        current_prefix: &str,
+        current_runner_session_id: &str,
+        trogon_session_id: &str,
+        current_model: &str,
+        model_id: &str,
+        cwd: &str,
+    ) -> Result<SwitchSurface, String> {
+        self.switch_model_for_session_into(
+            current_prefix,
+            current_runner_session_id,
+            trogon_session_id,
+            None,
+            current_model,
+            model_id,
+            cwd,
+        )
+        .await
+    }
+
+    /// Variant of [`Self::switch_model_for_session`] that hydrates a known target
+    /// runner session id instead of opening a new binding. ACP uses this when switching
+    /// back to the embedded runner: the target binding is the IDE-visible `acp_sid`, not
+    /// a new session.
+    pub async fn switch_model_for_session_into(
+        &mut self,
+        current_prefix: &str,
+        current_runner_session_id: &str,
+        trogon_session_id: &str,
+        target_runner_session_id: Option<&str>,
+        current_model: &str,
+        model_id: &str,
+        cwd: &str,
+    ) -> Result<SwitchSurface, String> {
         // 1. Resolve target runner from registry
         let cap = self
             .registry
@@ -100,7 +379,12 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             .ok_or("missing acp_prefix in registry metadata")?
             .to_string();
         if target_prefix == current_prefix {
-            return Ok((current_prefix.to_string(), current_session_id.to_string()));
+            // Same runner: an in-place model set, the active binding is unchanged.
+            return Ok(SwitchSurface {
+                new_prefix: current_prefix.to_string(),
+                new_session_id: current_runner_session_id.to_string(),
+                visible: same_runner_visible_result(trogon_session_id, current_model, model_id, current_prefix),
+            });
         }
 
         // 2. Ensure both bridges exist before any borrow
@@ -109,7 +393,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
 
         // 3. Export history as raw JSON (used for shadow mode and handoff fallback)
         let export_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": current_session_id }).to_string(),
+            serde_json::json!({ "sessionId": current_runner_session_id }).to_string(),
         )
         .map_err(|e| e.to_string())?;
         let messages_json = {
@@ -132,8 +416,10 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             match self
                 .switch_via_session_kernel(
                     current_prefix,
-                    current_session_id,
+                    trogon_session_id,
+                    current_model,
                     &target_prefix,
+                    target_runner_session_id,
                     model_id,
                     cwd,
                     raw_messages,
@@ -143,7 +429,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             {
                 Ok(result) => {
                     trogonai_switching::telemetry::metrics::record_switch_latency_ms(
-                        current_session_id,
+                        trogon_session_id,
                         &result.operation_id,
                         started.elapsed().as_secs_f64() * 1000.0,
                         &result.source_model,
@@ -156,19 +442,31 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                     // The structured result is emitted (not a parsed string); a degraded
                     // or repaired switch stays visible in logs derived from it.
                     tracing::info!(
-                        session_id = current_session_id,
+                        session_id = trogon_session_id,
                         target_model = model_id,
                         switch_result = switch_result_label(result.result),
                         "canonical model switch completed"
                     );
-                    return Ok((target_prefix, result.runner_session_id));
+                    return Ok(SwitchSurface {
+                        new_prefix: target_prefix,
+                        new_session_id: result.runner_session_id,
+                        visible: result.visible,
+                    });
                 }
                 Err(err) => {
                     trogonai_switching::telemetry::metrics::record_hydration_fallback(
-                        current_session_id,
+                        trogon_session_id,
                         &err.operation_id,
                         &err.reason,
                     );
+                    // § Switch Safety Gate / §2289: a blocked or confirmation-required gate
+                    // result is NOT a transport failure — it must surface as the structured
+                    // result with its next_action, and it must NEVER fall through to a silent
+                    // handoff (that would fake the very continuity the gate refused). The
+                    // visible result already carries the reasons/next_action; render them.
+                    if matches!(err.result, SwitchResult::Blocked | SwitchResult::RequiresConfirmation) {
+                        return Err(blocked_surface_message(&err.visible));
+                    }
                     // § Rollback Strategy / Compatibilidad temporal: a silent handoff is
                     // only permitted while the event log is NOT primary. Under event-primary
                     // a canonical failure must surface the structured repairable result,
@@ -181,47 +479,83 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                         ));
                     }
                     tracing::warn!(
-                        session_id = current_session_id,
+                        session_id = trogon_session_id,
                         target_model = model_id,
                         switch_result = switch_result_label(err.result),
                         error = %err.reason,
                         "canonical session kernel switch failed — falling back to export/import handoff"
                     );
+                    // The handoff that follows is a fallback FROM an attempted canonical
+                    // switch: surface fallback_used=true with the canonical failure reason.
+                    return self
+                        .handoff_switch(
+                            trogon_session_id,
+                            current_model,
+                            current_prefix,
+                            model_id,
+                            &target_prefix,
+                            cwd,
+                            raw_messages,
+                            Some(err.reason),
+                        )
+                        .await;
                 }
             }
         }
 
-        self.handoff_switch(&target_prefix, cwd, raw_messages).await
+        // No canonical stack: legacy/MVP mode where export/import handoff is THE mechanism.
+        // It is still surfaced as a fallback (§2288: handoff must be visible in UX).
+        self.handoff_switch(
+            trogon_session_id,
+            current_model,
+            current_prefix,
+            model_id,
+            &target_prefix,
+            cwd,
+            raw_messages,
+            None,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn switch_via_session_kernel(
         &mut self,
-        _current_prefix: &str,
+        current_prefix: &str,
         trogon_session_id: &str,
+        current_model: &str,
         target_prefix: &str,
+        target_runner_session_id: Option<&str>,
         model_id: &str,
         cwd: &str,
         export_json: &str,
         stack: &crate::session_kernel::SessionKernelStack,
     ) -> Result<CanonicalSwitchOutcome, CanonicalSwitchFailure> {
-        let session_id = SessionId::new(trogon_session_id).map_err(|err| CanonicalSwitchFailure {
-            operation_id: trogon_session_id.to_string(),
-            reason: err.to_string(),
-            result: SwitchResult::FailedRecoverable,
-        })?;
-        let operation_id =
-            OperationId::new(format!("op_switch_{}", uuid::Uuid::now_v7())).map_err(|err| CanonicalSwitchFailure {
-                operation_id: trogon_session_id.to_string(),
-                reason: err.to_string(),
-                result: SwitchResult::FailedRecoverable,
-            })?;
-        let idempotency_key =
-            IdempotencyKey::new(format!("idem_{}", uuid::Uuid::now_v7())).map_err(|err| CanonicalSwitchFailure {
-                operation_id: operation_id.as_str().to_string(),
-                reason: err.to_string(),
-                result: SwitchResult::FailedRecoverable,
-            })?;
+        // Synthesize a CanonicalSwitchFailure (with its visible result) for failures that
+        // have no rich orchestrator outcome — id/validation errors and post-attach
+        // hydration failures. The blocked/confirmation gate path builds the RICH visible
+        // result separately (it carries reasons/next_action from the orchestrator).
+        let mk_fail = move |operation_id: &str, result: SwitchResult, reason: String| CanonicalSwitchFailure {
+            operation_id: operation_id.to_string(),
+            visible: failed_visible_result(
+                trogon_session_id,
+                current_model,
+                current_prefix,
+                model_id,
+                target_prefix,
+                result,
+                reason.clone(),
+            ),
+            reason,
+            result,
+        };
+
+        let session_id = SessionId::new(trogon_session_id)
+            .map_err(|err| mk_fail(trogon_session_id, SwitchResult::FailedRecoverable, err.to_string()))?;
+        let operation_id = OperationId::new(format!("op_switch_{}", uuid::Uuid::now_v7()))
+            .map_err(|err| mk_fail(trogon_session_id, SwitchResult::FailedRecoverable, err.to_string()))?;
+        let idempotency_key = IdempotencyKey::new(format!("idem_{}", uuid::Uuid::now_v7()))
+            .map_err(|err| mk_fail(operation_id.as_str(), SwitchResult::FailedRecoverable, err.to_string()))?;
 
         if stack.flags.event_log_shadow_mode {
             let portable_config = legacy_portable_session_config(&self.nats, trogon_session_id).await;
@@ -237,37 +571,56 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             }
         }
 
-        let orchestrator = SwitchOrchestrator::new(
-            stack.kernel.clone(),
-            stack.snapshots.clone(),
-            stack.runner_bindings.clone(),
-            stack.twin_store.clone(),
-            self.registry.clone(),
-            Arc::new(PassthroughCheckpointRunner),
-            stack.switching_config.clone(),
-            stack.capability_config.clone(),
-            stack.projection_config.clone(),
-            stack.certification.clone(),
-        );
+        let request = SwitchModelRequest {
+            session_id: session_id.clone(),
+            target_model: model_id.to_string(),
+            reason: ModelSwitchReason::UserRequested,
+            user_confirmed: true,
+            force: false,
+            force_acknowledged_losses: Vec::new(),
+            operation_id: operation_id.clone(),
+            correlation_id: format!("corr_{}", uuid::Uuid::now_v7()),
+            idempotency_key,
+        };
 
-        let outcome = orchestrator
-            .switch_model(SwitchModelRequest {
-                session_id: session_id.clone(),
-                target_model: model_id.to_string(),
-                reason: ModelSwitchReason::UserRequested,
-                user_confirmed: true,
-                force: false,
-                force_acknowledged_losses: Vec::new(),
-                operation_id: operation_id.clone(),
-                correlation_id: format!("corr_{}", uuid::Uuid::now_v7()),
-                idempotency_key,
-            })
+        // Always provide the REAL destination-checkpoint runner over NATS; the orchestrator
+        // decides per-switch whether to actually invoke it (real checkpoint) or echo the
+        // Context Twin, per the configured checkpoint strictness and the switch's risk
+        // (§ Checkpoint strictness §1986/§2280: "switches con tools, artifacts, terminal o
+        // cambios de proveedor deben usar checkpoint real contra destino"). When the policy
+        // resolves to echo, the transport stays dormant (never asked).
+        let transport = SessionAckTransport::new(
+            self.nats.clone(),
+            target_prefix.to_string(),
+            model_id.to_string(),
+            std::path::PathBuf::from(cwd),
+        );
+        let outcome = self
+            .run_orchestrated_switch(stack, Arc::new(JsonAcknowledgementRunner::new(transport)), request)
             .await;
         // Normalize ONCE into the structured SwitchResult before unwrapping, so every
         // return path carries it (§ Trabajo restante: "emitir SwitchResult estructurado").
         let result_kind = classify_switch_result(&outcome);
+        // Build the single durable visible result from the orchestrator outcome BEFORE it
+        // is consumed (§ Contrato de resultado visible, §2084): degradations, lost
+        // capabilities, checkpoint status and next_action all derive from it here.
+        let visible_ctx = VisibleResultContext {
+            session_id: trogon_session_id,
+            from_model: current_model,
+            from_runner: current_prefix,
+            to_model: model_id,
+            to_runner: target_prefix,
+            fallback_used: false,
+            fallback_reason: None,
+        };
+        let visible = build_visible_result(&visible_ctx, &outcome);
 
-        let switch_result = outcome.map_err(|err| map_switching_error(operation_id.as_str(), result_kind, err))?;
+        let switch_result = outcome.map_err(|err| CanonicalSwitchFailure {
+            operation_id: operation_id.as_str().to_string(),
+            reason: err.to_string(),
+            result: result_kind,
+            visible: visible.clone(),
+        })?;
 
         let result = match switch_result {
             Ok(result) => result,
@@ -286,6 +639,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                     operation_id: operation_id.as_str().to_string(),
                     reason: "switch blocked by safety gate".to_string(),
                     result: result_kind,
+                    visible,
                 });
             }
             Err(SwitchGateOutcome::ConfirmationRequired(_)) => {
@@ -298,6 +652,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                     operation_id: operation_id.as_str().to_string(),
                     reason: "switch requires user confirmation".to_string(),
                     result: result_kind,
+                    visible,
                 });
             }
         };
@@ -308,13 +663,9 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 .kernel
                 .load_snapshot(&session_id)
                 .await
-                .map_err(|err| CanonicalSwitchFailure {
-                    operation_id: operation_id.as_str().to_string(),
-                    reason: err.to_string(),
-                    // Canonical switch committed; only post-switch hydration failed, so the
-                    // session stays consistent and the attempt is retryable.
-                    result: SwitchResult::FailedRecoverable,
-                })?;
+                // Canonical switch committed; only post-switch hydration failed, so the
+                // session stays consistent and the attempt is retryable.
+                .map_err(|err| mk_fail(operation_id.as_str(), SwitchResult::FailedRecoverable, err.to_string()))?;
             let mut portable = snapshot
                 .as_ref()
                 .and_then(|snap| snap.state.as_option())
@@ -335,21 +686,25 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             portable
         };
 
-        let import_messages =
-            messages_json_for_runner_hydration(&result.projection, &[]).map_err(|err| CanonicalSwitchFailure {
-                operation_id: operation_id.as_str().to_string(),
-                reason: err.to_string(),
-                result: SwitchResult::FailedRecoverable,
-            })?;
+        let import_messages = messages_json_for_runner_hydration(&result.projection, &[])
+            .map_err(|err| mk_fail(operation_id.as_str(), SwitchResult::FailedRecoverable, err.to_string()))?;
 
-        let new_session_id = self
-            .open_and_hydrate_runner_session(target_prefix, cwd, &import_messages, model_id, &portable)
+        let new_session_id = if let Some(target_runner_session_id) = target_runner_session_id {
+            self.hydrate_existing_runner_session(
+                target_prefix,
+                target_runner_session_id,
+                &import_messages,
+                model_id,
+                &portable,
+            )
             .await
-            .map_err(|reason| CanonicalSwitchFailure {
-                operation_id: operation_id.as_str().to_string(),
-                reason,
-                result: SwitchResult::FailedRecoverable,
-            })?;
+            .map_err(|reason| mk_fail(operation_id.as_str(), SwitchResult::FailedRecoverable, reason))?;
+            target_runner_session_id.to_string()
+        } else {
+            self.open_and_hydrate_runner_session(target_prefix, cwd, &import_messages, model_id, &portable)
+                .await
+                .map_err(|reason| mk_fail(operation_id.as_str(), SwitchResult::FailedRecoverable, reason))?
+        };
 
         trogonai_switching::telemetry::metrics::record_switch_completed(
             trogon_session_id,
@@ -376,21 +731,80 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             runner_session_id: new_session_id,
             checkpoint_result: checkpoint_result.map(str::to_string),
             result: result_kind,
+            visible,
         })
     }
 
+    /// Build a `SwitchOrchestrator` with the given continuity-checkpoint runner and run
+    /// the switch. Generic over the runner type so the checkpoint binding (Context-Twin
+    /// echo vs real target-model query) is selected without dynamic dispatch.
+    async fn run_orchestrated_switch<R: RunnerAcknowledgement + 'static>(
+        &self,
+        stack: &crate::session_kernel::SessionKernelStack,
+        runner: Arc<R>,
+        request: SwitchModelRequest,
+    ) -> Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> {
+        let orchestrator = SwitchOrchestrator::new(
+            stack.kernel.clone(),
+            stack.snapshots.clone(),
+            stack.runner_bindings.clone(),
+            stack.twin_store.clone(),
+            self.registry.clone(),
+            runner,
+            stack.switching_config.clone(),
+            stack.capability_config.clone(),
+            stack.projection_config.clone(),
+            stack.certification.clone(),
+        );
+        orchestrator.switch_model(request).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn handoff_switch(
         &mut self,
+        current_session_id: &str,
+        current_model: &str,
+        current_prefix: &str,
+        target_model: &str,
         target_prefix: &str,
         cwd: &str,
         raw_messages: &str,
-    ) -> Result<(String, String), String> {
+        fallback_reason: Option<String>,
+    ) -> Result<SwitchSurface, String> {
         if raw_messages.trim() == "null" || raw_messages.trim().is_empty() {
             return Err("session/export returned null — cannot import into new session".into());
         }
+        let new_session_id = self
+            .hydrate_new_runner_session(target_prefix, cwd, raw_messages)
+            .await?;
+        Ok(SwitchSurface {
+            new_prefix: target_prefix.to_string(),
+            new_session_id,
+            // §2074/§2288/§2319: a handoff is surfaced as a fallback (degraded), never as a
+            // clean canonical `switched`, so no surface fakes full continuity.
+            visible: handoff_visible_result(
+                current_session_id,
+                current_model,
+                current_prefix,
+                target_model,
+                target_prefix,
+                fallback_reason,
+            ),
+        })
+    }
 
+    /// Open a fresh session on `prefix` and import `messages_json` into it, returning the
+    /// new runner session id. Reused by handoff fallback and by event-log-primary resume
+    /// (Fase 11: "el runner destino debe hidratarse desde el Session Kernel").
+    async fn hydrate_new_runner_session(
+        &mut self,
+        prefix: &str,
+        cwd: &str,
+        messages_json: &str,
+    ) -> Result<String, String> {
+        self.ensure_bridge(prefix)?;
         let new_session_id = {
-            let (bridge, _) = self.bridges.get(target_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(prefix).unwrap();
             bridge
                 .new_session(NewSessionRequest::new(cwd))
                 .await
@@ -400,11 +814,11 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         };
 
         let import_params = serde_json::value::RawValue::from_string(format!(
-            r#"{{"sessionId":"{new_session_id}","messages":{raw_messages}}}"#
+            r#"{{"sessionId":"{new_session_id}","messages":{messages_json}}}"#
         ))
         .map_err(|e| e.to_string())?;
         {
-            let (bridge, _) = self.bridges.get(target_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(prefix).unwrap();
             if let Err(import_err) = bridge
                 .ext_method(ExtRequest::new("session/import", import_params.into()))
                 .await
@@ -416,7 +830,28 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             }
         }
 
-        Ok((target_prefix.to_string(), new_session_id))
+        Ok(new_session_id)
+    }
+
+    async fn hydrate_existing_runner_session(
+        &mut self,
+        target_prefix: &str,
+        target_session_id: &str,
+        import_messages_json: &str,
+        model_id: &str,
+        portable: &trogonai_switching::PortableRunnerConfig,
+    ) -> Result<(), String> {
+        self.ensure_bridge(target_prefix)?;
+        let import_params = serde_json::value::RawValue::from_string(format!(
+            r#"{{"sessionId":"{target_session_id}","messages":{import_messages_json}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        let (bridge, _) = self.bridges.get(target_prefix).unwrap();
+        bridge
+            .ext_method(ExtRequest::new("session/import", import_params.into()))
+            .await
+            .map_err(|err| err.to_string())?;
+        apply_portable_runner_config(bridge, target_session_id, model_id, portable).await
     }
 
     async fn open_and_hydrate_runner_session(
@@ -484,10 +919,36 @@ impl<S: RegistryStore> RunnerSwitcher for CrossRunnerSwitcher<S> {
         &'a mut self,
         current_prefix: &'a str,
         current_session_id: &'a str,
+        current_model: &'a str,
         model_id: &'a str,
         cwd: &'a str,
-    ) -> impl std::future::Future<Output = Result<(String, String), String>> + 'a {
-        CrossRunnerSwitcher::switch_model(self, current_prefix, current_session_id, model_id, cwd)
+    ) -> impl std::future::Future<Output = Result<SwitchSurface, String>> + 'a {
+        CrossRunnerSwitcher::switch_model(self, current_prefix, current_session_id, current_model, model_id, cwd)
+    }
+
+    fn resume_event_primary<'a>(
+        &'a mut self,
+        prefix: &'a str,
+        session_id: &'a str,
+        cwd: &'a str,
+    ) -> impl std::future::Future<Output = Result<Option<String>, String>> + 'a {
+        self.resume_event_primary_inner(prefix, session_id, cwd)
+    }
+
+    fn mark_session_event_primary<'a>(
+        &'a self,
+        session_id: &'a str,
+    ) -> impl std::future::Future<Output = Result<(), String>> + 'a {
+        self.mark_session_event_primary_inner(session_id)
+    }
+
+    fn certify_model<'a>(
+        &'a mut self,
+        prefix: &'a str,
+        model: &'a str,
+        cwd: &'a str,
+    ) -> impl std::future::Future<Output = Result<String, String>> + 'a {
+        self.certify_model_label(prefix, model, cwd)
     }
 }
 
@@ -522,13 +983,40 @@ pub mod mock {
     impl RunnerSwitcher for MockRunnerSwitcher {
         fn switch_model<'a>(
             &'a mut self,
-            _current_prefix: &'a str,
-            _current_session_id: &'a str,
-            _model_id: &'a str,
+            current_prefix: &'a str,
+            current_session_id: &'a str,
+            current_model: &'a str,
+            model_id: &'a str,
             _cwd: &'a str,
-        ) -> impl std::future::Future<Output = Result<(String, String), String>> + 'a {
+        ) -> impl std::future::Future<Output = Result<super::SwitchSurface, String>> + 'a {
             let result = self.result.clone();
-            async move { result }
+            async move {
+                let (new_prefix, new_session_id) = result?;
+                // Same runner → clean in-place switch; different runner → handoff fallback
+                // (the mock has no canonical kernel), matching the real surface contract.
+                let visible = if new_prefix == current_prefix {
+                    trogonai_switching::same_runner_visible_result(
+                        current_session_id,
+                        current_model,
+                        model_id,
+                        current_prefix,
+                    )
+                } else {
+                    trogonai_switching::handoff_visible_result(
+                        current_session_id,
+                        current_model,
+                        current_prefix,
+                        model_id,
+                        &new_prefix,
+                        None,
+                    )
+                };
+                Ok(super::SwitchSurface {
+                    new_prefix,
+                    new_session_id,
+                    visible,
+                })
+            }
         }
     }
 }
@@ -541,6 +1029,8 @@ struct CanonicalSwitchOutcome {
     /// The normalized, structured switch result (§ Contrato formal de resultado del
     /// switch). cross_runner emits THIS, not a parsed string.
     result: SwitchResult,
+    /// The single durable visible result every surface renders (§2084).
+    visible: SwitchVisibleResult,
 }
 
 struct CanonicalSwitchFailure {
@@ -549,14 +1039,25 @@ struct CanonicalSwitchFailure {
     /// Structured outcome so the caller/UX derive behavior from the result, not text
     /// (§ "logs y metricas deben derivarse del resultado estructurado, no de parsear texto").
     result: SwitchResult,
+    /// The visible result for this failure (carries reasons/next_action for blocked
+    /// and confirmation-required, so the surface never has to parse the reason text).
+    visible: SwitchVisibleResult,
 }
 
-fn map_switching_error(operation_id: &str, result: SwitchResult, err: SwitchingError) -> CanonicalSwitchFailure {
-    CanonicalSwitchFailure {
-        operation_id: operation_id.to_string(),
-        reason: err.to_string(),
-        result,
+/// Format the user-facing message for a blocked / confirmation-required switch from its
+/// structured visible result (§2075/§2076: the surface must show the next_action and the
+/// degradations/missing capabilities). Derived from the contract, not parsed from text.
+fn blocked_surface_message(visible: &SwitchVisibleResult) -> String {
+    let label = switch_result_label(visible.result.as_known().unwrap_or(SwitchResult::Blocked));
+    let mut msg = format!("switch {label}");
+    if !visible.degradations.is_empty() {
+        msg.push_str(": ");
+        msg.push_str(&visible.degradations.join("; "));
     }
+    if let Some(next) = &visible.next_action {
+        msg.push_str(&format!(" (next: {next})"));
+    }
+    msg
 }
 
 /// Stable snake_case label for the structured switch result, for user-facing messages
@@ -686,25 +1187,49 @@ mod tests {
     // "logs y metricas deben derivarse del resultado estructurado, no de parsear texto").
 
     #[test]
-    fn map_switching_error_carries_the_structured_result() {
-        let failure = map_switching_error(
-            "op_1",
+    fn visible_result_derives_user_text_from_structured_result() {
+        // A terminal failure carries the structured result and exposes the concrete cause
+        // as next_action (§ Reglas del contrato visible). The blocked message DERIVES from
+        // the visible result, never from parsing free text (§2031).
+        let terminal = failed_visible_result(
+            "sess_1",
+            "from-model",
+            "acp.src",
+            "ghost",
+            "acp.dst",
             SwitchResult::FailedTerminal,
-            SwitchingError::TargetModelNotFound { model_id: "ghost".to_string() },
+            "target model not found".to_string(),
         );
-        assert_eq!(failure.result, SwitchResult::FailedTerminal);
-        assert_eq!(failure.operation_id, "op_1");
+        assert_eq!(terminal.result.as_known(), Some(SwitchResult::FailedTerminal));
+        assert_eq!(terminal.next_action.as_deref(), Some("target model not found"));
+
+        let blocked = failed_visible_result(
+            "sess_1",
+            "from-model",
+            "acp.src",
+            "ghost",
+            "acp.dst",
+            SwitchResult::Blocked,
+            "blocked".to_string(),
+        );
+        assert!(blocked_surface_message(&blocked).contains("blocked"));
     }
 
     #[test]
     fn switch_result_label_is_stable_for_every_state() {
         assert_eq!(switch_result_label(SwitchResult::Switched), "switched");
         assert_eq!(switch_result_label(SwitchResult::Blocked), "blocked");
-        assert_eq!(switch_result_label(SwitchResult::RequiresConfirmation), "requires_confirmation");
+        assert_eq!(
+            switch_result_label(SwitchResult::RequiresConfirmation),
+            "requires_confirmation"
+        );
         assert_eq!(switch_result_label(SwitchResult::Degraded), "degraded");
         assert_eq!(switch_result_label(SwitchResult::Repaired), "repaired");
         assert_eq!(switch_result_label(SwitchResult::RolledBack), "rolled_back");
-        assert_eq!(switch_result_label(SwitchResult::FailedRecoverable), "failed_recoverable");
+        assert_eq!(
+            switch_result_label(SwitchResult::FailedRecoverable),
+            "failed_recoverable"
+        );
         assert_eq!(switch_result_label(SwitchResult::FailedTerminal), "failed_terminal");
     }
 
@@ -716,9 +1241,15 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         let result = switcher
-            .switch_model("acp.test", "session-abc", "gpt-4", "/workspace")
+            .switch_model("acp.test", "session-abc", "sonnet", "gpt-4", "/workspace")
             .await;
-        assert_eq!(result, Ok(("acp.test".to_string(), "session-abc".to_string())));
+        let surface = result.expect("same-runner switch must succeed");
+        assert_eq!(surface.new_prefix, "acp.test");
+        assert_eq!(surface.new_session_id, "session-abc");
+        assert!(
+            !surface.visible.runner_changed,
+            "same runner must not report a runner change"
+        );
     }
 
     #[tokio::test]
@@ -728,7 +1259,7 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         let result = switcher
-            .switch_model("acp.current", "session-1", "unknown-model", "/ws")
+            .switch_model("acp.current", "session-1", "sonnet", "unknown-model", "/ws")
             .await;
         assert_eq!(result, Err("no runner found for model: unknown-model".to_string()));
     }
@@ -742,7 +1273,9 @@ mod tests {
         registry.register(&cap).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.other", "session-1", "gpt-4", "/ws").await;
+        let result = switcher
+            .switch_model("acp.other", "session-1", "sonnet", "gpt-4", "/ws")
+            .await;
         assert_eq!(result, Err("missing acp_prefix in registry metadata".to_string()));
     }
 
@@ -754,7 +1287,9 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp..bad")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.current", "session-1", "gpt-4", "/ws").await;
+        let result = switcher
+            .switch_model("acp.current", "session-1", "sonnet", "gpt-4", "/ws")
+            .await;
         assert!(result.is_err(), "expected Err but got: {result:?}");
     }
 
@@ -800,10 +1335,17 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         let result = switcher
-            .switch_model("acp.src", "old-session-id", "gpt-4", "/workspace")
+            .switch_model("acp.src", "old-session-id", "sonnet", "gpt-4", "/workspace")
             .await;
 
-        assert_eq!(result, Ok(("acp.tgt".to_string(), "migrated-session".to_string())));
+        let surface = result.expect("cross-runner migration must succeed");
+        assert_eq!(surface.new_prefix, "acp.tgt");
+        assert_eq!(surface.new_session_id, "migrated-session");
+        // No canonical kernel here: the switch is a legacy handoff, surfaced as such.
+        assert!(
+            surface.visible.fallback_used,
+            "legacy handoff must surface fallback_used=true"
+        );
     }
 
     // ── Error propagation ─────────────────────────────────────────────────────
@@ -854,7 +1396,9 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.src", "session-1", "gpt-4", "/ws").await;
+        let result = switcher
+            .switch_model("acp.src", "session-1", "sonnet", "gpt-4", "/ws")
+            .await;
         assert!(result.is_err(), "expected export failure to propagate; got: {result:?}");
     }
 
@@ -871,7 +1415,9 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.src", "session-1", "gpt-4", "/ws").await;
+        let result = switcher
+            .switch_model("acp.src", "session-1", "sonnet", "gpt-4", "/ws")
+            .await;
         assert!(
             result.is_err(),
             "expected new_session failure to propagate; got: {result:?}"
@@ -892,7 +1438,9 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.src", "session-1", "gpt-4", "/ws").await;
+        let result = switcher
+            .switch_model("acp.src", "session-1", "sonnet", "gpt-4", "/ws")
+            .await;
         assert!(result.is_err(), "expected import failure to propagate; got: {result:?}");
     }
 
@@ -922,11 +1470,19 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
 
-        let r1 = switcher.switch_model("acp.src", "old-1", "gpt-4", "/ws").await;
-        assert_eq!(r1, Ok(("acp.tgt".to_string(), "s1".to_string())));
+        let r1 = switcher
+            .switch_model("acp.src", "old-1", "sonnet", "gpt-4", "/ws")
+            .await
+            .unwrap();
+        assert_eq!(r1.new_prefix, "acp.tgt");
+        assert_eq!(r1.new_session_id, "s1");
 
-        let r2 = switcher.switch_model("acp.src", "old-2", "gpt-4", "/ws").await;
-        assert_eq!(r2, Ok(("acp.tgt".to_string(), "s2".to_string())));
+        let r2 = switcher
+            .switch_model("acp.src", "old-2", "sonnet", "gpt-4", "/ws")
+            .await
+            .unwrap();
+        assert_eq!(r2.new_prefix, "acp.tgt");
+        assert_eq!(r2.new_session_id, "s2");
     }
 
     // ── Import payload correctness ────────────────────────────────────────────
@@ -956,7 +1512,7 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         switcher
-            .switch_model("acp.src", "session-1", "gpt-4", "/workspace/myproject")
+            .switch_model("acp.src", "session-1", "sonnet", "gpt-4", "/workspace/myproject")
             .await
             .unwrap();
 
@@ -999,7 +1555,7 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         switcher
-            .switch_model("acp.src", "src-session", "gpt-4", "/ws")
+            .switch_model("acp.src", "src-session", "sonnet", "gpt-4", "/ws")
             .await
             .unwrap();
 
@@ -1035,7 +1591,7 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         switcher
-            .switch_model("acp.src", "src-session", "gpt-4", "/ws")
+            .switch_model("acp.src", "src-session", "sonnet", "gpt-4", "/ws")
             .await
             .unwrap();
 

@@ -302,8 +302,16 @@ fn apply_session_created(
 
 fn apply_assistant_started(state: &mut SessionSnapshotState, payload: &AssistantMessageStartedPayload) {
     let config = state.config.get_or_insert_default();
-    config.model = Some(payload.model.clone());
-    config.runner = Some(payload.runner.clone());
+    // § No-Lossy Contract (§2192/§2201): the portable session `config.model`/`runner` is
+    // canonical truth and must never be lost. An assistant turn that does not carry a
+    // model/runner (e.g. a plain recorded message) must NOT clobber the configured value
+    // set at session creation or by a model switch.
+    if !payload.model.is_empty() {
+        config.model = Some(payload.model.clone());
+    }
+    if !payload.runner.is_empty() {
+        config.runner = Some(payload.runner.clone());
+    }
 }
 
 fn append_message(state: &mut SessionSnapshotState, message: &CanonicalMessage) {
@@ -429,6 +437,40 @@ mod tests {
             }),
             ..SessionEvent::default()
         }
+    }
+
+    #[test]
+    fn assistant_started_without_model_does_not_clobber_config_model() {
+        // § No-Lossy Contract (§2192/§2201): a plain assistant turn that carries no
+        // model/runner must NOT erase the portable config.model/runner set at session
+        // creation (regression: record_conversation emits assistant_message_started with an
+        // empty model for messages that don't specify one).
+        let session_id = "sess_nolossy";
+        let created = sample_created_event(session_id, 1);
+        let mut started = sample_created_event(session_id, 2);
+        started.payload = MessageField::some(SessionEventPayload {
+            kind: Some(
+                AssistantMessageStartedPayload {
+                    model: String::new(),
+                    runner: String::new(),
+                    ..AssistantMessageStartedPayload::default()
+                }
+                .into(),
+            ),
+            ..SessionEventPayload::default()
+        });
+        let snapshot = materialize_from_events(session_id, &[created, started], None).unwrap();
+        let config = snapshot
+            .state
+            .as_option()
+            .and_then(|state| state.config.as_option())
+            .expect("config");
+        assert_eq!(
+            config.model.as_deref(),
+            Some("anthropic/claude-sonnet"),
+            "config.model preserved"
+        );
+        assert_eq!(config.runner.as_deref(), Some("openrouter"), "config.runner preserved");
     }
 
     #[test]

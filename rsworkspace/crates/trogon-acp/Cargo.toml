@@ -30,6 +30,7 @@ trogon-registry      = { workspace = true }
 trogon-runner-tools  = { path = "../trogon-runner-tools" }
 trogon-tools         = { path = "../trogon-tools" }
 trogonai-catalog-client = { path = "../trogonai-catalog-client" }
+trogonai-session-kernel = { workspace = true }
 trogon-std        = { path = "../trogon-std" }
 uuid              = { version = "1", features = ["v4"] }
 

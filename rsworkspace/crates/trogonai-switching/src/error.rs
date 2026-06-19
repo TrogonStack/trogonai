@@ -35,6 +35,13 @@ pub enum SwitchingError {
     #[error("continuity checkpoint failed: {detail}")]
     CheckpointFailed { detail: String },
 
+    /// A stage AFTER `runner_attached` failed and Trogonai restored the previous runner
+    /// binding (§ "rolled_back: Trogonai intento cambiar, fallo una etapa posterior y
+    /// restauro el binding anterior"). The canonical session stays consistent on the
+    /// previous binding; the switch can be retried.
+    #[error("switch rolled back to previous binding: {detail}")]
+    SwitchRolledBack { detail: String },
+
     #[error("runner acknowledgement failed: {detail}")]
     RunnerAcknowledgementFailed { detail: String },
 

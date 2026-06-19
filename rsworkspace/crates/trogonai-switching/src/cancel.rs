@@ -23,6 +23,38 @@ pub struct CancelContext {
     pub runner_id: String,
 }
 
+impl CancelContext {
+    /// Build a cancellation context for a user-initiated CLI cancel, hiding the protobuf
+    /// actor/timestamp construction so callers stay transport/proto-free. `unix_seconds`
+    /// is the wall-clock second the cancel was requested.
+    pub fn for_cli(
+        session_id: trogonai_session_contracts::SessionId,
+        operation_id: trogonai_session_contracts::OperationId,
+        correlation_id: String,
+        idempotency_key: trogonai_session_contracts::IdempotencyKey,
+        runner_id: String,
+        unix_seconds: i64,
+    ) -> Self {
+        Self {
+            session_id,
+            operation_id,
+            correlation_id,
+            idempotency_key,
+            actor: trogonai_session_contracts::Actor {
+                r#type: buffa::EnumValue::Known(trogonai_session_contracts::ActorType::User),
+                id: "trogon-cli".to_string(),
+                ..trogonai_session_contracts::Actor::default()
+            },
+            created_at: Timestamp {
+                seconds: unix_seconds,
+                nanos: 0,
+                ..Timestamp::default()
+            },
+            runner_id,
+        }
+    }
+}
+
 /// Outcome of a cancellation attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CancelOutcome {
@@ -257,6 +289,32 @@ mod tests {
         assert_eq!(outcome, CancelOutcome::Cancelled);
         assert_eq!(state, CancelState::OperationCancelled);
         // Cancellation is a typed event flow, not a silent interruption.
+        assert_eq!(
+            event_kinds(&events),
+            vec!["operation_cancel_requested", "operation_cancelled"]
+        );
+    }
+
+    #[tokio::test]
+    async fn for_cli_context_drives_canonical_cancel_flow() {
+        let context = CancelContext::for_cli(
+            trogonai_session_contracts::SessionId::new("sess_cli_cancel").unwrap(),
+            OperationId::new("op_cli_cancel").unwrap(),
+            "corr_cli_cancel".to_string(),
+            IdempotencyKey::new("idem_cli_cancel").unwrap(),
+            "openrouter".to_string(),
+            1_700_000_000,
+        );
+        assert_eq!(context.actor.r#type.as_known(), Some(ActorType::User));
+        assert_eq!(context.runner_id, "openrouter");
+        assert_eq!(context.created_at.seconds, 1_700_000_000);
+
+        // No tools running → cancel-before-tools → operation_cancelled, as a typed flow.
+        let (outcome, state, events) = cancel_operation::<mock::MockRunnerCancellation>(None, &context, &[])
+            .await
+            .unwrap();
+        assert_eq!(outcome, CancelOutcome::Cancelled);
+        assert_eq!(state, CancelState::OperationCancelled);
         assert_eq!(
             event_kinds(&events),
             vec!["operation_cancel_requested", "operation_cancelled"]

@@ -36,7 +36,7 @@ pub struct ShadowSyncReport {
 /// actual"; § No-Lossy Contract). Conversation roles/counts come from the legacy
 /// export; tool I/O fidelity is compared against the full baseline tool calls so
 /// summarized/truncated tool input or output is surfaced rather than masked.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShadowDivergenceReport {
     pub materialized_messages: usize,
     pub legacy_messages: usize,
@@ -207,9 +207,7 @@ pub fn compare_shadow_divergence(
     for base in baseline_tool_calls {
         match materialized.tool_calls.iter().find(|call| call.id == base.id) {
             Some(materialized_call) => {
-                if materialized_call.input_json != base.input_json
-                    || tool_result_diverges(materialized_call, base)
-                {
+                if materialized_call.input_json != base.input_json || tool_result_diverges(materialized_call, base) {
                     mismatched_tool_io += 1;
                 }
             }

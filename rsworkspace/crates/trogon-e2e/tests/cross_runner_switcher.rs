@@ -28,8 +28,11 @@ use trogon_acp_runner::{
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message as AgentMessage};
 use trogon_cli::CrossRunnerSwitcher;
+use trogon_cli::session_kernel::SessionKernelStack;
 use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
+use trogonai_session_contracts::SessionId;
+use trogonai_session_kernel::{SessionKernelFeatureFlags, SessionKernelOperationalPolicy};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +42,19 @@ async fn start_nats_js() -> (ContainerAsync<Nats>, u16) {
         .start()
         .await
         .expect("Failed to start NATS container — is Docker running?");
+    let port = c.get_host_port_ipv4(4222).await.unwrap();
+    (c, port)
+}
+
+/// NATS 2.11+ JetStream server. The Session Kernel provisions a lease KV bucket with
+/// per-key TTL (limit markers), which requires NATS 2.11; the default image is older.
+async fn start_nats_js_v211() -> (ContainerAsync<Nats>, u16) {
+    let c = Nats::default()
+        .with_cmd(["--jetstream"])
+        .with_tag("2.11-alpine")
+        .start()
+        .await
+        .expect("Failed to start NATS 2.11 container — is Docker running?");
     let port = c.get_host_port_ipv4(4222).await.unwrap();
     (c, port)
 }
@@ -137,8 +153,8 @@ async fn switch_model_migrates_history_between_two_acp_runners() {
                 CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
 
             // ── 4. Migrate the session ────────────────────────────────────────
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.src", "switcher-src-1", "dst-model", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "switcher-src-1", "sonnet", "dst-model", "/tmp")
                 .await
                 .expect("switch_model should succeed");
 
@@ -229,8 +245,8 @@ async fn switch_model_migrates_session_to_codex_runner_prefix() {
             // ── 4. Migrate via CrossRunnerSwitcher ────────────────────────────
             let mut switcher =
                 CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.src", "codex-src-1", "o4-mini", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "codex-src-1", "sonnet", "o4-mini", "/tmp")
                 .await
                 .expect("switch_model to codex runner must succeed");
 
@@ -275,7 +291,7 @@ async fn switch_model_returns_error_when_model_not_in_registry() {
             let mut switcher = CrossRunnerSwitcher::new(nats, make_config(port), registry);
 
             let result = switcher
-                .switch_model("acp.current", "session-xyz", "unknown-model-xyz", "/workspace")
+                .switch_model("acp.current", "session-xyz", "sonnet", "unknown-model-xyz", "/workspace")
                 .await;
 
             assert_eq!(
@@ -393,10 +409,11 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             // ── 5. Migrate XAI session to OpenRouter via CrossRunnerSwitcher ───
             let mut switcher =
                 CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
-            let (new_prefix, new_session_id) = switcher
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
                 .switch_model(
                     "acp.xai",
                     &xai_session_id,
+                    "grok-4",
                     "anthropic/claude-3-5-sonnet",
                     "/tmp",
                 )
@@ -531,8 +548,8 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
             let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
 
             // ── 4. Migrate the session ────────────────────────────────────────
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.src", "switcher-tool-1", "dst-model", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "switcher-tool-1", "sonnet", "dst-model", "/tmp")
                 .await
                 .expect("switch_model should succeed");
             assert_eq!(new_prefix, "acp.dst");
@@ -667,8 +684,8 @@ async fn switch_model_prompt_on_new_runner_after_migration() {
 
             // ── 4. Migrate the session ────────────────────────────────────────
             let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.ps.src", "post-switch-src-1", "ps-model", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.ps.src", "post-switch-src-1", "sonnet", "ps-model", "/tmp")
                 .await
                 .expect("switch_model must succeed");
 
@@ -698,6 +715,89 @@ async fn switch_model_prompt_on_new_runner_after_migration() {
                 resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "prompt to migrated session must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// Canonical-path switch (Fase 8 / 11): with the Session Kernel enabled and
+/// `runner_binding_mode=canonical`, `CrossRunnerSwitcher::switch_model` drives the
+/// canonical orchestration (`switch_via_session_kernel`) instead of plain handoff. This
+/// exercises the canonical path end-to-end over REAL NATS JetStream between two real
+/// runners — coverage the mock-only `complex_session_fixture` cannot provide.
+///
+/// It verifies (a) the switch completes and the session is migrated to the target
+/// runner, and (b) the kernel materialized a canonical snapshot for the session over
+/// real NATS (shadow event log → snapshot), proving the canonical kernel integration
+/// ran rather than being bypassed.
+///
+/// Requires Docker.
+#[tokio::test]
+async fn canonical_switch_records_kernel_state_over_real_nats() {
+    let (_c, port) = start_nats_js_v211().await;
+    let (nats, js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            // ── 1. Seed source session ────────────────────────────────────────
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let src_state = SessionState {
+                messages: vec![
+                    AgentMessage::user_text("canonical question"),
+                    AgentMessage::assistant(vec![AgentContentBlock::Text {
+                        text: "canonical answer".into(),
+                    }]),
+                ],
+                ..Default::default()
+            };
+            store.save("sess_canon_1", &src_state).await.unwrap();
+
+            // ── 2. Two real runners on different prefixes ─────────────────────
+            attach_agent(make_agent(store.clone(), "acp.src"), nats.clone(), "acp.src");
+            attach_agent(make_agent(store.clone(), "acp.dst"), nats.clone(), "acp.dst");
+            tokio::time::sleep(Duration::from_millis(60)).await;
+
+            // ── 3. Registry: "dst-model" → "acp.dst" ──────────────────────────
+            let registry = Registry::new(MockRegistryStore::new());
+            let mut dst_cap = AgentCapability::new("dst-runner", ["chat"], "agents.dst.>");
+            dst_cap.metadata = serde_json::json!({ "models": ["dst-model"], "acp_prefix": "acp.dst" });
+            registry.register(&dst_cap).await.unwrap();
+
+            // ── 4. Session Kernel in CANONICAL binding mode ───────────────────
+            let mut flags = SessionKernelFeatureFlags::default().with_runner_binding_mode("canonical");
+            flags.session_kernel_enabled = true;
+            assert!(flags.use_canonical_runner_binding(), "test must drive the canonical path");
+            let stack = SessionKernelStack::provision(nats.clone(), flags, SessionKernelOperationalPolicy::default())
+                .await
+                .expect("kernel stack must provision against real NATS");
+            // Keep a snapshot-store handle to inspect canonical state after the switch.
+            let snapshots = stack.snapshots.clone();
+
+            let mut switcher =
+                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry).with_kernel_stack(stack);
+
+            // ── 5. Switch (canonical path; falls back to handoff only if the gate
+            //         blocks — either way the kernel records canonical state first) ──
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "sess_canon_1", "sonnet", "dst-model", "/tmp")
+                .await
+                .expect("switch_model should complete with the kernel enabled");
+            assert_eq!(new_prefix, "acp.dst");
+            assert!(!new_session_id.is_empty());
+
+            // ── 6. Session migrated to the destination runner ─────────────────
+            let dst_state = store.load(&new_session_id).await.unwrap();
+            assert_eq!(dst_state.messages.len(), 2, "migrated session must have 2 messages");
+            assert_eq!(dst_state.messages[0].role, "user");
+            assert_eq!(dst_state.messages[1].role, "assistant");
+
+            // ── 7. Canonical kernel materialized a snapshot over real NATS ────
+            let sid = SessionId::new("sess_canon_1").unwrap();
+            let snapshot = snapshots.load_snapshot(&sid).await.expect("snapshot load must not error");
+            assert!(
+                snapshot.is_some(),
+                "canonical kernel must materialize a snapshot for the switched session"
             );
         })
         .await;

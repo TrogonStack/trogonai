@@ -629,6 +629,8 @@ async fn complex_session_fixture_passes_all_criteria() {
 
     let post_switch = event_log.read_session_events(&session_id).await.unwrap();
     // Safety Gate + model switch + runner attach/detach are all durable events.
+    // AC-13 / AC-23: the Context Twin is refreshed before the switch, recorded durably.
+    assert!(has_kind(&post_switch, |k| matches!(k, Kind::ContextTwinUpdated(_))));
     assert!(has_kind(&post_switch, |k| matches!(k, Kind::SwitchSafetyEvaluated(_))));
     assert!(has_kind(&post_switch, |k| matches!(k, Kind::ModelSwitched(_))));
     // ELEMENT 12: runner attach/detach recorded by the orchestrator.

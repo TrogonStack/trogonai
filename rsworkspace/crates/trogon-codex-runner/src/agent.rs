@@ -150,6 +150,10 @@ pub struct CodexAgent<N: SessionNotifierFactory, P: ProcessSpawner> {
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
+    /// Fase 4 (§1875) canonical shadow recorder: mirrors each completed turn into the
+    /// Session Kernel event log/snapshot (the session belongs to Trogonai). `None` when
+    /// the kernel is disabled (default). Best-effort; never blocks the prompt path.
+    kernel_shadow: Option<Arc<dyn crate::kernel_shadow::ShadowRecorder>>,
 }
 
 /// Convenience type alias for the production agent wired to real dependencies.
@@ -221,7 +225,16 @@ where
             default_model,
             prompt_timeout,
             available_models,
+            kernel_shadow: None,
         }
+    }
+
+    /// Attach the Fase 4 canonical shadow recorder (§1875): each completed turn is
+    /// mirrored into the Session Kernel event log/snapshot. `None` (default) leaves the
+    /// in-memory-only path untouched.
+    pub fn with_kernel_shadow(mut self, recorder: Arc<dyn crate::kernel_shadow::ShadowRecorder>) -> Self {
+        self.kernel_shadow = Some(recorder);
+        self
     }
 
     /// Ensures the process is running, spawning (or re-spawning) as needed,
@@ -730,27 +743,39 @@ where
                     let text = std::mem::take(&mut assistant_text);
                     let tool_calls = std::mem::take(&mut tool_call_blocks);
                     let tool_results = std::mem::take(&mut tool_result_blocks);
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        if !tool_calls.is_empty() {
-                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                                role: "assistant".to_string(),
-                                text: "[tool call]".to_string(),
-                                blocks: tool_calls,
-                            });
+                    // Update the in-memory history, then snapshot it (only when the kernel
+                    // shadow is active) so the lock is released before the async record.
+                    let history_for_shadow = {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            if !tool_calls.is_empty() {
+                                s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                    role: "assistant".to_string(),
+                                    text: "[tool call]".to_string(),
+                                    blocks: tool_calls,
+                                });
+                            }
+                            if !tool_results.is_empty() {
+                                s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                    role: "user".to_string(),
+                                    text: String::new(),
+                                    blocks: tool_results,
+                                });
+                            }
+                            s.history.push(
+                                trogon_runner_tools::portable_session::PortableMessage::text_only(
+                                    "assistant", text,
+                                ),
+                            );
+                            self.kernel_shadow.as_ref().map(|_| s.history.clone())
+                        } else {
+                            None
                         }
-                        if !tool_results.is_empty() {
-                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                                role: "user".to_string(),
-                                text: String::new(),
-                                blocks: tool_results,
-                            });
-                        }
-                        s.history.push(
-                            trogon_runner_tools::portable_session::PortableMessage::text_only(
-                                "assistant", text,
-                            ),
-                        );
+                    };
+                    // Fase 4 (§1875/§1671 shadow mode): mirror the turn into the canonical
+                    // kernel (the session belongs to Trogonai). Best-effort.
+                    if let (Some(shadow), Some(history)) = (&self.kernel_shadow, history_for_shadow) {
+                        shadow.record_turn(&session_id, &history, model.as_deref().unwrap_or_default()).await;
                     }
                     break StopReason::EndTurn;
                 }

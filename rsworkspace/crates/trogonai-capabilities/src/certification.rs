@@ -1,5 +1,12 @@
+use buffa::{EnumValue, MessageField};
+use buffa_types::google::protobuf::Timestamp;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use trogonai_session_contracts::{
+    CapabilityTestResult, CertificationLevel as ProtoCertificationLevel,
+    ProviderCertificationEntry as ProtoProviderCertificationEntry,
+    ProviderCertificationMatrix as ProtoProviderCertificationMatrix, SCHEMA_VERSION_V1,
+};
 
 use crate::error::CapabilityError;
 use crate::probe::{ProbeKind, ProbeResult};
@@ -22,7 +29,8 @@ impl CertificationLevel {
     /// Probes that MUST pass for a model to be switch-safe: structured tool use, JSON
     /// schema, and a usable context window. A model that fails any of these cannot be
     /// trusted to carry a real session, so it stays `Basic` (gate still confirms).
-    const SWITCH_CRITICAL: &'static [ProbeKind] = &[ProbeKind::ToolUse, ProbeKind::JsonSchema, ProbeKind::ContextLimits];
+    const SWITCH_CRITICAL: &'static [ProbeKind] =
+        &[ProbeKind::ToolUse, ProbeKind::JsonSchema, ProbeKind::ContextLimits];
 
     /// Derive a certification level from a contract-test probe battery
     /// (§ Capability Registry Freshness: *"contract tests para tool use, image input,
@@ -68,6 +76,8 @@ pub struct ProviderCertificationEntry {
     pub switch_to: Vec<String>,
     pub certified_level: CertificationLevel,
     pub last_verified_at: Option<OffsetDateTime>,
+    #[serde(default)]
+    pub probe_results: Vec<ProbeResult>,
 }
 
 impl ProviderCertificationEntry {
@@ -97,6 +107,59 @@ impl ProviderCertificationEntry {
         }
         self.certified_level = CertificationLevel::from_probe_results(results);
         self.last_verified_at = Some(now);
+        self.probe_results = results.to_vec();
+    }
+
+    pub fn to_proto(&self) -> ProtoProviderCertificationEntry {
+        ProtoProviderCertificationEntry {
+            model: self.model.clone(),
+            runner: self.runner.clone(),
+            text: self.text,
+            tool_use: self.tool_use,
+            parallel_tools: self.parallel_tools,
+            image_input: self.image_input,
+            json_schema: self.json_schema,
+            long_context: self.long_context,
+            streaming: self.streaming,
+            artifact_refs: self.artifact_refs,
+            mcp_tools: self.mcp_tools,
+            switch_from: self.switch_from.clone(),
+            switch_to: self.switch_to.clone(),
+            certified_level: EnumValue::Known(self.certified_level.into()),
+            last_verified_at: self.last_verified_at.map(timestamp).into(),
+            probe_results: self
+                .probe_results
+                .iter()
+                .cloned()
+                .map(ProbeResult::into_test_result)
+                .collect(),
+            ..ProtoProviderCertificationEntry::default()
+        }
+    }
+
+    pub fn from_proto(entry: &ProtoProviderCertificationEntry) -> Self {
+        Self {
+            model: entry.model.clone(),
+            runner: entry.runner.clone(),
+            text: entry.text,
+            tool_use: entry.tool_use,
+            parallel_tools: entry.parallel_tools,
+            image_input: entry.image_input,
+            json_schema: entry.json_schema,
+            long_context: entry.long_context,
+            streaming: entry.streaming,
+            artifact_refs: entry.artifact_refs,
+            mcp_tools: entry.mcp_tools,
+            switch_from: entry.switch_from.clone(),
+            switch_to: entry.switch_to.clone(),
+            certified_level: entry
+                .certified_level
+                .as_known()
+                .unwrap_or(ProtoCertificationLevel::Unspecified)
+                .into(),
+            last_verified_at: entry.last_verified_at.as_option().map(offset_datetime),
+            probe_results: entry.probe_results.iter().map(probe_result_from_proto).collect(),
+        }
     }
 }
 
@@ -134,6 +197,25 @@ impl ProviderCertificationMatrix {
         entry.validate()?;
         self.entries.push(entry);
         Ok(())
+    }
+
+    pub fn to_proto(&self, updated_at: OffsetDateTime) -> ProtoProviderCertificationMatrix {
+        ProtoProviderCertificationMatrix {
+            schema_version: SCHEMA_VERSION_V1,
+            entries: self.entries.iter().map(ProviderCertificationEntry::to_proto).collect(),
+            updated_at: MessageField::some(timestamp(updated_at)),
+            ..ProtoProviderCertificationMatrix::default()
+        }
+    }
+
+    pub fn from_proto(matrix: &ProtoProviderCertificationMatrix) -> Self {
+        Self {
+            entries: matrix
+                .entries
+                .iter()
+                .map(ProviderCertificationEntry::from_proto)
+                .collect(),
+        }
     }
 
     /// Certify a model/runner from a probe battery, promoting it out of the unverified
@@ -215,9 +297,53 @@ impl ProviderCertificationMatrix {
                 // Expected-but-unverified -> Basic (gate still asks confirmation).
                 certified_level: CertificationLevel::Basic,
                 last_verified_at: None,
+                probe_results: Vec::new(),
             });
         }
         matrix
+    }
+}
+
+impl From<CertificationLevel> for ProtoCertificationLevel {
+    fn from(level: CertificationLevel) -> Self {
+        match level {
+            CertificationLevel::Experimental => Self::Experimental,
+            CertificationLevel::Basic => Self::Basic,
+            CertificationLevel::SwitchSafe => Self::SwitchSafe,
+            CertificationLevel::Production => Self::Production,
+        }
+    }
+}
+
+impl From<ProtoCertificationLevel> for CertificationLevel {
+    fn from(level: ProtoCertificationLevel) -> Self {
+        match level {
+            ProtoCertificationLevel::Experimental => Self::Experimental,
+            ProtoCertificationLevel::Basic => Self::Basic,
+            ProtoCertificationLevel::SwitchSafe => Self::SwitchSafe,
+            ProtoCertificationLevel::Production => Self::Production,
+            ProtoCertificationLevel::Unspecified => Self::Experimental,
+        }
+    }
+}
+
+fn timestamp(now: OffsetDateTime) -> Timestamp {
+    Timestamp {
+        seconds: now.unix_timestamp(),
+        nanos: now.nanosecond() as i32,
+        ..Timestamp::default()
+    }
+}
+
+fn offset_datetime(timestamp: &Timestamp) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp(timestamp.seconds).unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
+
+fn probe_result_from_proto(result: &CapabilityTestResult) -> ProbeResult {
+    ProbeResult {
+        kind: ProbeKind::from_name(&result.name).unwrap_or(ProbeKind::ToolUse),
+        passed: result.passed,
+        detail: result.detail.clone(),
     }
 }
 
@@ -315,7 +441,10 @@ mod tests {
             probe(ProbeKind::JsonSchema, true),
             probe(ProbeKind::ContextLimits, true),
         ];
-        assert_eq!(CertificationLevel::from_probe_results(&results), CertificationLevel::Basic);
+        assert_eq!(
+            CertificationLevel::from_probe_results(&results),
+            CertificationLevel::Basic
+        );
     }
 
     #[test]

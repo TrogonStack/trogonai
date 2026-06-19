@@ -66,6 +66,7 @@ pub(crate) fn compile_projection(input: ProjectionInput) -> Result<PromptProject
         textualize_tools,
         prefer_context_twin,
     );
+    push_tool_schemas(&input, &mut candidates);
     push_artifact_previews(&input, &mut candidates, &mut degradations);
     push_unresolved_errors(&input, &mut candidates);
     push_summaries(&input, &mut candidates, prefer_context_twin);
@@ -239,6 +240,35 @@ fn push_safety_permissions(input: &ProjectionInput, candidates: &mut Vec<Candida
             "block_safety_permissions",
             ProjectionBlockKind::SafetyPermissions,
             "safety, permissions and tool policy",
+            vec![text_block(&text)],
+            0,
+            None,
+        ),
+    });
+}
+
+/// § Prompt Compiler priority order (#8): "active tool schemas necesarias". The active
+/// tools are those the session has actually used (the distinct tool names from
+/// `tool_calls`); the projection lists them so the target model's token budget accounts
+/// for the tool surface and the model knows which tools are in play. The full JSON tool
+/// schemas are reloaded by the runner on attach (§ MCP and Tool Lifecycle); the canonical
+/// projection view here is the active tool set.
+fn push_tool_schemas(input: &ProjectionInput, candidates: &mut Vec<CandidateBlock>) {
+    let mut tools: Vec<String> = Vec::new();
+    for call in &input.snapshot.tool_calls {
+        if !call.name.is_empty() && !tools.iter().any(|name| name == &call.name) {
+            tools.push(call.name.clone());
+        }
+    }
+    if tools.is_empty() {
+        return;
+    }
+    let text = format!("active tool schemas: {}", tools.join(", "));
+    candidates.push(CandidateBlock {
+        block: projection_block(
+            "block_tool_schemas",
+            ProjectionBlockKind::ToolSchema,
+            "active tool schemas",
             vec![text_block(&text)],
             0,
             None,
@@ -863,6 +893,77 @@ mod tests {
             emitted(DegradationKind::ReasoningNotPortable),
             "reasoning_not_portable must be recorded"
         );
+    }
+
+    #[test]
+    fn tool_schemas_block_lists_distinct_active_tools() {
+        // § Prompt Compiler priority order #8: the active tool schemas are projected from
+        // the distinct tool names the session has used (deduped).
+        let input = ProjectionInput {
+            session_id: "sess_tools".to_string(),
+            model_id: "text-only".to_string(),
+            snapshot: SessionSnapshotState {
+                config: MessageField::some(SessionConfig {
+                    system_prompt: Some("You are helpful".to_string()),
+                    ..SessionConfig::default()
+                }),
+                conversation: vec![trogonai_session_contracts::CanonicalMessage {
+                    message_id: "msg_user".to_string(),
+                    role: "user".to_string(),
+                    content: vec![text_block("run the build")],
+                    ..trogonai_session_contracts::CanonicalMessage::default()
+                }],
+                tool_calls: vec![
+                    trogonai_session_contracts::CanonicalToolCall {
+                        id: "t1".to_string(),
+                        name: "bash".to_string(),
+                        ..trogonai_session_contracts::CanonicalToolCall::default()
+                    },
+                    trogonai_session_contracts::CanonicalToolCall {
+                        id: "t2".to_string(),
+                        name: "read".to_string(),
+                        ..trogonai_session_contracts::CanonicalToolCall::default()
+                    },
+                    trogonai_session_contracts::CanonicalToolCall {
+                        id: "t3".to_string(),
+                        name: "bash".to_string(),
+                        ..trogonai_session_contracts::CanonicalToolCall::default()
+                    },
+                ],
+                ..SessionSnapshotState::default()
+            },
+            context_twin: ContextTwin {
+                schema_version: SCHEMA_VERSION_V1,
+                session_id: "sess_tools".to_string(),
+                current_objective: "use tools".to_string(),
+                ..ContextTwin::default()
+            },
+            adaptation_plan: None,
+            capabilities: capabilities(200_000),
+            token_budget: 200_000,
+            current_request: None,
+            continuity_warnings: Vec::new(),
+            config: crate::config::ProjectionConfig::default(),
+            created_at: Some(fixed_timestamp()),
+            projection_id: Some("proj_tools".to_string()),
+        };
+
+        let projection = DefaultPromptCompiler.compile(input).unwrap();
+        let tool_block = projection
+            .included_blocks
+            .iter()
+            .find(|block| block.kind == EnumValue::Known(ProjectionBlockKind::ToolSchema))
+            .expect("a ToolSchema block must be produced for the active tools");
+        let text: String = tool_block
+            .content
+            .iter()
+            .filter_map(|block| match block.kind.as_ref()? {
+                BlockKind::Text(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("bash") && text.contains("read"));
+        assert_eq!(text.matches("bash").count(), 1, "duplicate tool names are deduped");
     }
 
     #[test]

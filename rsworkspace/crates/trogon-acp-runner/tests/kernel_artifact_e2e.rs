@@ -71,7 +71,9 @@ async fn large_tool_output_and_image_persist_as_artifact_refs_over_real_nats() {
     let fetcher = ReqwestImageFetcher::new(&FetchLimits::default()).unwrap();
 
     // artifacts_enabled = true, inline_limit = 64 -> the producer claim-checks the output.
-    let sink = KernelConversationSink::new(kernel.clone(), artifact_store.clone(), fetcher, true, 64);
+    // maintenance_enabled = false (retention pass off) so this test exercises only the
+    // claim-check path; retention 90d is the default window.
+    let sink = KernelConversationSink::new(kernel.clone(), artifact_store.clone(), fetcher, true, 64, false, 90);
 
     // A turn: a tool call whose output is large, plus a Base64 image in the same message.
     let big_output = "y".repeat(4096);
@@ -103,11 +105,27 @@ async fn large_tool_output_and_image_persist_as_artifact_refs_over_real_nats() {
     ];
 
     let sid = SessionId::new("sess_artifact_e2e").unwrap();
-    sink.sync(sid.as_str(), &messages, "/repo").await;
+    let todos = vec![trogonai_session_contracts::TodoItem {
+        id: "todo_1".to_string(),
+        content: "ship the feature".to_string(),
+        status: "in_progress".to_string(),
+        ..trogonai_session_contracts::TodoItem::default()
+    }];
+    sink.sync(sid.as_str(), &messages, "/repo", Some("/repo/worktree"), &todos)
+        .await;
 
     // Materialize the canonical state from the REAL event log + snapshot.
     let snapshot = kernel.materialize_state(&sid).await.unwrap();
     let state = snapshot.state.as_option().expect("materialized state present");
+
+    // § Terminal and Process Policy: the runner's terminal_cwd is captured into the
+    // canonical state so it survives a switch.
+    let terminal = state.terminal.as_option().expect("terminal continuity captured");
+    assert_eq!(terminal.terminal_cwd, "/repo/worktree");
+
+    // § event todo_updated: the session's todo list is captured into canonical state.
+    assert_eq!(state.todos.len(), 1);
+    assert_eq!(state.todos[0].content, "ship the feature");
 
     // The large tool output is referenced as an artifact, not inlined as text.
     let call = state

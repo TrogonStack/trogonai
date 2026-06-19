@@ -10,6 +10,7 @@ static SWITCH_LATENCY_MS: OnceLock<Histogram<f64>> = OnceLock::new();
 static SHADOW_SYNC: OnceLock<Counter<u64>> = OnceLock::new();
 static SHADOW_DIVERGENCE: OnceLock<Counter<u64>> = OnceLock::new();
 static MIGRATION_ON_DEMAND: OnceLock<Counter<u64>> = OnceLock::new();
+static ROLLOUT_ENFORCEMENT: OnceLock<Counter<u64>> = OnceLock::new();
 
 fn meter() -> opentelemetry::metrics::Meter {
     global::meter("trogonai-session-kernel")
@@ -151,6 +152,28 @@ pub fn record_shadow_divergence(session_id: &str, mismatched_roles: usize) {
         &[
             KeyValue::new("session_id", session_id.to_string()),
             KeyValue::new("mismatched_roles", mismatched_roles.to_string()),
+        ],
+    );
+}
+
+fn rollout_enforcement_counter() -> &'static Counter<u64> {
+    ROLLOUT_ENFORCEMENT.get_or_init(|| {
+        meter()
+            .u64_counter("trogonai.session_kernel.rollout.enforcement")
+            .with_description("Rollout promotion/rollback enforcement decision based on measured metrics")
+            .build()
+    })
+}
+
+/// Record a rollout enforcement decision (§ "enforcement de promocion/rollback basada en
+/// metricas"). `decision` is `promote` or `rollback`; `blocked_reasons` is the number of
+/// breached thresholds (0 on promote).
+pub fn record_rollout_enforcement(decision: &str, blocked_reasons: usize) {
+    rollout_enforcement_counter().add(
+        1,
+        &[
+            KeyValue::new("decision", decision.to_string()),
+            KeyValue::new("blocked_reasons", blocked_reasons.to_string()),
         ],
     );
 }

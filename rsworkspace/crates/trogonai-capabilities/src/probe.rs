@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
 use trogonai_session_contracts::CapabilityTestResult;
 
 /// Contract probe kinds recommended by the capability registry freshness policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProbeKind {
     ToolUse,
     ImageInput,
@@ -22,10 +24,22 @@ impl ProbeKind {
             Self::CompactionSupported => "compaction_supported",
         }
     }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "tool_use" => Some(Self::ToolUse),
+            "image_input" => Some(Self::ImageInput),
+            "json_schema" => Some(Self::JsonSchema),
+            "context_limits" => Some(Self::ContextLimits),
+            "streaming" => Some(Self::Streaming),
+            "compaction_supported" => Some(Self::CompactionSupported),
+            _ => None,
+        }
+    }
 }
 
 /// Result of a capability probe or contract test.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeResult {
     pub kind: ProbeKind,
     pub passed: bool,
@@ -72,11 +86,7 @@ impl CapabilityProbe for StaticProbe {
             ProbeKind::Streaming => (self.streaming, None),
             ProbeKind::CompactionSupported => (self.compaction_supported, None),
         };
-        ProbeResult {
-            kind,
-            passed,
-            detail,
-        }
+        ProbeResult { kind, passed, detail }
     }
 }
 

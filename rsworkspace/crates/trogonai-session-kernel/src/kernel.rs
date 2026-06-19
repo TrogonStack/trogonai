@@ -1,16 +1,18 @@
 use std::time::Duration;
 
 use async_nats::jetstream::kv;
-use buffa::MessageField;
+use buffa::{EnumValue, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus, is_create_key_value_already_exists,
 };
 use trogonai_session_contracts::{
-    Actor, AssistantMessageCompletedPayload, CanonicalMessage, CanonicalToolCall, ContractValidationError,
-    EventsArchivedPayload, SCHEMA_VERSION_V1, SessionBranchedPayload, SessionEvent, SessionEventPayload, SessionId,
-    SessionSnapshot, SnapshotCreatedPayload, TerminalContinuity, TerminalContinuityCapturedPayload,
-    ToolCallCompletedPayload, ToolCallRequestedPayload, UserMessageAddedPayload,
+    Actor, ActorType, AssistantMessageCompletedPayload, AssistantMessageStartedPayload, CanonicalMessage,
+    CanonicalToolCall, ContractValidationError, EventsArchivedPayload, FileChangeKind, FileChangedPayload,
+    InvalidEventRejectedPayload, SCHEMA_VERSION_V1, SessionBranchedPayload, SessionEvent, SessionEventPayload,
+    SessionId, SessionSnapshot, SnapshotCreatedPayload, TerminalContinuity, TerminalContinuityCapturedPayload,
+    TodoItem, TodoUpdatedPayload, ToolCallApprovedPayload, ToolCallCompletedPayload, ToolCallFailedPayload,
+    ToolCallRequestedPayload, ToolCallStartedPayload, ToolCallStatus, UserMessageAddedPayload,
 };
 
 use crate::config::SessionKernelConfig;
@@ -198,11 +200,66 @@ where
         self.leases.release_session_lease_renewing(guard, renewal).await
     }
 
-    pub async fn append_event(&self, mut event: SessionEvent) -> Result<SessionEvent, SessionKernelError> {
+    pub async fn append_event(&self, event: SessionEvent) -> Result<SessionEvent, SessionKernelError> {
+        match self.append_event_inner(event.clone()).await {
+            Ok(appended) => Ok(appended),
+            Err(err @ SessionKernelError::ContractValidation(_)) => {
+                // § Schema Governance: "runner event invalido se rechaza y registra
+                // `invalid_event_rejected`". Validation already rejects via the error; here
+                // we ALSO record the rejection as an audit event before propagating.
+                self.record_invalid_event_rejected(&event, &err).await;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn append_event_inner(&self, mut event: SessionEvent) -> Result<SessionEvent, SessionKernelError> {
         self.assign_next_seq(&mut event).await?;
         let appended = self.event_log.append(event).await?;
         telemetry::metrics::record_event_appended(appended.session_id.as_str(), event_payload_name(&appended));
         Ok(appended)
+    }
+
+    /// Record an `invalid_event_rejected` audit event for a rejected runner event
+    /// (§ Schema Governance). Best-effort and non-recursive: it appends through the inner
+    /// path, so a malformed session id on the rejected event simply logs without looping.
+    async fn record_invalid_event_rejected(&self, rejected: &SessionEvent, err: &SessionKernelError) {
+        let rejection = SessionEvent {
+            schema_version: SCHEMA_VERSION_V1,
+            event_id: format!("evt_reject_{}", rejected.event_id),
+            session_id: rejected.session_id.clone(),
+            seq: 0,
+            operation_id: format!("op_reject_{}", rejected.event_id),
+            correlation_id: format!("corr_reject_{}", rejected.event_id),
+            idempotency_key: format!("idem_reject_{}", rejected.event_id),
+            created_at: MessageField::some(Timestamp::default()),
+            actor: MessageField::some(Actor {
+                r#type: EnumValue::Known(ActorType::Kernel),
+                id: "session-kernel".to_string(),
+                ..Actor::default()
+            }),
+            payload: MessageField::some(SessionEventPayload {
+                kind: Some(
+                    InvalidEventRejectedPayload {
+                        event_id: rejected.event_id.clone(),
+                        reason: err.to_string(),
+                        ..InvalidEventRejectedPayload::default()
+                    }
+                    .into(),
+                ),
+                ..SessionEventPayload::default()
+            }),
+            ..SessionEvent::default()
+        };
+        if let Err(record_err) = self.append_event_inner(rejection).await {
+            tracing::warn!(
+                session_id = rejected.session_id.as_str(),
+                rejected_event_id = rejected.event_id.as_str(),
+                error = %record_err,
+                "failed to record invalid_event_rejected audit event"
+            );
+        }
     }
 
     pub async fn append_event_idempotent(
@@ -355,6 +412,28 @@ where
             });
         }
         for (idx, message) in messages.iter().enumerate() {
+            // § assistant message lifecycle (§269-270): an assistant message emits
+            // `assistant_message_started` (carrying model/runner) before its
+            // `assistant_message_completed`. User messages emit `user_message_added`.
+            if message.role != "user" {
+                let started_key = format!("idem_msgstart_{}_{idx}", session_id.as_str());
+                let started = self.message_event(
+                    session_id,
+                    &format!("evt_msgstart_{}_{idx}", session_id.as_str()),
+                    &started_key,
+                    &created_at,
+                    &actor,
+                    AssistantMessageStartedPayload {
+                        message_id: message.message_id.clone(),
+                        model: message.model.clone().unwrap_or_default(),
+                        runner: message.runner.clone().unwrap_or_default(),
+                        ..AssistantMessageStartedPayload::default()
+                    }
+                    .into(),
+                );
+                self.append_event_idempotent(started, &started_key).await?;
+            }
+
             let idempotency_key = format!("idem_msg_{}_{idx}", session_id.as_str());
             let kind = if message.role == "user" {
                 UserMessageAddedPayload {
@@ -370,25 +449,47 @@ where
                 }
                 .into()
             };
-            let event = SessionEvent {
-                schema_version: SCHEMA_VERSION_V1,
-                event_id: format!("evt_msg_{}_{idx}", session_id.as_str()),
-                session_id: session_id.as_str().to_string(),
-                seq: 0,
-                operation_id: format!("op_record_{}", session_id.as_str()),
-                correlation_id: format!("corr_record_{}", session_id.as_str()),
-                idempotency_key: idempotency_key.clone(),
-                created_at: MessageField::some(created_at.clone()),
-                actor: MessageField::some(actor.clone()),
-                payload: MessageField::some(SessionEventPayload {
-                    kind: Some(kind),
-                    ..SessionEventPayload::default()
-                }),
-                ..SessionEvent::default()
-            };
+            let event = self.message_event(
+                session_id,
+                &format!("evt_msg_{}_{idx}", session_id.as_str()),
+                &idempotency_key,
+                &created_at,
+                &actor,
+                kind,
+            );
             self.append_event_idempotent(event, &idempotency_key).await?;
         }
         self.materialize_state(session_id).await
+    }
+
+    /// Build a conversation/message `SessionEvent` with the shared per-record envelope
+    /// fields (operation/correlation ids, actor, timestamp), used by `record_conversation`.
+    #[allow(clippy::too_many_arguments)]
+    fn message_event(
+        &self,
+        session_id: &SessionId,
+        event_id: &str,
+        idempotency_key: &str,
+        created_at: &Timestamp,
+        actor: &Actor,
+        kind: trogonai_session_contracts::session_event_payload::Kind,
+    ) -> SessionEvent {
+        SessionEvent {
+            schema_version: SCHEMA_VERSION_V1,
+            event_id: event_id.to_string(),
+            session_id: session_id.as_str().to_string(),
+            seq: 0,
+            operation_id: format!("op_record_{}", session_id.as_str()),
+            correlation_id: format!("corr_record_{}", session_id.as_str()),
+            idempotency_key: idempotency_key.to_string(),
+            created_at: MessageField::some(created_at.clone()),
+            actor: MessageField::some(actor.clone()),
+            payload: MessageField::some(SessionEventPayload {
+                kind: Some(kind),
+                ..SessionEventPayload::default()
+            }),
+            ..SessionEvent::default()
+        }
     }
 
     /// Reconstruct structured tool-call events into the event log (§3) from canonical
@@ -437,7 +538,103 @@ where
             };
             self.append_event_idempotent(requested, &requested_key).await?;
 
-            if let Some(result) = tool.result.as_option() {
+            let is_failed = tool.status.as_known() == Some(ToolCallStatus::Failed);
+            // A tool that reached a terminal state — completed (has a result) or failed —
+            // passed approval and started executing (§271-274 / §372).
+            if tool.result.as_option().is_some() || is_failed {
+                // § tool lifecycle (§271-274): a tool that executed passed
+                // approval. Emit `tool_call_approved` before the terminal event. The
+                // original approver (user vs auto) is decided by the runner's permission
+                // flow, which the shadow recorder does not observe, so `approved_by` is
+                // left empty rather than inventing a value.
+                let approved_key = format!("idem_toolok_{}_{exec}", session_id.as_str());
+                let approved = SessionEvent {
+                    schema_version: SCHEMA_VERSION_V1,
+                    event_id: format!("evt_toolok_{}_{exec}", session_id.as_str()),
+                    session_id: session_id.as_str().to_string(),
+                    seq: 0,
+                    operation_id: format!("op_toolrec_{}", session_id.as_str()),
+                    correlation_id: format!("corr_toolrec_{}", session_id.as_str()),
+                    idempotency_key: approved_key.clone(),
+                    created_at: MessageField::some(created_at.clone()),
+                    actor: MessageField::some(actor.clone()),
+                    payload: MessageField::some(SessionEventPayload {
+                        kind: Some(
+                            ToolCallApprovedPayload {
+                                tool_call_id: tool.id.clone(),
+                                tool_execution_id: exec.clone(),
+                                ..ToolCallApprovedPayload::default()
+                            }
+                            .into(),
+                        ),
+                        ..SessionEventPayload::default()
+                    }),
+                    ..SessionEvent::default()
+                };
+                self.append_event_idempotent(approved, &approved_key).await?;
+
+                // § tool lifecycle (§372): the tool then started executing.
+                let started_key = format!("idem_toolstart_{}_{exec}", session_id.as_str());
+                let started = SessionEvent {
+                    schema_version: SCHEMA_VERSION_V1,
+                    event_id: format!("evt_toolstart_{}_{exec}", session_id.as_str()),
+                    session_id: session_id.as_str().to_string(),
+                    seq: 0,
+                    operation_id: format!("op_toolrec_{}", session_id.as_str()),
+                    correlation_id: format!("corr_toolrec_{}", session_id.as_str()),
+                    idempotency_key: started_key.clone(),
+                    created_at: MessageField::some(created_at.clone()),
+                    actor: MessageField::some(actor.clone()),
+                    payload: MessageField::some(SessionEventPayload {
+                        kind: Some(
+                            ToolCallStartedPayload {
+                                tool_call_id: tool.id.clone(),
+                                tool_execution_id: exec.clone(),
+                                ..ToolCallStartedPayload::default()
+                            }
+                            .into(),
+                        ),
+                        ..SessionEventPayload::default()
+                    }),
+                    ..SessionEvent::default()
+                };
+                self.append_event_idempotent(started, &started_key).await?;
+
+                if is_failed {
+                    // § tool_call_failed (§273/§374; §1048-1053 "nunca marcar completed algo
+                    // que fallo"): a failed tool records its error, never completion, and no
+                    // file_changed is recorded.
+                    let failed_key = format!("idem_toolfail_{}_{exec}", session_id.as_str());
+                    let failed = SessionEvent {
+                        schema_version: SCHEMA_VERSION_V1,
+                        event_id: format!("evt_toolfail_{}_{exec}", session_id.as_str()),
+                        session_id: session_id.as_str().to_string(),
+                        seq: 0,
+                        operation_id: format!("op_toolrec_{}", session_id.as_str()),
+                        correlation_id: format!("corr_toolrec_{}", session_id.as_str()),
+                        idempotency_key: failed_key.clone(),
+                        created_at: MessageField::some(created_at.clone()),
+                        actor: MessageField::some(actor.clone()),
+                        payload: MessageField::some(SessionEventPayload {
+                            kind: Some(
+                                ToolCallFailedPayload {
+                                    tool_call_id: tool.id.clone(),
+                                    tool_execution_id: exec.clone(),
+                                    error: tool.error.clone().unwrap_or_else(|| "tool call failed".to_string()),
+                                    ..ToolCallFailedPayload::default()
+                                }
+                                .into(),
+                            ),
+                            ..SessionEventPayload::default()
+                        }),
+                        ..SessionEvent::default()
+                    };
+                    self.append_event_idempotent(failed, &failed_key).await?;
+                    continue;
+                }
+                let Some(result) = tool.result.as_option() else {
+                    continue;
+                };
                 let completed_key = format!("idem_tooldone_{}_{exec}", session_id.as_str());
                 let completed = SessionEvent {
                     schema_version: SCHEMA_VERSION_V1,
@@ -464,6 +661,36 @@ where
                     ..SessionEvent::default()
                 };
                 self.append_event_idempotent(completed, &completed_key).await?;
+
+                // § event `file_changed`: a completed file-modifying tool (write/edit/
+                // str_replace) records the path it touched as a file_changed audit event.
+                if let Some(path) = file_change_path(&tool.name, &tool.input_json) {
+                    let file_key = format!("idem_filechg_{}_{exec}", session_id.as_str());
+                    let file_event = SessionEvent {
+                        schema_version: SCHEMA_VERSION_V1,
+                        event_id: format!("evt_filechg_{}_{exec}", session_id.as_str()),
+                        session_id: session_id.as_str().to_string(),
+                        seq: 0,
+                        operation_id: format!("op_toolrec_{}", session_id.as_str()),
+                        correlation_id: format!("corr_toolrec_{}", session_id.as_str()),
+                        idempotency_key: file_key.clone(),
+                        created_at: MessageField::some(created_at.clone()),
+                        actor: MessageField::some(actor.clone()),
+                        payload: MessageField::some(SessionEventPayload {
+                            kind: Some(
+                                FileChangedPayload {
+                                    path,
+                                    change_kind: EnumValue::Known(FileChangeKind::Modified),
+                                    ..FileChangedPayload::default()
+                                }
+                                .into(),
+                            ),
+                            ..SessionEventPayload::default()
+                        }),
+                        ..SessionEvent::default()
+                    };
+                    self.append_event_idempotent(file_event, &file_key).await?;
+                }
             }
         }
         self.materialize_state(session_id).await
@@ -495,6 +722,44 @@ where
                     TerminalContinuityCapturedPayload {
                         terminal: MessageField::some(terminal),
                         ..TerminalContinuityCapturedPayload::default()
+                    }
+                    .into(),
+                ),
+                ..SessionEventPayload::default()
+            }),
+            ..SessionEvent::default()
+        };
+        self.append_event(event).await?;
+        self.materialize_state(session_id).await
+    }
+
+    /// Record a todo-list update (§ event `todo_updated`): emit `TodoUpdatedPayload`
+    /// carrying the full current todo list and materialize it onto `state.todos`. The
+    /// payload is a list snapshot (the materializer replaces the list), so callers emit it
+    /// when the list changes rather than per individual todo.
+    pub async fn record_todos(
+        &self,
+        session_id: &SessionId,
+        todos: Vec<TodoItem>,
+        operation_id: &str,
+        actor: Actor,
+        created_at: Timestamp,
+    ) -> Result<SessionSnapshot, SessionKernelError> {
+        let event = SessionEvent {
+            schema_version: SCHEMA_VERSION_V1,
+            event_id: format!("evt_todo_{operation_id}"),
+            session_id: session_id.as_str().to_string(),
+            seq: 0,
+            operation_id: operation_id.to_string(),
+            correlation_id: format!("corr_todo_{operation_id}"),
+            idempotency_key: format!("idem_todo_{operation_id}"),
+            created_at: MessageField::some(created_at),
+            actor: MessageField::some(actor),
+            payload: MessageField::some(SessionEventPayload {
+                kind: Some(
+                    TodoUpdatedPayload {
+                        todos,
+                        ..TodoUpdatedPayload::default()
                     }
                     .into(),
                 ),
@@ -582,6 +847,66 @@ where
         };
         self.append_event(event).await?;
         Ok(archived_count)
+    }
+
+    /// Archive events whose `created_at` is at or before `retention_cutoff`, wiring
+    /// archival to the retention policy (§ Event Log Compaction and Retention: "archive
+    /// de eventos antiguos" by "retention por workspace/session policy"). Computes the
+    /// retention watermark — the highest `seq` still within the cutoff — and delegates to
+    /// [`Self::archive_events_through`], emitting `events_archived`. Returns the archived
+    /// count (0 when no event is old enough, so calling it repeatedly is a no-op once the
+    /// log is within retention).
+    pub async fn archive_events_older_than(
+        &self,
+        session_id: &SessionId,
+        retention_cutoff: Timestamp,
+        operation_id: &str,
+        actor: Actor,
+        created_at: Timestamp,
+    ) -> Result<u64, SessionKernelError> {
+        let events = self.event_log.read_session_events(session_id).await?;
+        let watermark = events
+            .iter()
+            .filter(|event| {
+                event
+                    .created_at
+                    .as_option()
+                    .is_some_and(|ts| timestamp_le(ts, &retention_cutoff))
+            })
+            .map(|event| event.seq)
+            .max();
+        match watermark {
+            Some(through_seq) => {
+                self.archive_events_through(session_id, through_seq, operation_id, actor, created_at)
+                    .await
+            }
+            None => Ok(0),
+        }
+    }
+
+    /// §1888 Compaction incremental: take a snapshot at the current applied seq, then
+    /// archive the events through that seq (§1347 "snapshots periodicos; archive de eventos
+    /// antiguos"). The snapshot is the retention audit trail (§1358); the physical stream
+    /// purge stays a deferred JetStream action. Composes [`Self::checkpoint_snapshot`] +
+    /// [`Self::archive_events_through`] into one incremental step that keeps the live log
+    /// bounded — repeated calls archive only the events appended since the last compaction.
+    pub async fn compact_session_incrementally(
+        &self,
+        session_id: &SessionId,
+        operation_id: &str,
+        actor: Actor,
+        created_at: Timestamp,
+    ) -> Result<IncrementalCompaction, SessionKernelError> {
+        let snapshot = self
+            .checkpoint_snapshot(session_id, operation_id, actor.clone(), created_at.clone())
+            .await?;
+        let archived_count = self
+            .archive_events_through(session_id, snapshot.last_applied_seq, operation_id, actor, created_at)
+            .await?;
+        Ok(IncrementalCompaction {
+            snapshot_seq: snapshot.last_applied_seq,
+            archived_count,
+        })
     }
 
     pub async fn recover(&self, session_id: &SessionId) -> Result<RecoveredSession, SessionKernelError> {
@@ -679,7 +1004,39 @@ where
     }
 }
 
-fn event_payload_name(event: &SessionEvent) -> &'static str {
+/// Chronological ordering for protobuf timestamps (`(seconds, nanos)` lexicographic),
+/// used to select the retention watermark in [`SessionKernel::archive_events_older_than`].
+fn timestamp_le(a: &Timestamp, b: &Timestamp) -> bool {
+    (a.seconds, a.nanos) <= (b.seconds, b.nanos)
+}
+
+/// Target path of a file-modifying tool call (write/edit/str_replace), parsed from the
+/// tool input JSON, for emitting `file_changed`. Returns `None` for non-file tools or when
+/// no `path` field is present. Note: file changes made via `bash` are NOT detected here —
+/// the kernel cannot infer them from the opaque command string.
+fn file_change_path(tool_name: &str, input_json: &str) -> Option<String> {
+    if !matches!(tool_name, "write" | "edit" | "str_replace") {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(input_json).ok()?;
+    value
+        .get("path")
+        .and_then(|path| path.as_str())
+        .filter(|path| !path.is_empty())
+        .map(|path| path.to_string())
+}
+
+/// Result of an incremental compaction (§1888): the snapshot watermark and how many events
+/// were archived through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IncrementalCompaction {
+    pub snapshot_seq: u64,
+    pub archived_count: u64,
+}
+
+/// Stable name for an event's payload kind (§3 event types). Reused by the session event
+/// inspector (§1892) and telemetry.
+pub fn event_payload_name(event: &SessionEvent) -> &'static str {
     event
         .payload
         .as_option()

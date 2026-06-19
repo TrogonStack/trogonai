@@ -290,6 +290,10 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     agent_loader: Option<Arc<dyn AgentLoading>>,
     skill_loader: Option<Arc<dyn SkillLoading>>,
     session_store: Option<Arc<dyn SessionStoring>>,
+    /// Fase 4 (§1875) canonical shadow recorder: mirrors each completed turn into the
+    /// Session Kernel event log/snapshot (the session belongs to Trogonai). `None` when
+    /// the kernel is disabled (default). Best-effort; never blocks the prompt path.
+    kernel_shadow: Option<Arc<dyn crate::kernel_shadow::ShadowRecorder>>,
     tenant_id: String,
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     execution_nats: Option<async_nats::Client>,
@@ -411,6 +415,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             agent_loader: None,
             skill_loader: None,
             session_store: None,
+            kernel_shadow: None,
             tenant_id,
             registry: None,
             execution_nats: None,
@@ -452,6 +457,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             agent_loader: self.agent_loader,
             skill_loader: self.skill_loader,
             session_store: self.session_store,
+            kernel_shadow: self.kernel_shadow,
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
@@ -496,6 +502,14 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
 
     pub fn with_session_store(mut self, store: Arc<dyn SessionStoring>) -> Self {
         self.session_store = Some(store);
+        self
+    }
+
+    /// Attach the Fase 4 canonical shadow recorder (§1875): each completed turn is
+    /// mirrored into the Session Kernel event log/snapshot in parallel with the runner's
+    /// own KV snapshot. `None` (default) leaves the legacy-only path untouched.
+    pub fn with_kernel_shadow(mut self, recorder: Arc<dyn crate::kernel_shadow::ShadowRecorder>) -> Self {
+        self.kernel_shadow = Some(recorder);
         self
     }
 
@@ -2360,6 +2374,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         };
         if let (Some(store), Some(snapshot)) = (&self.session_store, snapshot) {
             store.save(&snapshot).await;
+            // Fase 4 (§1875/§1671 shadow mode): mirror the turn into the canonical kernel
+            // in parallel with the runner's own KV snapshot. Best-effort.
+            if let Some(shadow) = &self.kernel_shadow {
+                shadow.record_turn(&session_id, &snapshot).await;
+            }
         }
 
         // Context compaction (post-turn): model-aware only, via the compactor

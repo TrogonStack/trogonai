@@ -19,6 +19,14 @@ enum ToolResultFormat {
   TOOL_RESULT_FORMAT_STRUCTURED = 3;
 }
 
+enum CertificationLevel {
+  CERTIFICATION_LEVEL_UNSPECIFIED = 0;
+  CERTIFICATION_LEVEL_EXPERIMENTAL = 1;
+  CERTIFICATION_LEVEL_BASIC = 2;
+  CERTIFICATION_LEVEL_SWITCH_SAFE = 3;
+  CERTIFICATION_LEVEL_PRODUCTION = 4;
+}
+
 message CapabilityTestResult {
   string name = 1;
   bool passed = 2;
@@ -49,4 +57,29 @@ message CapabilitySchema {
   uint64 ttl_seconds = 20;
   double confidence = 21;
   repeated CapabilityTestResult test_results = 22;
+}
+
+message ProviderCertificationEntry {
+  string model = 1;
+  string runner = 2;
+  bool text = 3;
+  bool tool_use = 4;
+  bool parallel_tools = 5;
+  bool image_input = 6;
+  bool json_schema = 7;
+  bool long_context = 8;
+  bool streaming = 9;
+  bool artifact_refs = 10;
+  bool mcp_tools = 11;
+  repeated string switch_from = 12;
+  repeated string switch_to = 13;
+  CertificationLevel certified_level = 14;
+  optional google.protobuf.Timestamp last_verified_at = 15;
+  repeated CapabilityTestResult probe_results = 16;
+}
+
+message ProviderCertificationMatrix {
+  uint32 schema_version = 1;
+  repeated ProviderCertificationEntry entries = 2;
+  google.protobuf.Timestamp updated_at = 3;
 }

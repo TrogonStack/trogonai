@@ -3,6 +3,7 @@
 pub mod cancel;
 pub mod checkpoint;
 pub mod config;
+pub mod continuity_eval;
 pub mod error;
 pub mod event;
 pub mod force;
@@ -18,6 +19,7 @@ pub mod visible_result;
 pub use cancel::{
     CancelContext, CancelOutcome, RunnerCancelOutcome, RunnerCancellation, cancel_operation, tool_states_from_session,
 };
+pub use continuity_eval::{ContinuityEvalReport, evaluate_continuity};
 pub use checkpoint::{
     AckTransport, ContinuityAcknowledgement, JsonAcknowledgementRunner, PassthroughCheckpointRunner,
     RunnerAcknowledgement, acknowledgement_from_context_twin, compare_acknowledgement, frame_acknowledgement_request,
@@ -38,7 +40,10 @@ pub use runner::{
     provision_runner_binding_store,
 };
 pub use safety::{SwitchSafetyInput, evaluate_switch_safety};
-pub use visible_result::{VisibleResultContext, build_visible_result};
+pub use visible_result::{
+    VisibleResultContext, build_visible_result, failed_visible_result, handoff_visible_result,
+    same_runner_visible_result,
+};
 pub use state::{
     ArtifactPersistenceState, CancelState, ContinuityCheckpointState, ForceSwitchState, RunnerBindingState,
     SwitchState, ToolExecutionState,

@@ -71,17 +71,24 @@ pub struct SessionKernelFeatureFlags {
     #[config(env = "TROGON_EVENT_LOG_SHADOW_MODE", default = true)]
     pub event_log_shadow_mode: bool,
 
-    #[config(env = "TROGON_PROMPT_PROJECTION_ENABLED", default = false)]
+    #[config(env = "TROGON_PROMPT_PROJECTION_ENABLED", default = true)]
     pub prompt_projection_enabled: bool,
 
     #[config(env = "TROGON_SWITCH_SAFETY_GATE_ENABLED", default = true)]
     pub switch_safety_gate_enabled: bool,
 
-    #[config(env = "TROGON_CONTINUITY_CHECKPOINT_ENABLED", default = false)]
+    #[config(env = "TROGON_CONTINUITY_CHECKPOINT_ENABLED", default = true)]
     pub continuity_checkpoint_enabled: bool,
 
     #[config(env = "TROGON_ARTIFACT_STORE_ENABLED", default = false)]
     pub artifact_store_enabled: bool,
+
+    /// Per-session Event Log Compaction & Retention maintenance (§ Event Log Compaction
+    /// and Retention): archive events past the retention cutoff and GC unreferenced
+    /// ephemeral artifacts. Defaults off (conservative default): retention purges are an
+    /// operational action enabled deliberately, never implicitly during shadow rollout.
+    #[config(env = "TROGON_SESSION_MAINTENANCE_ENABLED", default = false)]
+    pub session_maintenance_enabled: bool,
 
     #[config(env = "TROGON_RUNNER_BINDING_MODE", default = "handoff")]
     runner_binding_mode: String,
@@ -97,6 +104,22 @@ impl SessionKernelFeatureFlags {
 
     pub fn event_log_primary_mode(&self) -> EventLogPrimaryMode {
         EventLogPrimaryMode::parse(&self.event_log_primary_mode)
+    }
+
+    /// Override the event-log-primary mode string, for callers/tests that build flags
+    /// programmatically rather than from config/env. The raw string is parsed by
+    /// [`Self::event_log_primary_mode`]; unknown values resolve to `LegacyMessages`.
+    pub fn with_event_log_primary_mode(mut self, mode: impl Into<String>) -> Self {
+        self.event_log_primary_mode = mode.into();
+        self
+    }
+
+    /// Override the runner-binding mode string, for callers/tests that build flags
+    /// programmatically rather than from config/env. Parsed by
+    /// [`Self::runner_binding_mode`]; unknown values resolve to `Handoff`.
+    pub fn with_runner_binding_mode(mut self, mode: impl Into<String>) -> Self {
+        self.runner_binding_mode = mode.into();
+        self
     }
 
     pub fn use_canonical_runner_binding(&self) -> bool {
@@ -135,6 +158,12 @@ impl SessionKernelFeatureFlags {
     pub fn checkpoint_enabled(&self) -> bool {
         self.session_kernel_enabled && self.continuity_checkpoint_enabled
     }
+
+    /// Whether per-session retention maintenance runs. Gated by the master kernel flag:
+    /// the kernel must own the session (and its event log) before it may compact it.
+    pub fn maintenance_enabled(&self) -> bool {
+        self.session_kernel_enabled && self.session_maintenance_enabled
+    }
 }
 
 impl Default for SessionKernelFeatureFlags {
@@ -157,8 +186,14 @@ mod tests {
     fn feature_flag_defaults_are_shadow_safe() {
         let flags = SessionKernelFeatureFlags::default();
         assert!(!flags.session_kernel_enabled);
-        assert!(flags.session_lease_enabled, "the lease must default on (safety mechanism)");
-        assert!(flags.canonical_snapshot_enabled, "the canonical snapshot must default on");
+        assert!(
+            flags.session_lease_enabled,
+            "the lease must default on (safety mechanism)"
+        );
+        assert!(
+            flags.canonical_snapshot_enabled,
+            "the canonical snapshot must default on"
+        );
         assert!(flags.event_log_shadow_mode);
         assert_eq!(flags.runner_binding_mode(), RunnerBindingMode::Handoff);
     }
@@ -216,7 +251,10 @@ mod tests {
     fn handoff_fallback_allowed_only_while_event_log_not_primary() {
         let legacy = SessionKernelFeatureFlags::default();
         assert_eq!(legacy.event_log_primary_mode(), EventLogPrimaryMode::LegacyMessages);
-        assert!(legacy.allows_handoff_fallback(), "legacy/shadow may fall back to handoff");
+        assert!(
+            legacy.allows_handoff_fallback(),
+            "legacy/shadow may fall back to handoff"
+        );
 
         let new_sessions = SessionKernelFeatureFlags {
             event_log_primary_mode: "new_sessions".to_string(),

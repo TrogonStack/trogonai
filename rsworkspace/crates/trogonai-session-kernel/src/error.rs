@@ -51,6 +51,12 @@ pub enum SessionKernelError {
     #[error("failed to store session snapshot: {0}")]
     SnapshotStore(String),
 
+    #[error("failed to load session routing record: {0}")]
+    RoutingLoad(String),
+
+    #[error("failed to store session routing record: {0}")]
+    RoutingStore(String),
+
     #[error("failed to load session usage: {0}")]
     UsageLoad(String),
 

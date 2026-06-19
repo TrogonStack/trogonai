@@ -5446,6 +5446,7 @@ dependencies = [
  "trogon-std",
  "trogon-tools",
  "trogonai-catalog-client",
+ "trogonai-session-kernel",
  "uuid",
 ]
 
@@ -5609,6 +5610,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "testcontainers-modules",
+ "time",
  "tokio",
  "tracing",
  "trogon-nats",
@@ -5635,6 +5637,8 @@ dependencies = [
  "agent-client-protocol",
  "async-nats",
  "async-trait",
+ "buffa 0.7.0",
+ "buffa-types 0.7.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -5647,6 +5651,8 @@ dependencies = [
  "trogon-registry",
  "trogon-runner-tools",
  "trogon-xai-runner",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
  "uuid",
 ]
 
@@ -5791,6 +5797,8 @@ dependencies = [
  "trogon-runner-tools",
  "trogon-transcript",
  "trogon-xai-runner",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
  "uuid",
 ]
 
@@ -5963,6 +5971,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.9",
  "buffa 0.7.0",
+ "buffa-types 0.7.0",
  "bytes",
  "futures",
  "futures-util",
@@ -5983,6 +5992,8 @@ dependencies = [
  "trogon-tools",
  "trogonai-catalog-client",
  "trogonai-compactor-proto",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
  "uuid",
 ]
 
@@ -6370,6 +6381,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.9",
  "buffa 0.7.0",
+ "buffa-types 0.7.0",
  "bytes",
  "futures",
  "futures-util",
@@ -6391,6 +6403,8 @@ dependencies = [
  "trogon-tools",
  "trogonai-catalog-client",
  "trogonai-compactor-proto",
+ "trogonai-session-contracts",
+ "trogonai-session-kernel",
  "uuid",
 ]
 
@@ -6420,9 +6434,12 @@ dependencies = [
 name = "trogonai-capabilities"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "base64 0.22.1",
  "buffa 0.7.0",
  "buffa-types 0.7.0",
+ "bytes",
+ "confique",
  "opentelemetry",
  "serde",
  "serde_json",
@@ -6430,6 +6447,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "trogon-nats",
  "trogon-registry",
  "trogonai-session-contracts",
  "uuid",
