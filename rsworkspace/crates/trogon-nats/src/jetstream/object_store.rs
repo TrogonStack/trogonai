@@ -21,7 +21,6 @@ pub trait ObjectStoreGet: Send + Sync + Clone + 'static {
     fn get(&self, name: &str) -> impl Future<Output = Result<Self::Reader, Self::Error>> + Send;
 }
 
-#[cfg(not(coverage))]
 #[derive(Debug, thiserror::Error)]
 pub enum ProvisionObjectStoreError {
     #[error("failed to create object store: {0}")]
