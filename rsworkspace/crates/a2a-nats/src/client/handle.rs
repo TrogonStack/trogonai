@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use a2a::agent_card::AgentCard;
 use a2a::types::{
-    CancelTaskRequest, GetExtendedAgentCardRequest, GetTaskRequest, ListTasksRequest, ListTasksResponse,
-    SendMessageRequest, SendMessageResponse, SubscribeToTaskRequest, Task, TaskPushNotificationConfig,
+    CancelTaskRequest, GetExtendedAgentCardRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
+    ListTasksRequest, ListTasksResponse, SendMessageRequest, SendMessageResponse, SubscribeToTaskRequest, Task,
+    TaskPushNotificationConfig,
 };
 use a2a_identity_types::MintedUserJwt;
 use trogon_nats::RequestClient;
@@ -22,8 +23,8 @@ use crate::agent_id::A2aAgentId;
 use crate::constants::{DEFAULT_OPERATION_TIMEOUT, MIN_TIMEOUT_SECS};
 use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
 use crate::nats::subjects::agents::{
-    AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushSetSubject, TasksCancelSubject, TasksGetSubject,
-    TasksListSubject, TasksResubscribeSubject,
+    AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushGetSubject, PushSetSubject, TasksCancelSubject,
+    TasksGetSubject, TasksListSubject, TasksResubscribeSubject,
 };
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
@@ -179,6 +180,24 @@ where
             &self.nats,
             &subject,
             "message/send",
+            req,
+            &req_id,
+            self.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
+    }
+
+    pub async fn push_get(
+        &self,
+        req: &GetTaskPushNotificationConfigRequest,
+    ) -> Result<TaskPushNotificationConfig, ClientError> {
+        let subject = self.outbound_rpc_subject(PushGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let req_id = ReqId::new();
+        send_unary(
+            &self.nats,
+            &subject,
+            "tasks/pushNotificationConfig/get",
             req,
             &req_id,
             self.operation_timeout(),
@@ -1008,6 +1027,81 @@ mod tests {
             let client = A2aClient::new(prefix(), agent_id(), nats, ());
             assert!(matches!(
                 client.push_set(&push_config("c")).await,
+                Err(ClientError::Transport(_))
+            ));
+        }
+    }
+
+    mod push_get_op {
+        use a2a::types::{GetTaskPushNotificationConfigRequest, TaskPushNotificationConfig};
+        use bytes::Bytes;
+        use trogon_nats::AdvancedMockNatsClient;
+
+        use super::*;
+
+        fn get_request(id: &str) -> GetTaskPushNotificationConfigRequest {
+            GetTaskPushNotificationConfigRequest {
+                task_id: "task-1".to_string(),
+                id: id.to_string(),
+                tenant: None,
+            }
+        }
+
+        fn push_response(id: &str) -> Bytes {
+            let cfg = TaskPushNotificationConfig {
+                url: "https://example.com/webhook".to_string(),
+                id: Some(id.to_string()),
+                task_id: "task-1".to_string(),
+                token: None,
+                authentication: None,
+                tenant: None,
+            };
+            let json = serde_json::json!({"jsonrpc":"2.0","id":"any","result":cfg});
+            serde_json::to_vec(&json).unwrap().into()
+        }
+
+        fn error_response(code: i32, msg: &str) -> Bytes {
+            let json = serde_json::json!({"jsonrpc":"2.0","id":"any","error":{"code":code,"message":msg}});
+            serde_json::to_vec(&json).unwrap().into()
+        }
+
+        #[tokio::test]
+        async fn push_get_targets_agent_subject_by_default() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.agents.test-agent.push.get", push_response("c-1"));
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            let cfg = client.push_get(&get_request("c-1")).await.unwrap();
+            assert_eq!(cfg.id.as_deref(), Some("c-1"));
+        }
+
+        #[tokio::test]
+        async fn push_get_targets_gateway_subject_under_gateway_routing() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.gateway.test-agent.push.get", push_response("c-gw"));
+            let jwt =
+                MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
+            let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
+            client.push_get(&get_request("c-gw")).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn push_get_propagates_task_not_found() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.set_response("a2a.agents.test-agent.push.get", error_response(-32001, "missing"));
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            assert!(matches!(
+                client.push_get(&get_request("c")).await,
+                Err(ClientError::TaskNotFound)
+            ));
+        }
+
+        #[tokio::test]
+        async fn push_get_propagates_transport_errors() {
+            let nats = AdvancedMockNatsClient::new();
+            nats.fail_next_request();
+            let client = A2aClient::new(prefix(), agent_id(), nats, ());
+            assert!(matches!(
+                client.push_get(&get_request("c")).await,
                 Err(ClientError::Transport(_))
             ));
         }
