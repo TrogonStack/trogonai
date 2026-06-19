@@ -6,6 +6,7 @@
 pub mod agent_card;
 pub mod handler;
 pub mod message_send;
+pub mod tasks_cancel;
 pub mod tasks_get;
 pub mod tasks_list;
 #[cfg(test)]
