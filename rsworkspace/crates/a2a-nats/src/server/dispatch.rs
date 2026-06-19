@@ -176,7 +176,22 @@ mod tests {
     }
 
     #[test]
-    fn as_str_round_trips_for_message_send() {
-        assert_eq!(A2aMethod::MessageSend.as_str(), "message/send");
+    fn as_str_covers_every_variant() {
+        let pairs = [
+            (A2aMethod::MessageSend, "message/send"),
+            (A2aMethod::MessageStream, "message/stream"),
+            (A2aMethod::TasksGet, "tasks/get"),
+            (A2aMethod::TasksList, "tasks/list"),
+            (A2aMethod::TasksCancel, "tasks/cancel"),
+            (A2aMethod::TasksResubscribe, "tasks/resubscribe"),
+            (A2aMethod::PushNotificationSet, "tasks/pushNotificationConfig/set"),
+            (A2aMethod::PushNotificationGet, "tasks/pushNotificationConfig/get"),
+            (A2aMethod::PushNotificationList, "tasks/pushNotificationConfig/list"),
+            (A2aMethod::PushNotificationDelete, "tasks/pushNotificationConfig/delete"),
+            (A2aMethod::AgentCard, "agent/card"),
+        ];
+        for (method, expected) in pairs {
+            assert_eq!(method.as_str(), expected);
+        }
     }
 }
