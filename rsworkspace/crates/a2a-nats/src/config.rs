@@ -162,12 +162,10 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
                 config.push_dlq_dedup_lru_size = size;
             }
             Ok(_) => {
-                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} must be positive, using default");
-                config.push_dlq_dedup_lru_size = DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE;
+                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} must be positive, using prior value");
             }
             Err(_) => {
-                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} is not a valid integer, using default");
-                config.push_dlq_dedup_lru_size = DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE;
+                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} is not a valid integer, using prior value");
             }
         }
     }
@@ -451,22 +449,26 @@ mod tests {
     }
 
     #[test]
-    fn push_dlq_dedup_lru_size_zero_resets_to_default() {
+    fn push_dlq_dedup_lru_size_zero_preserves_in_code_value() {
         let env = trogon_std::env::InMemoryEnv::new();
         env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "0");
         with_subscriber(|| {
-            let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-            assert_eq!(cfg.push_dlq_dedup_lru_size(), DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE);
+            let mut base = Config::for_test("a2a");
+            base.push_dlq_dedup_lru_size = 9999;
+            let cfg = apply_timeout_overrides(base, &env);
+            assert_eq!(cfg.push_dlq_dedup_lru_size(), 9999);
         });
     }
 
     #[test]
-    fn push_dlq_dedup_lru_size_invalid_resets_to_default() {
+    fn push_dlq_dedup_lru_size_invalid_preserves_in_code_value() {
         let env = trogon_std::env::InMemoryEnv::new();
         env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "not-a-number");
         with_subscriber(|| {
-            let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-            assert_eq!(cfg.push_dlq_dedup_lru_size(), DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE);
+            let mut base = Config::for_test("a2a");
+            base.push_dlq_dedup_lru_size = 9999;
+            let cfg = apply_timeout_overrides(base, &env);
+            assert_eq!(cfg.push_dlq_dedup_lru_size(), 9999);
         });
     }
 }
