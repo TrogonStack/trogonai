@@ -5874,6 +5874,7 @@ dependencies = [
  "trogon-openrouter-runner",
  "trogon-registry",
  "trogon-runner-tools",
+ "trogon-tools",
  "trogon-xai-runner",
  "uuid",
 ]

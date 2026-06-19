@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,12 @@ struct Request<'a> {
     method: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     params: Option<Value>,
+}
+
+#[derive(Serialize)]
+struct Response<'a> {
+    id: &'a Value,
+    result: Value,
 }
 
 #[derive(Serialize)]
@@ -44,35 +52,145 @@ struct IncomingMessage {
     pub params: Option<Value>,
 }
 
+// ── Errors ─────────────────────────────────────────────────────────────────────
+
+const SPAWN_MAX_ATTEMPTS: u32 = 3;
+const SPAWN_RETRY_BACKOFF_MS: u64 = 200;
+
+/// Typed errors from the codex app-server subprocess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodexError {
+    /// Child exited or a reply channel closed unexpectedly.
+    ProcessDead,
+    /// A request or handshake timed out.
+    Timeout { what: String },
+    /// App-server returned a JSON-RPC error object.
+    Rpc { code: i64, message: String },
+    /// A turn/* or wire-shape call failed.
+    Turn { message: String },
+    /// Failed to spawn or handshake the subprocess.
+    Spawn { message: String },
+}
+
+impl fmt::Display for CodexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ProcessDead => write!(f, "codex process closed unexpectedly"),
+            Self::Timeout { what } => write!(f, "codex timed out: {what}"),
+            Self::Rpc { code, message } => write!(f, "codex rpc error {code}: {message}"),
+            Self::Turn { message } => write!(f, "codex turn error: {message}"),
+            Self::Spawn { message } => write!(f, "codex spawn error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for CodexError {}
+
+impl From<std::io::Error> for CodexError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Spawn {
+            message: value.to_string(),
+        }
+    }
+}
+
+impl From<serde_json::Error> for CodexError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Turn {
+            message: value.to_string(),
+        }
+    }
+}
+
+impl CodexError {
+    fn rpc_from_value(err: Value) -> Self {
+        let code = err.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let message = err
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown rpc error")
+            .to_string();
+        Self::Rpc { code, message }
+    }
+
+    fn is_transient_spawn_failure(&self) -> bool {
+        matches!(self, Self::Spawn { .. } | Self::Timeout { .. })
+    }
+}
+
+fn env_u64(var: &str, default: u64) -> u64 {
+    std::env::var(var)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
 // ── Codex event types ──────────────────────────────────────────────────────────
+
+/// Coarse classification of a codex tool item. Mapped to an ACP `ToolKind` at
+/// the agent layer so this protocol layer stays free of ACP schema types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexToolKind {
+    /// Shell command execution (`commandExecution`).
+    Execute,
+    /// File edits / patches (`fileChange`).
+    Edit,
+    /// MCP or dynamic tool call; refined by tool name at the agent layer.
+    Other,
+}
 
 /// Parsed event emitted by the Codex app-server during a turn.
 #[derive(Debug, Clone)]
 pub enum CodexEvent {
-    /// A text message chunk from the model.
+    /// Incremental assistant text from `item/agentMessage/delta`.
     TextDelta { text: String },
-    /// A tool/command execution started.
+    /// Incremental reasoning text from `item/reasoning/*Delta` notifications.
+    ReasoningDelta { text: String },
+    /// A tool/command execution started (`item/started`).
     ToolStarted {
         id: String,
         name: String,
         input: Value,
+        kind: CodexToolKind,
     },
-    /// A tool/command completed.
-    ToolCompleted { id: String, output: String },
-    /// The turn finished.
+    /// A tool/command completed (`item/completed`). `failed` is derived from the
+    /// item's terminal `status`, a non-zero `exitCode`, or a present `error`.
+    ToolCompleted {
+        id: String,
+        output: String,
+        failed: bool,
+    },
+    /// Token usage from `thread/tokenUsage/updated`.
+    Usage {
+        input: u64,
+        output: u64,
+        total: u64,
+        context_window: Option<u64>,
+    },
+    /// The turn finished (`turn/completed`).
     TurnCompleted,
     /// An error occurred during the turn.
     Error { message: String },
 }
 
-// ── CodexProcess ──────────────────────────────────────────────────────────────
+/// True when a completed item's `status` field names a non-success terminal
+/// state (codex uses these across `commandExecution`/`fileChange`/tool items).
+fn status_indicates_failure(item: &Value) -> bool {
+    matches!(
+        item.get("status").and_then(|v| v.as_str()),
+        Some("failed" | "incomplete" | "rejected" | "error" | "cancelled" | "canceled")
+    )
+}
 
-type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
+// ── CodexProcess ─────────────────────────────────────────────────────────────
 
-/// Per-thread event channels. Keyed by Codex thread_id.
-/// Each turn_start creates a new sender for that thread; the read_loop routes
-/// events to the correct channel so concurrent sessions don't cross-contaminate.
+type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, CodexError>>>>>;
+
+/// Per-thread event channels. Keyed by Codex `thread_id`.
 type TurnSenders = Arc<Mutex<HashMap<String, broadcast::Sender<CodexEvent>>>>;
+
+/// Trogon permission mode per active turn, used to auto-reply to server approval requests.
+type ThreadModes = Arc<Mutex<HashMap<String, String>>>;
 
 /// Manages a single `codex app-server` subprocess.
 /// Speaks the Codex JSON-RPC protocol over stdin/stdout.
@@ -81,14 +199,13 @@ pub struct CodexProcess {
     next_id: Arc<Mutex<u64>>,
     pending: PendingMap,
     turn_senders: TurnSenders,
+    thread_modes: ThreadModes,
     alive: Arc<AtomicBool>,
     _child: StdMutex<Child>,
 }
 
 impl Drop for CodexProcess {
     fn drop(&mut self) {
-        // Best-effort kill: start_kill sends SIGKILL without waiting. If the
-        // child has already exited this is a harmless no-op.
         if let Ok(mut child) = self._child.lock() {
             let _ = child.start_kill();
         }
@@ -96,23 +213,39 @@ impl Drop for CodexProcess {
 }
 
 impl CodexProcess {
-    /// Returns `true` while the subprocess stdout is open.
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Relaxed)
     }
 
-    /// Returns a clone of the alive flag so callers can observe liveness
-    /// after the `CodexProcess` itself has been dropped.
     pub fn alive_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.alive)
     }
 
-    /// Spawn `codex app-server` and perform the initialization handshake.
-    ///
-    /// The binary to invoke defaults to `codex` but can be overridden via the
-    /// `CODEX_BIN` environment variable.  Integration tests use this to inject
-    /// a mock server without touching the production code path.
-    pub async fn spawn() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn spawn() -> Result<Self, CodexError> {
+        let mut last_err = None;
+        for attempt in 1..=SPAWN_MAX_ATTEMPTS {
+            match Self::try_spawn_once().await {
+                Ok(process) => return Ok(process),
+                Err(e) if e.is_transient_spawn_failure() && attempt < SPAWN_MAX_ATTEMPTS => {
+                    warn!(
+                        attempt,
+                        max_attempts = SPAWN_MAX_ATTEMPTS,
+                        error = %e,
+                        "codex: transient spawn/handshake failure; retrying"
+                    );
+                    last_err = Some(e);
+                    tokio::time::sleep(Duration::from_millis(
+                        SPAWN_RETRY_BACKOFF_MS * u64::from(attempt),
+                    ))
+                    .await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.expect("spawn loop always records last error"))
+    }
+
+    async fn try_spawn_once() -> Result<Self, CodexError> {
         let bin = std::env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string());
         let mut child = Command::new(&bin)
             .arg("app-server")
@@ -126,40 +259,46 @@ impl CodexProcess {
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let turn_senders: TurnSenders = Arc::new(Mutex::new(HashMap::new()));
+        let thread_modes: ThreadModes = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
 
+        let stdin_arc = Arc::new(Mutex::new(stdin));
+
         let process = Self {
-            stdin: Arc::new(Mutex::new(stdin)),
+            stdin: stdin_arc.clone(),
             next_id: Arc::new(Mutex::new(1)),
             pending: pending.clone(),
             turn_senders: turn_senders.clone(),
+            thread_modes: thread_modes.clone(),
             alive: alive.clone(),
             _child: StdMutex::new(child),
         };
 
-        // Background task: read stdout and route messages.
-        tokio::task::spawn_local(Self::read_loop(stdout, pending, turn_senders, alive));
+        tokio::task::spawn_local(Self::read_loop(
+            stdout,
+            stdin_arc,
+            pending,
+            turn_senders,
+            thread_modes,
+            alive,
+        ));
 
-        // Handshake: initialize. Timeout is configurable via CODEX_SPAWN_TIMEOUT_SECS
-        // (default 30 s) so tests can set a shorter value without waiting.
-        let spawn_timeout_secs = std::env::var("CODEX_SPAWN_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(30);
-        tokio::time::timeout(
-            std::time::Duration::from_secs(spawn_timeout_secs),
+        let spawn_timeout_secs = env_u64("CODEX_SPAWN_TIMEOUT_SECS", 30);
+        match tokio::time::timeout(
+            Duration::from_secs(spawn_timeout_secs),
             process.initialize(),
         )
         .await
-        .map_err(|_| {
-            format!("codex app-server handshake timed out after {spawn_timeout_secs} s")
-        })??;
-
-        Ok(process)
+        {
+            Ok(Ok(())) => Ok(process),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(CodexError::Timeout {
+                what: format!("app-server handshake after {spawn_timeout_secs}s"),
+            }),
+        }
     }
 
-    /// Send `initialize` and wait for the response.
-    async fn initialize(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn initialize(&self) -> Result<(), CodexError> {
         let params = serde_json::json!({
             "clientInfo": {
                 "name": "trogon-codex-runner",
@@ -167,71 +306,62 @@ impl CodexProcess {
             }
         });
         self.request("initialize", Some(params)).await?;
-        // Send the `initialized` notification.
         self.notify("initialized", None).await?;
         Ok(())
     }
 
-    /// Start a new thread (ACP session). Returns the Codex `threadId`.
-    pub async fn thread_start(
-        &self,
-        working_directory: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let params = serde_json::json!({ "workingDirectory": working_directory });
+    /// Start a new thread (ACP session). Returns the Codex thread `id`.
+    pub async fn thread_start(&self, cwd: &str) -> Result<String, CodexError> {
+        let params = serde_json::json!({ "cwd": cwd });
         let result = self.request("thread/start", Some(params)).await?;
-        let thread_id = result["threadId"]
-            .as_str()
-            .ok_or("thread/start: missing threadId in response")?
-            .to_string();
-        Ok(thread_id)
+        Self::thread_id_from_result(&result)
     }
 
     /// Resume an existing thread. Returns the same `thread_id`.
-    pub async fn thread_resume(
-        &self,
-        thread_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn thread_resume(&self, thread_id: &str) -> Result<String, CodexError> {
         let params = serde_json::json!({ "threadId": thread_id });
-        self.request("thread/resume", Some(params)).await?;
-        Ok(thread_id.to_string())
+        let result = self.request("thread/resume", Some(params)).await?;
+        Self::thread_id_from_result(&result).or(Ok(thread_id.to_string()))
     }
 
-    /// Fork a thread. Returns the new `threadId`.
-    pub async fn thread_fork(
-        &self,
-        thread_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    /// Fork a thread. Returns the new thread `id`.
+    pub async fn thread_fork(&self, thread_id: &str) -> Result<String, CodexError> {
         let params = serde_json::json!({ "threadId": thread_id });
         let result = self.request("thread/fork", Some(params)).await?;
-        let new_id = result["threadId"]
-            .as_str()
-            .ok_or("thread/fork: missing threadId in response")?
-            .to_string();
-        Ok(new_id)
+        Self::thread_id_from_result(&result)
     }
 
     /// Start a turn and return a receiver for streaming `CodexEvent`s.
-    /// Events are scoped to this thread — other sessions' events are not visible.
-    ///
-    /// `approval_policy` is forwarded to Codex as the coarse session boundary Trogon
-    /// controls (`on-request`, `unless-trusted`, `never`). Trogon cannot intercept
-    /// individual tool calls inside the subprocess.
     pub async fn turn_start(
         &self,
         thread_id: &str,
         user_input: &str,
         model: Option<&str>,
         approval_policy: Option<&str>,
-    ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>> {
+        permission_mode: Option<&str>,
+    ) -> Result<broadcast::Receiver<CodexEvent>, CodexError> {
         let (tx, rx) = broadcast::channel(256);
         self.turn_senders
             .lock()
             .await
             .insert(thread_id.to_string(), tx);
 
+        if let Some(mode) = permission_mode {
+            self.thread_modes
+                .lock()
+                .await
+                .insert(thread_id.to_string(), mode.to_string());
+        } else {
+            self.thread_modes.lock().await.remove(thread_id);
+        }
+
+        let input = serde_json::json!([{
+            "type": "text",
+            "text": user_input,
+        }]);
         let mut params = serde_json::json!({
             "threadId": thread_id,
-            "userInput": user_input,
+            "input": input,
         });
         if let Some(m) = model {
             params["model"] = Value::String(m.to_string());
@@ -240,31 +370,29 @@ impl CodexProcess {
             params["approvalPolicy"] = Value::String(policy.to_string());
         }
         if let Err(e) = self.request("turn/start", Some(params)).await {
-            // Request failed — remove the sender we just inserted so it doesn't
-            // linger until the next turn_start call for this thread.
             self.turn_senders.lock().await.remove(thread_id);
+            self.thread_modes.lock().await.remove(thread_id);
             return Err(e);
         }
         Ok(rx)
     }
 
-    /// Interrupt the current turn for a thread.
-    pub async fn turn_interrupt(
-        &self,
-        thread_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn turn_interrupt(&self, thread_id: &str) -> Result<(), CodexError> {
         let params = serde_json::json!({ "threadId": thread_id });
         self.request("turn/interrupt", Some(params)).await?;
-        // MED-23: drop the interrupted turn's broadcast sender. Events are keyed by
-        // thread_id, so a later turn reusing this thread would otherwise receive the
-        // interrupted turn's late tail events. Removing the sender now means those
-        // late events find no receiver and are discarded instead of corrupting the
-        // next turn.
         self.turn_senders.lock().await.remove(thread_id);
+        self.thread_modes.lock().await.remove(thread_id);
         Ok(())
     }
 
-    // ── internal ───────────────────────────────────────────────────────────────
+    fn thread_id_from_result(result: &Value) -> Result<String, CodexError> {
+        result["thread"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| CodexError::Turn {
+                message: "codex response: missing thread.id".to_string(),
+            })
+    }
 
     async fn next_id(&self) -> u64 {
         let mut id = self.next_id.lock().await;
@@ -273,11 +401,7 @@ impl CodexProcess {
         current
     }
 
-    async fn request(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn request(&self, method: &str, params: Option<Value>) -> Result<Value, CodexError> {
         let id = self.next_id().await;
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -285,21 +409,25 @@ impl CodexProcess {
         let msg = Request { id, method, params };
         self.send_line(&serde_json::to_string(&msg)?).await?;
 
-        rx.await
-            .map_err(|_| "codex process closed unexpectedly".into())
-            .and_then(|r| r.map_err(|e| e.into()))
+        let request_timeout_secs = env_u64("CODEX_REQUEST_TIMEOUT_SECS", 120);
+        match tokio::time::timeout(Duration::from_secs(request_timeout_secs), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(CodexError::ProcessDead),
+            Err(_) => {
+                self.pending.lock().await.remove(&id);
+                Err(CodexError::Timeout {
+                    what: format!("json-rpc {method} after {request_timeout_secs}s"),
+                })
+            }
+        }
     }
 
-    async fn notify(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), CodexError> {
         let msg = Notification { method, params };
         self.send_line(&serde_json::to_string(&msg)?).await
     }
 
-    async fn send_line(&self, line: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn send_line(&self, line: &str) -> Result<(), CodexError> {
         let mut stdin = self.stdin.lock().await;
         stdin.write_all(line.as_bytes()).await?;
         stdin.write_all(b"\n").await?;
@@ -308,16 +436,12 @@ impl CodexProcess {
         Ok(())
     }
 
-    /// Background task: reads newline-delimited JSON from stdout and routes:
-    /// - Responses (have `id`) → resolves the pending oneshot.
-    /// - Notifications (have `method`, no `id`) → routed to the thread's event channel.
-    ///
-    /// When the subprocess exits, `alive` is set to false and all pending requests
-    /// are resolved with an error so callers don't hang.
     async fn read_loop(
         stdout: ChildStdout,
+        stdin: Arc<Mutex<ChildStdin>>,
         pending: PendingMap,
         turn_senders: TurnSenders,
+        thread_modes: ThreadModes,
         alive: Arc<AtomicBool>,
     ) {
         let mut reader = BufReader::new(stdout).lines();
@@ -332,7 +456,24 @@ impl CodexProcess {
             };
 
             if let Some(id) = &msg.id {
-                // It's a response to one of our requests.
+                if let Some(method) = &msg.method {
+                    // Server→client request: must be answered or the turn deadlocks.
+                    let id_val = Value::Number(id.clone());
+                    if let Err(e) = Self::respond_server_request(
+                        &stdin,
+                        &id_val,
+                        method,
+                        msg.params.as_ref(),
+                        &thread_modes,
+                    )
+                    .await
+                    {
+                        warn!(method = %method, error = %e, "codex: failed to reply to server request");
+                    }
+                    continue;
+                }
+
+                // Response to one of our outbound requests.
                 let id_u64: u64 = match id.to_string().parse() {
                     Ok(n) => n,
                     Err(_) => {
@@ -343,7 +484,7 @@ impl CodexProcess {
                 let tx = pending.lock().await.remove(&id_u64);
                 if let Some(tx) = tx {
                     let result = if let Some(err) = msg.error {
-                        Err(err.to_string())
+                        Err(CodexError::rpc_from_value(err))
                     } else {
                         Ok(msg.result.unwrap_or(Value::Null))
                     };
@@ -363,12 +504,10 @@ impl CodexProcess {
             }
         }
 
-        // Process stdout closed — mark dead, unblock pending requests, and signal
-        // all active turns so prompt loops don't hang until their timeout fires.
         alive.store(false, Ordering::Relaxed);
         let mut pending = pending.lock().await;
         for (_, tx) in pending.drain() {
-            let _ = tx.send(Err("codex process terminated".to_string()));
+            let _ = tx.send(Err(CodexError::ProcessDead));
         }
         drop(pending);
         let mut senders = turn_senders.lock().await;
@@ -378,6 +517,7 @@ impl CodexProcess {
             });
         }
         senders.clear();
+        thread_modes.lock().await.clear();
     }
 
     /// Route a parsed server notification to the appropriate turn channel(s).
@@ -412,65 +552,130 @@ impl CodexProcess {
         }
     }
 
-    fn parse_event(method: &str, params: Option<&Value>) -> Option<(String, CodexEvent)> {
-        // thread_id may be absent for broadcast-style error notifications.
-        let thread_id = params
+    /// Auto-reply decision for inbound approval/elicitation server requests.
+    ///
+    /// Phase 0.5: bridge to Trogon's permission UI is deferred — never leave a
+    /// request unanswered. `default` mode also auto-approves for now (tracked).
+    fn approval_decision_for_mode(mode: Option<&str>) -> &'static str {
+        match mode {
+            Some("bypassPermissions") | Some("acceptEdits") | Some("dontAsk") => "approved",
+            // TODO(phase-7): route `default` through Trogon permission UI instead of auto-approve.
+            Some("default") | None => "approved",
+            _ => "approved",
+        }
+    }
+
+    async fn respond_server_request(
+        stdin: &Arc<Mutex<ChildStdin>>,
+        id: &Value,
+        method: &str,
+        params: Option<&Value>,
+        thread_modes: &ThreadModes,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let thread_id = Self::thread_id_from_params(params);
+        let mode_str = if thread_id.is_empty() {
+            None
+        } else {
+            thread_modes.lock().await.get(&thread_id).cloned()
+        };
+        let mode = mode_str.as_deref();
+
+        let result = match method {
+            "execCommandApproval"
+            | "applyPatchApproval"
+            | "item/commandExecution/requestApproval"
+            | "item/fileChange/requestApproval"
+            | "item/permissions/requestApproval" => {
+                let decision = Self::approval_decision_for_mode(mode);
+                debug!(method = %method, thread_id = %thread_id, decision, "codex: auto-replying to approval request");
+                serde_json::json!({ "decision": decision })
+            }
+            "item/tool/requestUserInput" => {
+                debug!(method = %method, "codex: auto-replying to tool user-input request with empty answers");
+                serde_json::json!({ "answers": {} })
+            }
+            "mcpServer/elicitation/request" => {
+                debug!(method = %method, "codex: auto-accepting MCP elicitation request");
+                serde_json::json!({ "action": "accept" })
+            }
+            other => {
+                warn!(method = %other, "codex: replying to unknown server request with null result");
+                Value::Null
+            }
+        };
+
+        let resp = Response { id, result };
+        let line = serde_json::to_string(&resp)?;
+        let mut writer = stdin.lock().await;
+        writer.write_all(line.as_bytes()).await?;
+        writer.write_all(b"\n").await?;
+        writer.flush().await?;
+        debug!(line, "codex → sent server-request reply");
+        Ok(())
+    }
+
+    fn thread_id_from_params(params: Option<&Value>) -> String {
+        params
             .and_then(|p| p.get("threadId"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
-            .to_string();
+            .to_string()
+    }
+
+    fn parse_event(method: &str, params: Option<&Value>) -> Option<(String, CodexEvent)> {
+        let thread_id = Self::thread_id_from_params(params);
 
         match method {
-            "item/updated" | "item/completed" => {
+            "item/agentMessage/delta" => {
+                let delta = params?.get("delta")?.as_str()?;
+                if delta.is_empty() {
+                    return None;
+                }
+                Some((thread_id, CodexEvent::TextDelta { text: delta.to_string() }))
+            }
+            "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
+                let delta = params?.get("delta")?.as_str()?;
+                if delta.is_empty() {
+                    return None;
+                }
+                Some((
+                    thread_id,
+                    CodexEvent::ReasoningDelta {
+                        text: delta.to_string(),
+                    },
+                ))
+            }
+            "item/started" => {
+                let item = params?.get("item")?;
+                Self::parse_thread_item(item, true).map(|event| (thread_id, event))
+            }
+            "item/completed" => {
                 let item = params?.get("item")?;
                 let item_type = item.get("type")?.as_str()?;
-                let event = match item_type {
-                    "message" => {
-                        let content = item.get("content")?.as_array()?;
-                        let mut text = String::new();
-                        for block in content {
-                            if block.get("type").and_then(|v| v.as_str()) == Some("output_text")
-                                && let Some(t) = block.get("text").and_then(|v| v.as_str())
-                            {
-                                text.push_str(t);
-                            }
-                        }
-                        if text.is_empty() {
-                            trace!(
-                                thread_id,
-                                "codex: message item had no output_text blocks; skipping"
-                            );
-                            return None;
-                        }
-                        CodexEvent::TextDelta { text }
-                    }
-                    "tool_call" | "function_call" | "command_execution" => {
-                        let id = item.get("id")?.as_str()?.to_string();
-                        if method == "item/updated" {
-                            let name = item
-                                .get("name")
-                                .or_else(|| item.get("command"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            let input = item
-                                .get("arguments")
-                                .or_else(|| item.get("input"))
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            CodexEvent::ToolStarted { id, name, input }
-                        } else {
-                            let output = item
-                                .get("output")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            CodexEvent::ToolCompleted { id, output }
-                        }
-                    }
-                    _ => return None,
-                };
-                Some((thread_id, event))
+                if item_type == "agentMessage" {
+                    trace!(thread_id, "codex: ignoring agentMessage item/completed (streamed via delta)");
+                    return None;
+                }
+                Self::parse_thread_item(item, false).map(|event| (thread_id, event))
+            }
+            "thread/tokenUsage/updated" => {
+                let usage = params?.get("tokenUsage")?;
+                let last = usage.get("last")?;
+                let input = last.get("inputTokens")?.as_u64()?;
+                let output = last.get("outputTokens")?.as_u64()?;
+                let total = last.get("totalTokens")?.as_u64()?;
+                let context_window = usage
+                    .get("modelContextWindow")
+                    .and_then(|v| v.as_u64());
+                Some((
+                    thread_id,
+                    CodexEvent::Usage {
+                        input,
+                        output,
+                        total,
+                        context_window,
+                    },
+                ))
             }
             "turn/completed" => Some((thread_id, CodexEvent::TurnCompleted)),
             "error" => {
@@ -480,6 +685,131 @@ impl CodexProcess {
                     .unwrap_or("unknown error")
                     .to_string();
                 Some((thread_id, CodexEvent::Error { message }))
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_thread_item(item: &Value, started: bool) -> Option<CodexEvent> {
+        let item_type = item.get("type")?.as_str()?;
+        let id = item.get("id")?.as_str()?.to_string();
+
+        match item_type {
+            "commandExecution" if started => {
+                let name = item
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("command")
+                    .to_string();
+                let input = serde_json::json!({
+                    "command": item.get("command").cloned().unwrap_or(Value::Null),
+                    "cwd": item.get("cwd").cloned().unwrap_or(Value::Null),
+                });
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name,
+                    input,
+                    kind: CodexToolKind::Execute,
+                })
+            }
+            "commandExecution" => {
+                let output = item
+                    .get("aggregatedOutput")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                // A non-zero exit code or a terminal failure status marks the
+                // command as failed.
+                let exit_failed = item
+                    .get("exitCode")
+                    .and_then(|v| v.as_i64())
+                    .map(|c| c != 0)
+                    .unwrap_or(false);
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output,
+                    failed: exit_failed || status_indicates_failure(item),
+                })
+            }
+            "mcpToolCall" if started => {
+                let name = item
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("mcp")
+                    .to_string();
+                let input = item
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name,
+                    input,
+                    kind: CodexToolKind::Other,
+                })
+            }
+            "mcpToolCall" => {
+                let has_error = item.get("error").is_some();
+                let output = if let Some(result) = item.get("result") {
+                    result.to_string()
+                } else if let Some(err) = item.get("error").and_then(|e| e.get("message")) {
+                    err.as_str().unwrap_or("").to_string()
+                } else {
+                    String::new()
+                };
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output,
+                    failed: has_error || status_indicates_failure(item),
+                })
+            }
+            "fileChange" if started => {
+                let input = item.get("changes").cloned().unwrap_or(Value::Null);
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name: "fileChange".to_string(),
+                    input,
+                    kind: CodexToolKind::Edit,
+                })
+            }
+            "fileChange" => {
+                let status = item
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("completed");
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output: status.to_string(),
+                    failed: status_indicates_failure(item),
+                })
+            }
+            "dynamicToolCall" if started => {
+                let name = item
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("dynamicTool")
+                    .to_string();
+                let input = item
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name,
+                    input,
+                    kind: CodexToolKind::Other,
+                })
+            }
+            "dynamicToolCall" => {
+                let output = item
+                    .get("contentItems")
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output,
+                    failed: status_indicates_failure(item),
+                })
             }
             _ => None,
         }
@@ -497,15 +827,15 @@ impl CodexProcessClient for CodexProcess {
     }
 
     async fn thread_start(&self, cwd: &str) -> Result<String, DynError> {
-        self.thread_start(cwd).await
+        self.thread_start(cwd).await.map_err(Into::into)
     }
 
     async fn thread_resume(&self, thread_id: &str) -> Result<String, DynError> {
-        self.thread_resume(thread_id).await
+        self.thread_resume(thread_id).await.map_err(Into::into)
     }
 
     async fn thread_fork(&self, thread_id: &str) -> Result<String, DynError> {
-        self.thread_fork(thread_id).await
+        self.thread_fork(thread_id).await.map_err(Into::into)
     }
 
     async fn turn_start(
@@ -514,17 +844,24 @@ impl CodexProcessClient for CodexProcess {
         user_input: &str,
         model: Option<&str>,
         approval_policy: Option<&str>,
+        permission_mode: Option<&str>,
     ) -> Result<broadcast::Receiver<CodexEvent>, DynError> {
-        self.turn_start(thread_id, user_input, model, approval_policy)
-            .await
+        self.turn_start(
+            thread_id,
+            user_input,
+            model,
+            approval_policy,
+            permission_mode,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn turn_interrupt(&self, thread_id: &str) -> Result<(), DynError> {
-        self.turn_interrupt(thread_id).await
+        self.turn_interrupt(thread_id).await.map_err(Into::into)
     }
 }
 
-/// Spawns the real `codex app-server` subprocess.
 pub struct RealProcessSpawner;
 
 #[async_trait(?Send)]
@@ -532,7 +869,7 @@ impl ProcessSpawner for RealProcessSpawner {
     type Process = CodexProcess;
 
     async fn spawn(&self) -> Result<CodexProcess, DynError> {
-        CodexProcess::spawn().await
+        CodexProcess::spawn().await.map_err(Into::into)
     }
 }
 
@@ -545,65 +882,104 @@ mod tests {
     }
 
     #[test]
-    fn text_delta_from_item_updated() {
+    fn rpc_error_from_json_rpc_object() {
+        let err = serde_json::json!({"code": -32600, "message": "Invalid Request"});
+        let parsed = CodexError::rpc_from_value(err);
+        assert_eq!(
+            parsed,
+            CodexError::Rpc {
+                code: -32600,
+                message: "Invalid Request".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn transient_spawn_failures_are_spawn_and_timeout_only() {
+        assert!(CodexError::Spawn {
+            message: "io".to_string()
+        }
+        .is_transient_spawn_failure());
+        assert!(CodexError::Timeout {
+            what: "handshake".to_string()
+        }
+        .is_transient_spawn_failure());
+        assert!(!CodexError::Rpc {
+            code: 1,
+            message: "nope".to_string()
+        }
+        .is_transient_spawn_failure());
+        assert!(!CodexError::ProcessDead.is_transient_spawn_failure());
+    }
+
+    #[test]
+    fn codex_error_display_includes_rpc_code() {
+        let err = CodexError::Rpc {
+            code: 42,
+            message: "bad turn".to_string(),
+        };
+        assert!(err.to_string().contains("42"));
+        assert!(err.to_string().contains("bad turn"));
+    }
+
+    #[test]
+    fn text_delta_from_agent_message_delta() {
         let params = serde_json::json!({
             "threadId": "t1",
-            "item": {
-                "type": "message",
-                "content": [{"type": "output_text", "text": "hello"}]
-            }
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "delta": "hello"
         });
-        let (tid, event) = parse("item/updated", params).unwrap();
+        let (tid, event) = parse("item/agentMessage/delta", params).unwrap();
         assert_eq!(tid, "t1");
         assert!(matches!(event, CodexEvent::TextDelta { text } if text == "hello"));
     }
 
     #[test]
-    fn text_delta_concatenates_blocks() {
+    fn reasoning_delta_from_text_delta() {
         let params = serde_json::json!({
             "threadId": "t2",
-            "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": "foo"},
-                    {"type": "output_text", "text": "bar"}
-                ]
-            }
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "contentIndex": 0,
+            "delta": "thinking"
         });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "foobar"));
+        let (_, event) = parse("item/reasoning/textDelta", params).unwrap();
+        assert!(matches!(event, CodexEvent::ReasoningDelta { text } if text == "thinking"));
     }
 
     #[test]
-    fn empty_text_returns_none() {
+    fn empty_text_delta_returns_none() {
         let params = serde_json::json!({
             "threadId": "t3",
-            "item": {
-                "type": "message",
-                "content": [{"type": "other_type", "text": "ignored"}]
-            }
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "delta": ""
         });
-        assert!(parse("item/updated", params).is_none());
+        assert!(parse("item/agentMessage/delta", params).is_none());
     }
 
     #[test]
-    fn tool_started_from_item_updated() {
+    fn tool_started_from_item_started() {
         let params = serde_json::json!({
             "threadId": "t4",
+            "turnId": "turn-1",
+            "startedAtMs": 1,
             "item": {
-                "type": "tool_call",
+                "type": "commandExecution",
                 "id": "call-1",
-                "name": "bash",
-                "arguments": {"cmd": "ls"}
+                "command": "git status",
+                "commandActions": [],
+                "cwd": "/tmp",
+                "status": "inProgress"
             }
         });
-        let (tid, event) = parse("item/updated", params).unwrap();
+        let (tid, event) = parse("item/started", params).unwrap();
         assert_eq!(tid, "t4");
         match event {
-            CodexEvent::ToolStarted { id, name, input } => {
+            CodexEvent::ToolStarted { id, name, .. } => {
                 assert_eq!(id, "call-1");
-                assert_eq!(name, "bash");
-                assert_eq!(input, serde_json::json!({"cmd": "ls"}));
+                assert_eq!(name, "git status");
             }
             _ => panic!("expected ToolStarted"),
         }
@@ -613,32 +989,165 @@ mod tests {
     fn tool_completed_from_item_completed() {
         let params = serde_json::json!({
             "threadId": "t5",
+            "turnId": "turn-1",
+            "completedAtMs": 2,
             "item": {
-                "type": "tool_call",
+                "type": "commandExecution",
                 "id": "call-2",
-                "output": "done"
+                "command": "echo hi",
+                "commandActions": [],
+                "cwd": "/tmp",
+                "status": "completed",
+                "aggregatedOutput": "done"
             }
         });
         let (tid, event) = parse("item/completed", params).unwrap();
         assert_eq!(tid, "t5");
         assert!(
-            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done")
+            matches!(event, CodexEvent::ToolCompleted { id, output, failed } if id == "call-2" && output == "done" && !failed)
         );
     }
 
     #[test]
+    fn tool_completed_failed_on_nonzero_exit() {
+        let params = serde_json::json!({
+            "threadId": "t5",
+            "turnId": "turn-1",
+            "item": {
+                "type": "commandExecution",
+                "id": "call-x",
+                "command": "false",
+                "cwd": "/tmp",
+                "status": "completed",
+                "exitCode": 1,
+                "aggregatedOutput": "boom"
+            }
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { failed, .. } if failed));
+    }
+
+    #[test]
+    fn tool_completed_failed_on_status() {
+        let params = serde_json::json!({
+            "threadId": "t5",
+            "turnId": "turn-1",
+            "item": {
+                "type": "fileChange",
+                "id": "fc-1",
+                "status": "failed",
+                "changes": []
+            }
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { failed, .. } if failed));
+    }
+
+    #[test]
+    fn tool_started_carries_kind() {
+        let cmd = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "commandExecution", "id": "c1", "command": "ls", "cwd": "/tmp", "status": "inProgress" }
+        });
+        let (_, event) = parse("item/started", cmd).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { kind: CodexToolKind::Execute, .. }));
+
+        let fc = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "fileChange", "id": "f1", "status": "inProgress", "changes": [] }
+        });
+        let (_, event) = parse("item/started", fc).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { kind: CodexToolKind::Edit, .. }));
+
+        let mcp = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "mcpToolCall", "id": "m1", "tool": "search_docs", "arguments": {}, "status": "inProgress" }
+        });
+        let (_, event) = parse("item/started", mcp).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { kind: CodexToolKind::Other, .. }));
+    }
+
+    #[test]
+    fn mcp_tool_completed_failed_on_error() {
+        let params = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "mcpToolCall", "id": "m1", "error": { "message": "nope" } }
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { failed, .. } if failed));
+    }
+
+    #[test]
+    fn agent_message_completed_is_ignored() {
+        let params = serde_json::json!({
+            "threadId": "t6",
+            "turnId": "turn-1",
+            "completedAtMs": 2,
+            "item": {
+                "type": "agentMessage",
+                "id": "msg-1",
+                "text": "full text"
+            }
+        });
+        assert!(parse("item/completed", params).is_none());
+    }
+
+    #[test]
+    fn usage_from_token_usage_updated() {
+        let params = serde_json::json!({
+            "threadId": "t7",
+            "turnId": "turn-1",
+            "tokenUsage": {
+                "last": {
+                    "inputTokens": 10,
+                    "outputTokens": 5,
+                    "totalTokens": 15,
+                    "cachedInputTokens": 0,
+                    "reasoningOutputTokens": 0
+                },
+                "total": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "totalTokens": 150,
+                    "cachedInputTokens": 0,
+                    "reasoningOutputTokens": 0
+                },
+                "modelContextWindow": 128000
+            }
+        });
+        let (_, event) = parse("thread/tokenUsage/updated", params).unwrap();
+        match event {
+            CodexEvent::Usage {
+                input,
+                output,
+                total,
+                context_window,
+            } => {
+                assert_eq!(input, 10);
+                assert_eq!(output, 5);
+                assert_eq!(total, 15);
+                assert_eq!(context_window, Some(128_000));
+            }
+            _ => panic!("expected Usage"),
+        }
+    }
+
+    #[test]
     fn turn_completed() {
-        let params = serde_json::json!({"threadId": "t6"});
+        let params = serde_json::json!({
+            "threadId": "t8",
+            "turn": { "id": "turn-1", "status": "completed", "items": [] }
+        });
         let (tid, event) = parse("turn/completed", params).unwrap();
-        assert_eq!(tid, "t6");
+        assert_eq!(tid, "t8");
         assert!(matches!(event, CodexEvent::TurnCompleted));
     }
 
     #[test]
     fn error_with_thread_id() {
-        let params = serde_json::json!({"threadId": "t7", "message": "oops"});
+        let params = serde_json::json!({"threadId": "t9", "message": "oops"});
         let (tid, event) = parse("error", params).unwrap();
-        assert_eq!(tid, "t7");
+        assert_eq!(tid, "t9");
         assert!(matches!(event, CodexEvent::Error { message } if message == "oops"));
     }
 
@@ -652,332 +1161,89 @@ mod tests {
 
     #[test]
     fn unknown_method_returns_none() {
-        let params = serde_json::json!({"threadId": "t8"});
-        assert!(parse("unknown/method", params).is_none());
-    }
-
-    #[test]
-    fn missing_thread_id_defaults_to_empty() {
-        let params = serde_json::json!({"threadId": null});
-        let (tid, _) = parse("turn/completed", params).unwrap();
-        assert_eq!(tid, "");
-    }
-
-    #[test]
-    fn command_execution_tool_started() {
-        let params = serde_json::json!({
-            "threadId": "t9",
-            "item": {
-                "type": "command_execution",
-                "id": "exec-1",
-                "command": "git status",
-                "input": {"cwd": "/tmp"}
-            }
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::ToolStarted { name, .. } if name == "git status"));
-    }
-
-    #[test]
-    fn error_without_message_uses_default() {
         let params = serde_json::json!({"threadId": "t10"});
-        let (_, event) = parse("error", params).unwrap();
-        assert!(matches!(event, CodexEvent::Error { message } if message == "unknown error"));
-    }
-
-    // ── function_call item type ───────────────────────────────────────────────
-
-    #[test]
-    fn function_call_tool_started_from_item_updated() {
-        let params = serde_json::json!({
-            "threadId": "t11",
-            "item": {
-                "type": "function_call",
-                "id": "fn-1",
-                "name": "read_file",
-                "arguments": {"path": "/tmp/x"}
-            }
-        });
-        let (tid, event) = parse("item/updated", params).unwrap();
-        assert_eq!(tid, "t11");
-        match event {
-            CodexEvent::ToolStarted { id, name, input } => {
-                assert_eq!(id, "fn-1");
-                assert_eq!(name, "read_file");
-                assert_eq!(input, serde_json::json!({"path": "/tmp/x"}));
-            }
-            _ => panic!("expected ToolStarted"),
-        }
-    }
-
-    #[test]
-    fn function_call_tool_completed_from_item_completed() {
-        let params = serde_json::json!({
-            "threadId": "t12",
-            "item": {
-                "type": "function_call",
-                "id": "fn-2",
-                "output": "file contents"
-            }
-        });
-        let (tid, event) = parse("item/completed", params).unwrap();
-        assert_eq!(tid, "t12");
-        assert!(
-            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "fn-2" && output == "file contents")
-        );
-    }
-
-    // ── None params ───────────────────────────────────────────────────────────
-
-    #[test]
-    fn item_updated_with_no_params_returns_none() {
-        assert!(CodexProcess::parse_event("item/updated", None).is_none());
-    }
-
-    #[test]
-    fn item_completed_with_no_params_returns_none() {
-        assert!(CodexProcess::parse_event("item/completed", None).is_none());
-    }
-
-    // ── parse_event: text block edge cases ────────────────────────────────────
-
-    #[test]
-    fn text_blocks_whitespace_is_preserved() {
-        // Leading/trailing whitespace inside individual blocks must not be trimmed.
-        let params = serde_json::json!({
-            "threadId": "t-ws",
-            "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": "foo "},
-                    {"type": "output_text", "text": " bar"}
-                ]
-            }
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "foo  bar"));
-    }
-
-    #[test]
-    fn three_text_blocks_concatenated() {
-        let params = serde_json::json!({
-            "threadId": "t-three",
-            "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": "a"},
-                    {"type": "output_text", "text": "b"},
-                    {"type": "output_text", "text": "c"}
-                ]
-            }
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "abc"));
-    }
-
-    #[test]
-    fn output_text_block_missing_text_key_is_skipped() {
-        // A block with type=output_text but no "text" key must not contribute to output.
-        let params = serde_json::json!({
-            "threadId": "t-no-key",
-            "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text"},              // no "text" key
-                    {"type": "output_text", "text": "hi"}
-                ]
-            }
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "hi"));
-    }
-
-    #[test]
-    fn output_text_block_with_null_text_is_skipped() {
-        // A block with text: null must not panic or contribute to the output.
-        let params = serde_json::json!({
-            "threadId": "t-null",
-            "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": null},
-                    {"type": "output_text", "text": "world"}
-                ]
-            }
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "world"));
-    }
-
-    #[test]
-    fn all_output_text_blocks_empty_returns_none() {
-        // If every block has an empty text value, the combined text is "" → None.
-        let params = serde_json::json!({
-            "threadId": "t-all-empty",
-            "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": ""},
-                    {"type": "output_text", "text": ""}
-                ]
-            }
-        });
-        // Empty combined text triggers the `if text.is_empty() { return None }` path.
         assert!(parse("item/updated", params).is_none());
     }
 
     #[test]
-    fn text_blocks_with_embedded_newlines_preserved() {
-        let params = serde_json::json!({
-            "threadId": "t-nl",
+    fn mcp_tool_started_and_completed() {
+        let started = serde_json::json!({
+            "threadId": "t11",
+            "turnId": "turn-1",
+            "startedAtMs": 1,
             "item": {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": "line1\n"},
-                    {"type": "output_text", "text": "line2"}
-                ]
+                "type": "mcpToolCall",
+                "id": "mcp-1",
+                "server": "srv",
+                "tool": "search",
+                "arguments": {"q": "x"},
+                "status": "inProgress"
             }
         });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(matches!(event, CodexEvent::TextDelta { text } if text == "line1\nline2"));
+        let (_, event) = parse("item/started", started).unwrap();
+        match event {
+            CodexEvent::ToolStarted { name, input, .. } => {
+                assert_eq!(name, "search");
+                assert_eq!(input, serde_json::json!({"q": "x"}));
+            }
+            _ => panic!("expected ToolStarted"),
+        }
+
+        let completed = serde_json::json!({
+            "threadId": "t11",
+            "turnId": "turn-1",
+            "completedAtMs": 2,
+            "item": {
+                "type": "mcpToolCall",
+                "id": "mcp-1",
+                "server": "srv",
+                "tool": "search",
+                "arguments": {},
+                "status": "completed",
+                "result": {"content": [{"type": "text", "text": "ok"}]}
+            }
+        });
+        let (_, event) = parse("item/completed", completed).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { .. }));
     }
 
-    // ── broadcast channel lag recovery ────────────────────────────────────────
+    #[test]
+    fn approval_decision_maps_modes() {
+        assert_eq!(
+            CodexProcess::approval_decision_for_mode(Some("acceptEdits")),
+            "approved"
+        );
+        assert_eq!(
+            CodexProcess::approval_decision_for_mode(Some("default")),
+            "approved"
+        );
+    }
 
-    /// Verifies that a lagged broadcast receiver can continue receiving after lag.
-    ///
-    /// This documents the contract that `prompt()`'s `Lagged` arm (which does
-    /// `continue`) relies on: after a lag error the receiver skips missed
-    /// messages but resumes from the latest one.
     #[tokio::test]
     async fn broadcast_channel_lag_allows_recovery() {
         use tokio::sync::broadcast;
         let (tx, mut rx) = broadcast::channel::<i32>(2);
-        // Send 3 items into a capacity-2 channel without reading — forces lag.
         tx.send(1).unwrap();
         tx.send(2).unwrap();
         tx.send(3).unwrap();
 
-        // First recv must return Lagged (not a value).
         match rx.recv().await {
             Err(broadcast::error::RecvError::Lagged(_)) => {}
             other => panic!("expected Lagged, got {:?}", other),
         }
-        // After lag the receiver is reset to the oldest surviving item (2),
-        // and further recvs continue in order.
         let v = rx.recv().await.unwrap();
         assert_eq!(v, 2);
         let v = rx.recv().await.unwrap();
         assert_eq!(v, 3);
     }
 
-    // ── parse_event: item field edge cases ───────────────────────────────────
-
-    #[test]
-    fn item_updated_without_item_field_returns_none() {
-        // "item" key entirely absent.
-        let params = serde_json::json!({"threadId": "t-no-item"});
-        assert!(parse("item/updated", params).is_none());
-    }
-
-    #[test]
-    fn item_updated_with_non_string_type_returns_none() {
-        // "type" field is a number, not a string — as_str() returns None.
-        let params = serde_json::json!({
-            "threadId": "t-num-type",
-            "item": {"type": 42, "content": []}
-        });
-        assert!(parse("item/updated", params).is_none());
-    }
-
-    #[test]
-    fn item_updated_with_unknown_item_type_returns_none() {
-        // "type" is a valid string but not a recognised kind.
-        let params = serde_json::json!({
-            "threadId": "t-unknown-type",
-            "item": {"type": "image", "url": "http://example.com/img.png"}
-        });
-        assert!(parse("item/updated", params).is_none());
-    }
-
-    #[test]
-    fn message_item_with_non_array_content_returns_none() {
-        // "content" is a string, not a JSON array.
-        let params = serde_json::json!({
-            "threadId": "t-str-content",
-            "item": {"type": "message", "content": "not-an-array"}
-        });
-        assert!(parse("item/updated", params).is_none());
-    }
-
-    #[test]
-    fn tool_call_without_id_returns_none() {
-        // "id" key absent — as_str() chain returns None.
-        let params = serde_json::json!({
-            "threadId": "t-no-id",
-            "item": {"type": "tool_call", "name": "bash", "arguments": {}}
-        });
-        assert!(parse("item/updated", params).is_none());
-    }
-
-    #[test]
-    fn tool_call_without_name_or_command_uses_unknown() {
-        // Neither "name" nor "command" present — falls back to "unknown".
-        let params = serde_json::json!({
-            "threadId": "t-no-name",
-            "item": {"type": "tool_call", "id": "c1"}
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(
-            matches!(event, CodexEvent::ToolStarted { name, .. } if name == "unknown"),
-            "expected name == 'unknown'"
-        );
-    }
-
-    #[test]
-    fn tool_call_without_arguments_or_input_uses_null() {
-        // Neither "arguments" nor "input" present — input defaults to Value::Null.
-        let params = serde_json::json!({
-            "threadId": "t-no-args",
-            "item": {"type": "tool_call", "id": "c2", "name": "bash"}
-        });
-        let (_, event) = parse("item/updated", params).unwrap();
-        assert!(
-            matches!(event, CodexEvent::ToolStarted { input, .. } if input == serde_json::Value::Null),
-            "expected input == null"
-        );
-    }
-
-    #[test]
-    fn tool_completed_without_output_uses_empty_string() {
-        // "output" key absent — falls back to "".
-        let params = serde_json::json!({
-            "threadId": "t-no-output",
-            "item": {"type": "tool_call", "id": "c3"}
-        });
-        let (_, event) = parse("item/completed", params).unwrap();
-        assert!(
-            matches!(event, CodexEvent::ToolCompleted { output, .. } if output.is_empty()),
-            "expected empty output"
-        );
-    }
-
-    // ── broadcast channel closed behaviour ───────────────────────────────────
-
-    /// Documents the `RecvError::Closed` branch in `prompt()`'s event loop.
-    ///
-    /// When all senders are dropped and the buffer is empty, `recv()` returns
-    /// `Err(RecvError::Closed)`.  In production this is unreachable (the
-    /// `read_loop` always sends an `Error` event before clearing senders), but
-    /// the loop has a catch-all `Ok(Err(_)) => break` arm for safety.
     #[tokio::test]
     async fn broadcast_channel_closed_returns_closed_error() {
         use tokio::sync::broadcast;
         let (tx, mut rx) = broadcast::channel::<i32>(8);
-        // Drop all senders without sending anything.
         drop(tx);
         match rx.recv().await {
-            Err(broadcast::error::RecvError::Closed) => {} // expected
+            Err(broadcast::error::RecvError::Closed) => {}
             other => panic!("expected Closed, got {:?}", other),
         }
     }

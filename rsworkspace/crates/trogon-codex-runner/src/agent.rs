@@ -6,7 +6,8 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
+    AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodEnvVar, AuthenticateRequest,
+    AuthenticateResponse, CancelNotification,
     CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
     ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
     InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
@@ -17,16 +18,24 @@ use agent_client_protocol::{
     SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
+
 use crate::permissions::{ModeGateAction, mode_gate_action};
-use crate::process::{CodexEvent, RealProcessSpawner};
+use crate::process::{CodexEvent, CodexToolKind, RealProcessSpawner};
 use crate::traits::{CodexProcessClient, ProcessSpawner, SessionNotifier, SessionNotifierFactory};
+
+/// The single auth method codex advertises. The key itself is consumed by the
+/// `codex app-server` subprocess from the `OPENAI_API_KEY` env var; the method
+/// exists so clients can *discover* how auth is supplied, not so the runner
+/// captures a per-session key (unlike xai, which also accepts a key via meta).
+const OPENAI_AUTH_METHOD: &str = "openai-api-key";
 
 // ── ProcessGuard ──────────────────────────────────────────────────────────────
 
@@ -68,6 +77,72 @@ fn is_valid_mode(mode: &str) -> bool {
 
 fn invalid_params(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InvalidParams.into(), msg.into())
+}
+
+/// Map a codex tool classification to an ACP [`ToolKind`]. `commandExecution`
+/// and `fileChange` map directly; MCP/dynamic tools (`Other`) are refined by
+/// tool name (mirrors acp-runner's `tool_kind_for`).
+fn codex_tool_kind(kind: CodexToolKind, name: &str) -> ToolKind {
+    match kind {
+        CodexToolKind::Execute => ToolKind::Execute,
+        CodexToolKind::Edit => ToolKind::Edit,
+        CodexToolKind::Other => tool_kind_from_name(name),
+    }
+}
+
+/// Best-effort `ToolKind` inference from a tool name, for MCP/dynamic tools
+/// whose codex item type carries no structural hint.
+fn tool_kind_from_name(name: &str) -> ToolKind {
+    let n = name.to_ascii_lowercase();
+    if n.contains("read") || n.contains("view") || n.contains("cat") || n.contains("list") {
+        ToolKind::Read
+    } else if n.contains("search") || n.contains("grep") || n.contains("glob") || n.contains("find")
+    {
+        ToolKind::Search
+    } else if n.contains("fetch") || n.contains("web") || n.contains("http") || n.contains("url") {
+        ToolKind::Fetch
+    } else if n.contains("edit") || n.contains("write") || n.contains("patch") {
+        ToolKind::Edit
+    } else {
+        ToolKind::Other
+    }
+}
+
+/// Convert codex session history to the compactor wire format. Tool-call/result
+/// blocks collapse to their text summary — the compactor produces prose anyway,
+/// matching how the "Prior conversation" replay already serializes history.
+fn codex_history_to_wire(
+    history: &[trogon_runner_tools::portable_session::PortableMessage],
+) -> Vec<trogon_tools::Message> {
+    history
+        .iter()
+        .map(|m| trogon_tools::Message {
+            role: m.role.clone(),
+            content: vec![trogon_tools::ContentBlock::Text {
+                text: m.text.clone(),
+            }],
+        })
+        .collect()
+}
+
+/// Restore codex session history from the compactor wire format.
+fn codex_history_from_wire(
+    wire: Vec<trogon_tools::Message>,
+) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
+    wire.into_iter()
+        .map(|m| {
+            let text = m
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    trogon_tools::ContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            trogon_runner_tools::portable_session::PortableMessage::text_only(m.role, text)
+        })
+        .collect()
 }
 
 /// Apply the coarse permission-mode gate Trogon controls at session/turn boundaries.
@@ -182,9 +257,14 @@ pub struct CodexAgent<N: SessionNotifierFactory, P: ProcessSpawner> {
     spawner: P,
     process: Arc<Mutex<Option<P::Process>>>,
     sessions: Arc<Mutex<HashMap<String, CodexSession>>>,
+    /// Per-session cancel handles for the in-flight prompt loop.
+    cancel_notifies: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
+    /// Dedicated NATS client for the `trogon-compactor` service (context
+    /// compaction). `None` disables `session/compact`. Mirrors xai-runner.
+    compactor_nats: Option<async_nats::Client>,
 }
 
 /// Convenience type alias for the production agent wired to real dependencies.
@@ -253,9 +333,27 @@ where
             spawner,
             process: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            cancel_notifies: Arc::new(Mutex::new(HashMap::new())),
             default_model,
             prompt_timeout,
             available_models,
+            compactor_nats: None,
+        }
+    }
+
+    /// Enable context compaction by connecting to the `trogon-compactor` NATS
+    /// service. Mirrors `trogon-xai-runner::with_compactor`. Without this,
+    /// `session/compact` (the CLI's `/compact`) returns an error on codex.
+    pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
+        self.compactor_nats = Some(nats);
+        self
+    }
+
+    async fn interrupt_turn_best_effort(&self, thread_id: &str, session_id: &str) {
+        if let Ok(proc) = self.process().await
+            && let Err(e) = proc.turn_interrupt(thread_id).await
+        {
+            warn!(session_id, error = %e, "codex: turn_interrupt failed");
         }
     }
 
@@ -344,7 +442,23 @@ where
     ) -> agent_client_protocol::Result<InitializeResponse> {
         let mut caps_meta = serde_json::Map::new();
         caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
+        // C1: advertise the env-var auth method so clients can discover how
+        // codex auth is supplied (key read from OPENAI_API_KEY by the subprocess).
+        let auth_methods = vec![AuthMethod::EnvVar(
+            AuthMethodEnvVar::new(
+                OPENAI_AUTH_METHOD,
+                "OpenAI API Key",
+                vec![AuthEnvVar::new("OPENAI_API_KEY").label("OpenAI API Key")],
+            )
+            .link("https://platform.openai.com/api-keys")
+            .description("Set OPENAI_API_KEY for the codex app-server"),
+        )];
+        // C3: `embedded_context` and `branchAtIndex` are intentionally left OFF.
+        // Codex drops non-text prompt blocks, so advertising `embedded_context`
+        // would be a false claim; and codex owns thread history, so client-side
+        // index truncation (`branchAtIndex`) is not expressible against it.
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
+            .auth_methods(auth_methods)
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(true)
@@ -365,9 +479,18 @@ where
 
     async fn authenticate(
         &self,
-        _req: AuthenticateRequest,
+        req: AuthenticateRequest,
     ) -> agent_client_protocol::Result<AuthenticateResponse> {
-        // Codex uses the OPENAI_API_KEY env var — no per-session auth needed.
+        // C2: honor the advertised method instead of accepting any id. Codex's
+        // key still comes from OPENAI_API_KEY (the subprocess reads it), so there
+        // is nothing to capture here — but a client that selects an unknown
+        // method must be told auth is required, not handed a silent success.
+        if req.method_id.0.as_ref() != OPENAI_AUTH_METHOD {
+            return Err(Error::auth_required().data(serde_json::json!({
+                "requested": req.method_id.0.as_ref(),
+                "supported": [OPENAI_AUTH_METHOD],
+            })));
+        }
         Ok(AuthenticateResponse::new())
     }
 
@@ -605,12 +728,13 @@ where
             );
         }
 
-        let (thread_id, model, mode, pending_history, cwd, orig_first_turn, first_turn) = {
+        let (thread_id, model, mode, pending_history, cwd, prepend_trogon, orig_first_turn, first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
             let orig_first_turn = s.first_turn;
+            let prepend_trogon = s.first_turn || s.pending_history.is_some();
             let ph = s.pending_history.take();
             let ft = s.first_turn;
             let cwd = s.cwd.clone();
@@ -620,10 +744,11 @@ where
             ));
             (
                 s.thread_id.clone(),
-                s.model.clone(),
+                s.model.clone().or_else(|| Some(self.default_model.clone())),
                 s.mode.clone(),
                 ph,
                 cwd,
+                prepend_trogon,
                 orig_first_turn,
                 ft,
             )
@@ -641,31 +766,34 @@ where
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("Prior conversation:\n{formatted}\n\n---\n\n{user_input}")
-        } else if first_turn {
-            match trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
-                Some(md) => format!("{md}\n\n{user_input}"),
-                None => user_input,
-            }
         } else {
             user_input
         };
 
-        // Import path: pending history was formatted above; prepend TROGON.md once
-        // with the labeled wrapper. Fresh first turns use the `else if first_turn`
-        // arm instead — do not also run here or TROGON.md is duplicated.
-        if ph_backup.is_some()
+        // TROGON.md is injected exactly once per session. `prepend_trogon` is
+        // true on the first turn and on the first turn after a resume
+        // (pending_history), so this single block covers both cases. (Previously
+        // a separate `else if first_turn` branch above also injected it, which
+        // double-injected TROGON.md on the first turn — B1.)
+        if prepend_trogon
             && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
         {
             user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
-        // Codex takes no separate system prompt, so deliver the "always summarize
-        // what you did" guidance the same way as TROGON.md: prepended once on the
-        // first turn. Codex carries it through the rest of the session.
+        // Codex takes no separate system prompt, so deliver the behavioral
+        // guidance the other runners carry in their system prompt the same way as
+        // TROGON.md: prepended once on the first turn. Codex carries it through
+        // the rest of the session. (P2) URL_FETCH_GUIDANCE keeps codex from
+        // treating a URL as a local path; COMPLETION_GUIDANCE asks it to recap
+        // after running tools. PLAN_MODE guidance is intentionally omitted —
+        // codex owns its own tool execution and enforces no read-only mode, so
+        // the coarse approvalPolicy gate (apply_mode_gate) is the boundary.
         if first_turn {
             user_input = format!(
-                "Instructions: {}\n\n---\n\n{user_input}",
-                trogon_runner_tools::COMPLETION_GUIDANCE
+                "Instructions: {}\n\n{}\n\n---\n\n{user_input}",
+                trogon_runner_tools::COMPLETION_GUIDANCE,
+                trogon_runner_tools::URL_FETCH_GUIDANCE
             );
         }
 
@@ -688,6 +816,7 @@ where
                 &user_input,
                 model.as_deref(),
                 approval_policy,
+                Some(&mode),
             )
             .await
         {
@@ -712,29 +841,56 @@ where
         // Auto-summary guarantee: nudged the model once for a recap after a
         // silent (tools-ran, no-text) turn, so we nudge at most once.
         let mut auto_summary_done = false;
+        let cancel_notify = Arc::new(Notify::new());
+        self.cancel_notifies
+            .lock()
+            .await
+            .insert(session_id.clone(), Arc::clone(&cancel_notify));
         let stop_reason = loop {
-            let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
-                Err(_elapsed) => {
-                    warn!(session_id, "codex: prompt timed out");
-                    break StopReason::EndTurn;
-                }
-                Ok(Ok(e)) => e,
-                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
-                    warn!(session_id, lagged = n, "codex: event channel lagged");
-                    continue;
-                }
-                Ok(Err(_)) => {
-                    warn!(session_id, "codex: process channel closed unexpectedly");
-                    // Remove the user message that never received a response.
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        s.history.pop();
+            enum PromptWait {
+                Codex(CodexEvent),
+                TimedOut,
+                Cancelled,
+                ChannelClosed,
+            }
+
+            let wait = tokio::select! {
+                biased;
+                _ = cancel_notify.notified() => PromptWait::Cancelled,
+                recv = tokio::time::timeout(self.prompt_timeout, event_rx.recv()) => match recv {
+                    Err(_elapsed) => PromptWait::TimedOut,
+                    Ok(Ok(event)) => PromptWait::Codex(event),
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
+                        warn!(session_id, lagged = n, "codex: event channel lagged");
+                        continue;
                     }
-                    return Err(internal_error("codex process terminated unexpectedly"));
-                }
+                    Ok(Err(_)) => PromptWait::ChannelClosed,
+                },
             };
 
-            match event {
+            match wait {
+                PromptWait::TimedOut => {
+                    warn!(session_id, "codex: prompt timed out");
+                    self.interrupt_turn_best_effort(&thread_id, &session_id)
+                        .await;
+                    break StopReason::EndTurn;
+                }
+                PromptWait::Cancelled => {
+                    info!(session_id, "codex: prompt cancelled");
+                    self.interrupt_turn_best_effort(&thread_id, &session_id)
+                        .await;
+                    break StopReason::Cancelled;
+                }
+                PromptWait::ChannelClosed => {
+                    // The codex process exited mid-turn (read_loop closed the
+                    // channel). Unblock the prompt gracefully with EndTurn rather
+                    // than hanging until the timeout or hard-erroring the turn —
+                    // the next call's process() detects the dead process and
+                    // respawns. The partial assistant output is kept in history.
+                    warn!(session_id, "codex: process channel closed unexpectedly");
+                    break StopReason::EndTurn;
+                }
+                PromptWait::Codex(event) => match event {
                 CodexEvent::TextDelta { text } => {
                     assistant_text.push_str(&text);
                     let notif = SessionNotification::new(
@@ -748,11 +904,39 @@ where
                     }
                 }
 
-                CodexEvent::ToolStarted { id, name, input } => {
+                CodexEvent::ReasoningDelta { text } => {
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::from(
+                            text,
+                        ))),
+                    );
+                    if let Err(e) = notifier.session_notification(notif).await {
+                        warn!(session_id, error = %e, "codex: failed to send reasoning notification");
+                    }
+                }
+
+                CodexEvent::Usage {
+                    input,
+                    output: _,
+                    total: _,
+                    context_window,
+                } => {
+                    let size = context_window.unwrap_or(128_000);
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::UsageUpdate(UsageUpdate::new(input, size)),
+                    );
+                    if let Err(e) = notifier.session_notification(notif).await {
+                        warn!(session_id, error = %e, "codex: failed to send usage notification");
+                    }
+                }
+
+                CodexEvent::ToolStarted { id, name, input, kind } => {
                     let tool_call = ToolCall::new(id.clone(), name.clone())
                         .status(ToolCallStatus::InProgress)
                         .raw_input(input.clone())
-                        .kind(ToolKind::Execute);
+                        .kind(codex_tool_kind(kind, &name));
                     let notif = SessionNotification::new(
                         session_id.clone(),
                         SessionUpdate::ToolCall(tool_call),
@@ -769,11 +953,16 @@ where
                     );
                 }
 
-                CodexEvent::ToolCompleted { id, output } => {
+                CodexEvent::ToolCompleted { id, output, failed } => {
+                    let status = if failed {
+                        ToolCallStatus::Failed
+                    } else {
+                        ToolCallStatus::Completed
+                    };
                     let update = ToolCallUpdate::new(
                         id.clone(),
                         ToolCallUpdateFields::new()
-                            .status(ToolCallStatus::Completed)
+                            .status(status)
                             .raw_output(serde_json::Value::String(output.clone())),
                     );
                     let notif = SessionNotification::new(
@@ -841,6 +1030,7 @@ where
                                     trogon_runner_tools::AUTO_SUMMARY_NUDGE,
                                     model.as_deref(),
                                     approval_policy,
+                                    Some(&mode),
                                 )
                                 .await
                         {
@@ -855,17 +1045,35 @@ where
                 }
 
                 CodexEvent::Error { message } => {
+                    // Surface the error to the client as an assistant message,
+                    // then end the turn gracefully (EndTurn) so the prompt
+                    // unblocks instead of hard-failing the whole session.
                     warn!(session_id, error = %message, "codex: turn error");
-                    return Err(internal_error(format!("codex error: {message}")));
+                    let notif = SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
+                            format!("codex error: {message}"),
+                        ))),
+                    );
+                    if let Err(e) = notifier.session_notification(notif).await {
+                        warn!(session_id, error = %e, "codex: failed to send error notification");
+                    }
+                    break StopReason::EndTurn;
                 }
+                },
             }
         };
+        self.cancel_notifies.lock().await.remove(&session_id);
 
         Ok(PromptResponse::new(stop_reason))
     }
 
     async fn cancel(&self, req: CancelNotification) -> agent_client_protocol::Result<()> {
         let session_id = req.session_id.to_string();
+
+        if let Some(notify) = self.cancel_notifies.lock().await.get(&session_id) {
+            notify.notify_one();
+        }
 
         let thread_id = {
             let sessions = self.sessions.lock().await;
@@ -878,9 +1086,10 @@ where
             let guard = Arc::clone(&self.process).lock_owned().await;
             if let Some(p) = guard.as_ref()
                 && p.is_alive()
-                && let Err(e) = p.turn_interrupt(&thread_id).await
             {
-                warn!(session_id, error = %e, "codex: turn_interrupt failed");
+                p.turn_interrupt(&thread_id)
+                    .await
+                    .map_err(|e| internal_error(e.to_string()))?;
             }
         }
 
@@ -978,6 +1187,79 @@ where
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/compact" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str().ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "missing sessionId")
+            })?;
+            // Read history + resolved model + cwd. Codex has no per-session
+            // compactor_model override, so compaction defaults to the session
+            // model on the codex provider ("openai").
+            let (history, resolved_model, cwd) = {
+                let sessions = self.sessions.lock().await;
+                let s = sessions.get(session_id).ok_or_else(|| {
+                    Error::new(ErrorCode::InvalidParams.into(), "session not found")
+                })?;
+                let model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
+                (s.history.clone(), model, s.cwd.clone())
+            };
+            let wire = codex_history_to_wire(&history);
+            let tokens_before = estimate_tokens(&wire);
+            let nats = self.compactor_nats.as_ref().ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InternalError.into(),
+                    "no compactor backend for compaction",
+                )
+            })?;
+            let (token_budget, threshold_pct) = compaction_settings_from_env();
+            let compacted_wire = maybe_compact(
+                nats,
+                &wire,
+                token_budget,
+                threshold_pct,
+                true,
+                "openai",
+                &resolved_model,
+                None,
+            )
+            .await
+            .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
+                let tokens_after = estimate_tokens(&cw);
+                let new_history = codex_history_from_wire(cw);
+                // Codex keeps the conversation in the app-server thread, which
+                // still holds the *full* context. Start a fresh thread and replay
+                // only the compacted history (via pending_history) on the next
+                // prompt so the reduction actually takes effect. If the new thread
+                // can't be started, leave the session untouched and surface the
+                // error rather than corrupting state.
+                let proc = self.process().await?;
+                let new_thread_id = proc
+                    .thread_start(&cwd)
+                    .await
+                    .map_err(|e| internal_error(e.to_string()))?;
+                drop(proc);
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(session_id) {
+                    s.thread_id = new_thread_id;
+                    s.history = new_history.clone();
+                    s.pending_history = Some(new_history);
+                    s.first_turn = true;
+                }
+                (true, tokens_after)
+            } else {
+                (false, tokens_before)
+            };
+            let result = serde_json::json!({
+                "compacted": compacted,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+            });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
@@ -1052,6 +1334,10 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
             .get(id)
             .and_then(|s| s.pending_history.clone())
     }
+
+    async fn test_cancel_notifies_len(&self) -> usize {
+        self.cancel_notifies.lock().await.len()
+    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -1066,6 +1352,35 @@ mod tests {
         SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest, StopReason,
     };
     use tokio::sync::broadcast;
+
+    #[test]
+    fn codex_tool_kind_maps_item_types() {
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Execute, "bash"),
+            ToolKind::Execute
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Edit, "fileChange"),
+            ToolKind::Edit
+        );
+        // Other is refined by name.
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "read_file"),
+            ToolKind::Read
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "grep_repo"),
+            ToolKind::Search
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "web_fetch"),
+            ToolKind::Fetch
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "do_a_thing"),
+            ToolKind::Other
+        );
+    }
 
     // ── In-memory mocks ───────────────────────────────────────────────────────
 
@@ -1146,6 +1461,7 @@ mod tests {
             _user_input: &str,
             _model: Option<&str>,
             _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
         ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
         {
             let (tx, rx) = broadcast::channel(64);
@@ -1209,6 +1525,7 @@ mod tests {
             _user_input: &str,
             model: Option<&str>,
             _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
         ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
         {
             *self.captured.lock().await = Some(TurnStartCapture {
@@ -1551,12 +1868,46 @@ mod tests {
     // ── authenticate ──────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn authenticate_returns_ok() {
+    async fn initialize_advertises_openai_env_var_auth_method() {
         let agent = make_agent().await;
-        agent
-            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any")))
+        let resp = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
             .await
             .unwrap();
+        let ids: Vec<String> = resp
+            .auth_methods
+            .iter()
+            .map(|m| match m {
+                AuthMethod::EnvVar(e) => e.id.0.to_string(),
+                AuthMethod::Agent(a) => a.id.0.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(
+            ids.contains(&OPENAI_AUTH_METHOD.to_string()),
+            "initialize must advertise the openai-api-key env-var method; got: {ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticate_accepts_advertised_method() {
+        let agent = make_agent().await;
+        agent
+            .authenticate(AuthenticateRequest::new(AuthMethodId::from(
+                OPENAI_AUTH_METHOD,
+            )))
+            .await
+            .expect("the advertised method must authenticate");
+    }
+
+    #[tokio::test]
+    async fn authenticate_rejects_unknown_method() {
+        let agent = make_agent().await;
+        let err = agent
+            .authenticate(AuthenticateRequest::new(AuthMethodId::from("any")))
+            .await
+            .expect_err("an unknown method id must be rejected (C2)");
+        assert_eq!(err.code, ErrorCode::AuthRequired);
     }
 
     // ── set_session_mode ──────────────────────────────────────────────────────
@@ -1769,7 +2120,7 @@ mod tests {
             fork_info
                 .meta
                 .as_ref()
-                .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                .is_none_or(|m| !m.contains_key("branchedAtIndex")),
             "branchedAtIndex must not appear in _meta — branchAtIndex is not supported"
         );
     }
@@ -1825,6 +2176,57 @@ mod tests {
         let resp = agent.ext_method(ext_req).await.unwrap();
         let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
         assert_eq!(result["children"].as_array().unwrap().len(), 0);
+    }
+
+    // ── ext_method / session/compact (E1) ─────────────────────────────────────
+
+    #[test]
+    fn codex_history_wire_round_trip() {
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let history = vec![
+            PortableMessage::text_only("user", "hello"),
+            PortableMessage::text_only("assistant", "hi there"),
+        ];
+        let wire = codex_history_to_wire(&history);
+        assert_eq!(wire.len(), 2);
+        let restored = codex_history_from_wire(wire);
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].role, "user");
+        assert_eq!(restored[0].text, "hello");
+        assert_eq!(restored[1].role, "assistant");
+        assert_eq!(restored[1].text, "hi there");
+    }
+
+    #[tokio::test]
+    async fn ext_compact_without_backend_errors() {
+        // make_agent() builds without with_compactor, so compaction has no
+        // backend and session/compact must report that rather than panic.
+        let agent = make_agent().await;
+        agent.test_insert_session("s1", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "s1" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/compact", raw_params.into());
+        let err = agent
+            .ext_method(ext_req)
+            .await
+            .expect_err("compaction without a backend must error");
+        assert!(
+            err.message.contains("compactor"),
+            "error should mention the missing compactor backend, got: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_compact_missing_session_id_errors() {
+        let agent = make_agent().await;
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({}).to_string()).unwrap();
+        let ext_req = ExtRequest::new("session/compact", raw_params.into());
+        assert!(agent.ext_method(ext_req).await.is_err());
     }
 
     #[tokio::test]
@@ -1963,6 +2365,211 @@ mod tests {
             .cancel(CancelNotification::new("nonexistent"))
             .await
             .unwrap();
+    }
+
+    struct HangingMockCodexProcess {
+        event_tx: broadcast::Sender<CodexEvent>,
+    }
+
+    #[async_trait(?Send)]
+    impl CodexProcessClient for HangingMockCodexProcess {
+        fn is_alive(&self) -> bool {
+            true
+        }
+
+        async fn thread_start(
+            &self,
+            _cwd: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("mock-thread-id".to_string())
+        }
+
+        async fn thread_resume(
+            &self,
+            thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(thread_id.to_string())
+        }
+
+        async fn thread_fork(
+            &self,
+            _thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("fork-thread".to_string())
+        }
+
+        async fn turn_start(
+            &self,
+            _thread_id: &str,
+            _user_input: &str,
+            _model: Option<&str>,
+            _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            Ok(self.event_tx.subscribe())
+        }
+
+        async fn turn_interrupt(
+            &self,
+            _thread_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    struct HangingMockProcessSpawner {
+        event_tx: broadcast::Sender<CodexEvent>,
+    }
+
+    #[async_trait(?Send)]
+    impl ProcessSpawner for HangingMockProcessSpawner {
+        type Process = HangingMockCodexProcess;
+
+        async fn spawn(
+            &self,
+        ) -> Result<HangingMockCodexProcess, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(HangingMockCodexProcess {
+                event_tx: self.event_tx.clone(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn prompt_cancel_returns_cancelled_stop_reason() {
+        let (event_tx, _) = broadcast::channel(8);
+        let agent = Arc::new(CodexAgent::new(
+            MockNotifierFactory::new(),
+            HangingMockProcessSpawner {
+                event_tx: event_tx.clone(),
+            },
+            "o4-mini",
+        ));
+        agent.test_insert_session("cancel-me", "/tmp", None).await;
+
+        let agent_prompt = Arc::clone(&agent);
+        let agent_cancel = Arc::clone(&agent);
+        let prompt_fut = async move {
+            agent_prompt
+                .prompt(PromptRequest::new(
+                    "cancel-me",
+                    vec![ContentBlock::from("wait forever")],
+                ))
+                .await
+        };
+        let cancel_fut = async move {
+            for _ in 0..50 {
+                if agent_cancel.test_cancel_notifies_len().await > 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(agent_cancel.test_cancel_notifies_len().await, 1);
+            agent_cancel
+                .cancel(CancelNotification::new("cancel-me"))
+                .await
+        };
+
+        let (prompt_result, cancel_result) = tokio::join!(prompt_fut, cancel_fut);
+        cancel_result.unwrap();
+        let resp = prompt_result.unwrap();
+        assert_eq!(resp.stop_reason, StopReason::Cancelled);
+        assert_eq!(agent.test_cancel_notifies_len().await, 0);
+    }
+
+    struct FailingInterruptMockCodexProcess {
+        fail_interrupt: bool,
+    }
+
+    #[async_trait(?Send)]
+    impl CodexProcessClient for FailingInterruptMockCodexProcess {
+        fn is_alive(&self) -> bool {
+            true
+        }
+
+        async fn thread_start(
+            &self,
+            _cwd: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("mock-thread-id".to_string())
+        }
+
+        async fn thread_resume(
+            &self,
+            thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(thread_id.to_string())
+        }
+
+        async fn thread_fork(
+            &self,
+            _thread_id: &str,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("fork-thread".to_string())
+        }
+
+        async fn turn_start(
+            &self,
+            _thread_id: &str,
+            _user_input: &str,
+            _model: Option<&str>,
+            _approval_policy: Option<&str>,
+            _permission_mode: Option<&str>,
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            let (tx, rx) = broadcast::channel(8);
+            drop(tx);
+            Ok(rx)
+        }
+
+        async fn turn_interrupt(
+            &self,
+            _thread_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            if self.fail_interrupt {
+                Err("interrupt failed".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    struct FailingInterruptMockProcessSpawner {
+        fail_interrupt: bool,
+    }
+
+    #[async_trait(?Send)]
+    impl ProcessSpawner for FailingInterruptMockProcessSpawner {
+        type Process = FailingInterruptMockCodexProcess;
+
+        async fn spawn(
+            &self,
+        ) -> Result<FailingInterruptMockCodexProcess, Box<dyn std::error::Error + Send + Sync>>
+        {
+            Ok(FailingInterruptMockCodexProcess {
+                fail_interrupt: self.fail_interrupt,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_propagates_turn_interrupt_failure() {
+        let agent = CodexAgent::new(
+            MockNotifierFactory::new(),
+            FailingInterruptMockProcessSpawner {
+                fail_interrupt: true,
+            },
+            "o4-mini",
+        );
+        agent.test_insert_session("fail-int", "/tmp", None).await;
+        agent.process().await.unwrap();
+
+        let err = agent
+            .cancel(CancelNotification::new("fail-int"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InternalError);
+        assert!(err.message.contains("interrupt failed"));
     }
 
     // ── prompt ────────────────────────────────────────────────────────────────

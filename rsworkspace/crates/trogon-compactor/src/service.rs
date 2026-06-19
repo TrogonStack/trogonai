@@ -102,6 +102,7 @@ pub struct ServiceState {
     pub anthropic: Option<ProviderConfig>,
     pub xai: Option<ProviderConfig>,
     pub openrouter: Option<ProviderConfig>,
+    pub openai: Option<ProviderConfig>,
 }
 
 impl ServiceState {
@@ -110,6 +111,7 @@ impl ServiceState {
             "anthropic" => self.anthropic.as_ref(),
             "xai" => self.xai.as_ref(),
             "openrouter" => self.openrouter.as_ref(),
+            "openai" => self.openai.as_ref(),
             _ => None,
         }
     }
@@ -230,6 +232,7 @@ mod tests {
             }),
             xai: None,
             openrouter: None,
+            openai: None,
         }
     }
 
