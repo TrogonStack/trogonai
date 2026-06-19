@@ -95,6 +95,11 @@ pub trait A2aExecutor: Send + Sync + 'static {
         &self,
         request: a2a::types::GetExtendedAgentCardRequest,
     ) -> Result<a2a::agent_card::AgentCard, A2aError>;
+
+    async fn message_send(
+        &self,
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<a2a::types::SendMessageResponse, A2aError>;
 }
 
 #[cfg(test)]
