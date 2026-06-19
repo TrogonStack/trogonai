@@ -41,12 +41,12 @@ impl Config {
     }
 
     pub fn with_operation_timeout(mut self, timeout: Duration) -> Self {
-        self.operation_timeout = timeout;
+        self.operation_timeout = timeout.max(Duration::from_secs(MIN_TIMEOUT_SECS));
         self
     }
 
     pub fn with_task_timeout(mut self, timeout: Duration) -> Self {
-        self.task_timeout = timeout;
+        self.task_timeout = timeout.max(Duration::from_secs(MIN_TIMEOUT_SECS));
         self
     }
 
@@ -163,9 +163,11 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
             }
             Ok(_) => {
                 warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} must be positive, using default");
+                config.push_dlq_dedup_lru_size = DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE;
             }
             Err(_) => {
                 warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} is not a valid integer, using default");
+                config.push_dlq_dedup_lru_size = DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE;
             }
         }
     }
@@ -413,5 +415,58 @@ mod tests {
         env.set(ENV_MAX_CONCURRENT_CLIENT_TASKS, "bogus");
         let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
         assert_eq!(cfg.max_concurrent_client_tasks(), default_max);
+    }
+
+    #[test]
+    fn a2a_prefix_ref_returns_prefix_value_object() {
+        let prefix = A2aPrefix::new("a2a-test").unwrap();
+        let config = Config::new(prefix.clone(), default_nats());
+        assert_eq!(config.a2a_prefix_ref().as_str(), prefix.as_str());
+    }
+
+    #[test]
+    fn push_dlq_dedup_lru_size_default() {
+        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats());
+        assert_eq!(config.push_dlq_dedup_lru_size(), DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE);
+    }
+
+    #[test]
+    fn with_operation_timeout_clamps_below_minimum_to_minimum() {
+        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_operation_timeout(Duration::ZERO);
+        assert_eq!(config.operation_timeout(), Duration::from_secs(MIN_TIMEOUT_SECS));
+    }
+
+    #[test]
+    fn with_task_timeout_clamps_below_minimum_to_minimum() {
+        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_task_timeout(Duration::ZERO);
+        assert_eq!(config.task_timeout(), Duration::from_secs(MIN_TIMEOUT_SECS));
+    }
+
+    #[test]
+    fn push_dlq_dedup_lru_size_env_override() {
+        let env = trogon_std::env::InMemoryEnv::new();
+        env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "4096");
+        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
+        assert_eq!(cfg.push_dlq_dedup_lru_size(), 4096);
+    }
+
+    #[test]
+    fn push_dlq_dedup_lru_size_zero_resets_to_default() {
+        let env = trogon_std::env::InMemoryEnv::new();
+        env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "0");
+        with_subscriber(|| {
+            let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
+            assert_eq!(cfg.push_dlq_dedup_lru_size(), DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE);
+        });
+    }
+
+    #[test]
+    fn push_dlq_dedup_lru_size_invalid_resets_to_default() {
+        let env = trogon_std::env::InMemoryEnv::new();
+        env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "not-a-number");
+        with_subscriber(|| {
+            let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
+            assert_eq!(cfg.push_dlq_dedup_lru_size(), DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE);
+        });
     }
 }
