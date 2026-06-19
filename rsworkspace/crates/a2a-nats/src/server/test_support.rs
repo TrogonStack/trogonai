@@ -12,6 +12,7 @@ pub struct StubHandler {
     pub tasks_list_result: Option<Result<a2a::types::ListTasksResponse, A2aError>>,
     pub tasks_cancel_result: Option<Result<a2a::types::Task, A2aError>>,
     pub tasks_resubscribe_result: Option<Result<a2a::types::Task, A2aError>>,
+    pub push_set_result: Option<Result<a2a::types::TaskPushNotificationConfig, A2aError>>,
 }
 
 fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T, A2aError> {
@@ -49,6 +50,13 @@ impl A2aExecutor for std::sync::Mutex<StubHandler> {
 
     async fn tasks_resubscribe(&self, _req: a2a::types::SubscribeToTaskRequest) -> Result<a2a::types::Task, A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().tasks_resubscribe_result)
+    }
+
+    async fn push_notification_set(
+        &self,
+        _req: a2a::types::TaskPushNotificationConfig,
+    ) -> Result<a2a::types::TaskPushNotificationConfig, A2aError> {
+        take_or_unimplemented(&mut self.lock().unwrap().push_set_result)
     }
 }
 
