@@ -2,7 +2,7 @@
 //!
 //! `StubHandler` grows a result slot per operation as each per-op PR lands.
 
-use crate::server::handler::{A2aError, A2aExecutor};
+use crate::server::handler::{A2aError, A2aExecutor, TaskEventStream};
 
 #[derive(Default)]
 pub struct StubHandler {
@@ -16,6 +16,7 @@ pub struct StubHandler {
     pub push_get_result: Option<Result<a2a::types::TaskPushNotificationConfig, A2aError>>,
     pub push_list_result: Option<Result<a2a::types::ListTaskPushNotificationConfigsResponse, A2aError>>,
     pub push_delete_result: Option<Result<(), A2aError>>,
+    pub message_stream_result: Option<Result<(a2a::types::Task, TaskEventStream), A2aError>>,
 }
 
 fn take_or_unimplemented<T>(slot: &mut Option<Result<T, A2aError>>) -> Result<T, A2aError> {
@@ -81,6 +82,13 @@ impl A2aExecutor for std::sync::Mutex<StubHandler> {
         _req: a2a::types::DeleteTaskPushNotificationConfigRequest,
     ) -> Result<(), A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().push_delete_result)
+    }
+
+    async fn message_stream(
+        &self,
+        _req: a2a::types::SendMessageRequest,
+    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError> {
+        take_or_unimplemented(&mut self.lock().unwrap().message_stream_result)
     }
 }
 

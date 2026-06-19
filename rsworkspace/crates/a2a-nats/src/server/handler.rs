@@ -134,6 +134,15 @@ pub trait A2aExecutor: Send + Sync + 'static {
         &self,
         request: a2a::types::DeleteTaskPushNotificationConfigRequest,
     ) -> Result<(), A2aError>;
+
+    /// Bootstrap a streaming task. Returns the initial task envelope (used as the
+    /// JSON-RPC bootstrap reply) and a stream of [`a2a::event::StreamResponse`] items;
+    /// the dispatch handler publishes each item on the JetStream task-events subject
+    /// until the task reaches a terminal state.
+    async fn message_stream(
+        &self,
+        request: a2a::types::SendMessageRequest,
+    ) -> Result<(a2a::types::Task, TaskEventStream), A2aError>;
 }
 
 #[cfg(test)]
