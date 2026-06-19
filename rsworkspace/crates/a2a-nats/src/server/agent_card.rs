@@ -27,21 +27,15 @@ where
         return;
     }
 
-    let result = match parse_request::<a2a::types::GetExtendedAgentCardRequest>(payload) {
-        Ok(req) => {
-            let params = req
-                .params
-                .unwrap_or(a2a::types::GetExtendedAgentCardRequest { tenant: None });
-            match handler.agent_card(params).await {
-                Ok(card) => match serde_json::to_value(&card) {
-                    Ok(v) if accept_agent_card_on_read(&v, AgentCardSource::AgentHandler) => Ok(card),
-                    Ok(_) => Err(A2aError::invalid_agent_response("AgentCard failed read validation")),
-                    Err(_) => Err(A2aError::internal("failed to serialize agent card for validation")),
-                },
-                Err(e) => Err(e),
-            }
-        }
+    let result = match parse_request::<serde_json::Value>(payload) {
         Err(_) => Err(parse_error()),
+        Ok(envelope) => match envelope.params {
+            None => call_handler_and_validate(handler, a2a::types::GetExtendedAgentCardRequest { tenant: None }).await,
+            Some(raw) => match serde_json::from_value::<a2a::types::GetExtendedAgentCardRequest>(raw) {
+                Err(e) => Err(A2aError::new(-32602, format!("Invalid params: {e}"))),
+                Ok(params) => call_handler_and_validate(handler, params).await,
+            },
+        },
     };
     let bytes = match result {
         Ok(resp) => JsonRpcResponse::new(id, resp).to_bytes(),
@@ -63,6 +57,20 @@ where
 
 fn parse_error() -> A2aError {
     A2aError::new(-32700, "Parse error")
+}
+
+async fn call_handler_and_validate<H: A2aExecutor>(
+    handler: &H,
+    params: a2a::types::GetExtendedAgentCardRequest,
+) -> Result<a2a::agent_card::AgentCard, A2aError> {
+    match handler.agent_card(params).await {
+        Ok(card) => match serde_json::to_value(&card) {
+            Ok(v) if accept_agent_card_on_read(&v, AgentCardSource::AgentHandler) => Ok(card),
+            Ok(_) => Err(A2aError::invalid_agent_response("AgentCard failed read validation")),
+            Err(_) => Err(A2aError::internal("failed to serialize agent card for validation")),
+        },
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]
@@ -188,7 +196,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parse_error_returns_jsonrpc_parse_error_code() {
+    async fn invalid_params_shape_returns_invalid_params_code() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
         let payload = serde_json::to_vec(&serde_json::json!({
@@ -200,7 +208,7 @@ mod tests {
         .unwrap();
         handle(&handler, &payload, Some("r".into()), &nats).await;
         let body = parse_response(&nats.published_payloads()[0]);
-        assert_eq!(body["error"]["code"], -32700);
+        assert_eq!(body["error"]["code"], -32602);
         assert_eq!(body["id"], 7);
     }
 
