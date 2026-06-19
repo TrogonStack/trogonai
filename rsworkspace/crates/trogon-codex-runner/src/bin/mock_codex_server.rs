@@ -27,6 +27,9 @@
 //! | `MOCK_SEND_TOOL_EVENT`           | Emit tool `item/started` + `item/completed` before complete |
 //! | `MOCK_SEND_APPROVAL`             | Emit `execCommandApproval` server request mid-turn          |
 //! | `MOCK_SEND_USAGE`                | Emit `thread/tokenUsage/updated` (default: on)            |
+//! | `MOCK_SEND_REASONING`            | Emit an `item/reasoning/textDelta` before text            |
+//! | `MOCK_TOOL_FAILED`               | Tool `item/completed` carries `exitCode`!=0 + failed status |
+//! | `MOCK_REQUIRE_APPROVAL_POLICY=<v>` | Fail `turn/start` unless `params.approvalPolicy` equals `<v>` |
 //! | `MOCK_BROADCAST_ERROR_AFTER_TURNS=N` | After N `turn/start` acks, emit broadcast `error`     |
 //! | `MOCK_VALIDATE_SCHEMA`               | Reject malformed `turn/start` params                    |
 //!
@@ -63,6 +66,9 @@ fn main() {
     let send_tool_event = std::env::var("MOCK_SEND_TOOL_EVENT").is_ok();
     let send_approval = std::env::var("MOCK_SEND_APPROVAL").is_ok();
     let send_usage = std::env::var("MOCK_SKIP_USAGE").is_err();
+    let send_reasoning = std::env::var("MOCK_SEND_REASONING").is_ok();
+    let tool_failed = std::env::var("MOCK_TOOL_FAILED").is_ok();
+    let require_approval_policy = std::env::var("MOCK_REQUIRE_APPROVAL_POLICY").ok();
     let broadcast_error_after_turns: Option<usize> =
         std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
             .ok()
@@ -217,6 +223,20 @@ fn main() {
                     }
                 }
 
+                if let Some(expected) = &require_approval_policy {
+                    let got = msg["params"]["approvalPolicy"].as_str().unwrap_or("");
+                    if got != expected {
+                        respond_error(
+                            &mut out,
+                            &id,
+                            &format!(
+                                "mock: expected approvalPolicy '{expected}', got '{got}'"
+                            ),
+                        );
+                        continue;
+                    }
+                }
+
                 let thread_id = msg["params"]["threadId"].as_str().unwrap_or("").to_string();
                 let turn_id = format!("mock-turn-{turn_ack_count}");
 
@@ -253,6 +273,8 @@ fn main() {
                     send_tool_event,
                     send_approval,
                     send_usage,
+                    send_reasoning,
+                    tool_failed,
                     emit_stray_thread_event,
                     malformed_before_complete,
                     unknown_id_before_complete,
@@ -326,6 +348,8 @@ fn emit_turn_sequence(
     send_tool_event: bool,
     send_approval: bool,
     send_usage: bool,
+    send_reasoning: bool,
+    tool_failed: bool,
     emit_stray_thread_event: bool,
     malformed_before_complete: bool,
     unknown_id_before_complete: bool,
@@ -385,6 +409,20 @@ fn emit_turn_sequence(
         );
     }
 
+    if send_reasoning {
+        emit(
+            out,
+            "item/reasoning/textDelta",
+            serde_json::json!({
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "itemId": item_id,
+                "contentIndex": 0_i64,
+                "delta": "thinking..."
+            }),
+        );
+    }
+
     for i in 0..send_n_text_events {
         emit(
             out,
@@ -399,6 +437,13 @@ fn emit_turn_sequence(
     }
 
     if send_tool_event {
+        // MOCK_TOOL_FAILED flips the completed item to a non-zero exit + failed
+        // status so the runner exercises its Failed-status derivation (P4).
+        let (status, exit_code, output) = if tool_failed {
+            ("failed", 1_i64, "boom")
+        } else {
+            ("completed", 0_i64, "hi")
+        };
         emit(
             out,
             "item/completed",
@@ -412,8 +457,9 @@ fn emit_turn_sequence(
                     "command": "bash",
                     "commandActions": [],
                     "cwd": "/tmp",
-                    "status": "completed",
-                    "aggregatedOutput": "hi"
+                    "status": status,
+                    "exitCode": exit_code,
+                    "aggregatedOutput": output
                 }
             }),
         );

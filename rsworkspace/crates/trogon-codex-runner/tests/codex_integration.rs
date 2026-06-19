@@ -1577,6 +1577,39 @@ async fn nats_publish_failure_for_tool_events_is_non_fatal() {
     unsafe { std::env::remove_var("MOCK_SEND_TOOL_EVENT") };
 }
 
+// ── approvalPolicy is forwarded on the wire (T3) ─────────────────────────────
+
+/// The runner must forward the mode-derived `approvalPolicy` on `turn/start`.
+/// The mock rejects the turn unless `params.approvalPolicy` matches, so a
+/// default-mode session that forwards `on-request` completing normally proves
+/// the policy reached the wire (mirrors the `MOCK_REQUIRE_MODEL` pattern).
+#[tokio::test(flavor = "current_thread")]
+async fn turn_start_forwards_approval_policy_on_wire() {
+    let _guard = bin_env_lock().lock().await;
+    unsafe { std::env::set_var("MOCK_REQUIRE_APPROVAL_POLICY", "on-request") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id.to_string(),
+                    vec![ContentBlock::Text(TextContent::new("hello"))],
+                ))
+                .await
+                .unwrap();
+            // Default mode → "on-request"; if the runner omitted or sent the
+            // wrong policy, the mock would reject turn/start.
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_REQUIRE_APPROVAL_POLICY") };
+}
+
 // ── broadcast error (no threadId) reaches all active turns ───────────────────
 
 /// When `read_loop` receives a notification whose `threadId` is absent/empty,

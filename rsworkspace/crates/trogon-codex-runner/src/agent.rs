@@ -25,8 +25,10 @@ use tokio::sync::{Mutex, Notify};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
+
 use crate::permissions::{ModeGateAction, mode_gate_action};
-use crate::process::{CodexEvent, RealProcessSpawner};
+use crate::process::{CodexEvent, CodexToolKind, RealProcessSpawner};
 use crate::traits::{CodexProcessClient, ProcessSpawner, SessionNotifier, SessionNotifierFactory};
 
 /// The single auth method codex advertises. The key itself is consumed by the
@@ -75,6 +77,72 @@ fn is_valid_mode(mode: &str) -> bool {
 
 fn invalid_params(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InvalidParams.into(), msg.into())
+}
+
+/// Map a codex tool classification to an ACP [`ToolKind`]. `commandExecution`
+/// and `fileChange` map directly; MCP/dynamic tools (`Other`) are refined by
+/// tool name (mirrors acp-runner's `tool_kind_for`).
+fn codex_tool_kind(kind: CodexToolKind, name: &str) -> ToolKind {
+    match kind {
+        CodexToolKind::Execute => ToolKind::Execute,
+        CodexToolKind::Edit => ToolKind::Edit,
+        CodexToolKind::Other => tool_kind_from_name(name),
+    }
+}
+
+/// Best-effort `ToolKind` inference from a tool name, for MCP/dynamic tools
+/// whose codex item type carries no structural hint.
+fn tool_kind_from_name(name: &str) -> ToolKind {
+    let n = name.to_ascii_lowercase();
+    if n.contains("read") || n.contains("view") || n.contains("cat") || n.contains("list") {
+        ToolKind::Read
+    } else if n.contains("search") || n.contains("grep") || n.contains("glob") || n.contains("find")
+    {
+        ToolKind::Search
+    } else if n.contains("fetch") || n.contains("web") || n.contains("http") || n.contains("url") {
+        ToolKind::Fetch
+    } else if n.contains("edit") || n.contains("write") || n.contains("patch") {
+        ToolKind::Edit
+    } else {
+        ToolKind::Other
+    }
+}
+
+/// Convert codex session history to the compactor wire format. Tool-call/result
+/// blocks collapse to their text summary — the compactor produces prose anyway,
+/// matching how the "Prior conversation" replay already serializes history.
+fn codex_history_to_wire(
+    history: &[trogon_runner_tools::portable_session::PortableMessage],
+) -> Vec<trogon_tools::Message> {
+    history
+        .iter()
+        .map(|m| trogon_tools::Message {
+            role: m.role.clone(),
+            content: vec![trogon_tools::ContentBlock::Text {
+                text: m.text.clone(),
+            }],
+        })
+        .collect()
+}
+
+/// Restore codex session history from the compactor wire format.
+fn codex_history_from_wire(
+    wire: Vec<trogon_tools::Message>,
+) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
+    wire.into_iter()
+        .map(|m| {
+            let text = m
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    trogon_tools::ContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            trogon_runner_tools::portable_session::PortableMessage::text_only(m.role, text)
+        })
+        .collect()
 }
 
 /// Apply the coarse permission-mode gate Trogon controls at session/turn boundaries.
@@ -194,6 +262,9 @@ pub struct CodexAgent<N: SessionNotifierFactory, P: ProcessSpawner> {
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
+    /// Dedicated NATS client for the `trogon-compactor` service (context
+    /// compaction). `None` disables `session/compact`. Mirrors xai-runner.
+    compactor_nats: Option<async_nats::Client>,
 }
 
 /// Convenience type alias for the production agent wired to real dependencies.
@@ -266,7 +337,16 @@ where
             default_model,
             prompt_timeout,
             available_models,
+            compactor_nats: None,
         }
+    }
+
+    /// Enable context compaction by connecting to the `trogon-compactor` NATS
+    /// service. Mirrors `trogon-xai-runner::with_compactor`. Without this,
+    /// `session/compact` (the CLI's `/compact`) returns an error on codex.
+    pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
+        self.compactor_nats = Some(nats);
+        self
     }
 
     async fn interrupt_turn_best_effort(&self, thread_id: &str, session_id: &str) {
@@ -701,13 +781,19 @@ where
             user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
-        // Codex takes no separate system prompt, so deliver the "always summarize
-        // what you did" guidance the same way as TROGON.md: prepended once on the
-        // first turn. Codex carries it through the rest of the session.
+        // Codex takes no separate system prompt, so deliver the behavioral
+        // guidance the other runners carry in their system prompt the same way as
+        // TROGON.md: prepended once on the first turn. Codex carries it through
+        // the rest of the session. (P2) URL_FETCH_GUIDANCE keeps codex from
+        // treating a URL as a local path; COMPLETION_GUIDANCE asks it to recap
+        // after running tools. PLAN_MODE guidance is intentionally omitted —
+        // codex owns its own tool execution and enforces no read-only mode, so
+        // the coarse approvalPolicy gate (apply_mode_gate) is the boundary.
         if first_turn {
             user_input = format!(
-                "Instructions: {}\n\n---\n\n{user_input}",
-                trogon_runner_tools::COMPLETION_GUIDANCE
+                "Instructions: {}\n\n{}\n\n---\n\n{user_input}",
+                trogon_runner_tools::COMPLETION_GUIDANCE,
+                trogon_runner_tools::URL_FETCH_GUIDANCE
             );
         }
 
@@ -846,11 +932,11 @@ where
                     }
                 }
 
-                CodexEvent::ToolStarted { id, name, input } => {
+                CodexEvent::ToolStarted { id, name, input, kind } => {
                     let tool_call = ToolCall::new(id.clone(), name.clone())
                         .status(ToolCallStatus::InProgress)
                         .raw_input(input.clone())
-                        .kind(ToolKind::Execute);
+                        .kind(codex_tool_kind(kind, &name));
                     let notif = SessionNotification::new(
                         session_id.clone(),
                         SessionUpdate::ToolCall(tool_call),
@@ -867,11 +953,16 @@ where
                     );
                 }
 
-                CodexEvent::ToolCompleted { id, output } => {
+                CodexEvent::ToolCompleted { id, output, failed } => {
+                    let status = if failed {
+                        ToolCallStatus::Failed
+                    } else {
+                        ToolCallStatus::Completed
+                    };
                     let update = ToolCallUpdate::new(
                         id.clone(),
                         ToolCallUpdateFields::new()
-                            .status(ToolCallStatus::Completed)
+                            .status(status)
                             .raw_output(serde_json::Value::String(output.clone())),
                     );
                     let notif = SessionNotification::new(
@@ -1096,6 +1187,79 @@ where
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/compact" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str().ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "missing sessionId")
+            })?;
+            // Read history + resolved model + cwd. Codex has no per-session
+            // compactor_model override, so compaction defaults to the session
+            // model on the codex provider ("openai").
+            let (history, resolved_model, cwd) = {
+                let sessions = self.sessions.lock().await;
+                let s = sessions.get(session_id).ok_or_else(|| {
+                    Error::new(ErrorCode::InvalidParams.into(), "session not found")
+                })?;
+                let model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
+                (s.history.clone(), model, s.cwd.clone())
+            };
+            let wire = codex_history_to_wire(&history);
+            let tokens_before = estimate_tokens(&wire);
+            let nats = self.compactor_nats.as_ref().ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InternalError.into(),
+                    "no compactor backend for compaction",
+                )
+            })?;
+            let (token_budget, threshold_pct) = compaction_settings_from_env();
+            let compacted_wire = maybe_compact(
+                nats,
+                &wire,
+                token_budget,
+                threshold_pct,
+                true,
+                "openai",
+                &resolved_model,
+                None,
+            )
+            .await
+            .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
+                let tokens_after = estimate_tokens(&cw);
+                let new_history = codex_history_from_wire(cw);
+                // Codex keeps the conversation in the app-server thread, which
+                // still holds the *full* context. Start a fresh thread and replay
+                // only the compacted history (via pending_history) on the next
+                // prompt so the reduction actually takes effect. If the new thread
+                // can't be started, leave the session untouched and surface the
+                // error rather than corrupting state.
+                let proc = self.process().await?;
+                let new_thread_id = proc
+                    .thread_start(&cwd)
+                    .await
+                    .map_err(|e| internal_error(e.to_string()))?;
+                drop(proc);
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(session_id) {
+                    s.thread_id = new_thread_id;
+                    s.history = new_history.clone();
+                    s.pending_history = Some(new_history);
+                    s.first_turn = true;
+                }
+                (true, tokens_after)
+            } else {
+                (false, tokens_before)
+            };
+            let result = serde_json::json!({
+                "compacted": compacted,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+            });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
@@ -1188,6 +1352,35 @@ mod tests {
         SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest, StopReason,
     };
     use tokio::sync::broadcast;
+
+    #[test]
+    fn codex_tool_kind_maps_item_types() {
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Execute, "bash"),
+            ToolKind::Execute
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Edit, "fileChange"),
+            ToolKind::Edit
+        );
+        // Other is refined by name.
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "read_file"),
+            ToolKind::Read
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "grep_repo"),
+            ToolKind::Search
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "web_fetch"),
+            ToolKind::Fetch
+        );
+        assert_eq!(
+            codex_tool_kind(CodexToolKind::Other, "do_a_thing"),
+            ToolKind::Other
+        );
+    }
 
     // ── In-memory mocks ───────────────────────────────────────────────────────
 
@@ -1840,6 +2033,57 @@ mod tests {
         let resp = agent.ext_method(ext_req).await.unwrap();
         let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
         assert_eq!(result["children"].as_array().unwrap().len(), 0);
+    }
+
+    // ── ext_method / session/compact (E1) ─────────────────────────────────────
+
+    #[test]
+    fn codex_history_wire_round_trip() {
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let history = vec![
+            PortableMessage::text_only("user", "hello"),
+            PortableMessage::text_only("assistant", "hi there"),
+        ];
+        let wire = codex_history_to_wire(&history);
+        assert_eq!(wire.len(), 2);
+        let restored = codex_history_from_wire(wire);
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].role, "user");
+        assert_eq!(restored[0].text, "hello");
+        assert_eq!(restored[1].role, "assistant");
+        assert_eq!(restored[1].text, "hi there");
+    }
+
+    #[tokio::test]
+    async fn ext_compact_without_backend_errors() {
+        // make_agent() builds without with_compactor, so compaction has no
+        // backend and session/compact must report that rather than panic.
+        let agent = make_agent().await;
+        agent.test_insert_session("s1", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "s1" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/compact", raw_params.into());
+        let err = agent
+            .ext_method(ext_req)
+            .await
+            .expect_err("compaction without a backend must error");
+        assert!(
+            err.message.contains("compactor"),
+            "error should mention the missing compactor backend, got: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_compact_missing_session_id_errors() {
+        let agent = make_agent().await;
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({}).to_string()).unwrap();
+        let ext_req = ExtRequest::new("session/compact", raw_params.into());
+        assert!(agent.ext_method(ext_req).await.is_err());
     }
 
     #[tokio::test]

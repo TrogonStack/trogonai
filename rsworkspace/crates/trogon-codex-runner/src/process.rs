@@ -127,6 +127,18 @@ fn env_u64(var: &str, default: u64) -> u64 {
 
 // ── Codex event types ──────────────────────────────────────────────────────────
 
+/// Coarse classification of a codex tool item. Mapped to an ACP `ToolKind` at
+/// the agent layer so this protocol layer stays free of ACP schema types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexToolKind {
+    /// Shell command execution (`commandExecution`).
+    Execute,
+    /// File edits / patches (`fileChange`).
+    Edit,
+    /// MCP or dynamic tool call; refined by tool name at the agent layer.
+    Other,
+}
+
 /// Parsed event emitted by the Codex app-server during a turn.
 #[derive(Debug, Clone)]
 pub enum CodexEvent {
@@ -139,9 +151,15 @@ pub enum CodexEvent {
         id: String,
         name: String,
         input: Value,
+        kind: CodexToolKind,
     },
-    /// A tool/command completed (`item/completed`).
-    ToolCompleted { id: String, output: String },
+    /// A tool/command completed (`item/completed`). `failed` is derived from the
+    /// item's terminal `status`, a non-zero `exitCode`, or a present `error`.
+    ToolCompleted {
+        id: String,
+        output: String,
+        failed: bool,
+    },
     /// Token usage from `thread/tokenUsage/updated`.
     Usage {
         input: u64,
@@ -153,6 +171,15 @@ pub enum CodexEvent {
     TurnCompleted,
     /// An error occurred during the turn.
     Error { message: String },
+}
+
+/// True when a completed item's `status` field names a non-success terminal
+/// state (codex uses these across `commandExecution`/`fileChange`/tool items).
+fn status_indicates_failure(item: &Value) -> bool {
+    matches!(
+        item.get("status").and_then(|v| v.as_str()),
+        Some("failed" | "incomplete" | "rejected" | "error" | "cancelled" | "canceled")
+    )
 }
 
 // ── CodexProcess ─────────────────────────────────────────────────────────────
@@ -659,7 +686,12 @@ impl CodexProcess {
                     "command": item.get("command").cloned().unwrap_or(Value::Null),
                     "cwd": item.get("cwd").cloned().unwrap_or(Value::Null),
                 });
-                Some(CodexEvent::ToolStarted { id, name, input })
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name,
+                    input,
+                    kind: CodexToolKind::Execute,
+                })
             }
             "commandExecution" => {
                 let output = item
@@ -667,7 +699,18 @@ impl CodexProcess {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                Some(CodexEvent::ToolCompleted { id, output })
+                // A non-zero exit code or a terminal failure status marks the
+                // command as failed.
+                let exit_failed = item
+                    .get("exitCode")
+                    .and_then(|v| v.as_i64())
+                    .map(|c| c != 0)
+                    .unwrap_or(false);
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output,
+                    failed: exit_failed || status_indicates_failure(item),
+                })
             }
             "mcpToolCall" if started => {
                 let name = item
@@ -679,9 +722,15 @@ impl CodexProcess {
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Null);
-                Some(CodexEvent::ToolStarted { id, name, input })
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name,
+                    input,
+                    kind: CodexToolKind::Other,
+                })
             }
             "mcpToolCall" => {
+                let has_error = item.get("error").is_some();
                 let output = if let Some(result) = item.get("result") {
                     result.to_string()
                 } else if let Some(err) = item.get("error").and_then(|e| e.get("message")) {
@@ -689,7 +738,11 @@ impl CodexProcess {
                 } else {
                     String::new()
                 };
-                Some(CodexEvent::ToolCompleted { id, output })
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output,
+                    failed: has_error || status_indicates_failure(item),
+                })
             }
             "fileChange" if started => {
                 let input = item.get("changes").cloned().unwrap_or(Value::Null);
@@ -697,6 +750,7 @@ impl CodexProcess {
                     id,
                     name: "fileChange".to_string(),
                     input,
+                    kind: CodexToolKind::Edit,
                 })
             }
             "fileChange" => {
@@ -707,6 +761,7 @@ impl CodexProcess {
                 Some(CodexEvent::ToolCompleted {
                     id,
                     output: status.to_string(),
+                    failed: status_indicates_failure(item),
                 })
             }
             "dynamicToolCall" if started => {
@@ -719,14 +774,23 @@ impl CodexProcess {
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Null);
-                Some(CodexEvent::ToolStarted { id, name, input })
+                Some(CodexEvent::ToolStarted {
+                    id,
+                    name,
+                    input,
+                    kind: CodexToolKind::Other,
+                })
             }
             "dynamicToolCall" => {
                 let output = item
                     .get("contentItems")
                     .map(|v| v.to_string())
                     .unwrap_or_default();
-                Some(CodexEvent::ToolCompleted { id, output })
+                Some(CodexEvent::ToolCompleted {
+                    id,
+                    output,
+                    failed: status_indicates_failure(item),
+                })
             }
             _ => None,
         }
@@ -840,6 +904,7 @@ mod tests {
     }
 
     #[test]
+    fn text_delta_from_agent_message_delta() {
         let params = serde_json::json!({
             "threadId": "t1",
             "turnId": "turn-1",
@@ -920,8 +985,77 @@ mod tests {
         let (tid, event) = parse("item/completed", params).unwrap();
         assert_eq!(tid, "t5");
         assert!(
-            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done")
+            matches!(event, CodexEvent::ToolCompleted { id, output, failed } if id == "call-2" && output == "done" && !failed)
         );
+    }
+
+    #[test]
+    fn tool_completed_failed_on_nonzero_exit() {
+        let params = serde_json::json!({
+            "threadId": "t5",
+            "turnId": "turn-1",
+            "item": {
+                "type": "commandExecution",
+                "id": "call-x",
+                "command": "false",
+                "cwd": "/tmp",
+                "status": "completed",
+                "exitCode": 1,
+                "aggregatedOutput": "boom"
+            }
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { failed, .. } if failed));
+    }
+
+    #[test]
+    fn tool_completed_failed_on_status() {
+        let params = serde_json::json!({
+            "threadId": "t5",
+            "turnId": "turn-1",
+            "item": {
+                "type": "fileChange",
+                "id": "fc-1",
+                "status": "failed",
+                "changes": []
+            }
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { failed, .. } if failed));
+    }
+
+    #[test]
+    fn tool_started_carries_kind() {
+        let cmd = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "commandExecution", "id": "c1", "command": "ls", "cwd": "/tmp", "status": "inProgress" }
+        });
+        let (_, event) = parse("item/started", cmd).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { kind: CodexToolKind::Execute, .. }));
+
+        let fc = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "fileChange", "id": "f1", "status": "inProgress", "changes": [] }
+        });
+        let (_, event) = parse("item/started", fc).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { kind: CodexToolKind::Edit, .. }));
+
+        let mcp = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "mcpToolCall", "id": "m1", "tool": "search_docs", "arguments": {}, "status": "inProgress" }
+        });
+        let (_, event) = parse("item/started", mcp).unwrap();
+        assert!(matches!(event, CodexEvent::ToolStarted { kind: CodexToolKind::Other, .. }));
+    }
+
+    #[test]
+    fn mcp_tool_completed_failed_on_error() {
+        let params = serde_json::json!({
+            "threadId": "t5", "turnId": "turn-1",
+            "item": { "type": "mcpToolCall", "id": "m1", "error": { "message": "nope" } }
+        });
+        let (_, event) = parse("item/completed", params).unwrap();
+        assert!(matches!(event, CodexEvent::ToolCompleted { failed, .. } if failed));
     }
 
     #[test]
