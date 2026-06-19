@@ -6,6 +6,7 @@
 pub mod agent_card;
 pub mod handler;
 pub mod message_send;
+pub mod message_stream;
 pub mod push_delete;
 pub mod push_get;
 pub mod push_list;
