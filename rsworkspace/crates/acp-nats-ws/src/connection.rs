@@ -47,10 +47,9 @@ pub async fn handle<N, J>(
         notification_tx,
     ));
 
-    let (connection, io_task) =
-        AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-            tokio::task::spawn_local(fut);
-        });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
+        tokio::task::spawn_local(fut);
+    });
 
     let connection = Rc::new(connection);
 
@@ -124,10 +123,7 @@ pub async fn handle<N, J>(
 }
 
 #[cfg_attr(coverage, coverage(off))]
-async fn run_recv_pump(
-    mut ws_receiver: SplitStream<WebSocket>,
-    mut ws_recv_write: tokio::io::DuplexStream,
-) {
+async fn run_recv_pump(mut ws_receiver: SplitStream<WebSocket>, mut ws_recv_write: tokio::io::DuplexStream) {
     while let Some(Ok(msg)) = ws_receiver.next().await {
         let bytes = match msg {
             Message::Text(t) => bytes::Bytes::from(t),
@@ -162,10 +158,7 @@ async fn run_recv_pump(
 }
 
 #[cfg_attr(coverage, coverage(off))]
-async fn run_send_pump(
-    mut ws_sender: SplitSink<WebSocket, Message>,
-    ws_send_read: tokio::io::DuplexStream,
-) {
+async fn run_send_pump(mut ws_sender: SplitSink<WebSocket, Message>, ws_send_read: tokio::io::DuplexStream) {
     let mut reader = tokio::io::BufReader::new(ws_send_read);
     let mut line = String::new();
     loop {
@@ -230,9 +223,7 @@ mod tests {
 
         let messages = vec!["alpha", "beta", "gamma"];
         for msg in &messages {
-            ws.send(TungsteniteMessage::Text((*msg).into()))
-                .await
-                .unwrap();
+            ws.send(TungsteniteMessage::Text((*msg).into())).await.unwrap();
         }
 
         for expected in &messages {

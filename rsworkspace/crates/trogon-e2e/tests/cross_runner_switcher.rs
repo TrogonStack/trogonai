@@ -11,25 +11,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::{AcpPrefix, Config};
-use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiNatsNotifier, XaiAgent};
-use trogon_openrouter_runner::{
-    MockOpenRouterHttpClient, NatsSessionNotifier as OrNatsNotifier, OpenRouterAgent,
-};
 use acp_nats_agent::AgentSideNatsConnection;
 use async_nats::jetstream;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::RwLock;
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionStore, SessionState, SessionStore,
-    TrogonAgent,
-    agent_runner::mock::MockAgentRunner,
+    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent, agent_runner::mock::MockAgentRunner,
     session_notifier::mock::MockSessionNotifier,
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message as AgentMessage};
 use trogon_cli::CrossRunnerSwitcher;
 use trogon_nats::{NatsAuth, NatsConfig};
+use trogon_openrouter_runner::{MockOpenRouterHttpClient, NatsSessionNotifier as OrNatsNotifier, OpenRouterAgent};
 use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
+use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiNatsNotifier, XaiAgent};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -127,14 +123,11 @@ async fn switch_model_migrates_history_between_two_acp_runners() {
 
             // ── 3. Build CrossRunnerSwitcher: "dst-model" → "acp.dst" ─────────
             let registry = Registry::new(MockRegistryStore::new());
-            let mut dst_cap =
-                AgentCapability::new("dst-runner", ["chat"], "agents.dst.>");
-            dst_cap.metadata =
-                serde_json::json!({ "models": ["dst-model"], "acp_prefix": "acp.dst" });
+            let mut dst_cap = AgentCapability::new("dst-runner", ["chat"], "agents.dst.>");
+            dst_cap.metadata = serde_json::json!({ "models": ["dst-model"], "acp_prefix": "acp.dst" });
             registry.register(&dst_cap).await.unwrap();
 
-            let mut switcher =
-                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
 
             // ── 4. Migrate the session ────────────────────────────────────────
             let (new_prefix, new_session_id) = switcher
@@ -148,11 +141,7 @@ async fn switch_model_migrates_history_between_two_acp_runners() {
             // ── 5. Verify migrated messages in dst via shared KV bucket ───────
             let dst_state = store.load(&new_session_id).await.unwrap();
 
-            assert_eq!(
-                dst_state.messages.len(),
-                2,
-                "migrated session must have 2 messages"
-            );
+            assert_eq!(dst_state.messages.len(), 2, "migrated session must have 2 messages");
             assert_eq!(
                 dst_state.messages[0].role, "user",
                 "first migrated message must be user"
@@ -209,17 +198,12 @@ async fn switch_model_migrates_session_to_codex_runner_prefix() {
 
             // ── 2. Start source agent and a mock "codex" agent ───────────────
             attach_agent(make_agent(store.clone(), "acp.src"), nats.clone(), "acp.src");
-            attach_agent(
-                make_agent(store.clone(), "acp.codex"),
-                nats.clone(),
-                "acp.codex",
-            );
+            attach_agent(make_agent(store.clone(), "acp.codex"), nats.clone(), "acp.codex");
             tokio::time::sleep(Duration::from_millis(60)).await;
 
             // ── 3. Register "acp.codex" as a codex runner ────────────────────
             let registry = Registry::new(MockRegistryStore::new());
-            let mut codex_cap =
-                AgentCapability::new("codex", ["chat", "code_edit"], "acp.codex.agent.>");
+            let mut codex_cap = AgentCapability::new("codex", ["chat", "code_edit"], "acp.codex.agent.>");
             codex_cap.metadata = serde_json::json!({
                 "models": ["o4-mini", "o3"],
                 "acp_prefix": "acp.codex"
@@ -227,8 +211,7 @@ async fn switch_model_migrates_session_to_codex_runner_prefix() {
             registry.register(&codex_cap).await.unwrap();
 
             // ── 4. Migrate via CrossRunnerSwitcher ────────────────────────────
-            let mut switcher =
-                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
             let (new_prefix, new_session_id) = switcher
                 .switch_model("acp.src", "codex-src-1", "o4-mini", "/tmp")
                 .await
@@ -301,15 +284,13 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             // ── 1. Attach XaiAgent to "acp.xai" ──────────────────────────────
             let xai_prefix = AcpPrefix::new("acp.xai").unwrap();
             let xai_notifier = XaiNatsNotifier::new(nats.clone(), xai_prefix.clone());
-            let xai_agent =
-                XaiAgent::with_deps(xai_notifier, "grok-4", "", MockXaiHttpClient::default());
-            let (_, xai_io) = AgentSideNatsConnection::new(
-                xai_agent,
-                nats.clone(),
-                xai_prefix,
-                |fut| { tokio::task::spawn_local(fut); },
-            );
-            tokio::task::spawn_local(async move { xai_io.await.ok(); });
+            let xai_agent = XaiAgent::with_deps(xai_notifier, "grok-4", "", MockXaiHttpClient::default());
+            let (_, xai_io) = AgentSideNatsConnection::new(xai_agent, nats.clone(), xai_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                xai_io.await.ok();
+            });
 
             // ── 2. Attach OpenRouterAgent to "acp.or" ─────────────────────────
             let or_prefix = AcpPrefix::new("acp.or").unwrap();
@@ -320,13 +301,12 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
                 "",
                 MockOpenRouterHttpClient::default(),
             );
-            let (_, or_io) = AgentSideNatsConnection::new(
-                or_agent,
-                nats.clone(),
-                or_prefix,
-                |fut| { tokio::task::spawn_local(fut); },
-            );
-            tokio::task::spawn_local(async move { or_io.await.ok(); });
+            let (_, or_io) = AgentSideNatsConnection::new(or_agent, nats.clone(), or_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                or_io.await.ok();
+            });
 
             // Allow both agents to subscribe before sending requests.
             tokio::time::sleep(Duration::from_millis(300)).await;
@@ -348,8 +328,7 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             .await
             .unwrap()
             .unwrap();
-            let new_resp: serde_json::Value =
-                serde_json::from_slice(&new_resp_msg.payload).unwrap();
+            let new_resp: serde_json::Value = serde_json::from_slice(&new_resp_msg.payload).unwrap();
             let xai_session_id = new_resp["sessionId"].as_str().unwrap().to_string();
 
             tokio::time::timeout(
@@ -373,17 +352,11 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
 
             // ── 4. Register both runners in the registry ───────────────────────
             let registry = Registry::new(MockRegistryStore::new());
-            let mut xai_cap =
-                AgentCapability::new("xai", ["chat", "explore", "plan"], "acp.xai.agent.>");
-            xai_cap.metadata =
-                serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.xai" });
+            let mut xai_cap = AgentCapability::new("xai", ["chat", "explore", "plan"], "acp.xai.agent.>");
+            xai_cap.metadata = serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.xai" });
             registry.register(&xai_cap).await.unwrap();
 
-            let mut or_cap = AgentCapability::new(
-                "openrouter",
-                ["chat", "explore", "plan"],
-                "acp.or.agent.>",
-            );
+            let mut or_cap = AgentCapability::new("openrouter", ["chat", "explore", "plan"], "acp.or.agent.>");
             or_cap.metadata = serde_json::json!({
                 "models": ["anthropic/claude-3-5-sonnet"],
                 "acp_prefix": "acp.or"
@@ -391,15 +364,9 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             registry.register(&or_cap).await.unwrap();
 
             // ── 5. Migrate XAI session to OpenRouter via CrossRunnerSwitcher ───
-            let mut switcher =
-                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
             let (new_prefix, new_session_id) = switcher
-                .switch_model(
-                    "acp.xai",
-                    &xai_session_id,
-                    "anthropic/claude-3-5-sonnet",
-                    "/tmp",
-                )
+                .switch_model("acp.xai", &xai_session_id, "anthropic/claude-3-5-sonnet", "/tmp")
                 .await
                 .expect("switch_model from xai to openrouter must succeed");
 
@@ -419,8 +386,7 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             .await
             .unwrap()
             .unwrap();
-            let messages: Vec<serde_json::Value> =
-                serde_json::from_slice(&export_msg.payload).unwrap();
+            let messages: Vec<serde_json::Value> = serde_json::from_slice(&export_msg.payload).unwrap();
 
             assert_eq!(
                 messages.len(),
@@ -659,10 +625,8 @@ async fn switch_model_prompt_on_new_runner_after_migration() {
 
             // ── 3. Register the destination runner ────────────────────────────
             let registry = Registry::new(MockRegistryStore::new());
-            let mut dst_cap =
-                AgentCapability::new("ps-dst-runner", ["chat"], "acp.ps.dst.agent.>");
-            dst_cap.metadata =
-                serde_json::json!({ "models": ["ps-model"], "acp_prefix": "acp.ps.dst" });
+            let mut dst_cap = AgentCapability::new("ps-dst-runner", ["chat"], "acp.ps.dst.agent.>");
+            dst_cap.metadata = serde_json::json!({ "models": ["ps-model"], "acp_prefix": "acp.ps.dst" });
             registry.register(&dst_cap).await.unwrap();
 
             // ── 4. Migrate the session ────────────────────────────────────────
@@ -683,16 +647,12 @@ async fn switch_model_prompt_on_new_runner_after_migration() {
             }))
             .unwrap();
 
-            let resp_msg = tokio::time::timeout(
-                Duration::from_secs(15),
-                nats.request(prompt_subject, body.into()),
-            )
-            .await
-            .expect("timed out waiting for prompt response on new runner")
-            .expect("NATS request failed");
+            let resp_msg = tokio::time::timeout(Duration::from_secs(15), nats.request(prompt_subject, body.into()))
+                .await
+                .expect("timed out waiting for prompt response on new runner")
+                .expect("NATS request failed");
 
-            let resp: serde_json::Value =
-                serde_json::from_slice(&resp_msg.payload).unwrap();
+            let resp: serde_json::Value = serde_json::from_slice(&resp_msg.payload).unwrap();
 
             assert_eq!(
                 resp["stopReason"].as_str(),

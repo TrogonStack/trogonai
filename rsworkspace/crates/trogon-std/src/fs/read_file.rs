@@ -34,10 +34,7 @@ mod tests {
         let fs = MemFs::new();
         fs.insert("/seed.txt", "seeded content");
 
-        assert_eq!(
-            fs.read_to_string(Path::new("/seed.txt")).unwrap(),
-            "seeded content"
-        );
+        assert_eq!(fs.read_to_string(Path::new("/seed.txt")).unwrap(), "seeded content");
     }
 
     #[test]

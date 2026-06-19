@@ -68,10 +68,7 @@ pub fn slack_tool_defs() -> Vec<ToolDef> {
 /// future recovery checks can match by key without relying on text equality:
 /// `{ "metadata": { "event_type": "trogon_agent_msg",
 ///                  "event_payload": { "idempotency_key": "…" } } }`
-pub async fn send_message(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
+pub async fn send_message(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let text = input["text"].as_str().ok_or("missing text")?;
     let idempotency_key = input["_idempotency_key"].as_str();
@@ -101,10 +98,7 @@ pub async fn send_message(
             .http_client
             .get(
                 &history_url,
-                vec![(
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.slack_token),
-                )],
+                vec![("Authorization".to_string(), format!("Bearer {}", ctx.slack_token))],
             )
             .await
         {
@@ -119,16 +113,13 @@ pub async fn send_message(
                         .map(|msgs| {
                             msgs.iter().any(|m| {
                                 m["metadata"]["event_type"].as_str() == Some("trogon_agent_msg")
-                                    && m["metadata"]["event_payload"]["idempotency_key"].as_str()
-                                        == Some(key)
+                                    && m["metadata"]["event_payload"]["idempotency_key"].as_str() == Some(key)
                             })
                         })
                         .unwrap_or(false);
 
                     if metadata_match {
-                        return Ok(format!(
-                            "Message already sent to {channel} (skipped duplicate)"
-                        ));
+                        return Ok(format!("Message already sent to {channel} (skipped duplicate)"));
                     }
 
                     // Warn once when messages exist but none carry a `metadata`
@@ -137,9 +128,7 @@ pub async fn send_message(
                     // regenerates different wording on recovery, so surface the
                     // misconfiguration early rather than silently duplicating.
                     if messages
-                        .map(|msgs| {
-                            !msgs.is_empty() && msgs.iter().all(|m| m.get("metadata").is_none())
-                        })
+                        .map(|msgs| !msgs.is_empty() && msgs.iter().all(|m| m.get("metadata").is_none()))
                         .unwrap_or(false)
                     {
                         warn!(
@@ -158,9 +147,7 @@ pub async fn send_message(
                         .unwrap_or(false);
 
                     if text_match {
-                        return Ok(format!(
-                            "Message already sent to {channel} (skipped duplicate)"
-                        ));
+                        return Ok(format!("Message already sent to {channel} (skipped duplicate)"));
                     }
                 }
                 // History ok:false (e.g. missing scope) — proceed with send.
@@ -187,10 +174,7 @@ pub async fn send_message(
         .post(
             &url,
             vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.slack_token),
-                ),
+                ("Authorization".to_string(), format!("Bearer {}", ctx.slack_token)),
                 ("Content-Type".to_string(), "application/json".to_string()),
             ],
             body,
@@ -208,10 +192,7 @@ pub async fn send_message(
 }
 
 /// Read recent messages from a public Slack channel.
-pub async fn read_channel(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
+pub async fn read_channel(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let channel = input["channel"].as_str().ok_or("missing channel")?;
     let limit = input["limit"].as_u64().unwrap_or(20);
 
@@ -224,10 +205,7 @@ pub async fn read_channel(
         .http_client
         .get(
             &url,
-            vec![(
-                "Authorization".to_string(),
-                format!("Bearer {}", ctx.slack_token),
-            )],
+            vec![("Authorization".to_string(), format!("Bearer {}", ctx.slack_token))],
         )
         .await?;
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
@@ -350,10 +328,7 @@ mod tests {
             result.unwrap().contains("already sent"),
             "must detect duplicate via metadata primary match"
         );
-        assert!(
-            ctx.http_client.is_empty(),
-            "no POST should be made on metadata match"
-        );
+        assert!(ctx.http_client.is_empty(), "no POST should be made on metadata match");
     }
 
     /// When the history GET fails with a network error, `send_message` must
@@ -365,10 +340,8 @@ mod tests {
         // History GET fails.
         ctx.http_client.enqueue_err("connection refused");
         // POST succeeds.
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"ok": true, "ts": "1700000003.000003"}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"ok": true, "ts": "1700000003.000003"}).to_string());
 
         let result = send_message(
             &ctx,
@@ -379,10 +352,7 @@ mod tests {
             }),
         )
         .await;
-        assert!(
-            result.is_ok(),
-            "must succeed after history GET failure: {result:?}"
-        );
+        assert!(result.is_ok(), "must succeed after history GET failure: {result:?}");
         assert!(result.unwrap().contains("Message sent"));
     }
 
@@ -392,14 +362,10 @@ mod tests {
     async fn send_message_history_ok_false_proceeds_with_post() {
         let ctx = make_ctx();
 
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"ok": false, "error": "missing_scope"}).to_string(),
-        );
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"ok": true, "ts": "1700000004.000004"}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"ok": false, "error": "missing_scope"}).to_string());
+        ctx.http_client
+            .enqueue_ok(200, json!({"ok": true, "ts": "1700000004.000004"}).to_string());
 
         let result = send_message(
             &ctx,
@@ -410,10 +376,7 @@ mod tests {
             }),
         )
         .await;
-        assert!(
-            result.is_ok(),
-            "must succeed when history ok:false: {result:?}"
-        );
+        assert!(result.is_ok(), "must succeed when history ok:false: {result:?}");
         assert!(result.unwrap().contains("Message sent"));
     }
 
@@ -422,10 +385,8 @@ mod tests {
     #[tokio::test]
     async fn read_channel_ok_false_returns_error() {
         let ctx = make_ctx();
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"ok": false, "error": "channel_not_found"}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"ok": false, "error": "channel_not_found"}).to_string());
         let result = read_channel(&ctx, &json!({"channel": "C-MISSING"})).await;
         assert!(result.is_err(), "ok:false must return Err");
         assert!(
@@ -455,14 +416,8 @@ mod tests {
         let result = read_channel(&ctx, &json!({"channel": "C-MIXED"})).await;
         assert!(result.is_ok(), "read_channel must succeed: {result:?}");
         let body = result.unwrap();
-        assert!(
-            body.contains("visible message"),
-            "message with text must appear"
-        );
-        assert!(
-            !body.contains("U1"),
-            "message without text must be filtered"
-        );
+        assert!(body.contains("visible message"), "message with text must appear");
+        assert!(!body.contains("U1"), "message without text must be filtered");
     }
 
     /// When the send POST itself returns `ok: false`, `send_message` must
@@ -472,18 +427,12 @@ mod tests {
         let ctx = make_ctx();
 
         // No idempotency key → no history GET; only the POST runs.
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"ok": false, "error": "not_in_channel"}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"ok": false, "error": "not_in_channel"}).to_string());
 
-        let result =
-            send_message(&ctx, &json!({"channel": "C-RESTRICTED", "text": "Hello!"})).await;
+        let result = send_message(&ctx, &json!({"channel": "C-RESTRICTED", "text": "Hello!"})).await;
 
-        assert!(
-            result.is_err(),
-            "ok:false from POST must return Err: {result:?}"
-        );
+        assert!(result.is_err(), "ok:false from POST must return Err: {result:?}");
         assert!(
             result.unwrap_err().contains("not_in_channel"),
             "error must include Slack's error code"
@@ -501,10 +450,8 @@ mod tests {
         ctx.http_client.enqueue_ok(200, "not valid json {{");
 
         // POST: send the message normally.
-        ctx.http_client.enqueue_ok(
-            200,
-            json!({"ok": true, "ts": "1700000005.000005"}).to_string(),
-        );
+        ctx.http_client
+            .enqueue_ok(200, json!({"ok": true, "ts": "1700000005.000005"}).to_string());
 
         let result = send_message(
             &ctx,
@@ -521,10 +468,7 @@ mod tests {
             "must proceed with send when history JSON is invalid: {result:?}"
         );
         assert!(result.unwrap().contains("Message sent"));
-        assert!(
-            ctx.http_client.is_empty(),
-            "both GET and POST must have been consumed"
-        );
+        assert!(ctx.http_client.is_empty(), "both GET and POST must have been consumed");
     }
 
     /// When the HTTP response body is not valid JSON, `read_channel` must
@@ -535,10 +479,7 @@ mod tests {
         ctx.http_client.enqueue_ok(200, "not valid json {{");
 
         let result = read_channel(&ctx, &json!({"channel": "C-ENG"})).await;
-        assert!(
-            result.is_err(),
-            "invalid JSON response must return Err: {result:?}"
-        );
+        assert!(result.is_err(), "invalid JSON response must return Err: {result:?}");
     }
 
     /// When the channel history is empty, `read_channel` must return the

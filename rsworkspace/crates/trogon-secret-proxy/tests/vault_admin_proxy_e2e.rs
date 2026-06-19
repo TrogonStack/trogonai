@@ -153,9 +153,7 @@ async fn vault_admin_store_then_proxy_request_succeeds() {
     // ── 10. Send request through proxy using the newly registered token ────
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_runtimeabc")
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)
@@ -197,9 +195,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
         servers: vec![format!("localhost:{nats_port}")],
         auth: NatsAuth::None,
     };
-    let nats = connect(&nats_config, Duration::from_secs(10))
-        .await
-        .unwrap();
+    let nats = connect(&nats_config, Duration::from_secs(10)).await.unwrap();
     let jetstream = Arc::new(async_nats::jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
@@ -246,9 +242,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
     let admin_nats = nats.clone();
     let admin_vault = Arc::clone(&vault);
     tokio::spawn(async move {
-        vault_admin::run(admin_nats, admin_vault, "trogon", None)
-            .await
-            .ok();
+        vault_admin::run(admin_nats, admin_vault, "trogon", None).await.ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -283,9 +277,7 @@ async fn vault_admin_revoke_then_proxy_request_fails() {
     // Now try to use the revoked token through the proxy — must fail.
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_revokeme01")
         .header("Content-Type", "application/json")
         .body(r#"{}"#)
@@ -393,9 +385,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
     let admin_nats = nats.clone();
     let admin_vault = Arc::clone(&vault);
     tokio::spawn(async move {
-        vault_admin::run(admin_nats, admin_vault, "trogon", None)
-            .await
-            .ok();
+        vault_admin::run(admin_nats, admin_vault, "trogon", None).await.ok();
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -418,9 +408,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
     // ── Step 2: First proxy request — must reach mock with OLD key ─────────
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_rotatetest")
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)
@@ -452,9 +440,7 @@ async fn vault_admin_rotate_then_proxy_uses_new_key() {
 
     // ── Step 4: Second proxy request — must reach mock with NEW key ────────
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{proxy_port}/anthropic/v1/messages"
-        ))
+        .post(format!("http://127.0.0.1:{proxy_port}/anthropic/v1/messages"))
         .header("Authorization", "Bearer tok_anthropic_prod_rotatetest")
         .header("Content-Type", "application/json")
         .body(r#"{"model":"claude-opus-4-6","max_tokens":10,"messages":[]}"#)

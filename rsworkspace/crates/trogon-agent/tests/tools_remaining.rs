@@ -48,10 +48,7 @@ async fn get_pr_comments_calls_correct_proxy_path() {
         result.contains("LGTM"),
         "expected comment body in result, got: {result}"
     );
-    assert!(
-        result.contains("alice"),
-        "expected author in result, got: {result}"
-    );
+    assert!(result.contains("alice"), "expected author in result, got: {result}");
 }
 
 #[tokio::test]
@@ -79,10 +76,7 @@ async fn get_pr_comments_missing_owner_returns_error() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "repo": "api", "pr_number": 1 });
     let result = dispatch_tool(&ctx, "get_pr_comments", &input).await;
-    assert!(
-        result.contains("missing owner"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing owner"), "expected error, got: {result}");
 }
 
 #[tokio::test]
@@ -91,10 +85,7 @@ async fn get_pr_comments_missing_pr_number_returns_error() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "acme", "repo": "api" });
     let result = dispatch_tool(&ctx, "get_pr_comments", &input).await;
-    assert!(
-        result.contains("missing pr_number"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing pr_number"), "expected error, got: {result}");
 }
 
 // ── update_file ───────────────────────────────────────────────────────────────
@@ -124,14 +115,8 @@ async fn update_file_calls_correct_proxy_path_and_base64_encodes_content() {
     });
     let result = dispatch_tool(&ctx, "update_file", &input).await;
 
-    assert!(
-        result.contains("abc123def456"),
-        "expected commit sha, got: {result}"
-    );
-    assert!(
-        result.contains(".trogon/memory.md"),
-        "expected path, got: {result}"
-    );
+    assert!(result.contains("abc123def456"), "expected commit sha, got: {result}");
+    assert!(result.contains(".trogon/memory.md"), "expected path, got: {result}");
 }
 
 #[tokio::test]
@@ -156,10 +141,7 @@ async fn update_file_includes_sha_when_provided() {
         "sha": "existing_sha_789"
     });
     let result = dispatch_tool(&ctx, "update_file", &input).await;
-    assert!(
-        result.contains("newsha123"),
-        "expected commit sha, got: {result}"
-    );
+    assert!(result.contains("newsha123"), "expected commit sha, got: {result}");
 }
 
 #[tokio::test]
@@ -168,10 +150,7 @@ async fn update_file_missing_content_returns_error() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "acme", "repo": "api", "path": "f.md", "message": "m" });
     let result = dispatch_tool(&ctx, "update_file", &input).await;
-    assert!(
-        result.contains("missing content"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing content"), "expected error, got: {result}");
 }
 
 #[tokio::test]
@@ -180,10 +159,7 @@ async fn update_file_missing_message_returns_error() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "acme", "repo": "api", "path": "f.md", "content": "x" });
     let result = dispatch_tool(&ctx, "update_file", &input).await;
-    assert!(
-        result.contains("missing message"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing message"), "expected error, got: {result}");
 }
 
 #[tokio::test]
@@ -214,11 +190,7 @@ async fn update_file_no_sha_omits_sha_field_in_body() {
     });
     let result = dispatch_tool(&ctx, "update_file", &input).await;
     assert!(result.contains("abc"), "expected ok result, got: {result}");
-    assert_eq!(
-        bad_mock.hits(),
-        0,
-        "sha must not appear in body when not provided"
-    );
+    assert_eq!(bad_mock.hits(), 0, "sha must not appear in body when not provided");
     let _ = ok_mock;
 }
 
@@ -286,10 +258,7 @@ async fn create_pull_request_missing_title_returns_error() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "acme", "repo": "api", "head": "feat" });
     let result = dispatch_tool(&ctx, "create_pull_request", &input).await;
-    assert!(
-        result.contains("missing title"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing title"), "expected error, got: {result}");
 }
 
 #[tokio::test]
@@ -298,10 +267,7 @@ async fn create_pull_request_missing_head_returns_error() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "acme", "repo": "api", "title": "T" });
     let result = dispatch_tool(&ctx, "create_pull_request", &input).await;
-    assert!(
-        result.contains("missing head"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing head"), "expected error, got: {result}");
 }
 
 #[tokio::test]
@@ -309,8 +275,7 @@ async fn create_pull_request_no_html_url_in_response_uses_fallback() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/github/repos/acme/api/pulls");
+        when.method(httpmock::Method::POST).path("/github/repos/acme/api/pulls");
         then.status(201)
             .header("content-type", "application/json")
             .json_body(json!({ "number": 5 })); // no html_url
@@ -319,10 +284,7 @@ async fn create_pull_request_no_html_url_in_response_uses_fallback() {
     let ctx = make_ctx(&server.base_url());
     let input = json!({ "owner": "acme", "repo": "api", "title": "T", "head": "feat" });
     let result = dispatch_tool(&ctx, "create_pull_request", &input).await;
-    assert!(
-        result.contains("(no url)"),
-        "expected fallback url, got: {result}"
-    );
+    assert!(result.contains("(no url)"), "expected fallback url, got: {result}");
     assert!(result.contains("#5"), "expected PR number, got: {result}");
 }
 
@@ -359,10 +321,7 @@ async fn get_linear_comments_calls_graphql_and_returns_nodes() {
     let input = json!({ "issue_id": "ISS-42" });
     let result = dispatch_tool(&ctx, "get_linear_comments", &input).await;
 
-    assert!(
-        result.contains("First comment"),
-        "expected comment body, got: {result}"
-    );
+    assert!(result.contains("First comment"), "expected comment body, got: {result}");
     assert!(result.contains("Alice"), "expected author, got: {result}");
 }
 
@@ -390,8 +349,5 @@ async fn get_linear_comments_missing_issue_id_returns_error() {
     let server = MockServer::start_async().await;
     let ctx = make_ctx(&server.base_url());
     let result = dispatch_tool(&ctx, "get_linear_comments", &json!({})).await;
-    assert!(
-        result.contains("missing issue_id"),
-        "expected error, got: {result}"
-    );
+    assert!(result.contains("missing issue_id"), "expected error, got: {result}");
 }

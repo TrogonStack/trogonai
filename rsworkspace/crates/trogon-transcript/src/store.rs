@@ -59,11 +59,7 @@ impl TranscriptStore {
     ///
     /// The result is bounded by [`MAX_QUERY_ENTRIES`]. For entities with very
     /// long histories, use `replay` to read one session at a time.
-    pub async fn query(
-        &self,
-        actor_type: &str,
-        actor_key: &str,
-    ) -> Result<Vec<TranscriptEntry>, TranscriptError> {
+    pub async fn query(&self, actor_type: &str, actor_key: &str) -> Result<Vec<TranscriptEntry>, TranscriptError> {
         let filter = entity_subject_filter(actor_type, actor_key);
         self.fetch_entries(filter).await
     }
@@ -84,10 +80,7 @@ impl TranscriptStore {
     /// up to `MAX_QUERY_ENTRIES` messages, deserialize them, and return as a
     /// `Vec`. The ephemeral consumer is cleaned up by NATS after its inactivity
     /// threshold elapses.
-    async fn fetch_entries(
-        &self,
-        filter_subject: String,
-    ) -> Result<Vec<TranscriptEntry>, TranscriptError> {
+    async fn fetch_entries(&self, filter_subject: String) -> Result<Vec<TranscriptEntry>, TranscriptError> {
         let stream = self
             .js
             .get_stream(STREAM_NAME)
@@ -114,8 +107,8 @@ impl TranscriptStore {
         let mut entries = Vec::new();
         while let Some(result) = messages.next().await {
             let msg = result.map_err(|e| TranscriptError::Stream(e.to_string()))?;
-            let entry = serde_json::from_slice::<TranscriptEntry>(&msg.payload)
-                .map_err(TranscriptError::Deserialization)?;
+            let entry =
+                serde_json::from_slice::<TranscriptEntry>(&msg.payload).map_err(TranscriptError::Deserialization)?;
             entries.push(entry);
         }
 

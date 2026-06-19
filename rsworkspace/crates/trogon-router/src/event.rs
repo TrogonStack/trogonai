@@ -24,9 +24,7 @@ impl RouterEvent {
     ///
     /// Example: `"trogon.events.github.pull_request"` → `"github.pull_request"`
     pub fn event_type(&self) -> &str {
-        self.subject
-            .strip_prefix("trogon.events.")
-            .unwrap_or(&self.subject)
+        self.subject.strip_prefix("trogon.events.").unwrap_or(&self.subject)
     }
 
     /// Payload as a UTF-8 string for inclusion in LLM prompts.

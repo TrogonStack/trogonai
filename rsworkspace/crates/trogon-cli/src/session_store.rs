@@ -184,14 +184,7 @@ pub fn new_session_entry(
 }
 
 /// Record the active session in the local index (`sessions.json`).
-pub fn persist_session<F: Fs>(
-    fs: &F,
-    project: &Path,
-    prefix: &str,
-    session_id: &str,
-    model: &str,
-    name: Option<&str>,
-) {
+pub fn persist_session<F: Fs>(fs: &F, project: &Path, prefix: &str, session_id: &str, model: &str, name: Option<&str>) {
     let mut index = SessionIndex::load(fs);
     let mut entry = new_session_entry(prefix, session_id, model);
     entry.name = name.map(String::from);

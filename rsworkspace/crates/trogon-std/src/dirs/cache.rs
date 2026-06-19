@@ -34,10 +34,7 @@ mod tests {
         let mut dirs = FixedDirs::new();
         dirs.set(DirKind::Cache, "/cache");
 
-        assert_eq!(
-            cache_file(&dirs, "index.bin"),
-            Some(PathBuf::from("/cache/index.bin"))
-        );
+        assert_eq!(cache_file(&dirs, "index.bin"), Some(PathBuf::from("/cache/index.bin")));
         assert_eq!(cache_file(&FixedDirs::new(), "index.bin"), None);
     }
 }

@@ -20,12 +20,10 @@ use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tower::ServiceExt as _;
-use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{
-    ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge,
-};
 use trogon_gateway::source::github::config::{GitHubWebhookSecret, GithubConfig};
 use trogon_gateway::source::linear::config::{LinearConfig, LinearWebhookSecret};
+use trogon_nats::NatsToken;
+use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge};
 use trogon_std::NonZeroDuration;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -136,14 +134,8 @@ async fn setup() -> TestFixture {
     // Mirror mount_sources() from http.rs, but using only GitHub and Linear to keep
     // the test focused and avoid provisioning every source's stream.
     let app = axum::Router::new()
-        .route(
-            "/-/liveness",
-            axum::routing::get(|| async { StatusCode::OK }),
-        )
-        .route(
-            "/-/readiness",
-            axum::routing::get(|| async { StatusCode::OK }),
-        )
+        .route("/-/liveness", axum::routing::get(|| async { StatusCode::OK }))
+        .route("/-/readiness", axum::routing::get(|| async { StatusCode::OK }))
         .nest(
             "/github",
             trogon_gateway::source::github::router(publisher.clone(), &gh_cfg),
@@ -238,10 +230,9 @@ async fn linear_webhook_at_nested_path_publishes_to_nats() {
     let fixture = setup().await;
 
     let ts = now_ms();
-    let body = format!(
-        r#"{{"type":"Issue","action":"create","webhookId":"gw-lin-001","webhookTimestamp":{ts},"data":{{}}}}"#
-    )
-    .into_bytes();
+    let body =
+        format!(r#"{{"type":"Issue","action":"create","webhookId":"gw-lin-001","webhookTimestamp":{ts},"data":{{}}}}"#)
+            .into_bytes();
     let sig = linear_sig(&body);
 
     let mut sub = fixture.nats.subscribe("linear.>").await.unwrap();

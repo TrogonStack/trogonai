@@ -214,9 +214,7 @@ impl<H: HttpClient> HashicorpVaultStore<H> {
         let first = f(self.current_token()).await;
 
         let should_retry = match &first {
-            Err(HashicorpVaultError::Api { status, .. }) if *status == 403 => {
-                !matches!(self.auth, VaultAuth::Token(_))
-            }
+            Err(HashicorpVaultError::Api { status, .. }) if *status == 403 => !matches!(self.auth, VaultAuth::Token(_)),
             _ => false,
         };
 
@@ -248,9 +246,7 @@ async fn authenticate_with<H: HttpClient>(
 ) -> Result<String, HashicorpVaultError> {
     match auth {
         VaultAuth::Token(t) => Ok(t.clone()),
-        VaultAuth::AppRole { role_id, secret_id } => {
-            approle_login(client, vault_addr, role_id, secret_id).await
-        }
+        VaultAuth::AppRole { role_id, secret_id } => approle_login(client, vault_addr, role_id, secret_id).await,
         VaultAuth::Kubernetes { role, jwt_path } => {
             kubernetes_login(client, vault_addr, role, jwt_path.as_deref()).await
         }
@@ -265,7 +261,11 @@ async fn approle_login<H: HttpClient>(
 ) -> Result<String, HashicorpVaultError> {
     let url = format!("{vault_addr}/v1/auth/approle/login");
     let resp = client
-        .post_json(url, serde_json::json!({"role_id": role_id, "secret_id": secret_id}), vec![])
+        .post_json(
+            url,
+            serde_json::json!({"role_id": role_id, "secret_id": secret_id}),
+            vec![],
+        )
         .await
         .map_err(|e| HashicorpVaultError::Http(HttpError::from(e)))?;
     extract_client_token(resp, "approle")
@@ -294,24 +294,20 @@ async fn kubernetes_login<H: HttpClient>(
     extract_client_token(resp, "kubernetes")
 }
 
-fn extract_client_token(
-    resp: HttpResponse,
-    method: &str,
-) -> Result<String, HashicorpVaultError> {
+fn extract_client_token(resp: HttpResponse, method: &str) -> Result<String, HashicorpVaultError> {
     if (200u16..300).contains(&resp.status) {
-        let json: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| HashicorpVaultError::Deserialize(e.to_string()))?;
+        let json: Value =
+            serde_json::from_str(&resp.body).map_err(|e| HashicorpVaultError::Deserialize(e.to_string()))?;
         json.pointer("/auth/client_token")
             .and_then(|v| v.as_str())
             .map(String::from)
-            .ok_or_else(|| {
-                HashicorpVaultError::Auth(format!(
-                    "missing client_token in {method} login response"
-                ))
-            })
+            .ok_or_else(|| HashicorpVaultError::Auth(format!("missing client_token in {method} login response")))
     } else {
         let errors = parse_vault_errors(&resp.body);
-        Err(HashicorpVaultError::Api { status: resp.status, errors })
+        Err(HashicorpVaultError::Api {
+            status: resp.status,
+            errors,
+        })
     }
 }
 
@@ -319,11 +315,9 @@ fn parse_vault_errors(body: &str) -> Vec<String> {
     serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|v| {
-            v.get("errors")?.as_array().map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.as_str().map(String::from))
-                    .collect()
-            })
+            v.get("errors")?
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|e| e.as_str().map(String::from)).collect())
         })
         .unwrap_or_default()
 }
@@ -352,7 +346,10 @@ impl<H: HttpClient> VaultStore for HashicorpVaultStore<H> {
                     Ok(())
                 } else {
                     let errors = parse_vault_errors(&resp.body);
-                    Err(HashicorpVaultError::Api { status: resp.status, errors })
+                    Err(HashicorpVaultError::Api {
+                        status: resp.status,
+                        errors,
+                    })
                 }
             }
         })
@@ -384,9 +381,7 @@ impl<H: HttpClient> VaultStore for HashicorpVaultStore<H> {
                         .and_then(|v| v.as_str())
                         .map(String::from)
                         .ok_or_else(|| {
-                            HashicorpVaultError::Deserialize(
-                                "missing .data.data.api_key in Vault response".to_string(),
-                            )
+                            HashicorpVaultError::Deserialize("missing .data.data.api_key in Vault response".to_string())
                         })?;
                     Ok(Some(key))
                 } else {
@@ -449,11 +444,7 @@ mod tests {
     /// Build a Token-auth store pointing at the given mock server.
     async fn token_store(server: &MockServer) -> HashicorpVaultStore {
         let vault_addr = format!("http://{}", server.address());
-        let config = HashicorpVaultConfig::new(
-            &vault_addr,
-            "ai-keys",
-            VaultAuth::Token("test-token".to_string()),
-        );
+        let config = HashicorpVaultConfig::new(&vault_addr, "ai-keys", VaultAuth::Token("test-token".to_string()));
         HashicorpVaultStore::new(config).await.unwrap()
     }
 
@@ -513,8 +504,7 @@ mod tests {
     async fn resolve_returns_api_key() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"data":{"api_key":"sk-ant-realkey"},"metadata":{}}}"#);
@@ -531,8 +521,7 @@ mod tests {
     async fn resolve_returns_none_for_404() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(404)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":[]}"#);
@@ -549,8 +538,7 @@ mod tests {
     async fn revoke_deletes_metadata_path() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(DELETE)
-                .path("/v1/ai-keys/metadata/anthropic/prod/a1b2c3");
+            when.method(DELETE).path("/v1/ai-keys/metadata/anthropic/prod/a1b2c3");
             then.status(204);
         });
 
@@ -566,8 +554,7 @@ mod tests {
     async fn revoke_returns_ok_when_vault_responds_404() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(DELETE)
-                .path("/v1/ai-keys/metadata/anthropic/prod/a1b2c3");
+            when.method(DELETE).path("/v1/ai-keys/metadata/anthropic/prod/a1b2c3");
             then.status(404)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":[]}"#);
@@ -576,10 +563,7 @@ mod tests {
         let store = token_store(&server).await;
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.revoke(&token).await;
-        assert!(
-            result.is_ok(),
-            "404 on revoke must be treated as success (idempotent)"
-        );
+        assert!(result.is_ok(), "404 on revoke must be treated as success (idempotent)");
         mock.assert();
     }
 
@@ -590,8 +574,7 @@ mod tests {
     async fn parse_vault_errors_with_non_array_errors_field_returns_empty() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(500)
                 .header("content-type", "application/json")
                 // "errors" is a string, not an array
@@ -602,10 +585,7 @@ mod tests {
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.resolve(&token).await;
         match result {
-            Err(HashicorpVaultError::Api {
-                status: 500,
-                errors,
-            }) => {
+            Err(HashicorpVaultError::Api { status: 500, errors }) => {
                 assert!(
                     errors.is_empty(),
                     "non-array errors field must yield empty Vec, got: {:?}",
@@ -623,8 +603,7 @@ mod tests {
     async fn token_auth_403_returned_immediately_without_retry() {
         let server = MockServer::start();
         let resolve_mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(403)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":["permission denied"]}"#);
@@ -647,8 +626,7 @@ mod tests {
     async fn api_error_propagated() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(403)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":["permission denied"]}"#);
@@ -658,10 +636,7 @@ mod tests {
         let store = token_store(&server).await;
         let token = tok("tok_anthropic_prod_a1b2c3");
         let result = store.resolve(&token).await;
-        assert!(matches!(
-            result,
-            Err(HashicorpVaultError::Api { status: 403, .. })
-        ));
+        assert!(matches!(result, Err(HashicorpVaultError::Api { status: 403, .. })));
     }
 
     #[tokio::test]
@@ -738,11 +713,7 @@ mod tests {
             },
         );
         let result = HashicorpVaultStore::new(config).await;
-        assert!(
-            result.is_ok(),
-            "Kubernetes auth must succeed: {:?}",
-            result.err()
-        );
+        assert!(result.is_ok(), "Kubernetes auth must succeed: {:?}", result.err());
         mock.assert();
 
         std::fs::remove_file(&jwt_file).ok();
@@ -913,8 +884,7 @@ mod tests {
     async fn resolve_returns_deserialize_error_when_api_key_is_null() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"data":{"api_key":null},"metadata":{}}}"#);
@@ -936,8 +906,7 @@ mod tests {
     async fn resolve_returns_deserialize_error_when_api_key_field_absent() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"data":{"data":{},"metadata":{}}}"#);
@@ -959,8 +928,7 @@ mod tests {
     async fn resolve_non_json_error_response_propagates_status_with_empty_errors() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(500)
                 .header("content-type", "text/plain")
                 .body("internal server error");
@@ -972,10 +940,7 @@ mod tests {
         match result {
             Err(HashicorpVaultError::Api { status, errors }) => {
                 assert_eq!(status, 500);
-                assert!(
-                    errors.is_empty(),
-                    "non-JSON body must produce empty errors vec"
-                );
+                assert!(errors.is_empty(), "non-JSON body must produce empty errors vec");
             }
             other => panic!("expected Api error, got: {:?}", other.err()),
         }
@@ -1000,8 +965,7 @@ mod tests {
 
         // Resolve returns 403 → triggers re-auth.
         let _resolve_403 = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(403)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":["permission denied"]}"#);
@@ -1170,17 +1134,10 @@ mod tests {
         let server = MockServer::start();
         let vault_addr = format!("http://{}", server.address());
 
-        let config = HashicorpVaultConfig::new(
-            &vault_addr,
-            "ai-keys",
-            VaultAuth::Token("static-token".to_string()),
-        )
-        .with_tls_skip_verify();
+        let config = HashicorpVaultConfig::new(&vault_addr, "ai-keys", VaultAuth::Token("static-token".to_string()))
+            .with_tls_skip_verify();
 
-        assert!(
-            config.tls_skip_verify,
-            "flag must be true after with_tls_skip_verify()"
-        );
+        assert!(config.tls_skip_verify, "flag must be true after with_tls_skip_verify()");
 
         // Creating the store must succeed — the dangerous-cert client builds
         // without error even though we are not actually bypassing TLS here.
@@ -1221,8 +1178,7 @@ mod tests {
             "expected Io error, got: {err}"
         );
         assert!(
-            err.to_string()
-                .contains("empty or contains only whitespace"),
+            err.to_string().contains("empty or contains only whitespace"),
             "error message must mention the cause, got: {err}"
         );
     }
@@ -1235,8 +1191,7 @@ mod tests {
         let store = token_store(&server).await;
 
         let resolve_500 = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
+            when.method(GET).path("/v1/ai-keys/data/anthropic/prod/a1b2c3");
             then.status(500)
                 .header("content-type", "application/json")
                 .body(r#"{"errors":["internal server error"]}"#);
@@ -1325,14 +1280,22 @@ mod tests {
     async fn mock_store_returns_ok_on_200() {
         let http = MockHttpClient::new();
         http.enqueue(200, r#"{"data":{"created_time":"t"}}"#);
-        mock_store(http).await.store(&tok("tok_anthropic_prod_a1b2c3"), "sk-real").await.unwrap();
+        mock_store(http)
+            .await
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "sk-real")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn mock_resolve_parses_secret_value() {
         let http = MockHttpClient::new();
         http.enqueue(200, r#"{"data":{"data":{"api_key":"sk-real-key"},"metadata":{}}}"#);
-        let val = mock_store(http).await.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        let val = mock_store(http)
+            .await
+            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
         assert_eq!(val, Some("sk-real-key".to_string()));
     }
 
@@ -1340,7 +1303,11 @@ mod tests {
     async fn mock_resolve_returns_none_on_404() {
         let http = MockHttpClient::new();
         http.enqueue(404, r#"{"errors":[]}"#);
-        let val = mock_store(http).await.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        let val = mock_store(http)
+            .await
+            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
         assert!(val.is_none());
     }
 
@@ -1348,7 +1315,11 @@ mod tests {
     async fn mock_resolve_returns_api_error_on_5xx() {
         let http = MockHttpClient::new();
         http.enqueue(500, r#"{"errors":["internal server error"]}"#);
-        let err = mock_store(http).await.resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap_err();
+        let err = mock_store(http)
+            .await
+            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap_err();
         assert!(matches!(err, HashicorpVaultError::Api { status: 500, .. }));
     }
 
@@ -1356,14 +1327,22 @@ mod tests {
     async fn mock_revoke_returns_ok_on_204() {
         let http = MockHttpClient::new();
         http.enqueue(204, "");
-        mock_store(http).await.revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        mock_store(http)
+            .await
+            .revoke(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn mock_revoke_returns_api_error_on_403() {
         let http = MockHttpClient::new();
         http.enqueue(403, r#"{"errors":["permission denied"]}"#);
-        let err = mock_store(http).await.revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap_err();
+        let err = mock_store(http)
+            .await
+            .revoke(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap_err();
         assert!(matches!(err, HashicorpVaultError::Api { status: 403, .. }));
     }
 }

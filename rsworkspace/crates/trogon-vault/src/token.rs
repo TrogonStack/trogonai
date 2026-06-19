@@ -299,10 +299,7 @@ mod tests {
     fn ai_provider_display() {
         assert_eq!(AiProvider::Anthropic.to_string(), "anthropic");
         assert_eq!(AiProvider::OpenAi.to_string(), "openai");
-        assert_eq!(
-            AiProvider::Other("custom".to_string()).to_string(),
-            "custom"
-        );
+        assert_eq!(AiProvider::Other("custom".to_string()).to_string(), "custom");
     }
 
     #[test]
@@ -317,10 +314,6 @@ mod tests {
         assert!(TokenError::MissingPrefix.to_string().contains("tok_"));
         assert!(TokenError::TooFewSegments.to_string().contains("format"));
         assert!(TokenError::EmptyId.to_string().contains("id segment"));
-        assert!(
-            TokenError::InvalidIdCharacter('-')
-                .to_string()
-                .contains("'-'")
-        );
+        assert!(TokenError::InvalidIdCharacter('-').to_string().contains("'-'"));
     }
 }

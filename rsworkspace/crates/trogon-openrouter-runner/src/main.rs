@@ -7,9 +7,7 @@ use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
-use trogon_openrouter_runner::{
-    AgentLoader, NatsSessionNotifier, NatsSessionStore, OpenRouterAgent, SkillLoader,
-};
+use trogon_openrouter_runner::{AgentLoader, NatsSessionNotifier, NatsSessionStore, OpenRouterAgent, SkillLoader};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -57,8 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cap = trogon_registry::AgentCapability {
         agent_type: cfg.agent_type.clone(),
         capabilities: trogon_registry::RunnerCapability::to_strings(
-            trogon_registry::expected_runner_capabilities("openrouter")
-                .expect("openrouter capabilities"),
+            trogon_registry::expected_runner_capabilities("openrouter").expect("openrouter capabilities"),
         ),
         nats_subject: format!("{}.agent.>", cfg.prefix),
         current_load: 0,
@@ -81,12 +78,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    let nats_config = acp_nats::NatsConfig { servers: vec![cfg.nats_url.clone()], auth: acp_nats::NatsAuth::None };
+    let nats_config = acp_nats::NatsConfig {
+        servers: vec![cfg.nats_url.clone()],
+        auth: acp_nats::NatsAuth::None,
+    };
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let proxy_url =
-        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
     let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
     let classifier_http = reqwest::Client::new();
@@ -96,11 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         anthropic_base_url.as_deref(),
         anthropic_token,
     );
-    let mut agent = OpenRouterAgent::new(
-        notifier,
-        cfg.default_model,
-        cfg.api_key.unwrap_or_default(),
-    );
+    let mut agent = OpenRouterAgent::new(notifier, cfg.default_model, cfg.api_key.unwrap_or_default());
     agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
     agent = agent.with_compactor(nats.clone());
     agent = agent.with_permissions(nats.clone(), acp_prefix.clone());
@@ -140,8 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_for_perm = nats.clone();
     let prefix_for_perm = acp_prefix.clone();
 
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
     agent = agent.with_elicitation(elic_tx);
     let nats_for_elic = nats.clone();
     let prefix_for_elic = acp_prefix.clone();
@@ -171,10 +165,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             });
 
-            let (_conn, io_task) =
-                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             // LOW-16: register AFTER the ACP subscription is established so
             // incoming requests are not received before we can handle them.
             if let Err(e) = registry_for_register.register(&cap).await {
@@ -182,7 +175,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     format!("initial registry registration failed: {e}").into(),
                 ));
             }
-            info!(agent_type = agent_type_for_log, prefix = prefix_for_log, "registered in agent registry");
+            info!(
+                agent_type = agent_type_for_log,
+                prefix = prefix_for_log,
+                "registered in agent registry"
+            );
             info!("openrouter-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,

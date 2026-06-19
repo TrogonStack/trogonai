@@ -92,9 +92,7 @@ impl<H: HttpClient> SplitClient<H> {
         flag: &dyn FeatureFlag,
         attributes: Option<&HashMap<String, Value>>,
     ) -> bool {
-        self.get_treatment_or_control(key, flag.name(), attributes)
-            .await
-            == "on"
+        self.get_treatment_or_control(key, flag.name(), attributes).await == "on"
     }
 
     /// Return `true` if **all** of the provided flags are `"on"` for the user.
@@ -296,10 +294,7 @@ mod tests {
     async fn treatment_for_returns_raw_treatment() {
         let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"blue"}"#);
         let client = SplitClient::new_with(make_config(), mock);
-        let t = client
-            .treatment_for("u", &AppFlag::NewDashboard, None)
-            .await
-            .unwrap();
+        let t = client.treatment_for("u", &AppFlag::NewDashboard, None).await.unwrap();
         assert_eq!(t, "blue");
     }
 
@@ -325,8 +320,7 @@ mod tests {
     /// is made, which would fail the test if short-circuiting is broken.
     #[tokio::test]
     async fn all_enabled_short_circuits_after_first_false() {
-        let mock = MockHttpClient::new()
-            .enqueue_ok(200, r#"{"treatment":"off"}"#); // NewDashboard → off; BetaSearch must not be queried
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"off"}"#); // NewDashboard → off; BetaSearch must not be queried
         let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(!client.all_enabled("u", &flags, None).await);
@@ -337,8 +331,7 @@ mod tests {
     /// is made, which would fail the test if short-circuiting is broken.
     #[tokio::test]
     async fn any_enabled_short_circuits_after_first_true() {
-        let mock = MockHttpClient::new()
-            .enqueue_ok(200, r#"{"treatment":"on"}"#); // NewDashboard → on; BetaSearch must not be queried
+        let mock = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"on"}"#); // NewDashboard → on; BetaSearch must not be queried
         let client = SplitClient::new_with(make_config(), mock);
         let flags: Vec<&dyn FeatureFlag> = vec![&AppFlag::NewDashboard, &AppFlag::BetaSearch];
         assert!(client.any_enabled("u", &flags, None).await);
@@ -348,9 +341,6 @@ mod tests {
 
     #[test]
     fn description_defaults_to_name() {
-        assert_eq!(
-            AppFlag::NewDashboard.description(),
-            AppFlag::NewDashboard.name()
-        );
+        assert_eq!(AppFlag::NewDashboard.description(), AppFlag::NewDashboard.name());
     }
 }

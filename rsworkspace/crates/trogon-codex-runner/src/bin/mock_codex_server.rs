@@ -61,10 +61,9 @@ fn main() {
     // Used by pending_history integration tests to verify the prepend.
     let record_turn_input_file = std::env::var("MOCK_RECORD_TURN_INPUT_FILE").ok();
     let send_tool_event = std::env::var("MOCK_SEND_TOOL_EVENT").is_ok();
-    let broadcast_error_after_turns: Option<usize> =
-        std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
-            .ok()
-            .and_then(|s| s.parse().ok());
+    let broadcast_error_after_turns: Option<usize> = std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
+        .ok()
+        .and_then(|s| s.parse().ok());
     let validate_schema = std::env::var("MOCK_VALIDATE_SCHEMA").is_ok();
 
     let stdin = std::io::stdin();
@@ -156,7 +155,11 @@ fn main() {
                         .unwrap_or(false);
                     let user_input_ok = msg["params"]["userInput"].is_string();
                     if !thread_id_ok {
-                        respond_error(&mut out, &id, "schema: turn/start params.threadId must be a non-empty string");
+                        respond_error(
+                            &mut out,
+                            &id,
+                            "schema: turn/start params.threadId must be a non-empty string",
+                        );
                         continue;
                     }
                     if !user_input_ok {
@@ -167,7 +170,11 @@ fn main() {
                         && !model_val.is_null()
                         && model_val.as_str().map(|s| s.is_empty()).unwrap_or(true)
                     {
-                        respond_error(&mut out, &id, "schema: turn/start params.model must be a non-empty string when present");
+                        respond_error(
+                            &mut out,
+                            &id,
+                            "schema: turn/start params.model must be a non-empty string when present",
+                        );
                         continue;
                     }
                 }

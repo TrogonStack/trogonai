@@ -37,8 +37,7 @@ use trogon_compactor::service::{self, ProviderConfig, ServiceState};
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "trogon_compactor=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "trogon_compactor=info".into()),
         )
         .init();
 
@@ -98,8 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             api_url,
             token,
             auth_style,
-            default_model: std::env::var("COMPACTOR_MODEL")
-                .unwrap_or_else(|_| "claude-haiku-4-5-20251001".into()),
+            default_model: std::env::var("COMPACTOR_MODEL").unwrap_or_else(|_| "claude-haiku-4-5-20251001".into()),
         }
     });
     let xai = std::env::var("COMPACTOR_XAI_TOKEN")
@@ -113,8 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 api_url: format!("{}/chat/completions", base.trim_end_matches('/')),
                 token,
                 auth_style: AuthStyle::Bearer,
-                default_model: std::env::var("COMPACTOR_XAI_MODEL")
-                    .unwrap_or_else(|_| "grok-3".into()),
+                default_model: std::env::var("COMPACTOR_XAI_MODEL").unwrap_or_else(|_| "grok-3".into()),
             }
         });
     let openrouter = std::env::var("COMPACTOR_OPENROUTER_TOKEN")

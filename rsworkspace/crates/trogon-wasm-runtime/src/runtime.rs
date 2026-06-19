@@ -3,17 +3,15 @@ use crate::metrics::METRICS;
 use crate::session::WasmSession;
 use crate::terminal::{TerminalKind, WasmTerminal};
 use crate::traits::{
-    ChildProcessHandle, Clock, Fs, IdGenerator, NatsBroker, ProcessSpawner, Runtime,
-    SemaphoreTaskLimiter, StdClock, StdSyncFs, TaskLimiter, TokioFs, TokioProcessSpawner,
-    UuidGenerator, WasmExecutor, WasmRunConfig,
+    ChildProcessHandle, Clock, Fs, IdGenerator, NatsBroker, ProcessSpawner, Runtime, SemaphoreTaskLimiter, StdClock,
+    StdSyncFs, TaskLimiter, TokioFs, TokioProcessSpawner, UuidGenerator, WasmExecutor, WasmRunConfig,
 };
 use crate::wasm::RealWasmExecutor;
 use agent_client_protocol::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification, TerminalExitStatus, TerminalId,
-    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionNotification,
+    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use std::cell::RefCell;
@@ -103,10 +101,7 @@ impl WasmRuntime<TokioFs, TokioProcessSpawner, async_nats::Client> {
         Self::with_nats(config, None)
     }
 
-    pub fn with_nats(
-        config: &Config,
-        nats_client: Option<async_nats::Client>,
-    ) -> Result<Self, wasmtime::Error> {
+    pub fn with_nats(config: &Config, nats_client: Option<async_nats::Client>) -> Result<Self, wasmtime::Error> {
         let wasm_executor = RealWasmExecutor::new(config)?;
         let permits = if config.wasm_max_concurrent_tasks == 0 {
             tokio::sync::Semaphore::MAX_PERMITS
@@ -187,10 +182,7 @@ where
             return s.dir.clone();
         }
         let dir = self.session_root.join(session_id);
-        sessions.insert(
-            session_id.to_string(),
-            WasmSession::new(dir.clone(), self.clock.now()),
-        );
+        sessions.insert(session_id.to_string(), WasmSession::new(dir.clone(), self.clock.now()));
         dir
     }
 
@@ -374,7 +366,9 @@ where
         if self.wasm_only {
             return Err(agent_client_protocol::Error::new(
                 -32602,
-                format!("native process spawning is disabled (wasm_only=true); command must be a .wasm file: {command}"),
+                format!(
+                    "native process spawning is disabled (wasm_only=true); command must be a .wasm file: {command}"
+                ),
             ));
         }
 
@@ -386,26 +380,13 @@ where
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         // Build the env pairs to forward from the request.
-        let env_pairs: Vec<(String, String)> = req
-            .env
-            .iter()
-            .map(|e| (e.name.clone(), e.value.clone()))
-            .collect();
+        let env_pairs: Vec<(String, String)> = req.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect();
 
         let mut handle = self
             .process_spawner
-            .spawn(
-                command,
-                args,
-                &env_pairs,
-                &cwd,
-                &cwd,
-                &sandbox_dir.join("tmp"),
-            )
+            .spawn(command, args, &env_pairs, &cwd, &cwd, &sandbox_dir.join("tmp"))
             .await
-            .map_err(|e| {
-                agent_client_protocol::Error::new(-32603, format!("Failed to spawn process: {e}"))
-            })?;
+            .map_err(|e| agent_client_protocol::Error::new(-32603, format!("Failed to spawn process: {e}")))?;
 
         let stdin = handle.take_stdin();
 
@@ -421,12 +402,7 @@ where
                 loop {
                     match stdout.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => crate::terminal::append_output(
-                            &buf_stdout,
-                            &trunc_stdout,
-                            limit,
-                            &chunk[..n],
-                        ),
+                        Ok(n) => crate::terminal::append_output(&buf_stdout, &trunc_stdout, limit, &chunk[..n]),
                         Err(_) => break,
                     }
                 }
@@ -444,12 +420,7 @@ where
                 loop {
                     match stderr.read(&mut chunk).await {
                         Ok(0) => break,
-                        Ok(n) => crate::terminal::append_output(
-                            &buf_stderr,
-                            &trunc_stderr,
-                            limit,
-                            &chunk[..n],
-                        ),
+                        Ok(n) => crate::terminal::append_output(&buf_stderr, &trunc_stderr, limit, &chunk[..n]),
                         Err(_) => break,
                     }
                 }
@@ -475,9 +446,7 @@ where
         };
 
         info!(session_id, terminal_id, command, "Terminal created");
-        self.terminals
-            .borrow_mut()
-            .insert(terminal_id.clone(), terminal);
+        self.terminals.borrow_mut().insert(terminal_id.clone(), terminal);
 
         // Track terminal → session mapping for session-level cleanup.
         self.session_terminals
@@ -489,9 +458,7 @@ where
             .borrow_mut()
             .insert(terminal_id.clone(), session_id.to_string());
 
-        Ok(CreateTerminalResponse::new(TerminalId::new(
-            terminal_id.as_str(),
-        )))
+        Ok(CreateTerminalResponse::new(TerminalId::new(terminal_id.as_str())))
     }
 
     /// Runs a `.wasm` module as a background tokio task.
@@ -515,11 +482,7 @@ where
             if p.is_absolute() {
                 p
             } else {
-                let resolved = self
-                    .sessions
-                    .borrow()
-                    .get(session_id)
-                    .and_then(|s| s.resolve_path(&p));
+                let resolved = self.sessions.borrow().get(session_id).and_then(|s| s.resolve_path(&p));
                 resolved.ok_or_else(|| {
                     agent_client_protocol::Error::new(
                         -32602,
@@ -528,10 +491,7 @@ where
                 })?
             }
         };
-        let env_pairs: Vec<(String, String)> = env_vars
-            .iter()
-            .map(|e| (e.name.clone(), e.value.clone()))
-            .collect();
+        let env_pairs: Vec<(String, String)> = env_vars.iter().map(|e| (e.name.clone(), e.value.clone())).collect();
 
         // Eagerly validate the WASM file (executor-specific pre-flight check) before
         // spawning the background task. This preserves the contract that `create_terminal`
@@ -545,8 +505,7 @@ where
         // Shared output buffer and exit status arc for the background task.
         let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let was_truncated_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let wasm_exit: Arc<std::sync::OnceLock<TerminalExitStatus>> =
-            Arc::new(std::sync::OnceLock::new());
+        let wasm_exit: Arc<std::sync::OnceLock<TerminalExitStatus>> = Arc::new(std::sync::OnceLock::new());
 
         let terminal_id = self.id_gen.new_id();
 
@@ -580,9 +539,7 @@ where
             let Some(_permit) = task_limiter.acquire().await else {
                 // MED-30: limiter closed (runtime shutting down). Set the exit arc
                 // so a concurrent wait_for_terminal_exit doesn't loop forever.
-                let _ = exit_arc.set(
-                    TerminalExitStatus::new().signal(Some("runtime shutting down".to_string())),
-                );
+                let _ = exit_arc.set(TerminalExitStatus::new().signal(Some("runtime shutting down".to_string())));
                 return;
             };
             // Count tasks that actually start executing, not just those queued for a permit.
@@ -637,22 +594,15 @@ where
         });
 
         let terminal = WasmTerminal {
-            kind: TerminalKind::Wasm {
-                exit_arc: wasm_exit,
-            },
+            kind: TerminalKind::Wasm { exit_arc: wasm_exit },
             output_buf,
             output_collector: Some(collector),
             exit_status: None,
             was_truncated: was_truncated_flag,
         };
 
-        info!(
-            session_id,
-            terminal_id, command, "WASM module executing (background)"
-        );
-        self.terminals
-            .borrow_mut()
-            .insert(terminal_id.clone(), terminal);
+        info!(session_id, terminal_id, command, "WASM module executing (background)");
+        self.terminals.borrow_mut().insert(terminal_id.clone(), terminal);
 
         // Track terminal → session mapping for session-level cleanup.
         self.session_terminals
@@ -664,9 +614,7 @@ where
             .borrow_mut()
             .insert(terminal_id.clone(), session_id.to_string());
 
-        Ok(CreateTerminalResponse::new(TerminalId::new(
-            terminal_id.as_str(),
-        )))
+        Ok(CreateTerminalResponse::new(TerminalId::new(terminal_id.as_str())))
     }
 
     pub async fn handle_terminal_output(
@@ -707,11 +655,7 @@ where
         }
     }
 
-    pub async fn handle_write_to_terminal(
-        &self,
-        terminal_id: &str,
-        data: &[u8],
-    ) -> agent_client_protocol::Result<()> {
+    pub async fn handle_write_to_terminal(&self, terminal_id: &str, data: &[u8]) -> agent_client_protocol::Result<()> {
         self.tick_last_activity_for_terminal(terminal_id);
         // Clone the stdin Arc while the RefCell borrow is held (sync), then drop the
         // borrow and perform the async write through the Arc. This keeps the terminal
@@ -749,24 +693,19 @@ where
                 } else {
                     Err(agent_client_protocol::Error::new(
                         -32603,
-                        "Failed to write to terminal stdin (stdin closed or WASM terminal)"
-                            .to_string(),
+                        "Failed to write to terminal stdin (stdin closed or WASM terminal)".to_string(),
                     ))
                 }
             }
             None => Err(agent_client_protocol::Error::new(
                 -32603,
-                "Failed to write to terminal stdin (WASM terminals do not support stdin)"
-                    .to_string(),
+                "Failed to write to terminal stdin (WASM terminals do not support stdin)".to_string(),
             )),
         }
     }
 
     /// Closes the stdin pipe of a terminal, sending EOF to the process.
-    pub fn handle_close_terminal_stdin(
-        &self,
-        terminal_id: &str,
-    ) -> agent_client_protocol::Result<()> {
+    pub fn handle_close_terminal_stdin(&self, terminal_id: &str) -> agent_client_protocol::Result<()> {
         self.tick_last_activity_for_terminal(terminal_id);
         let mut terminals = self.terminals.borrow_mut();
         match terminals.get_mut(terminal_id) {
@@ -870,9 +809,7 @@ where
                     }
                     let (child, wasm_exit_arc) = match &mut t.kind {
                         TerminalKind::Native { child, .. } => (child.take(), None),
-                        TerminalKind::Wasm { exit_arc } => {
-                            (None, Some(std::sync::Arc::clone(exit_arc)))
-                        }
+                        TerminalKind::Wasm { exit_arc } => (None, Some(std::sync::Arc::clone(exit_arc))),
                     };
                     (t.output_collector.take(), child, wasm_exit_arc)
                 }
@@ -915,12 +852,7 @@ where
                 }
                 s
             } else {
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout),
-                    child_proc.wait(),
-                )
-                .await
-                {
+                match tokio::time::timeout(std::time::Duration::from_secs(timeout), child_proc.wait()).await {
                     Ok(Ok(exit_status)) => {
                         if let Some(c) = collector {
                             if let Err(e) = c.await {
@@ -937,10 +869,7 @@ where
                         TerminalExitStatus::new()
                     }
                     Err(_elapsed) => {
-                        tracing::warn!(
-                            terminal_id,
-                            "Terminal wait timed out after {timeout}s — killing"
-                        );
+                        tracing::warn!(terminal_id, "Terminal wait timed out after {timeout}s — killing");
                         // child_proc.wait() future was dropped by tokio::time::timeout,
                         // releasing its borrow; child_proc is now accessible for kill().
                         let _ = child_proc.kill().await;
@@ -1053,9 +982,7 @@ where
 
         let dest = {
             let sessions = self.sessions.borrow();
-            sessions
-                .get(session_id)
-                .and_then(|s| s.resolve_path(&req.path))
+            sessions.get(session_id).and_then(|s| s.resolve_path(&req.path))
         };
 
         let dest = dest.ok_or_else(|| {
@@ -1077,9 +1004,7 @@ where
         self.fs
             .write(&tmp_dest, req.content.as_bytes())
             .await
-            .map_err(|e| {
-                agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}"))
-            })?;
+            .map_err(|e| agent_client_protocol::Error::new(-32603, format!("Failed to write file: {e}")))?;
         let tmp_dest_clone = tmp_dest.clone();
         let fs = self.fs.clone();
         self.fs.rename(&tmp_dest, &dest).await.map_err(|e| {
@@ -1111,9 +1036,7 @@ where
 
         let src = {
             let sessions = self.sessions.borrow();
-            sessions
-                .get(session_id)
-                .and_then(|s| s.resolve_path(&req.path))
+            sessions.get(session_id).and_then(|s| s.resolve_path(&req.path))
         };
 
         let src = src.ok_or_else(|| {
@@ -1141,9 +1064,8 @@ where
         if self.auto_allow_permissions {
             // Select the first available option.
             if let Some(first) = req.options.first() {
-                let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                    first.option_id.clone(),
-                ));
+                let outcome =
+                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(first.option_id.clone()));
                 return Ok(RequestPermissionResponse::new(outcome));
             }
         }
@@ -1155,9 +1077,8 @@ where
                     option = %first.option_id.0,
                     "TROGON_NON_INTERACTIVE=1 — auto-selecting first permission option (no NATS)"
                 );
-                let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                    first.option_id.clone(),
-                ));
+                let outcome =
+                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(first.option_id.clone()));
                 return Ok(RequestPermissionResponse::new(outcome));
             }
         }
@@ -1176,14 +1097,12 @@ where
                 )
                 .await
                 {
-                    Ok(Ok(msg)) => {
-                        match serde_json::from_slice::<RequestPermissionResponse>(&msg.payload) {
-                            Ok(resp) => return Ok(resp),
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Failed to deserialize permission response — cancelling");
-                            }
+                    Ok(Ok(msg)) => match serde_json::from_slice::<RequestPermissionResponse>(&msg.payload) {
+                        Ok(resp) => return Ok(resp),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to deserialize permission response — cancelling");
                         }
-                    }
+                    },
                     Ok(Err(e)) => {
                         tracing::warn!(error = %e, "NATS permission request failed — cancelling");
                     }
@@ -1267,11 +1186,7 @@ where
         WasmRuntime::handle_kill_terminal(self, req).await
     }
 
-    async fn handle_write_to_terminal(
-        &self,
-        terminal_id: &str,
-        data: &[u8],
-    ) -> agent_client_protocol::Result<()> {
+    async fn handle_write_to_terminal(&self, terminal_id: &str, data: &[u8]) -> agent_client_protocol::Result<()> {
         WasmRuntime::handle_write_to_terminal(self, terminal_id, data).await
     }
 
@@ -1551,10 +1466,7 @@ mod tests {
     struct NeverWasmExecutor<N: NatsBroker + Send + Sync>(PhantomData<N>);
 
     impl<N: NatsBroker + Send + Sync> WasmExecutor<N> for NeverWasmExecutor<N> {
-        async fn run(
-            &self,
-            _: WasmRunConfig<N>,
-        ) -> Result<agent_client_protocol::TerminalExitStatus, anyhow::Error> {
+        async fn run(&self, _: WasmRunConfig<N>) -> Result<agent_client_protocol::TerminalExitStatus, anyhow::Error> {
             panic!("NeverWasmExecutor::run called in test")
         }
     }
@@ -1567,10 +1479,7 @@ mod tests {
     impl NatsBroker for NoNatsBroker {
         type Sub = futures::stream::Empty<async_nats::Message>;
 
-        async fn subscribe(
-            &self,
-            _: &str,
-        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+        async fn subscribe(&self, _: &str) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
             Err("no nats broker".into())
         }
 
@@ -1621,10 +1530,7 @@ mod tests {
     impl NatsBroker for PermissionResponderNats {
         type Sub = futures::stream::Empty<async_nats::Message>;
 
-        async fn subscribe(
-            &self,
-            _: &str,
-        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+        async fn subscribe(&self, _: &str) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
             Err("not used".into())
         }
 
@@ -1681,17 +1587,17 @@ mod tests {
 
     fn test_config() -> Config {
         Config {
-            session_root:              PathBuf::from("/test-root"),
-            output_byte_limit:         1024 * 1024,
-            auto_allow_permissions:    false,
-            wasm_timeout_secs:         None,
-            wasm_only:                 false,
-            wasm_memory_limit_bytes:   None,
-            module_cache_dir:          None,
-            wasm_allow_network:        false,
-            wasm_fuel_limit:           1_000_000_000,
-            wasm_host_call_limit:      10_000,
-            acp_prefix:                "acp".into(),
+            session_root: PathBuf::from("/test-root"),
+            output_byte_limit: 1024 * 1024,
+            auto_allow_permissions: false,
+            wasm_timeout_secs: None,
+            wasm_only: false,
+            wasm_memory_limit_bytes: None,
+            module_cache_dir: None,
+            wasm_allow_network: false,
+            wasm_fuel_limit: 1_000_000_000,
+            wasm_host_call_limit: 10_000,
+            acp_prefix: "acp".into(),
             wasm_max_concurrent_tasks: 4,
             session_idle_timeout_secs: 3600,
             wasm_max_module_size_bytes: 100 * 1024 * 1024,
@@ -1699,11 +1605,7 @@ mod tests {
         }
     }
 
-    fn make_runtime_with<FS: Fs>(
-        config: Config,
-        fs: FS,
-        clock: MockClock,
-    ) -> TestRuntime<FS> {
+    fn make_runtime_with<FS: Fs>(config: Config, fs: FS, clock: MockClock) -> TestRuntime<FS> {
         WasmRuntime::with_services(
             &config,
             None,
@@ -1765,10 +1667,9 @@ mod tests {
     #[tokio::test]
     async fn read_text_file_returns_existing_content() {
         let fs = MockFs::new();
-        fs.0.lock().unwrap().insert(
-            PathBuf::from("/test-root/sess1/doc.txt"),
-            b"hello there".to_vec(),
-        );
+        fs.0.lock()
+            .unwrap()
+            .insert(PathBuf::from("/test-root/sess1/doc.txt"), b"hello there".to_vec());
         let rt = make_runtime_with(test_config(), fs, MockClock::new());
         let req = ReadTextFileRequest::new("sess1", PathBuf::from("/doc.txt"));
         let resp = rt.handle_read_text_file("sess1", req).await.unwrap();
@@ -1793,8 +1694,7 @@ mod tests {
     #[tokio::test]
     async fn write_then_read_roundtrip() {
         let rt = make_runtime();
-        let write_req =
-            WriteTextFileRequest::new("s1", PathBuf::from("/roundtrip.txt"), "round and round");
+        let write_req = WriteTextFileRequest::new("s1", PathBuf::from("/roundtrip.txt"), "round and round");
         rt.handle_write_text_file("s1", write_req).await.unwrap();
         let read_req = ReadTextFileRequest::new("s1", PathBuf::from("/roundtrip.txt"));
         let resp = rt.handle_read_text_file("s1", read_req).await.unwrap();
@@ -1820,7 +1720,10 @@ mod tests {
         let mut config = test_config();
         config.auto_allow_permissions = true;
         let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
+        let resp = rt
+            .handle_request_permission(perm_req(vec![allow_option()]))
+            .await
+            .unwrap();
         assert!(
             matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),
             "first option must be selected when auto_allow is true"
@@ -1839,7 +1742,10 @@ mod tests {
     #[tokio::test]
     async fn request_permission_cancelled_when_auto_allow_disabled() {
         let rt = make_runtime(); // auto_allow_permissions = false, no nats_client
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
+        let resp = rt
+            .handle_request_permission(perm_req(vec![allow_option()]))
+            .await
+            .unwrap();
         assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
     }
 
@@ -1871,7 +1777,10 @@ mod tests {
         )
         .unwrap();
 
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
+        let resp = rt
+            .handle_request_permission(perm_req(vec![allow_option()]))
+            .await
+            .unwrap();
 
         assert!(
             matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),

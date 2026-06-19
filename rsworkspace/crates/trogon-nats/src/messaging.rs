@@ -465,10 +465,7 @@ mod tests {
         let delay_at_100 = delay_for(101); // attempts=101 → exp=31 (capped)
 
         // All three must be identical — the cap prevents further growth.
-        assert_eq!(
-            delay_at_31, delay_at_32,
-            "delay must not grow beyond exp=31"
-        );
+        assert_eq!(delay_at_31, delay_at_32, "delay must not grow beyond exp=31");
         assert_eq!(
             delay_at_31, delay_at_100,
             "delay must not grow beyond exp=31 even at high attempt counts"
@@ -1014,13 +1011,8 @@ mod tests {
             }
         }
 
-        let result: Result<TestResponse, NatsError> = request_with_timeout(
-            &UnreachableClient,
-            "test.subj",
-            &AlwaysFailsSer,
-            Duration::from_secs(5),
-        )
-        .await;
+        let result: Result<TestResponse, NatsError> =
+            request_with_timeout(&UnreachableClient, "test.subj", &AlwaysFailsSer, Duration::from_secs(5)).await;
 
         assert!(
             matches!(result, Err(NatsError::Serialize(_))),
@@ -1163,10 +1155,7 @@ mod tests {
         for high_attempt in [32u32, 50, 100] {
             let exp = (high_attempt - 1).min(31);
             let delay = initial * (1u32 << exp);
-            assert_eq!(
-                delay, max_delay,
-                "delay at attempt {high_attempt} must equal the cap"
-            );
+            assert_eq!(delay, max_delay, "delay at attempt {high_attempt} must equal the cap");
         }
     }
 
@@ -1195,9 +1184,7 @@ mod tests {
     /// The builder correctly applies a `FlushPolicy`.
     #[test]
     fn publish_options_with_flush_policy() {
-        let opts = PublishOptions::builder()
-            .flush_policy(FlushPolicy::standard())
-            .build();
+        let opts = PublishOptions::builder().flush_policy(FlushPolicy::standard()).build();
         let flush = opts.flush.expect("flush must be set");
         assert_eq!(flush.retry_policy.max_retries, 3);
     }
@@ -1214,10 +1201,7 @@ mod tests {
             .build();
 
         assert_eq!(opts.publish_retry_policy.max_retries, 5);
-        assert_eq!(
-            opts.publish_retry_policy.initial_retry_delay,
-            Duration::from_millis(25)
-        );
+        assert_eq!(opts.publish_retry_policy.initial_retry_delay, Duration::from_millis(25));
         assert!(opts.flush.is_some());
         assert_eq!(opts.flush.unwrap().retry_policy.max_retries, 3);
     }

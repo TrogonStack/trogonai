@@ -4,23 +4,19 @@ use std::time::Duration;
 
 use acp_nats::{acp_prefix::AcpPrefix, client_proxy::NatsClientProxy, session_id::AcpSessionId};
 use agent_client_protocol::{
-    Client as AcpClient, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields,
+    Client as AcpClient, PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
+    ToolCallUpdate, ToolCallUpdateFields,
 };
-use trogon_nats::{FlushClient, PublishClient, RequestClient};
 use tracing::warn;
+use trogon_nats::{FlushClient, PublishClient, RequestClient};
 
 use crate::permission_rules::always_allow_key;
 use crate::{PermissionReq, SessionStore};
 
 /// Forward a single `PermissionReq` to the ACP client and send the allow/deny
 /// decision back on the embedded oneshot channel.
-pub async fn handle_permission_request_nats<S, N>(
-    req: PermissionReq,
-    nats: N,
-    prefix: AcpPrefix,
-    store: &S,
-) where
+pub async fn handle_permission_request_nats<S, N>(req: PermissionReq, nats: N, prefix: AcpPrefix, store: &S)
+where
     S: SessionStore,
     N: RequestClient + PublishClient + FlushClient,
 {
@@ -42,12 +38,11 @@ pub async fn handle_permission_request_nats<S, N>(
     // For bash commands show "Always Allow `mkdir`" so the user knows the scope is
     // per-binary, not the entire bash tool.
     let always_key = always_allow_key(&req.tool_name, &req.tool_input);
-    let always_label: std::borrow::Cow<str> =
-        if let Some(bin) = always_key.strip_prefix("Bash:") {
-            format!("Always Allow `{bin}`").into()
-        } else {
-            "Always Allow".into()
-        };
+    let always_label: std::borrow::Cow<str> = if let Some(bin) = always_key.strip_prefix("Bash:") {
+        format!("Always Allow `{bin}`").into()
+    } else {
+        "Always Allow".into()
+    };
 
     let options = vec![
         PermissionOption::new("allow_always", always_label.as_ref(), PermissionOptionKind::AllowAlways),
@@ -87,9 +82,7 @@ pub async fn handle_permission_request_nats<S, N>(
                 // wants to switch into. Record it so the runner can apply it to the
                 // session once the tool call finishes (the bridge can't persist it
                 // itself — the turn re-saves the session at the end).
-                if req.tool_name == "ExitPlanMode"
-                    && matches!(id, "acceptEdits" | "default" | "bypassPermissions")
-                {
+                if req.tool_name == "ExitPlanMode" && matches!(id, "acceptEdits" | "default" | "bypassPermissions") {
                     *req.exit_plan_mode.lock().unwrap() = Some(id.to_string());
                 }
                 (is_allowed, is_always)
@@ -128,14 +121,12 @@ pub async fn handle_permission_request_nats<S, N>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
-        RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome,
-    };
+    use agent_client_protocol::{RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome};
     use tokio::sync::oneshot;
     use trogon_nats::AdvancedMockNatsClient;
 
-    use crate::session_store::mock::MemorySessionStore;
     use crate::SessionState;
+    use crate::session_store::mock::MemorySessionStore;
 
     const SESSION: &str = "sess-1";
     const SUBJECT: &str = "acp.session.sess-1.client.session.request_permission";
@@ -163,9 +154,9 @@ mod tests {
     }
 
     fn selected(id: impl Into<String>) -> bytes::Bytes {
-        response(RequestPermissionOutcome::Selected(
-            SelectedPermissionOutcome::new(id.into()),
-        ))
+        response(RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+            id.into(),
+        )))
     }
 
     fn cancelled() -> bytes::Bytes {
@@ -177,10 +168,7 @@ mod tests {
         nats.set_response(SUBJECT, nats_response);
 
         let store = MemorySessionStore::new();
-        store
-            .save(SESSION, &SessionState::default())
-            .await
-            .unwrap();
+        store.save(SESSION, &SessionState::default()).await.unwrap();
 
         let (req, rx) = make_req(tool);
         handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
@@ -199,12 +187,14 @@ mod tests {
     async fn allow_always_returns_true_and_persists_tool() {
         let (allowed, store) = run("Edit", selected("allow_always")).await;
         assert!(allowed);
-        assert!(store
-            .load(SESSION)
-            .await
-            .unwrap()
-            .allowed_tools
-            .contains(&"Edit".to_string()));
+        assert!(
+            store
+                .load(SESSION)
+                .await
+                .unwrap()
+                .allowed_tools
+                .contains(&"Edit".to_string())
+        );
     }
 
     #[tokio::test]

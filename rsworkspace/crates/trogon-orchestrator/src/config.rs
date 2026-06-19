@@ -29,11 +29,7 @@ pub struct OrchestratorConfig {
 
 impl OrchestratorConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
-        let auth_style = match env
-            .var("ORCHESTRATOR_LLM_AUTH_STYLE")
-            .as_deref()
-            .unwrap_or("xapikey")
-        {
+        let auth_style = match env.var("ORCHESTRATOR_LLM_AUTH_STYLE").as_deref().unwrap_or("xapikey") {
             "bearer" => OrchestratorAuthStyle::Bearer,
             _ => OrchestratorAuthStyle::XApiKey,
         };

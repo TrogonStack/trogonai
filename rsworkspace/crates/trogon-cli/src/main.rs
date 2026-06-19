@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use trogon_cli::Session as _;
 use trogon_cli::{
-    CrossRunnerSwitcher, McpManager, NatsSessionFactory, OutputFormat, PrintOptions, RealFs,
-    SessionEntry, SessionFactory, SessionIndex, SessionInit, connect_or_start_nats,
-    persist_session, repl::resolve_model_alias, session::TrogonSession, should_use_ansi,
+    CrossRunnerSwitcher, McpManager, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry,
+    SessionFactory, SessionIndex, SessionInit, connect_or_start_nats, persist_session, repl::resolve_model_alias,
+    session::TrogonSession, should_use_ansi,
 };
 
 #[derive(Subcommand)]
@@ -35,7 +35,12 @@ struct Args {
     #[command(subcommand)]
     command: Option<Command>,
     /// NATS server URL (overrides TROGON_NATS_URL)
-    #[arg(long, env = "TROGON_NATS_URL", default_value = "nats://localhost:4222", global = true)]
+    #[arg(
+        long,
+        env = "TROGON_NATS_URL",
+        default_value = "nats://localhost:4222",
+        global = true
+    )]
     nats_url: String,
 
     /// ACP prefix (overrides ACP_PREFIX)
@@ -403,8 +408,7 @@ async fn main() -> anyhow::Result<()> {
         }
         let resumed = resume.is_some();
 
-        let mut mcp_manager =
-            McpManager::load_for_cli(&RealFs, Some(&cwd), &args.mcp_config, args.strict_mcp_config);
+        let mut mcp_manager = McpManager::load_for_cli(&RealFs, Some(&cwd), &args.mcp_config, args.strict_mcp_config);
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
@@ -429,24 +433,13 @@ async fn main() -> anyhow::Result<()> {
 
         let nats_for_perm = nats.clone();
         let session = if let Some(entry) = resume {
-            match resume_print_session(
-                nats,
-                &mut mcp_manager,
-                &target_prefix,
-                &entry.session_id,
-                &cwd,
-            )
-            .await
-            {
+            match resume_print_session(nats, &mut mcp_manager, &target_prefix, &entry.session_id, &cwd).await {
                 Ok(s) => {
                     eprintln!("resumed session {} on {target_prefix}", s.session_id());
                     s
                 }
                 Err(e) => {
-                    eprintln!(
-                        "warning: could not resume {}: {e} — starting fresh",
-                        entry.session_id
-                    );
+                    eprintln!("warning: could not resume {}: {e} — starting fresh", entry.session_id);
                     start_print_session(
                         nats_for_perm.clone(),
                         &mut mcp_manager,
@@ -458,14 +451,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         } else {
-            start_print_session(
-                nats,
-                &mut mcp_manager,
-                &target_prefix,
-                cwd.clone(),
-                &session_init,
-            )
-            .await?
+            start_print_session(nats, &mut mcp_manager, &target_prefix, cwd.clone(), &session_init).await?
         };
         // Permission handling in non-interactive mode: `--dangerously-skip-permissions`
         // sets `bypassPermissions` (auto-allow, no prompts). Otherwise — since there is
@@ -477,12 +463,8 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = session.set_mode("bypassPermissions").await {
                 eprintln!("warning: could not set bypassPermissions: {e}");
             }
-        } else if let Some(task) = trogon_cli::print::spawn_auto_deny_permissions(
-            nats_for_perm,
-            &target_prefix,
-            session.session_id(),
-        )
-        .await
+        } else if let Some(task) =
+            trogon_cli::print::spawn_auto_deny_permissions(nats_for_perm, &target_prefix, session.session_id()).await
         {
             deny_task = Some(task);
         } else {
@@ -490,9 +472,7 @@ async fn main() -> anyhow::Result<()> {
             drop(nats_server);
             std::process::exit(1);
         }
-        if !resumed
-            && let Some(model) = &chosen_model
-        {
+        if !resumed && let Some(model) = &chosen_model {
             let model_id = resolve_model_alias(model);
             if let Err(e) = session.set_model(&model_id).await {
                 eprintln!("error: could not set model: {e}");
@@ -548,8 +528,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         let repl_default_model =
-            effective_model(args.model.as_deref(), settings.model.as_deref())
-                .map(|m| resolve_model_alias(&m));
+            effective_model(args.model.as_deref(), settings.model.as_deref()).map(|m| resolve_model_alias(&m));
 
         trogon_cli::runtime::run_interactive(
             factory,
@@ -596,7 +575,9 @@ mod tests {
         let args = Args::try_parse_from(["trogon", "sessions", "list"]).unwrap();
         assert!(matches!(
             args.command,
-            Some(Command::Sessions { action: Some(SessionsAction::List) })
+            Some(Command::Sessions {
+                action: Some(SessionsAction::List)
+            })
         ));
     }
 

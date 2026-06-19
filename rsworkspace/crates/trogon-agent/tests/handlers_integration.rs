@@ -65,8 +65,7 @@ async fn pr_review_handle_opened_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("LGTM — clean diff."));
@@ -91,8 +90,7 @@ async fn pr_review_handle_synchronize_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Reviewed updated push."));
@@ -175,8 +173,7 @@ async fn pr_review_handle_draft_returns_none() {
 
     // The mock must not be hit — if it is, the test fails via assert_hits(0).
     let mock = server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -208,8 +205,7 @@ async fn issue_triage_handle_create_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Triaged: needs more info."));
@@ -284,8 +280,7 @@ async fn pr_merged_handle_merged_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Merge acknowledged."));
@@ -351,8 +346,7 @@ async fn comment_added_handle_created_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Thanks for the comment!"));
@@ -397,8 +391,7 @@ async fn push_to_branch_handle_branch_push_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Push looks fine."));
@@ -466,8 +459,7 @@ async fn ci_completed_handle_failure_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_mock_body("Likely a test compilation error."));

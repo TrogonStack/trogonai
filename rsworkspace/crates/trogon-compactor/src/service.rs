@@ -118,14 +118,8 @@ impl ServiceState {
 /// Resolves which model compacts: `compactor_model` (override) wins, then the
 /// session `model`, then the provider default. This is the second half of the
 /// principle "session model compacts, with a configurable same-provider override".
-fn resolve_model(
-    compactor_model: Option<String>,
-    model: Option<String>,
-    default: &str,
-) -> String {
-    compactor_model
-        .or(model)
-        .unwrap_or_else(|| default.to_string())
+fn resolve_model(compactor_model: Option<String>, model: Option<String>, default: &str) -> String {
+    compactor_model.or(model).unwrap_or_else(|| default.to_string())
 }
 
 fn build_provider(name: &str, cfg: LlmConfig, client: reqwest::Client) -> DynLlmProvider {
@@ -156,10 +150,7 @@ pub async fn run(nats: Client, state: ServiceState) -> Result<(), async_nats::Er
             Ok(resp) => serde_json::to_vec(&resp).unwrap_or_default(),
             Err(e) => {
                 error!(error = %e, "compaction failed");
-                serde_json::to_vec(&ErrorResponse {
-                    error: e.to_string(),
-                })
-                .unwrap_or_default()
+                serde_json::to_vec(&ErrorResponse { error: e.to_string() }).unwrap_or_default()
             }
         };
 
@@ -170,14 +161,14 @@ pub async fn run(nats: Client, state: ServiceState) -> Result<(), async_nats::Er
 }
 
 async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse, CompactorError> {
-    let req: CompactRequest = serde_json::from_slice(payload)
-        .map_err(|e| CompactorError::InvalidRequest(e.to_string()))?;
+    let req: CompactRequest =
+        serde_json::from_slice(payload).map_err(|e| CompactorError::InvalidRequest(e.to_string()))?;
 
     // Backward-compat: no provider → "anthropic" (the only consumer shape today).
     let provider_name = req.provider.as_deref().unwrap_or("anthropic").to_string();
-    let pc = state.provider_config(&provider_name).ok_or_else(|| {
-        CompactorError::InvalidRequest(format!("provider not configured: {provider_name}"))
-    })?;
+    let pc = state
+        .provider_config(&provider_name)
+        .ok_or_else(|| CompactorError::InvalidRequest(format!("provider not configured: {provider_name}")))?;
 
     // compactor_model overrides model; both absent → provider default.
     let model = resolve_model(req.compactor_model, req.model, &pc.default_model);

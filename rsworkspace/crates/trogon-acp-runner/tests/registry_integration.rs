@@ -12,19 +12,13 @@ use trogon_registry::{AgentCapability, MockRegistryStore, Registry, RunnerCapabi
 
 const ACP_PREFIX: &str = "acp";
 const AGENT_TYPE: &str = "claude";
-const MODELS: &[&str] = &[
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001",
-];
+const MODELS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
 
 /// Builds the same `AgentCapability` that `main.rs` constructs at startup.
 fn make_cap() -> AgentCapability {
     AgentCapability {
         agent_type: AGENT_TYPE.to_string(),
-        capabilities: RunnerCapability::to_strings(
-            trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap(),
-        ),
+        capabilities: RunnerCapability::to_strings(trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap()),
         nats_subject: format!("{ACP_PREFIX}.agent.>"),
         current_load: 0,
         metadata: serde_json::json!({

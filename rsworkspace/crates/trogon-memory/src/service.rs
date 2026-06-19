@@ -8,11 +8,7 @@ use tracing::{info, warn};
 use trogon_transcript::store::TranscriptStore;
 
 use crate::{
-    dreamer::Dreamer,
-    provider::MemoryProvider,
-    provision::DREAMS_STREAM,
-    store::MemoryStore,
-    types::DreamTrigger,
+    dreamer::Dreamer, provider::MemoryProvider, provision::DREAMS_STREAM, store::MemoryStore, types::DreamTrigger,
 };
 
 #[derive(Debug)]
@@ -47,7 +43,11 @@ pub struct DreamingService<P: MemoryProvider, S: MemoryStore> {
 
 impl<P: MemoryProvider, S: MemoryStore> DreamingService<P, S> {
     pub fn new(js: jetstream::Context, consumer_name: String, dreamer: Dreamer<P, S>) -> Self {
-        Self { js, consumer_name, dreamer }
+        Self {
+            js,
+            consumer_name,
+            dreamer,
+        }
     }
 
     pub async fn run(self) -> Result<(), ServiceError> {

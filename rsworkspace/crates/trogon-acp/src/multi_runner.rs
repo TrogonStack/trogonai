@@ -18,14 +18,12 @@ use std::rc::Rc;
 use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use acp_nats::{AcpPrefix, Bridge, Config};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
-    ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse,
-    ModelId, ModelInfo, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    Result, ResumeSessionRequest, ResumeSessionResponse, SessionConfigOptionValue, SessionId,
-    SessionModelState, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutRequest, LogoutResponse, ModelId, ModelInfo, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, Result, ResumeSessionRequest, ResumeSessionResponse, SessionConfigOptionValue, SessionId,
+    SessionModelState, SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use tokio::sync::mpsc;
@@ -33,8 +31,8 @@ use tracing::warn;
 use trogon_acp_runner::{SessionNotifier, SessionStore};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsMessageOf, JsRequestMessage};
 use trogon_runner_tools::portable_session::{
-    export_json_from_wire, parse_export_json, v1_to_messages, v2_to_messages, ParsedExport,
-    PortableBlock, PortableMessage,
+    ParsedExport, PortableBlock, PortableMessage, export_json_from_wire, parse_export_json, v1_to_messages,
+    v2_to_messages,
 };
 use trogon_std::time::GetElapsed;
 use trogon_tools::{ContentBlock, Message};
@@ -169,15 +167,10 @@ where
     /// Returns `None` on failure (network error, runner not found, etc.).
     async fn export_history(&self, prefix: &str, session_id: &str) -> Option<Vec<Message>> {
         let bridge = self.get_or_create_bridge(prefix)?;
-        let params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": session_id }).to_string(),
-        )
-        .ok()?;
-        match agent_client_protocol::Agent::ext_method(
-            &*bridge,
-            ExtRequest::new("session/export", params.into()),
-        )
-        .await
+        let params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": session_id }).to_string())
+                .ok()?;
+        match agent_client_protocol::Agent::ext_method(&*bridge, ExtRequest::new("session/export", params.into())).await
         {
             Ok(resp) => {
                 // The runner emits wire JSON (V1 array or versioned V2 object) via
@@ -186,8 +179,7 @@ where
                 match parse_export_json(resp.0.get()) {
                     Ok(ParsedExport::V1(msgs)) => Some(v1_to_messages(&msgs)),
                     Ok(ParsedExport::V2(exp)) => Some(v2_to_messages(&exp)),
-                    Err(wire_err) => match serde_json::from_str::<Vec<PortableMessage>>(resp.0.get())
-                    {
+                    Err(wire_err) => match serde_json::from_str::<Vec<PortableMessage>>(resp.0.get()) {
                         Ok(portable) => Some(messages_from_portable(&portable)),
                         Err(e) => {
                             warn!(
@@ -235,11 +227,8 @@ where
         )) else {
             return;
         };
-        if let Err(e) = agent_client_protocol::Agent::ext_method(
-            &*bridge,
-            ExtRequest::new("session/import", params.into()),
-        )
-        .await
+        if let Err(e) =
+            agent_client_protocol::Agent::ext_method(&*bridge, ExtRequest::new("session/import", params.into())).await
         {
             warn!(error = %e, prefix, "multi-runner: session/import failed");
         }
@@ -251,18 +240,15 @@ where
     /// run grok-4 even if the user picked grok-3-mini).
     async fn open_runner_session(&self, prefix: &str, cwd: &str, model_id: &str) -> Option<String> {
         let bridge = self.get_or_create_bridge(prefix)?;
-        let runner_sid = match agent_client_protocol::Agent::new_session(
-            &*bridge,
-            NewSessionRequest::new(PathBuf::from(cwd)),
-        )
-        .await
-        {
-            Ok(r) => r.session_id.0.to_string(),
-            Err(e) => {
-                warn!(error = %e, prefix, "multi-runner: runner new_session failed — staying on inner");
-                return None;
-            }
-        };
+        let runner_sid =
+            match agent_client_protocol::Agent::new_session(&*bridge, NewSessionRequest::new(PathBuf::from(cwd))).await
+            {
+                Ok(r) => r.session_id.0.to_string(),
+                Err(e) => {
+                    warn!(error = %e, prefix, "multi-runner: runner new_session failed — staying on inner");
+                    return None;
+                }
+            };
         // Communicate the selected model to the runner (best-effort).
         let _ = agent_client_protocol::Agent::set_session_model(
             &*bridge,
@@ -277,11 +263,9 @@ where
         let Some(bridge) = self.get_or_create_bridge(prefix) else {
             return;
         };
-        let _ = agent_client_protocol::Agent::close_session(
-            &*bridge,
-            CloseSessionRequest::new(SessionId::new(session_id)),
-        )
-        .await;
+        let _ =
+            agent_client_protocol::Agent::close_session(&*bridge, CloseSessionRequest::new(SessionId::new(session_id)))
+                .await;
     }
 
     /// The (prefix, runner_sid) a session is routed to, if any.
@@ -299,11 +283,7 @@ where
     }
 
     /// Write `history` into KV under `acp_sid.messages`. Best-effort.
-    async fn sync_session_to_kv(
-        &self,
-        acp_sid: &str,
-        history: &[Message],
-    ) -> anyhow::Result<()> {
+    async fn sync_session_to_kv(&self, acp_sid: &str, history: &[Message]) -> anyhow::Result<()> {
         let mut state = self.store.load(acp_sid).await?;
         state.messages = history.to_vec();
         self.store.save(acp_sid, &state).await
@@ -313,10 +293,7 @@ where
     /// registry, deduped by model id (first occurrence wins). Returns `None` if the registry
     /// is unavailable or advertises no models — callers then keep the inner agent's own
     /// (Claude-only) list, the correct graceful behavior for local dev with no runners.
-    async fn build_model_state_from_registry(
-        &self,
-        current_model: &str,
-    ) -> Option<SessionModelState> {
+    async fn build_model_state_from_registry(&self, current_model: &str) -> Option<SessionModelState> {
         let Ok(all) = self.registry.list_all().await else {
             return None;
         };
@@ -357,55 +334,84 @@ where
 // ── Portable↔Native message converters ──────────────────────────────────────
 
 fn messages_from_portable(history: &[PortableMessage]) -> Vec<Message> {
-    history.iter().map(|pm| {
-        let content = if pm.blocks.is_empty() {
-            vec![ContentBlock::Text { text: pm.text.clone() }]
-        } else {
-            pm.blocks.iter().filter_map(|b| match b {
-                PortableBlock::Text { text } =>
-                    Some(ContentBlock::Text { text: text.clone() }),
-                PortableBlock::ToolUse { id, name, input_summary } =>
-                    Some(ContentBlock::ToolUse {
-                        id: id.clone(),
-                        name: name.clone(),
-                        // V2 stores a textual summary, not the raw input; parse back to
-                        // JSON when possible, otherwise carry the summary as a string.
-                        input: serde_json::from_str(input_summary)
-                            .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone())),
-                        parent_tool_use_id: None,
-                    }),
-                PortableBlock::ToolResult { id, output_summary } =>
-                    Some(ContentBlock::ToolResult {
-                        tool_use_id: id.clone(), content: output_summary.clone(), blocks: vec![],
-                    }),
-                PortableBlock::Thinking { .. } => None,
-            }).collect()
-        };
-        Message { role: pm.role.clone(), content }
-    }).collect()
+    history
+        .iter()
+        .map(|pm| {
+            let content = if pm.blocks.is_empty() {
+                vec![ContentBlock::Text { text: pm.text.clone() }]
+            } else {
+                pm.blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        PortableBlock::Text { text } => Some(ContentBlock::Text { text: text.clone() }),
+                        PortableBlock::ToolUse {
+                            id,
+                            name,
+                            input_summary,
+                        } => Some(ContentBlock::ToolUse {
+                            id: id.clone(),
+                            name: name.clone(),
+                            // V2 stores a textual summary, not the raw input; parse back to
+                            // JSON when possible, otherwise carry the summary as a string.
+                            input: serde_json::from_str(input_summary)
+                                .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone())),
+                            parent_tool_use_id: None,
+                        }),
+                        PortableBlock::ToolResult { id, output_summary } => Some(ContentBlock::ToolResult {
+                            tool_use_id: id.clone(),
+                            content: output_summary.clone(),
+                            blocks: vec![],
+                        }),
+                        PortableBlock::Thinking { .. } => None,
+                    })
+                    .collect()
+            };
+            Message {
+                role: pm.role.clone(),
+                content,
+            }
+        })
+        .collect()
 }
 
 fn portable_from_messages(messages: &[Message]) -> Vec<PortableMessage> {
-    messages.iter().map(|m| {
-        let blocks: Vec<PortableBlock> = m.content.iter().filter_map(|b| match b {
-            ContentBlock::Text { text } =>
-                Some(PortableBlock::Text { text: text.clone() }),
-            ContentBlock::ToolUse { id, name, input, .. } =>
-                Some(PortableBlock::ToolUse {
-                    id: id.clone(), name: name.clone(), input_summary: input.to_string(),
-                }),
-            ContentBlock::ToolResult { tool_use_id, content, .. } =>
-                Some(PortableBlock::ToolResult {
-                    id: tool_use_id.clone(), output_summary: content.clone(),
-                }),
-            ContentBlock::Thinking { .. } | ContentBlock::Image { .. } => None,
-        }).collect();
-        let text = blocks.iter().filter_map(|b| match b {
-            PortableBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        }).collect::<Vec<_>>().join("\n");
-        PortableMessage { role: m.role.clone(), text, blocks }
-    }).collect()
+    messages
+        .iter()
+        .map(|m| {
+            let blocks: Vec<PortableBlock> = m
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(PortableBlock::Text { text: text.clone() }),
+                    ContentBlock::ToolUse { id, name, input, .. } => Some(PortableBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input_summary: input.to_string(),
+                    }),
+                    ContentBlock::ToolResult {
+                        tool_use_id, content, ..
+                    } => Some(PortableBlock::ToolResult {
+                        id: tool_use_id.clone(),
+                        output_summary: content.clone(),
+                    }),
+                    ContentBlock::Thinking { .. } | ContentBlock::Image { .. } => None,
+                })
+                .collect();
+            let text = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    PortableBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            PortableMessage {
+                role: m.role.clone(),
+                text,
+                blocks,
+            }
+        })
+        .collect()
 }
 
 #[async_trait::async_trait(?Send)]
@@ -426,9 +432,7 @@ where
         let cwd = args.cwd.to_string_lossy().to_string();
         let resp = self.inner.new_session(args).await?;
         let acp_sid = resp.session_id.0.to_string();
-        self.session_cwd
-            .borrow_mut()
-            .insert(acp_sid.clone(), cwd.clone());
+        self.session_cwd.borrow_mut().insert(acp_sid.clone(), cwd.clone());
 
         // If the deploy-time default model (AGENT_MODEL) is served by an external runner,
         // establish routing now so the FIRST prompt reaches that runner. Without this the
@@ -466,10 +470,7 @@ where
         })
     }
 
-    async fn set_session_model(
-        &self,
-        args: SetSessionModelRequest,
-    ) -> Result<SetSessionModelResponse> {
+    async fn set_session_model(&self, args: SetSessionModelRequest) -> Result<SetSessionModelResponse> {
         let acp_sid = args.session_id.0.to_string();
         let model = args.model_id.0.to_string();
         // session_cwd is populated in new_session. For load_session / resume_session /
@@ -485,9 +486,7 @@ where
                 .load(&acp_sid)
                 .await
                 .map(|s| {
-                    self.session_cwd
-                        .borrow_mut()
-                        .insert(acp_sid.clone(), s.cwd.clone());
+                    self.session_cwd.borrow_mut().insert(acp_sid.clone(), s.cwd.clone());
                     s.cwd
                 })
                 .unwrap_or_else(|_| ".".to_string()),
@@ -575,29 +574,20 @@ where
         // state once, re-open the external runner session if the model requires it, and
         // register routing — subsequent prompts hit the fast path above.
         let known = self.session_cwd.borrow().contains_key(&acp_sid);
-        if !known
-            && let Ok(state) = self.store.load(&acp_sid).await
-        {
-            self.session_cwd
-                .borrow_mut()
-                .insert(acp_sid.clone(), state.cwd.clone());
+        if !known && let Ok(state) = self.store.load(&acp_sid).await {
+            self.session_cwd.borrow_mut().insert(acp_sid.clone(), state.cwd.clone());
             if let Some(ref model) = state.model
                 && let Some(prefix) = self.resolve_external_prefix(model).await
             {
                 let cwd = state.cwd.clone();
-                if let Some(runner_sid) =
-                    self.open_runner_session(&prefix, &cwd, model).await
-                {
+                if let Some(runner_sid) = self.open_runner_session(&prefix, &cwd, model).await {
                     if !state.messages.is_empty() {
-                        self.import_history(&prefix, &runner_sid, &state.messages)
-                            .await;
+                        self.import_history(&prefix, &runner_sid, &state.messages).await;
                     }
                     self.active_sessions
                         .borrow_mut()
                         .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
-                    self.id_remap
-                        .borrow_mut()
-                        .insert(runner_sid.clone(), acp_sid.clone());
+                    self.id_remap.borrow_mut().insert(runner_sid.clone(), acp_sid.clone());
                     if let Some(bridge) = self.get_or_create_bridge(&prefix) {
                         let resp = bridge.prompt_to(args, &runner_sid).await?;
                         self.post_prompt_sync_kv(&acp_sid, &prefix, &runner_sid).await;
@@ -646,10 +636,7 @@ where
         })
     }
 
-    async fn set_session_mode(
-        &self,
-        args: SetSessionModeRequest,
-    ) -> Result<SetSessionModeResponse> {
+    async fn set_session_mode(&self, args: SetSessionModeRequest) -> Result<SetSessionModeResponse> {
         self.inner.set_session_mode(args).await
     }
 
@@ -758,16 +745,14 @@ mod tests {
     use super::*;
     use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
     use agent_client_protocol::{
-        Agent, CancelNotification, CloseSessionRequest, ForkSessionRequest, LoadSessionRequest,
-        NewSessionRequest, PromptRequest, ResumeSessionRequest, SessionConfigOptionValue, SessionId,
-        SetSessionConfigOptionRequest, SetSessionModelRequest,
+        Agent, CancelNotification, CloseSessionRequest, ForkSessionRequest, LoadSessionRequest, NewSessionRequest,
+        PromptRequest, ResumeSessionRequest, SessionConfigOptionValue, SessionId, SetSessionConfigOptionRequest,
+        SetSessionModelRequest,
     };
     use std::sync::Arc;
     use tokio::sync::{RwLock, mpsc};
     use trogon_acp_runner::{
-        SessionState,
-        session_notifier::mock::MockSessionNotifier,
-        session_store::mock::MemorySessionStore,
+        SessionState, session_notifier::mock::MockSessionNotifier, session_store::mock::MemorySessionStore,
     };
     use trogon_nats::{
         AdvancedMockNatsClient,
@@ -796,9 +781,8 @@ mod tests {
 
     impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         type PublishError = MockError;
-        type AckFuture = std::future::Ready<
-            std::result::Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-        >;
+        type AckFuture =
+            std::future::Ready<std::result::Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
         async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
             &self,
@@ -851,7 +835,10 @@ mod tests {
         let gateway_config = Arc::new(RwLock::new(None));
         let config = Config::new(
             AcpPrefix::new(EMBEDDED_PREFIX).unwrap(),
-            NatsConfig { servers: vec!["unused".into()], auth: NatsAuth::None },
+            NatsConfig {
+                servers: vec!["unused".into()],
+                auth: NatsAuth::None,
+            },
         );
         let bridge = Bridge::new(
             nats.clone(),
@@ -870,7 +857,17 @@ mod tests {
             "claude-opus-4-6",
             gateway_config,
         );
-        MultiRunnerAgent::new(inner, store, nats, js, SystemClock, config, registry, notif_tx, EMBEDDED_PREFIX)
+        MultiRunnerAgent::new(
+            inner,
+            store,
+            nats,
+            js,
+            SystemClock,
+            config,
+            registry,
+            notif_tx,
+            EMBEDDED_PREFIX,
+        )
     }
 
     fn make_agent() -> (TestAgent, AdvancedMockNatsClient, MemorySessionStore) {
@@ -878,7 +875,11 @@ mod tests {
         let store = MemorySessionStore::new();
         let registry = Registry::new(MockRegistryStore::new());
         let (notif_tx, _) = mpsc::channel(64);
-        (build_agent(nats.clone(), store.clone(), registry, notif_tx), nats, store)
+        (
+            build_agent(nats.clone(), store.clone(), registry, notif_tx),
+            nats,
+            store,
+        )
     }
 
     fn make_agent_with_registry(
@@ -887,7 +888,11 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let store = MemorySessionStore::new();
         let (notif_tx, _) = mpsc::channel(64);
-        (build_agent(nats.clone(), store.clone(), registry, notif_tx), nats, store)
+        (
+            build_agent(nats.clone(), store.clone(), registry, notif_tx),
+            nats,
+            store,
+        )
     }
 
     /// Register an external model in the registry pointing to `ext_prefix`.
@@ -898,11 +903,7 @@ mod tests {
     }
 
     /// Register multiple models on one runner.
-    async fn register_models_on_runner(
-        registry: &Registry<MockRegistryStore>,
-        models: &[&str],
-        ext_prefix: &str,
-    ) {
+    async fn register_models_on_runner(registry: &Registry<MockRegistryStore>, models: &[&str], ext_prefix: &str) {
         let mut cap = AgentCapability::new(ext_prefix, ["chat"], format!("{ext_prefix}.>"));
         cap.metadata = serde_json::json!({ "models": models, "acp_prefix": ext_prefix });
         registry.register(&cap).await.unwrap();
@@ -976,8 +977,14 @@ mod tests {
             let models = resp.models.expect("inner agent always returns models");
             let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             // Claude model must be present; ext model must not be
-            assert!(ids.iter().any(|id| id.contains("claude")), "Claude model must be in list: {ids:?}");
-            assert!(!ids.contains(&EXT_MODEL), "registry is empty — ext model must not appear: {ids:?}");
+            assert!(
+                ids.iter().any(|id| id.contains("claude")),
+                "Claude model must be in list: {ids:?}"
+            );
+            assert!(
+                !ids.contains(&EXT_MODEL),
+                "registry is empty — ext model must not appear: {ids:?}"
+            );
         })
         .await;
     }
@@ -995,13 +1002,13 @@ mod tests {
                 .await
                 .unwrap();
             let sid = new_resp.session_id.clone();
-            let load_resp = agent
-                .load_session(LoadSessionRequest::new(sid, "/cwd"))
-                .await
-                .unwrap();
+            let load_resp = agent.load_session(LoadSessionRequest::new(sid, "/cwd")).await.unwrap();
             let models = load_resp.models.expect("models must be present");
             let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
-            assert!(ids.contains(&EXT_MODEL), "registry model must appear after load_session: {ids:?}");
+            assert!(
+                ids.contains(&EXT_MODEL),
+                "registry model must appear after load_session: {ids:?}"
+            );
         })
         .await;
     }
@@ -1023,7 +1030,10 @@ mod tests {
                 .unwrap();
             let models = fork_resp.models.expect("models must be present");
             let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
-            assert!(ids.contains(&EXT_MODEL), "registry model must appear after fork_session: {ids:?}");
+            assert!(
+                ids.contains(&EXT_MODEL),
+                "registry model must appear after fork_session: {ids:?}"
+            );
         })
         .await;
     }
@@ -1045,7 +1055,10 @@ mod tests {
                 .unwrap();
             let models = resume_resp.models.expect("models must be present");
             let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
-            assert!(ids.contains(&EXT_MODEL), "registry model must appear after resume_session: {ids:?}");
+            assert!(
+                ids.contains(&EXT_MODEL),
+                "registry model must appear after resume_session: {ids:?}"
+            );
         })
         .await;
     }
@@ -1090,7 +1103,10 @@ mod tests {
             let models = resp.models.expect("inner always provides models");
             // The list comes from the embedded agent, not the registry; ext model absent.
             assert!(
-                !models.available_models.iter().any(|m| m.model_id.0.as_ref() == EXT_MODEL),
+                !models
+                    .available_models
+                    .iter()
+                    .any(|m| m.model_id.0.as_ref() == EXT_MODEL),
                 "ext model must not appear when registry is empty"
             );
         })
@@ -1205,7 +1221,10 @@ mod tests {
                 .set_session_model(SetSessionModelRequest::new(sid.clone(), EXT_MODEL))
                 .await
                 .unwrap();
-            assert!(!agent.active_sessions_snapshot().is_empty(), "routing must be established first");
+            assert!(
+                !agent.active_sessions_snapshot().is_empty(),
+                "routing must be established first"
+            );
             // Switch back to Claude.
             agent
                 .set_session_model(SetSessionModelRequest::new(sid.clone(), "claude-opus-4-6"))
@@ -1360,7 +1379,9 @@ mod tests {
             let req = SetSessionConfigOptionRequest::new(
                 sid,
                 "model",
-                SessionConfigOptionValue::ValueId { value: "claude-sonnet-4-6".into() },
+                SessionConfigOptionValue::ValueId {
+                    value: "claude-sonnet-4-6".into(),
+                },
             );
             let cfg_resp = agent.set_session_config_option(req).await.unwrap();
             // The intercept path returns empty config_options; the notification
@@ -1410,7 +1431,10 @@ mod tests {
             let sid = resp.session_id.0.to_string();
             // cancel is fire-and-forget on the bridge; always returns Ok.
             let result = agent.cancel(CancelNotification::new(sid)).await;
-            assert!(result.is_ok(), "cancel must return Ok when session has no external routing");
+            assert!(
+                result.is_ok(),
+                "cancel must return Ok when session has no external routing"
+            );
         })
         .await;
     }
@@ -1435,9 +1459,7 @@ mod tests {
             let agent = build_agent(nats, store, reg, notif_tx);
             assert!(agent.session_cwd_snapshot().is_empty(), "must start with empty cwd map");
             // prompt fails (no JetStream consumers configured), but lazy reinit still runs.
-            let _ = agent
-                .prompt(PromptRequest::new(acp_sid, vec![]))
-                .await;
+            let _ = agent.prompt(PromptRequest::new(acp_sid, vec![])).await;
             assert_eq!(
                 agent.session_cwd_snapshot().get(acp_sid),
                 Some(&"/restored/cwd".to_string()),
@@ -1474,10 +1496,9 @@ mod tests {
         use super::super::MultiRunnerAgent;
         use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
         use agent_client_protocol::{
-            Agent, CancelNotification, CloseSessionRequest, ExtResponse, ForkSessionRequest,
-            LoadSessionRequest, NewSessionRequest, NewSessionResponse, PromptRequest,
-            PromptResponse, ResumeSessionRequest, SessionConfigOptionValue, SessionId,
-            SetSessionConfigOptionRequest, SetSessionModelRequest, StopReason,
+            Agent, CancelNotification, CloseSessionRequest, ExtResponse, ForkSessionRequest, LoadSessionRequest,
+            NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
+            SessionConfigOptionValue, SessionId, SetSessionConfigOptionRequest, SetSessionModelRequest, StopReason,
         };
         use async_nats::jetstream;
         use futures_util::StreamExt as _;
@@ -1540,7 +1561,10 @@ mod tests {
             let (notif_tx, _notif_rx) = mpsc::channel(64);
             let config = Config::new(
                 AcpPrefix::new(EMBEDDED).unwrap(),
-                NatsConfig { servers: vec!["unused".into()], auth: NatsAuth::None },
+                NatsConfig {
+                    servers: vec!["unused".into()],
+                    auth: NatsAuth::None,
+                },
             )
             .with_operation_timeout(SHORT_TIMEOUT);
             let notifier = NatsSessionNotifier::new(nats.clone());
@@ -1621,12 +1645,7 @@ mod tests {
         }
 
         /// Spawn a background task that answers one JetStream prompt and publishes a response.
-        fn stub_js_prompt(
-            nats: async_nats::Client,
-            js: jetstream::Context,
-            prefix: &str,
-            runner_sid: &str,
-        ) {
+        fn stub_js_prompt(nats: async_nats::Client, js: jetstream::Context, prefix: &str, runner_sid: &str) {
             let subject = format!("{prefix}.session.{runner_sid}.agent.prompt");
             let resp_subject_base = format!("{prefix}.session.{runner_sid}.agent.prompt.response");
             tokio::spawn(async move {
@@ -1645,12 +1664,7 @@ mod tests {
         }
 
         /// Spawn a background task that answers one JetStream close and publishes a response.
-        fn stub_js_close(
-            nats: async_nats::Client,
-            js: jetstream::Context,
-            prefix: &str,
-            runner_sid: &str,
-        ) {
+        fn stub_js_close(nats: async_nats::Client, js: jetstream::Context, prefix: &str, runner_sid: &str) {
             use agent_client_protocol::CloseSessionResponse;
             let subject = format!("{prefix}.session.{runner_sid}.agent.close");
             let resp_subject_base = format!("{prefix}.session.{runner_sid}.agent.response");
@@ -1670,12 +1684,7 @@ mod tests {
         }
 
         /// Spawn a background task that answers one JetStream set_model and publishes a response.
-        fn stub_js_set_model(
-            nats: async_nats::Client,
-            js: jetstream::Context,
-            prefix: &str,
-            runner_sid: &str,
-        ) {
+        fn stub_js_set_model(nats: async_nats::Client, js: jetstream::Context, prefix: &str, runner_sid: &str) {
             use agent_client_protocol::SetSessionModelResponse;
             let subject = format!("{prefix}.session.{runner_sid}.agent.set_model");
             let resp_subject_base = format!("{prefix}.session.{runner_sid}.agent.response");
@@ -1705,17 +1714,10 @@ mod tests {
             register_model(&registry, EXT_MODEL, EXT).await;
 
             let agent = make_real_agent(nats, js, store, registry).await;
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
 
             let models = resp.models.expect("registry is non-empty — models must be present");
-            let ids: Vec<&str> = models
-                .available_models
-                .iter()
-                .map(|m| m.model_id.0.as_ref())
-                .collect();
+            let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             assert!(
                 ids.contains(&EXT_MODEL),
                 "registry model must appear in new_session available_models: {ids:?}"
@@ -1735,10 +1737,7 @@ mod tests {
             stub_js_set_model(nats.clone(), js.clone(), EXT, RUNNER_SID);
 
             let agent = make_real_agent(nats, js, store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -1767,10 +1766,7 @@ mod tests {
             stub_js_set_model(nats.clone(), js.clone(), EXT, RUNNER_SID);
 
             let agent = make_real_agent(nats.clone(), js.clone(), store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -1808,10 +1804,7 @@ mod tests {
             stub_js_set_model(nats.clone(), js.clone(), EXT, RUNNER_SID);
 
             let agent = make_real_agent(nats.clone(), js.clone(), store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -1844,10 +1837,7 @@ mod tests {
             stub_js_set_model(nats.clone(), js.clone(), EXT, RUNNER_SID);
 
             let agent = make_real_agent(nats.clone(), js.clone(), store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -1886,10 +1876,7 @@ mod tests {
 
             let store_clone = store.clone();
             let agent = make_real_agent(nats.clone(), js.clone(), store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -1930,23 +1917,15 @@ mod tests {
             register_model(&registry, EXT_MODEL, EXT).await;
 
             let agent = make_real_agent(nats, js, store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let sid = new_resp.session_id.clone();
 
-            let load_resp = agent
-                .load_session(LoadSessionRequest::new(sid, "/cwd"))
-                .await
-                .unwrap();
+            let load_resp = agent.load_session(LoadSessionRequest::new(sid, "/cwd")).await.unwrap();
 
-            let models = load_resp.models.expect("models must be present when registry has entries");
-            let ids: Vec<&str> = models
-                .available_models
-                .iter()
-                .map(|m| m.model_id.0.as_ref())
-                .collect();
+            let models = load_resp
+                .models
+                .expect("models must be present when registry has entries");
+            let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             assert!(
                 ids.contains(&EXT_MODEL),
                 "registry model must appear in load_session available_models: {ids:?}"
@@ -1962,10 +1941,7 @@ mod tests {
             register_model(&registry, EXT_MODEL, EXT).await;
 
             let agent = make_real_agent(nats, js, store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let sid = new_resp.session_id.clone();
 
             let fork_resp = agent
@@ -1973,12 +1949,10 @@ mod tests {
                 .await
                 .unwrap();
 
-            let models = fork_resp.models.expect("models must be present when registry has entries");
-            let ids: Vec<&str> = models
-                .available_models
-                .iter()
-                .map(|m| m.model_id.0.as_ref())
-                .collect();
+            let models = fork_resp
+                .models
+                .expect("models must be present when registry has entries");
+            let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             assert!(
                 ids.contains(&EXT_MODEL),
                 "registry model must appear in fork_session available_models: {ids:?}"
@@ -1994,10 +1968,7 @@ mod tests {
             register_model(&registry, EXT_MODEL, EXT).await;
 
             let agent = make_real_agent(nats, js, store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let sid = new_resp.session_id.clone();
 
             let resume_resp = agent
@@ -2005,12 +1976,10 @@ mod tests {
                 .await
                 .unwrap();
 
-            let models = resume_resp.models.expect("models must be present when registry has entries");
-            let ids: Vec<&str> = models
-                .available_models
-                .iter()
-                .map(|m| m.model_id.0.as_ref())
-                .collect();
+            let models = resume_resp
+                .models
+                .expect("models must be present when registry has entries");
+            let ids: Vec<&str> = models.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
             assert!(
                 ids.contains(&EXT_MODEL),
                 "registry model must appear in resume_session available_models: {ids:?}"
@@ -2030,10 +1999,7 @@ mod tests {
             stub_js_set_model(nats.clone(), js.clone(), EXT, RUNNER_SID);
 
             let agent = make_real_agent(nats, js, store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.clone();
             let acp_sid_str = acp_sid.0.to_string();
 
@@ -2041,7 +2007,9 @@ mod tests {
                 .set_session_config_option(SetSessionConfigOptionRequest::new(
                     acp_sid.clone(),
                     "model",
-                    SessionConfigOptionValue::ValueId { value: EXT_MODEL.to_string().into() },
+                    SessionConfigOptionValue::ValueId {
+                        value: EXT_MODEL.to_string().into(),
+                    },
                 ))
                 .await
                 .unwrap();
@@ -2074,10 +2042,7 @@ mod tests {
             stub_js_set_model(nats.clone(), js.clone(), EXT, RUNNER_SID);
 
             let agent = make_real_agent(nats.clone(), js.clone(), store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -2093,7 +2058,10 @@ mod tests {
             let (export_tx, mut export_rx) = tokio::sync::oneshot::channel::<()>();
             let nats_xai = nats.clone();
             tokio::spawn(async move {
-                let mut sub = nats_xai.subscribe(format!("{EXT}.agent.ext.session/export")).await.unwrap();
+                let mut sub = nats_xai
+                    .subscribe(format!("{EXT}.agent.ext.session/export"))
+                    .await
+                    .unwrap();
                 if let Some(msg) = sub.next().await {
                     let raw = serde_json::value::RawValue::from_string("[]".to_string()).unwrap();
                     let payload = serde_json::to_vec(&ExtResponse::new(raw.into())).unwrap();
@@ -2107,7 +2075,10 @@ mod tests {
             let (import_tx, mut import_rx) = tokio::sync::oneshot::channel::<()>();
             let nats_or = nats.clone();
             tokio::spawn(async move {
-                let mut sub = nats_or.subscribe(format!("{ALT_EXT}.agent.ext.session/import")).await.unwrap();
+                let mut sub = nats_or
+                    .subscribe(format!("{ALT_EXT}.agent.ext.session/import"))
+                    .await
+                    .unwrap();
                 if let Some(msg) = sub.next().await {
                     let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
                     let payload = serde_json::to_vec(&ExtResponse::new(raw.into())).unwrap();
@@ -2127,15 +2098,11 @@ mod tests {
                 .unwrap();
 
             assert!(
-                export_rx.is_terminated()
-                    || export_rx.try_recv().is_ok()
-                    || export_rx.try_recv().is_err(),
+                export_rx.is_terminated() || export_rx.try_recv().is_ok() || export_rx.try_recv().is_err(),
                 "session/export must have been called on the source runner (xai) during migration"
             );
             assert!(
-                import_rx.is_terminated()
-                    || import_rx.try_recv().is_ok()
-                    || import_rx.try_recv().is_err(),
+                import_rx.is_terminated() || import_rx.try_recv().is_ok() || import_rx.try_recv().is_err(),
                 "session/import must have been called on the target runner (openrouter) during migration"
             );
 
@@ -2144,7 +2111,10 @@ mod tests {
                 .get(&acp_sid)
                 .expect("routing must exist after successful migration");
             assert_eq!(prefix, ALT_EXT, "routing must point to target runner after migration");
-            assert_eq!(runner_sid, ALT_RUNNER_SID, "runner_sid must match target runner's new_session response");
+            assert_eq!(
+                runner_sid, ALT_RUNNER_SID,
+                "runner_sid must match target runner's new_session response"
+            );
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -2163,10 +2133,7 @@ mod tests {
             stub_ext_method(nats.clone(), EXT, "session/export", "[]".to_string());
 
             let agent = make_real_agent(nats.clone(), js.clone(), store, registry).await;
-            let new_resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let acp_sid = new_resp.session_id.0.to_string();
 
             agent
@@ -2231,9 +2198,7 @@ mod tests {
 
             // First prompt to this session triggers lazy reinit: the agent loads KV state,
             // sees the ext model, opens a runner session, and routes the prompt there.
-            let resp = agent
-                .prompt(PromptRequest::new(acp_sid, vec![]))
-                .await;
+            let resp = agent.prompt(PromptRequest::new(acp_sid, vec![])).await;
 
             assert!(
                 resp.is_ok(),

@@ -48,10 +48,7 @@ pub type UpdateStreamError = async_nats::jetstream::context::UpdateStreamError;
 impl JetStreamStreamUpdater for NatsJetStreamClient {
     type UpdateError = UpdateStreamError;
 
-    async fn update_stream<S: Into<stream::Config> + Send>(
-        &self,
-        config: S,
-    ) -> Result<(), Self::UpdateError> {
+    async fn update_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), Self::UpdateError> {
         self.context.update_stream(config.into()).await.map(|_| ())
     }
 }

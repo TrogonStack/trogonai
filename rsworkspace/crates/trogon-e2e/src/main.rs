@@ -43,10 +43,7 @@ async fn main() {
         String::new()
     });
     let console_url = env("CONSOLE_URL", "http://localhost:8090");
-    let prompt_text = env(
-        "PROMPT_TEXT",
-        "Di 'hola' en exactamente una palabra, sin puntuación.",
-    );
+    let prompt_text = env("PROMPT_TEXT", "Di 'hola' en exactamente una palabra, sin puntuación.");
 
     println!("═══════════════════════════════════════════════════════");
     println!(" trogon E2E: xai-runner ↔ console");
@@ -55,9 +52,7 @@ async fn main() {
     println!("   console: {}", console_url);
     println!("═══════════════════════════════════════════════════════\n");
 
-    let nats = async_nats::connect(&nats_url)
-        .await
-        .expect("connect to NATS");
+    let nats = async_nats::connect(&nats_url).await.expect("connect to NATS");
     let js = jetstream::new(nats.clone());
 
     let prefix_upper = prefix.to_uppercase().replace('.', "_");
@@ -127,7 +122,11 @@ async fn main() {
     println!("  text: \"{prompt_text}\"");
 
     let stop1 = do_prompt(
-        &js, &prefix, &notif_stream, &resp_stream, &session_id,
+        &js,
+        &prefix,
+        &notif_stream,
+        &resp_stream,
+        &session_id,
         json!({
             "sessionId": session_id,
             "prompt": [{ "type": "text", "text": prompt_text }]
@@ -162,7 +161,11 @@ async fn main() {
     println!("  text: \"{second}\"");
 
     let stop2 = do_prompt(
-        &js, &prefix, &notif_stream, &resp_stream, &session_id,
+        &js,
+        &prefix,
+        &notif_stream,
+        &resp_stream,
+        &session_id,
         json!({
             "sessionId": session_id,
             "prompt": [{ "type": "text", "text": second }]
@@ -172,14 +175,18 @@ async fn main() {
     println!("  stop_reason={stop2}");
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    if let Some(s) = get_sessions(&http, &console_url).await.iter()
+    if let Some(s) = get_sessions(&http, &console_url)
+        .await
+        .iter()
         .find(|s| s["id"].as_str() == Some(&session_id))
     {
         let c = s["message_count"].as_u64().unwrap_or(0);
         let i = s["input_tokens"].as_u64().unwrap_or(0);
         let o = s["output_tokens"].as_u64().unwrap_or(0);
         println!("  message_count={c} (expected ≥4)  input={i}  output={o}");
-        if c < 4 { eprintln!("  WARN: expected ≥4 messages, got {c}"); }
+        if c < 4 {
+            eprintln!("  WARN: expected ≥4 messages, got {c}");
+        }
     }
     ok("multi-turn");
 
@@ -188,11 +195,16 @@ async fn main() {
 
     let r7 = uuid::Uuid::new_v4().to_string();
     let cfg_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.set_config_option"),
         json!({ "sessionId": session_id, "configId": "web_search", "value": "on" }),
         &r7,
-    ).await;
+    )
+    .await;
     if let Some(err) = cfg_resp.get("error") {
         eprintln!("  WARN: set_config_option error: {err}");
     } else {
@@ -202,9 +214,14 @@ async fn main() {
     let search_q = "What is the capital of France? Answer in one word.";
     println!("  text: \"{search_q}\"");
     let stop3 = do_prompt(
-        &js, &prefix, &notif_stream, &resp_stream, &session_id,
+        &js,
+        &prefix,
+        &notif_stream,
+        &resp_stream,
+        &session_id,
         json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": search_q }] }),
-    ).await;
+    )
+    .await;
     println!("  stop_reason={stop3}");
     ok("tool use (web_search)");
 
@@ -213,59 +230,83 @@ async fn main() {
 
     let r8 = uuid::Uuid::new_v4().to_string();
     let fork_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.fork"),
         json!({ "sessionId": session_id, "cwd": "/tmp/e2e-fork", "mcpServers": [] }),
         &r8,
-    ).await;
+    )
+    .await;
     if let Some(err) = fork_resp.get("error") {
         fail(&format!("fork error: {err}"));
     }
     let forked_id = fork_resp["sessionId"]
         .as_str()
         .or_else(|| fork_resp["session_id"].as_str())
-        .unwrap_or_else(|| { eprintln!("  DEBUG fork: {fork_resp}"); panic!("forked sessionId not found") })
+        .unwrap_or_else(|| {
+            eprintln!("  DEBUG fork: {fork_resp}");
+            panic!("forked sessionId not found")
+        })
         .to_string();
     println!("  forked_session_id={forked_id}");
 
     // Disable web_search in fork before prompting (grok-3-mini doesn't support server-side tools).
     let r8b = uuid::Uuid::new_v4().to_string();
     let _ = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &forked_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &forked_id,
         format!("{prefix}.session.{forked_id}.agent.set_config_option"),
         json!({ "sessionId": forked_id, "configId": "web_search", "value": "off" }),
         &r8b,
-    ).await;
+    )
+    .await;
 
     let fork_prompt = "Di 'fork' en exactamente una palabra.";
     println!("  prompting fork: \"{fork_prompt}\"");
     let stop4 = do_prompt(
-        &js, &prefix, &notif_stream, &resp_stream, &forked_id,
+        &js,
+        &prefix,
+        &notif_stream,
+        &resp_stream,
+        &forked_id,
         json!({ "sessionId": forked_id, "prompt": [{ "type": "text", "text": fork_prompt }] }),
-    ).await;
+    )
+    .await;
     println!("  stop_reason={stop4}");
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let s8 = get_sessions(&http, &console_url).await;
-    println!("  original in console: {}", s8.iter().any(|s| s["id"].as_str() == Some(&session_id)));
-    println!("  forked in console:   {}", s8.iter().any(|s| s["id"].as_str() == Some(&forked_id)));
+    println!(
+        "  original in console: {}",
+        s8.iter().any(|s| s["id"].as_str() == Some(&session_id))
+    );
+    println!(
+        "  forked in console:   {}",
+        s8.iter().any(|s| s["id"].as_str() == Some(&forked_id))
+    );
     ok("fork session");
 
     // ── 9. ACP session.list ────────────────────────────────────────────────────
     step(9, "session.list (ACP)");
 
-    let list_resp = nats_req(
-        &nats,
-        format!("{prefix}.agent.session.list"),
-        json!({}),
-    ).await;
+    let list_resp = nats_req(&nats, format!("{prefix}.agent.session.list"), json!({})).await;
     if let Some(err) = list_resp.get("error") {
         eprintln!("  WARN: session.list error: {err}");
     } else {
         let sessions_arr = list_resp["sessions"].as_array().cloned().unwrap_or_default();
         println!("  total sessions in runner: {}", sessions_arr.len());
-        let has_orig = sessions_arr.iter().any(|s| s["sessionId"].as_str() == Some(&session_id) || s["id"].as_str() == Some(&session_id));
-        let has_fork = sessions_arr.iter().any(|s| s["sessionId"].as_str() == Some(&forked_id) || s["id"].as_str() == Some(&forked_id));
+        let has_orig = sessions_arr
+            .iter()
+            .any(|s| s["sessionId"].as_str() == Some(&session_id) || s["id"].as_str() == Some(&session_id));
+        let has_fork = sessions_arr
+            .iter()
+            .any(|s| s["sessionId"].as_str() == Some(&forked_id) || s["id"].as_str() == Some(&forked_id));
         println!("  original session in list: {has_orig}");
         println!("  forked session in list:   {has_fork}");
     }
@@ -277,19 +318,29 @@ async fn main() {
     // Disable web_search first so the prompt doesn't hit the server-side tools restriction.
     let r10a = uuid::Uuid::new_v4().to_string();
     let _ = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.set_config_option"),
         json!({ "sessionId": session_id, "configId": "web_search", "value": "off" }),
         &r10a,
-    ).await;
+    )
+    .await;
 
     let r10b = uuid::Uuid::new_v4().to_string();
     let model_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.set_model"),
         json!({ "sessionId": session_id, "modelId": "grok-3" }),
         &r10b,
-    ).await;
+    )
+    .await;
     if let Some(err) = model_resp.get("error") {
         eprintln!("  WARN: set_model error: {err}");
     } else {
@@ -299,13 +350,20 @@ async fn main() {
     let grok3_prompt = "Di 'grok3' en exactamente una palabra.";
     println!("  text: \"{grok3_prompt}\"");
     let stop5 = do_prompt(
-        &js, &prefix, &notif_stream, &resp_stream, &session_id,
+        &js,
+        &prefix,
+        &notif_stream,
+        &resp_stream,
+        &session_id,
         json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": grok3_prompt }] }),
-    ).await;
+    )
+    .await;
     println!("  stop_reason={stop5}");
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    if let Some(s) = get_sessions(&http, &console_url).await.iter()
+    if let Some(s) = get_sessions(&http, &console_url)
+        .await
+        .iter()
         .find(|s| s["id"].as_str() == Some(&session_id))
     {
         println!("  model in console: {}", s["model"].as_str().unwrap_or("?"));
@@ -317,11 +375,16 @@ async fn main() {
 
     let r11 = uuid::Uuid::new_v4().to_string();
     let resume_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.resume"),
         json!({ "sessionId": session_id, "cwd": "/tmp/e2e-test" }),
         &r11,
-    ).await;
+    )
+    .await;
     if let Some(err) = resume_resp.get("error") {
         eprintln!("  WARN: resume error: {err}");
     } else {
@@ -383,11 +446,16 @@ async fn main() {
 
     let r14a = uuid::Uuid::new_v4().to_string();
     let load_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.load"),
         json!({ "sessionId": session_id, "cwd": "/tmp/e2e-test", "mcpServers": [] }),
         &r14a,
-    ).await;
+    )
+    .await;
     if let Some(err) = load_resp.get("error") {
         eprintln!("  WARN: load_session error: {err}");
     } else {
@@ -402,11 +470,16 @@ async fn main() {
 
     let r15 = uuid::Uuid::new_v4().to_string();
     let mode_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.set_mode"),
         json!({ "sessionId": session_id, "modeId": "default" }),
         &r15,
-    ).await;
+    )
+    .await;
     if let Some(err) = mode_resp.get("error") {
         eprintln!("  WARN: set_mode error: {err}");
     } else {
@@ -419,11 +492,16 @@ async fn main() {
 
     let r16 = uuid::Uuid::new_v4().to_string();
     let close_resp = js_command(
-        &js, &prefix, &resp_stream, &cmd_stream, &session_id,
+        &js,
+        &prefix,
+        &resp_stream,
+        &cmd_stream,
+        &session_id,
         format!("{prefix}.session.{session_id}.agent.close"),
         json!({ "sessionId": session_id }),
         &r16,
-    ).await;
+    )
+    .await;
     if let Some(err) = close_resp.get("error") {
         eprintln!("  WARN: close error: {err}");
     } else {
@@ -435,7 +513,8 @@ async fn main() {
 
     let list2 = nats_req(&nats, format!("{prefix}.agent.session.list"), json!({})).await;
     let acp_sessions = list2["sessions"].as_array().cloned().unwrap_or_default();
-    let still_in_acp = acp_sessions.iter()
+    let still_in_acp = acp_sessions
+        .iter()
         .any(|s| s["sessionId"].as_str() == Some(&session_id) || s["id"].as_str() == Some(&session_id));
     println!("  session still in ACP list: {still_in_acp} (expected: false)");
 
@@ -448,11 +527,7 @@ async fn main() {
     // ── 17. logout ────────────────────────────────────────────────────────────
     step(17, "logout");
 
-    let logout_resp = nats_req(
-        &nats,
-        format!("{prefix}.agent.logout"),
-        json!({}),
-    ).await;
+    let logout_resp = nats_req(&nats, format!("{prefix}.agent.logout"), json!({})).await;
     if let Some(err) = logout_resp.get("error") {
         eprintln!("  WARN: logout error: {err}");
     } else {
@@ -465,7 +540,8 @@ async fn main() {
         &nats,
         format!("{prefix}.agent.session.new"),
         json!({ "cwd": "/tmp/e2e-post-logout", "mcpServers": [] }),
-    ).await;
+    )
+    .await;
     let post_logout_err = post_logout.get("error").is_some();
     println!("  new_session after logout fails: {post_logout_err}");
     ok("logout");

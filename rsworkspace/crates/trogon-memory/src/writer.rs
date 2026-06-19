@@ -36,11 +36,19 @@ pub struct WriteResponse {
 
 impl WriteResponse {
     fn success(total_facts: usize) -> Self {
-        Self { ok: true, total_facts: Some(total_facts), error: None }
+        Self {
+            ok: true,
+            total_facts: Some(total_facts),
+            error: None,
+        }
     }
 
     fn failure(error: impl Into<String>) -> Self {
-        Self { ok: false, total_facts: None, error: Some(error.into()) }
+        Self {
+            ok: false,
+            total_facts: None,
+            error: Some(error.into()),
+        }
     }
 }
 
@@ -70,7 +78,9 @@ pub struct MemoryWriteHandler<S: MemoryStore> {
 
 impl<S: MemoryStore> MemoryWriteHandler<S> {
     pub fn new(store: S) -> Self {
-        Self { client: MemoryClient::new(store) }
+        Self {
+            client: MemoryClient::new(store),
+        }
     }
 
     /// Process a raw NATS payload and return the response bytes.
@@ -119,7 +129,10 @@ pub struct MemoryWriter<S: MemoryStore> {
 
 impl<S: MemoryStore> MemoryWriter<S> {
     pub fn new(nats: Client, store: S) -> Self {
-        Self { nats, handler: MemoryWriteHandler::new(store) }
+        Self {
+            nats,
+            handler: MemoryWriteHandler::new(store),
+        }
     }
 
     pub async fn run(self) -> Result<(), WriterError> {
@@ -129,7 +142,10 @@ impl<S: MemoryStore> MemoryWriter<S> {
             .await
             .map_err(|e| WriterError::Subscribe(e.to_string()))?;
 
-        info!(subject = WRITE_SUBJECT, "Memory writer listening for in-session write requests");
+        info!(
+            subject = WRITE_SUBJECT,
+            "Memory writer listening for in-session write requests"
+        );
 
         while let Some(msg) = sub.next().await {
             let Some(reply) = msg.reply.clone() else {
@@ -139,9 +155,8 @@ impl<S: MemoryStore> MemoryWriter<S> {
 
             let response = self.handler.handle(&msg.payload).await;
 
-            let bytes = serde_json::to_vec(&response).unwrap_or_else(|_| {
-                br#"{"ok":false,"error":"serialization failed"}"#.to_vec()
-            });
+            let bytes = serde_json::to_vec(&response)
+                .unwrap_or_else(|_| br#"{"ok":false,"error":"serialization failed"}"#.to_vec());
 
             self.nats.publish(reply, bytes.into()).await.ok();
         }
@@ -206,7 +221,11 @@ mod tests {
     }
 
     fn fact(category: &str, content: &str) -> RawFact {
-        RawFact { category: category.into(), content: content.into(), confidence: 0.9 }
+        RawFact {
+            category: category.into(),
+            content: content.into(),
+            confidence: 0.9,
+        }
     }
 
     #[tokio::test]
@@ -278,14 +297,13 @@ mod tests {
     #[tokio::test]
     async fn missing_field_returns_error() {
         let h = handler();
-        let payload: Bytes =
-            serde_json::to_vec(&serde_json::json!({
-                "actor_type": "pr",
-                "session_id": "s1",
-                "facts": []
-            }))
-            .unwrap()
-            .into();
+        let payload: Bytes = serde_json::to_vec(&serde_json::json!({
+            "actor_type": "pr",
+            "session_id": "s1",
+            "facts": []
+        }))
+        .unwrap()
+        .into();
         let resp = h.handle(&payload).await;
         assert!(!resp.ok);
     }

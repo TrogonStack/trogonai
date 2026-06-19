@@ -235,16 +235,8 @@ async fn tenant_isolation_different_tenants_see_different_automations() {
         .await
         .unwrap();
 
-    assert_eq!(
-        acme_list.as_array().unwrap().len(),
-        1,
-        "acme sees only its own"
-    );
-    assert_eq!(
-        other_list.as_array().unwrap().len(),
-        1,
-        "other-org sees only its own"
-    );
+    assert_eq!(acme_list.as_array().unwrap().len(), 1, "acme sees only its own");
+    assert_eq!(other_list.as_array().unwrap().len(), 1, "other-org sees only its own");
     // IDs are different
     assert_ne!(acme_list[0]["id"], other_list[0]["id"]);
 }
@@ -652,12 +644,7 @@ async fn update_changes_visibility() {
 #[tokio::test]
 async fn get_runs_missing_tenant_returns_400() {
     let s = start_server().await;
-    let res = s
-        .client
-        .get(format!("{}/runs", s.base_url))
-        .send()
-        .await
-        .unwrap();
+    let res = s.client.get(format!("{}/runs", s.base_url)).send().await.unwrap();
     assert_eq!(res.status(), 400);
 }
 
@@ -727,11 +714,7 @@ async fn get_runs_for_automation_path_returns_filtered_runs() {
         .await
         .unwrap();
     let arr = res.as_array().unwrap();
-    assert_eq!(
-        arr.len(),
-        2,
-        "/automations/auto-A/runs must return only auto-A runs"
-    );
+    assert_eq!(arr.len(), 2, "/automations/auto-A/runs must return only auto-A runs");
     assert!(arr.iter().all(|r| r["automation_id"] == "auto-A"));
 }
 
@@ -807,12 +790,7 @@ async fn get_runs_for_automation_path_tenant_isolation() {
 #[tokio::test]
 async fn get_stats_missing_tenant_returns_400() {
     let s = start_server().await;
-    let res = s
-        .client
-        .get(format!("{}/stats", s.base_url))
-        .send()
-        .await
-        .unwrap();
+    let res = s.client.get(format!("{}/stats", s.base_url)).send().await.unwrap();
     assert_eq!(res.status(), 400);
 }
 

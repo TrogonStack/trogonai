@@ -142,20 +142,14 @@ async fn handle_health() -> StatusCode {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook<J, R>(
-    State(state): State<AppState<J, R>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode
+async fn handle_webhook<J, R>(State(state): State<AppState<J, R>>, headers: HeaderMap, body: Bytes) -> StatusCode
 where
     J: JetStreamPublisher + Clone + Send + Sync + 'static,
     R: IncidentRepository,
 {
     // Validate HMAC signature when a secret is configured.
     if let Some(secret) = &state.webhook_secret {
-        let sig = headers
-            .get("x-incident-signature")
-            .and_then(|v| v.to_str().ok());
+        let sig = headers.get("x-incident-signature").and_then(|v| v.to_str().ok());
 
         match sig {
             Some(sig) if signature::verify(secret, &body, sig) => {}
@@ -195,27 +189,21 @@ where
     nats_headers.insert("X-Incident-Event-Type", ev_type.as_str());
     nats_headers.insert("X-Incident-Delivery", delivery_id.as_str());
 
-    match state
-        .js
-        .publish_with_headers(subject.clone(), nats_headers, body)
-        .await
-    {
-        Ok(ack_future) => {
-            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
-                Ok(Ok(_)) => {
-                    info!(subject, "Published incident.io event to NATS");
-                    StatusCode::OK
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-                Err(_) => {
-                    warn!("NATS ack timed out");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
+    match state.js.publish_with_headers(subject.clone(), nats_headers, body).await {
+        Ok(ack_future) => match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
+            Ok(Ok(_)) => {
+                info!(subject, "Published incident.io event to NATS");
+                StatusCode::OK
             }
-        }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NATS ack failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Err(_) => {
+                warn!("NATS ack timed out");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        },
         Err(e) => {
             warn!(error = %e, "Failed to publish incident.io event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -224,9 +212,7 @@ where
 }
 
 /// `GET /incidents` — returns all stored incidents as a JSON array.
-async fn list_incidents<J, R>(
-    State(state): State<AppState<J, R>>,
-) -> Result<Json<Vec<serde_json::Value>>, StatusCode>
+async fn list_incidents<J, R>(State(state): State<AppState<J, R>>) -> Result<Json<Vec<serde_json::Value>>, StatusCode>
 where
     J: Clone + Send + Sync + 'static,
     R: IncidentRepository,
@@ -377,10 +363,7 @@ mod tests {
         let body = br#"{"event_type":"incident.created","incident":{"id":"inc-42"}}"#;
         let sig = compute_sig(TEST_SECRET, body);
 
-        let resp = app
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         let msgs = publisher.published_messages();
@@ -395,10 +378,7 @@ mod tests {
     async fn invalid_signature_returns_401_and_does_not_publish() {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone(), MockIncidentStore::new());
-        let resp = app
-            .oneshot(webhook_request(b"{}", Some("deadbeef")))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(b"{}", Some("deadbeef"))).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
     }
@@ -436,10 +416,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            publisher.published_subjects(),
-            vec!["incidentio.incident.updated"]
-        );
+        assert_eq!(publisher.published_subjects(), vec!["incidentio.incident.updated"]);
     }
 
     #[tokio::test]
@@ -449,10 +426,7 @@ mod tests {
         let app = mock_app(publisher.clone(), MockIncidentStore::new());
         let body = b"{}";
         let sig = compute_sig(TEST_SECRET, body);
-        let resp = app
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(&sig))).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -460,16 +434,12 @@ mod tests {
     async fn list_incidents_returns_stored_incidents() {
         let publisher = MockJetStreamPublisher::new();
         let store = MockIncidentStore::new();
-        let body =
-            br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"db down"}}"#;
+        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-1","name":"db down"}}"#;
         let sig = compute_sig(TEST_SECRET, body);
         let app = mock_app(publisher, store);
 
         // POST — stores the incident
-        app.clone()
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        app.clone().oneshot(webhook_request(body, Some(&sig))).await.unwrap();
 
         // GET /incidents — same shared store via Arc
         let req = Request::builder()
@@ -479,9 +449,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["incident"]["id"], "inc-1");
@@ -503,16 +471,12 @@ mod tests {
     async fn get_incident_by_id_returns_stored_incident() {
         let publisher = MockJetStreamPublisher::new();
         let store = MockIncidentStore::new();
-        let body =
-            br#"{"event_type":"incident.created","incident":{"id":"inc-7","name":"svc down"}}"#;
+        let body = br#"{"event_type":"incident.created","incident":{"id":"inc-7","name":"svc down"}}"#;
         let sig = compute_sig(TEST_SECRET, body);
         let app = mock_app(publisher, store);
 
         // POST — stores the incident
-        app.clone()
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        app.clone().oneshot(webhook_request(body, Some(&sig))).await.unwrap();
 
         // GET /incidents/inc-7
         let req = Request::builder()
@@ -522,9 +486,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(val["incident"]["id"], "inc-7");
     }
@@ -603,10 +565,7 @@ mod tests {
                 ack_timeout: Duration::from_millis(50),
             };
             Router::new()
-                .route(
-                    "/webhook",
-                    post(handle_webhook::<AckFailPublisher, MockIncidentStore>),
-                )
+                .route("/webhook", post(handle_webhook::<AckFailPublisher, MockIncidentStore>))
                 .with_state(state)
         }
 
@@ -654,9 +613,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 

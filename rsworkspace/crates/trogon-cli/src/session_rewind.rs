@@ -39,24 +39,16 @@ impl Default for SessionRewindState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RewindResolution {
     /// Use a stored export snapshot verbatim.
-    Snapshot {
-        messages_json: String,
-        target_turn: usize,
-    },
+    Snapshot { messages_json: String, target_turn: usize },
     /// Truncate a fresh export to the first `target_turn` user turns.
-    TruncateToTurns {
-        target_turn: usize,
-    },
+    TruncateToTurns { target_turn: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RewindError {
     ListRequested,
     InvalidTurns,
-    TooManyTurns {
-        requested: usize,
-        available: usize,
-    },
+    TooManyTurns { requested: usize, available: usize },
     UnknownCheckpoint(String),
     ExportParse(String),
     ExportSerialize(String),
@@ -156,11 +148,7 @@ impl SessionRewindState {
                 });
             }
             let target_turn = self.turn_count - n;
-            if let Some(cp) = self
-                .checkpoints
-                .iter()
-                .find(|c| c.turn_index == target_turn)
-            {
+            if let Some(cp) = self.checkpoints.iter().find(|c| c.turn_index == target_turn) {
                 return Ok(RewindResolution::Snapshot {
                     messages_json: cp.messages_json.clone(),
                     target_turn,

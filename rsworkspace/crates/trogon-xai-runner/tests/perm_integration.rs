@@ -11,8 +11,8 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use agent_client_protocol::{
-    Agent as _, ContentBlock, NewSessionRequest, PromptRequest,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SessionUpdate, ToolCallStatus,
+    Agent as _, ContentBlock, NewSessionRequest, PromptRequest, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, ToolCallStatus,
 };
 use trogon_runner_tools::session_store::AuditOutcome;
 use trogon_xai_runner::{InputItem, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent};
@@ -58,12 +58,15 @@ fn push_function_call(mock: &MockXaiHttpClient, call_id: &str, name: &str, args:
 
 fn second_call_has_denied_output(mock: &MockXaiHttpClient, call_id: &str) -> bool {
     let calls = mock.calls.lock().unwrap();
-    calls.get(1).map(|call| {
-        call.input.iter().any(|item| {
-            matches!(item, InputItem::FunctionCallOutput { call_id: cid, output }
+    calls
+        .get(1)
+        .map(|call| {
+            call.input.iter().any(|item| {
+                matches!(item, InputItem::FunctionCallOutput { call_id: cid, output }
                 if cid == call_id && output.contains("permission denied"))
+            })
         })
-    }).unwrap_or(false)
+        .unwrap_or(false)
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -73,10 +76,7 @@ fn second_call_has_denied_output(mock: &MockXaiHttpClient, call_id: &str) -> boo
 async fn deny_path_from_trogon_md_blocks_file_tool() {
     let _guard = env_lock().lock().unwrap();
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    ).unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     push_function_call(&mock, "cid-deny", "read_file", r#"{"path":".env"}"#);
@@ -85,9 +85,15 @@ async fn deny_path_from_trogon_md_blocks_file_tool() {
 
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+        .await
+        .unwrap();
 
     assert!(
         second_call_has_denied_output(&mock, "cid-deny"),
@@ -97,7 +103,11 @@ async fn deny_path_from_trogon_md_blocks_file_tool() {
     let audit = agent.test_session_audit_log(&sid).await;
     assert_eq!(audit.len(), 1, "one tool call must produce one audit entry");
     assert_eq!(audit[0].tool, "read_file");
-    assert_eq!(audit[0].outcome, AuditOutcome::Denied, "audit must record Denied for .env");
+    assert_eq!(
+        audit[0].outcome,
+        AuditOutcome::Denied,
+        "audit must record Denied for .env"
+    );
 }
 
 /// bypassPermissions flag in new_session meta skips deny_paths from TROGON.md.
@@ -105,10 +115,7 @@ async fn deny_path_from_trogon_md_blocks_file_tool() {
 async fn bypass_permissions_meta_skips_deny_rule_from_trogon_md() {
     let _guard = env_lock().lock().unwrap();
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    ).unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     push_function_call(&mock, "cid-bypass", "read_file", r#"{"path":".env"}"#);
@@ -119,7 +126,10 @@ async fn bypass_permissions_meta_skips_deny_rule_from_trogon_md() {
     meta.insert("bypassPermissions".to_string(), serde_json::json!(true));
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()).meta(meta))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
     assert_eq!(
         agent.test_session_mode(&sid).await.as_deref(),
@@ -127,21 +137,31 @@ async fn bypass_permissions_meta_skips_deny_rule_from_trogon_md() {
         "session mode must be bypassPermissions after new_session with meta flag"
     );
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+        .await
+        .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let has_denied = calls.get(1).map(|call| {
-        call.input.iter().any(|item| {
+    let has_denied = calls
+        .get(1)
+        .map(|call| {
+            call.input.iter().any(|item| {
             matches!(item, InputItem::FunctionCallOutput { output, .. } if output.contains("permission denied"))
         })
-    }).unwrap_or(false);
+        })
+        .unwrap_or(false);
     drop(calls);
-    assert!(!has_denied, "bypass mode must not block tools even when deny_paths matches");
+    assert!(
+        !has_denied,
+        "bypass mode must not block tools even when deny_paths matches"
+    );
 
     let audit = agent.test_session_audit_log(&sid).await;
     assert_eq!(audit.len(), 1);
     assert_eq!(
-        audit[0].outcome, AuditOutcome::Allowed,
+        audit[0].outcome,
+        AuditOutcome::Allowed,
         "bypass mode must record Allowed in audit"
     );
 }
@@ -151,10 +171,7 @@ async fn bypass_permissions_meta_skips_deny_rule_from_trogon_md() {
 async fn set_session_mode_bypass_overrides_deny_rule() {
     let _guard = env_lock().lock().unwrap();
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    ).unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     push_function_call(&mock, "cid-mode", "read_file", r#"{"path":".env"}"#);
@@ -163,11 +180,15 @@ async fn set_session_mode_bypass_overrides_deny_rule() {
 
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
     agent
         .set_session_mode(SetSessionModeRequest::new(sid.clone(), "bypassPermissions"))
-        .await.unwrap();
+        .await
+        .unwrap();
 
     assert_eq!(
         agent.test_session_mode(&sid).await.as_deref(),
@@ -175,21 +196,31 @@ async fn set_session_mode_bypass_overrides_deny_rule() {
         "session mode must update to bypassPermissions"
     );
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+        .await
+        .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let has_denied = calls.get(1).map(|call| {
-        call.input.iter().any(|item| {
+    let has_denied = calls
+        .get(1)
+        .map(|call| {
+            call.input.iter().any(|item| {
             matches!(item, InputItem::FunctionCallOutput { output, .. } if output.contains("permission denied"))
         })
-    }).unwrap_or(false);
+        })
+        .unwrap_or(false);
     drop(calls);
-    assert!(!has_denied, "bypass mode set via set_session_mode must allow tools denied by TROGON.md");
+    assert!(
+        !has_denied,
+        "bypass mode set via set_session_mode must allow tools denied by TROGON.md"
+    );
 
     let audit = agent.test_session_audit_log(&sid).await;
     assert_eq!(audit.len(), 1);
     assert_eq!(
-        audit[0].outcome, AuditOutcome::Allowed,
+        audit[0].outcome,
+        AuditOutcome::Allowed,
         "audit must record Allowed after set_session_mode bypass"
     );
 }
@@ -199,10 +230,7 @@ async fn set_session_mode_bypass_overrides_deny_rule() {
 async fn deny_command_from_trogon_md_blocks_bash() {
     let _guard = env_lock().lock().unwrap();
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_commands: rm -rf\n",
-    ).unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_commands: rm -rf\n").unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     push_function_call(&mock, "cid-bash", "bash", r#"{"command":"rm -rf /"}"#);
@@ -211,9 +239,15 @@ async fn deny_command_from_trogon_md_blocks_bash() {
 
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("run")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("run")]))
+        .await
+        .unwrap();
 
     assert!(
         second_call_has_denied_output(&mock, "cid-bash"),
@@ -223,7 +257,11 @@ async fn deny_command_from_trogon_md_blocks_bash() {
     let audit = agent.test_session_audit_log(&sid).await;
     assert_eq!(audit.len(), 1);
     assert_eq!(audit[0].tool, "bash");
-    assert_eq!(audit[0].outcome, AuditOutcome::Denied, "audit must record Denied for denied bash command");
+    assert_eq!(
+        audit[0].outcome,
+        AuditOutcome::Denied,
+        "audit must record Denied for denied bash command"
+    );
 }
 
 /// Permission rules injected via set_session_config_option("permissions", ...) deny the tool.
@@ -241,15 +279,24 @@ async fn permission_rules_via_config_option_denies_tool() {
 
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
-    agent.set_session_config_option(SetSessionConfigOptionRequest::new(
-        sid.clone(),
-        "permissions",
-        "## Permissions\ndeny_paths: .env\n",
-    )).await.unwrap();
+    agent
+        .set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "permissions",
+            "## Permissions\ndeny_paths: .env\n",
+        ))
+        .await
+        .unwrap();
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+        .await
+        .unwrap();
 
     assert!(
         second_call_has_denied_output(&mock, "cid-cfg"),
@@ -259,7 +306,8 @@ async fn permission_rules_via_config_option_denies_tool() {
     let audit = agent.test_session_audit_log(&sid).await;
     assert_eq!(audit.len(), 1);
     assert_eq!(
-        audit[0].outcome, AuditOutcome::Denied,
+        audit[0].outcome,
+        AuditOutcome::Denied,
         "audit must record Denied when rule comes from config option"
     );
 }
@@ -269,10 +317,7 @@ async fn permission_rules_via_config_option_denies_tool() {
 async fn mixed_allowed_and_denied_tools_in_same_prompt() {
     let _guard = env_lock().lock().unwrap();
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: secrets/**\n",
-    ).unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: secrets/**\n").unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     mock.push_response(vec![
@@ -294,17 +339,23 @@ async fn mixed_allowed_and_denied_tools_in_same_prompt() {
 
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read both")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read both")]))
+        .await
+        .unwrap();
 
     let audit = agent.test_session_audit_log(&sid).await;
     assert_eq!(audit.len(), 2, "audit must have one entry per tool call");
 
     let has_allowed = audit.iter().any(|e| e.outcome == AuditOutcome::Allowed);
-    let has_denied  = audit.iter().any(|e| e.outcome == AuditOutcome::Denied);
+    let has_denied = audit.iter().any(|e| e.outcome == AuditOutcome::Denied);
     assert!(has_allowed, "audit must contain Allowed entry for README.md");
-    assert!(has_denied,  "audit must contain Denied entry for secrets/key.pem");
+    assert!(has_denied, "audit must contain Denied entry for secrets/key.pem");
 
     let denied = audit.iter().find(|e| e.outcome == AuditOutcome::Denied).unwrap();
     assert!(
@@ -320,7 +371,10 @@ async fn mixed_allowed_and_denied_tools_in_same_prompt() {
         matches!(item, InputItem::FunctionCallOutput { call_id, output }
             if call_id == "cid-bad" && output.contains("permission denied"))
     });
-    assert!(denied_output, "denied tool must produce 'permission denied' in follow-up HTTP call");
+    assert!(
+        denied_output,
+        "denied tool must produce 'permission denied' in follow-up HTTP call"
+    );
 }
 
 /// A denied tool must NOT get ToolCall(InProgress), only Pending then ToolCallUpdate(Completed).
@@ -328,10 +382,7 @@ async fn mixed_allowed_and_denied_tools_in_same_prompt() {
 async fn denied_tool_has_no_inprogress_notification() {
     let _guard = env_lock().lock().unwrap();
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    ).unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let mock = Arc::new(MockXaiHttpClient::new());
     push_function_call(&mock, "cid-denied", "read_file", r#"{"path":".env"}"#);
@@ -340,9 +391,15 @@ async fn denied_tool_has_no_inprogress_notification() {
 
     let sid = agent
         .new_session(NewSessionRequest::new(dir.path()))
-        .await.unwrap().session_id.to_string();
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
 
-    agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")])).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+        .await
+        .unwrap();
 
     let notifs = agent.test_notifier().notifications.lock().unwrap();
 
@@ -351,19 +408,28 @@ async fn denied_tool_has_no_inprogress_notification() {
             if tc.tool_call_id.to_string() == "cid-denied"
                 && tc.status == ToolCallStatus::Pending)
     });
-    assert!(has_pending, "ToolCall(Pending) must be sent when FunctionCall event is received; got: {notifs:?}");
+    assert!(
+        has_pending,
+        "ToolCall(Pending) must be sent when FunctionCall event is received; got: {notifs:?}"
+    );
 
     let has_inprogress = notifs.iter().any(|n| {
         matches!(&n.update, SessionUpdate::ToolCall(tc)
             if tc.tool_call_id.to_string() == "cid-denied"
                 && tc.status == ToolCallStatus::InProgress)
     });
-    assert!(!has_inprogress, "ToolCall(InProgress) must NOT be sent for a denied tool; got: {notifs:?}");
+    assert!(
+        !has_inprogress,
+        "ToolCall(InProgress) must NOT be sent for a denied tool; got: {notifs:?}"
+    );
 
     let has_denied_update = notifs.iter().any(|n| {
         if let SessionUpdate::ToolCallUpdate(tcu) = &n.update {
             tcu.tool_call_id.to_string() == "cid-denied"
-                && tcu.fields.raw_output.as_ref()
+                && tcu
+                    .fields
+                    .raw_output
+                    .as_ref()
                     .and_then(|v| v.as_str())
                     .map(|s| s.contains("permission denied"))
                     .unwrap_or(false)

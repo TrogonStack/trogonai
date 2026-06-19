@@ -19,8 +19,7 @@ statements in the history about being a specific named model or assistant (for e
 \"I'm Claude\"); do not adopt or continue that persona. Simply continue helping the user as yourself.";
 
 /// Provider-specific session keys that `session/export` does not carry across runners.
-const NON_TRANSFERABLE_PROVIDER_KEYS: &[&str] =
-    &["thread_id", "last_response_id", "previous_response_id"];
+const NON_TRANSFERABLE_PROVIDER_KEYS: &[&str] = &["thread_id", "last_response_id", "previous_response_id"];
 
 /// Returns `true` when `json` (export payload and/or `session/get_state` body) contains a
 /// non-empty provider-opaque identifier that cannot be imported into another runner.
@@ -641,7 +640,9 @@ mod tests {
             .await
             .unwrap();
 
-        let new_session_body = new_session_rx.await.expect("new_session request must have been captured");
+        let new_session_body = new_session_rx
+            .await
+            .expect("new_session request must have been captured");
         let json: serde_json::Value = serde_json::from_slice(&new_session_body).unwrap();
         assert_eq!(
             json["cwd"].as_str(),

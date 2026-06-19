@@ -47,11 +47,7 @@ impl AgentLoader {
                 };
                 val["skill_ids"]
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                     .unwrap_or_default()
             }
             Ok(None) => {

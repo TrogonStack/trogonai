@@ -2,13 +2,13 @@ mod config;
 
 use std::time::Duration;
 
-use trogon_telemetry::{ResourceAttribute, ServiceName};
 use clap::Parser;
 use tracing::info;
 use trogon_nats::connect;
 use trogon_service_config::{NatsArgs, RuntimeConfigArgs, load_config, resolve_nats};
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
+use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 use trogon_actor::inbox::provision_actor_inbox;
 use trogon_nats::jetstream::NatsJetStreamClient;
@@ -33,7 +33,12 @@ struct Cli {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    trogon_telemetry::init_logger(ServiceName::TrogonRouter, [ResourceAttribute::acp_prefix("router")], &SystemEnv, &SystemFs);
+    trogon_telemetry::init_logger(
+        ServiceName::TrogonRouter,
+        [ResourceAttribute::acp_prefix("router")],
+        &SystemEnv,
+        &SystemFs,
+    );
 
     info!("trogon-router starting");
 
@@ -73,9 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("ACTOR_INBOX stream ready");
 
     // ── Build router ──────────────────────────────────────────────────────────
-    let http = reqwest::Client::builder()
-        .timeout(LLM_REQUEST_TIMEOUT)
-        .build()?;
+    let http = reqwest::Client::builder().timeout(LLM_REQUEST_TIMEOUT).build()?;
     let llm = OpenAiCompatClient::new(
         http,
         LlmConfig {
@@ -86,8 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let registry = trogon_registry::Registry::new(registry_store);
     let publisher = NatsTranscriptPublisher::new(js);
-    let router =
-        Router::new(llm, registry, publisher, nats, js_client).with_dlq(UNROUTABLE_SUBJECT_PREFIX);
+    let router = Router::new(llm, registry, publisher, nats, js_client).with_dlq(UNROUTABLE_SUBJECT_PREFIX);
 
     // ── Run ───────────────────────────────────────────────────────────────────
     let subjects: Vec<&str> = cfg.events_subject.split(',').map(str::trim).collect();

@@ -30,11 +30,7 @@ pub fn transcript_subject(actor_type: &str, actor_key: &str, session_id: &str) -
 ///
 /// Pattern: `transcripts.{actor_type}.{actor_key}.>`
 pub fn entity_subject_filter(actor_type: &str, actor_key: &str) -> String {
-    format!(
-        "transcripts.{}.{}.>",
-        sanitize_key(actor_type),
-        sanitize_key(actor_key),
-    )
+    format!("transcripts.{}.{}.>", sanitize_key(actor_type), sanitize_key(actor_key),)
 }
 
 #[cfg(test)]

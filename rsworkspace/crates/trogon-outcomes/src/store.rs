@@ -13,16 +13,9 @@ pub trait OutcomesStore: Send + Sync + Clone + 'static {
     type DeleteError: std::error::Error + Send + Sync + 'static;
     type KeysError: std::error::Error + Send + Sync + 'static;
 
-    fn put(
-        &self,
-        key: &str,
-        value: Bytes,
-    ) -> impl Future<Output = Result<u64, Self::PutError>> + Send;
+    fn put(&self, key: &str, value: Bytes) -> impl Future<Output = Result<u64, Self::PutError>> + Send;
 
-    fn get(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
 
     fn delete(&self, key: &str) -> impl Future<Output = Result<(), Self::DeleteError>> + Send;
 
@@ -163,11 +156,7 @@ impl<S: OutcomesStore> ResultClient<S> {
             .map_err(|e| OutcomesError::Store(e.to_string()))
     }
 
-    pub async fn get(
-        &self,
-        session_id: &str,
-        rubric_id: &str,
-    ) -> Result<Option<EvaluationResult>, OutcomesError> {
+    pub async fn get(&self, session_id: &str, rubric_id: &str) -> Result<Option<EvaluationResult>, OutcomesError> {
         let key = result_key(session_id, rubric_id);
         match self.store.get(&key).await {
             Ok(Some(b)) => serde_json::from_slice::<EvaluationResult>(&b)
@@ -179,10 +168,7 @@ impl<S: OutcomesStore> ResultClient<S> {
     }
 
     /// List all results for a given session (across all rubrics).
-    pub async fn list_for_session(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<EvaluationResult>, OutcomesError> {
+    pub async fn list_for_session(&self, session_id: &str) -> Result<Vec<EvaluationResult>, OutcomesError> {
         let prefix = format!("{session_id}.");
         let keys = self
             .store

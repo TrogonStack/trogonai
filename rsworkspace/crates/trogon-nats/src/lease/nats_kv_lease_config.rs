@@ -48,8 +48,12 @@ impl NatsKvLeaseConfig {
 mod tests {
     use super::*;
 
-    fn ttl(secs: u64) -> LeaseTtl { LeaseTtl::from_secs(secs).unwrap() }
-    fn interval(secs: u64) -> LeaseRenewInterval { LeaseRenewInterval::from_secs(secs).unwrap() }
+    fn ttl(secs: u64) -> LeaseTtl {
+        LeaseTtl::from_secs(secs).unwrap()
+    }
+    fn interval(secs: u64) -> LeaseRenewInterval {
+        LeaseRenewInterval::from_secs(secs).unwrap()
+    }
 
     #[test]
     fn valid_config_accessors() {

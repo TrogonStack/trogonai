@@ -109,7 +109,10 @@ pub struct AnthropicOrchestratorProvider<C = reqwest::Client> {
 
 impl AnthropicOrchestratorProvider {
     pub fn new(config: OrchestratorLlmConfig) -> Self {
-        Self { client: reqwest::Client::new(), config }
+        Self {
+            client: reqwest::Client::new(),
+            config,
+        }
     }
 }
 
@@ -129,7 +132,12 @@ impl<C: OrchestratorHttpClient> AnthropicOrchestratorProvider<C> {
 
         let resp = self
             .client
-            .post(&self.config.api_url, &self.config.api_key, &self.config.auth_style, body)
+            .post(
+                &self.config.api_url,
+                &self.config.api_key,
+                &self.config.auth_style,
+                body,
+            )
             .await
             .map_err(OrchestratorError::Planning)?;
 
@@ -144,8 +152,7 @@ impl<C: OrchestratorHttpClient> OrchestratorProvider for AnthropicOrchestratorPr
         task: &'a str,
         capabilities: &'a [AgentCapability],
     ) -> Result<TaskPlan, OrchestratorError> {
-        let caps_json = serde_json::to_string_pretty(capabilities)
-            .unwrap_or_else(|_| "[]".to_string());
+        let caps_json = serde_json::to_string_pretty(capabilities).unwrap_or_else(|_| "[]".to_string());
         let prompt = format!(
             "You are an orchestrator. Break down the following task into parallel sub-tasks, \
              each assigned to one of the available agent capabilities.\n\n\
@@ -159,7 +166,10 @@ impl<C: OrchestratorHttpClient> OrchestratorProvider for AnthropicOrchestratorPr
              The payload field should be a JSON string the target agent will receive."
         );
 
-        let text = self.call_llm(prompt).await.map_err(|e| OrchestratorError::Planning(e.to_string()))?;
+        let text = self
+            .call_llm(prompt)
+            .await
+            .map_err(|e| OrchestratorError::Planning(e.to_string()))?;
         parse_plan(&text)
     }
 
@@ -180,7 +190,9 @@ impl<C: OrchestratorHttpClient> OrchestratorProvider for AnthropicOrchestratorPr
             plan.reasoning
         );
 
-        self.call_llm(prompt).await.map_err(|e| OrchestratorError::Synthesis(e.to_string()))
+        self.call_llm(prompt)
+            .await
+            .map_err(|e| OrchestratorError::Synthesis(e.to_string()))
     }
 }
 
@@ -211,8 +223,8 @@ struct RawSubTask {
 
 fn parse_plan(text: &str) -> Result<TaskPlan, OrchestratorError> {
     let json_str = extract_json_block(text);
-    let raw: RawPlan = serde_json::from_str(json_str)
-        .map_err(|e| OrchestratorError::Planning(format!("plan parse error: {e}")))?;
+    let raw: RawPlan =
+        serde_json::from_str(json_str).map_err(|e| OrchestratorError::Planning(format!("plan parse error: {e}")))?;
 
     let subtasks = raw
         .subtasks
@@ -225,7 +237,10 @@ fn parse_plan(text: &str) -> Result<TaskPlan, OrchestratorError> {
         })
         .collect();
 
-    Ok(TaskPlan { subtasks, reasoning: raw.reasoning })
+    Ok(TaskPlan {
+        subtasks,
+        reasoning: raw.reasoning,
+    })
 }
 
 fn extract_json_block(text: &str) -> &str {
@@ -289,7 +304,9 @@ mod tests {
 
     impl MockHttpClient {
         fn with_responses(responses: Vec<Result<serde_json::Value, String>>) -> Self {
-            Self { responses: Arc::new(Mutex::new(responses)) }
+            Self {
+                responses: Arc::new(Mutex::new(responses)),
+            }
         }
     }
 
@@ -368,8 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn plan_task_returns_error_on_bad_json() {
-        let client =
-            MockHttpClient::with_responses(vec![Ok(text_response("not valid json at all"))]);
+        let client = MockHttpClient::with_responses(vec![Ok(text_response("not valid json at all"))]);
         let provider = AnthropicOrchestratorProvider::with_client(config(), client);
         let caps = vec![AgentCapability::new("PrActor", ["code_review"], "actors.pr.>")];
         let err = provider.plan_task("task", &caps).await.unwrap_err();

@@ -15,8 +15,8 @@
 //! ```
 //! This is the standard GitHub `pull_request` webhook payload shape.
 
-use sha2::{Digest, Sha256};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 use super::{fetch_memory, run_agent};
@@ -50,9 +50,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let owner = event["repository"]["owner"]["login"].as_str()?;
     let repo = event["repository"]["name"].as_str()?;
     let pr_number = event["number"].as_u64()?;
-    let head_sha = event["pull_request"]["head"]["sha"]
-        .as_str()
-        .unwrap_or_default();
+    let head_sha = event["pull_request"]["head"]["sha"].as_str().unwrap_or_default();
 
     // SHA-based dedup: skip if we already reviewed this exact commit.
     // Rapid force-pushes each get a different NATS sequence but the same SHA
@@ -108,10 +106,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     // Pre-fetch memory file and inject as Anthropic system prompt.
     // Returns None gracefully when the file doesn't exist yet.
-    let mem_path = agent
-        .memory_path
-        .as_deref()
-        .unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = fetch_memory(agent, owner, repo, mem_path).await;
 
     match run_agent(agent, prompt, tools, memory).await {
@@ -358,10 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        assert!(matches!(
-            handle(&make_agent(), b"not json").await,
-            Some(Err(_))
-        ));
+        assert!(matches!(handle(&make_agent(), b"not json").await, Some(Err(_))));
     }
 
     /// When `repository.owner.login`, `repository.name`, or `number` is absent
@@ -423,10 +415,7 @@ mod tests {
         // The agent will try to run but fail (no mock responses) — that's fine,
         // we only want to confirm we did NOT get None from the draft guard.
         let result = handle(&make_agent(), &serde_json::to_vec(&payload).unwrap()).await;
-        assert!(
-            result.is_some(),
-            "non-draft PR must not be skipped by the draft guard"
-        );
+        assert!(result.is_some(), "non-draft PR must not be skipped by the draft guard");
     }
 
     /// The prompt must contain the head SHA so the agent can pass it to `post_pr_review`.
@@ -500,10 +489,7 @@ mod tests {
         });
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn.clone(),
-                end_turn,
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn.clone(), end_turn])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),

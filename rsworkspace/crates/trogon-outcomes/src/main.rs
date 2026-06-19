@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use trogon_nats::connect;
-use trogon_std::env::SystemEnv;
 use trogon_outcomes::{
-    AnthropicEvaluationProvider, Evaluator, EvaluationService, OutcomesConfig,
-    provision_rubrics_kv, provision_results_kv, provision_stream, serve,
+    AnthropicEvaluationProvider, EvaluationService, Evaluator, OutcomesConfig, provision_results_kv,
+    provision_rubrics_kv, provision_stream, serve,
 };
+use trogon_std::env::SystemEnv;
 
 #[tokio::main]
 async fn main() {
@@ -23,9 +23,15 @@ async fn main() {
 
     let js = async_nats::jetstream::new(nats);
 
-    provision_stream(&js).await.expect("Failed to provision SESSION_EVALUATIONS stream");
-    let rubric_kv = provision_rubrics_kv(&js).await.expect("Failed to provision rubrics bucket");
-    let result_kv = provision_results_kv(&js).await.expect("Failed to provision results bucket");
+    provision_stream(&js)
+        .await
+        .expect("Failed to provision SESSION_EVALUATIONS stream");
+    let rubric_kv = provision_rubrics_kv(&js)
+        .await
+        .expect("Failed to provision rubrics bucket");
+    let result_kv = provision_results_kv(&js)
+        .await
+        .expect("Failed to provision results bucket");
 
     let provider = AnthropicEvaluationProvider::new(config.llm);
     let evaluator = Evaluator::new(provider, rubric_kv.clone(), result_kv.clone());

@@ -14,14 +14,13 @@ use std::time::Duration;
 
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
-    ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+    ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionId,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModelRequest,
-    SetSessionModelResponse, SetSessionModeRequest, SetSessionModeResponse, StopReason,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -56,10 +55,7 @@ async fn nats_client(port: u16) -> async_nats::Client {
         .expect("Failed to connect to NATS")
 }
 
-fn make_bridge(
-    nats: async_nats::Client,
-    prefix: &str,
-) -> Bridge<async_nats::Client, SystemClock, NatsJetStreamClient> {
+fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Client, SystemClock, NatsJetStreamClient> {
     let js = NatsJetStreamClient::new(jetstream::new(nats.clone()));
     let config = Config::new(
         AcpPrefix::new(prefix).unwrap(),
@@ -91,23 +87,16 @@ async fn initialize_returns_protocol_version_from_agent() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
 
-    let result = bridge
-        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
-        .await;
+    let result = bridge.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await;
 
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().protocol_version, ProtocolVersion::LATEST);
 }
 
@@ -145,10 +134,7 @@ async fn initialize_returns_error_on_invalid_json_response() {
             && let Some(reply) = msg.reply
         {
             // Send malformed JSON.
-            nats2
-                .publish(reply, b"{bad json}".as_ref().into())
-                .await
-                .unwrap();
+            nats2.publish(reply, b"{bad json}".as_ref().into()).await.unwrap();
         }
     });
 
@@ -189,14 +175,8 @@ async fn authenticate_succeeds() {
         }
     });
 
-    let result = bridge
-        .authenticate(AuthenticateRequest::new("password"))
-        .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    let result = bridge.authenticate(AuthenticateRequest::new("password")).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 #[tokio::test]
@@ -235,11 +215,7 @@ async fn new_session_returns_session_id() {
     });
 
     let result = bridge.new_session(NewSessionRequest::new(".")).await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().session_id, expected_id);
 }
 
@@ -268,10 +244,7 @@ async fn new_session_publishes_session_ready_after_delay() {
         }
     });
 
-    bridge
-        .new_session(NewSessionRequest::new("."))
-        .await
-        .unwrap();
+    bridge.new_session(NewSessionRequest::new(".")).await.unwrap();
 
     // The session.ready is published ~100ms after new_session returns.
     let msg = tokio::time::timeout(Duration::from_secs(2), ready_sub.next())
@@ -313,10 +286,7 @@ async fn load_session_uses_session_scoped_subject() {
         }
     });
 
-    bridge
-        .load_session(LoadSessionRequest::new("s1", "."))
-        .await
-        .unwrap();
+    bridge.load_session(LoadSessionRequest::new("s1", ".")).await.unwrap();
 
     let subject = tokio::time::timeout(Duration::from_secs(1), rx)
         .await
@@ -407,10 +377,7 @@ async fn set_session_mode_succeeds() {
     let bridge = make_bridge(nats.clone(), "acp");
 
     // JetStream-published messages are also delivered to core NATS subscribers.
-    let mut agent_sub = nats
-        .subscribe("acp.session.s1.agent.set_mode")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.s1.agent.set_mode").await.unwrap();
     let js2 = js.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -426,14 +393,8 @@ async fn set_session_mode_succeeds() {
         }
     });
 
-    let result = bridge
-        .set_session_mode(SetSessionModeRequest::new("s1", "edit"))
-        .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    let result = bridge.set_session_mode(SetSessionModeRequest::new("s1", "edit")).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -506,8 +467,7 @@ async fn custom_prefix_used_in_all_subjects() {
         if let Some(msg) = agent_sub.next().await {
             let subject = msg.subject.to_string();
             let _ = tx.send(subject);
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -541,8 +501,7 @@ async fn initialize_with_client_info_forwarded_to_agent() {
             // Capture the raw payload to verify the client name is present.
             let payload_str = String::from_utf8_lossy(&msg.payload).to_string();
             let _ = tx.send(payload_str);
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -551,8 +510,7 @@ async fn initialize_with_client_info_forwarded_to_agent() {
 
     bridge
         .initialize(
-            InitializeRequest::new(ProtocolVersion::LATEST)
-                .client_info(Implementation::new("my-client", "1.0.0")),
+            InitializeRequest::new(ProtocolVersion::LATEST).client_info(Implementation::new("my-client", "1.0.0")),
         )
         .await
         .unwrap();
@@ -602,11 +560,7 @@ async fn concurrent_requests_dont_mix_replies() {
 
     let mut session_ids = HashSet::new();
     for result in [r0, r1, r2, r3, r4] {
-        assert!(
-            result.is_ok(),
-            "concurrent request failed: {:?}",
-            result.unwrap_err()
-        );
+        assert!(result.is_ok(), "concurrent request failed: {:?}", result.unwrap_err());
         let id = result.unwrap().session_id.to_string();
         assert!(!id.is_empty(), "session_id must not be empty");
         session_ids.insert(id);
@@ -653,19 +607,14 @@ async fn prompt_succeeds_with_real_jetstream() {
                 .and_then(|h| h.get("X-Req-Id"))
                 .map(|v| v.as_str().to_string())
                 .unwrap_or_default();
-            let resp_subject = format!(
-                "acp.session.{}.agent.prompt.response.{}",
-                session_id, req_id
-            );
+            let resp_subject = format!("acp.session.{}.agent.prompt.response.{}", session_id, req_id);
             let resp = serde_json::to_vec(&PromptResponse::new(StopReason::EndTurn)).unwrap();
             // JetStream-publish so the bridge's RESPONSES consumer picks it up.
             let _ = js2.publish(resp_subject, resp.into()).await;
         }
     });
 
-    let result = bridge
-        .prompt(PromptRequest::new(session_id, vec![]))
-        .await;
+    let result = bridge.prompt(PromptRequest::new(session_id, vec![])).await;
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
@@ -757,9 +706,7 @@ async fn fork_session_succeeds_with_real_jetstream() {
         }
     });
 
-    let result = bridge
-        .fork_session(ForkSessionRequest::new(session_id, "."))
-        .await;
+    let result = bridge.fork_session(ForkSessionRequest::new(session_id, ".")).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().session_id, new_session_id);
 }
@@ -797,9 +744,7 @@ async fn close_session_succeeds_with_real_jetstream() {
         }
     });
 
-    let result = bridge
-        .close_session(CloseSessionRequest::new(session_id))
-        .await;
+    let result = bridge.close_session(CloseSessionRequest::new(session_id)).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
@@ -836,9 +781,7 @@ async fn resume_session_succeeds_with_real_jetstream() {
         }
     });
 
-    let result = bridge
-        .resume_session(ResumeSessionRequest::new(session_id, "."))
-        .await;
+    let result = bridge.resume_session(ResumeSessionRequest::new(session_id, ".")).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
@@ -856,13 +799,12 @@ async fn ext_method_routes_to_agent_and_returns_response() {
 
     let mut agent_sub = nats.subscribe("acp.agent.ext.ping").await.unwrap();
     let nats2 = nats.clone();
-    let resp_payload =
-        serde_json::to_vec(&ExtResponse::new(
-            serde_json::value::RawValue::from_string(r#"{"pong":true}"#.to_string())
-                .unwrap()
-                .into(),
-        ))
-        .unwrap();
+    let resp_payload = serde_json::to_vec(&ExtResponse::new(
+        serde_json::value::RawValue::from_string(r#"{"pong":true}"#.to_string())
+            .unwrap()
+            .into(),
+    ))
+    .unwrap();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await
             && let Some(reply) = msg.reply
@@ -871,11 +813,8 @@ async fn ext_method_routes_to_agent_and_returns_response() {
         }
     });
 
-    let params =
-        serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
-    let result = bridge
-        .ext_method(ExtRequest::new("ping", params.into()))
-        .await;
+    let params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+    let result = bridge.ext_method(ExtRequest::new("ping", params.into())).await;
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
@@ -906,10 +845,7 @@ async fn ext_notification_publishes_to_correct_subject() {
         .expect("subscriber closed");
 
     assert_eq!(msg.subject.as_str(), "acp.agent.ext.my_notify");
-    assert!(
-        msg.reply.is_none(),
-        "ext_notification must not include a reply subject"
-    );
+    assert!(msg.reply.is_none(), "ext_notification must not include a reply subject");
 }
 
 // ── set_session_config_option ─────────────────────────────────────────────────
@@ -946,9 +882,7 @@ async fn set_session_config_option_succeeds_with_real_jetstream() {
     });
 
     let result = bridge
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            session_id, "theme", "dark",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new(session_id, "theme", "dark"))
         .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }

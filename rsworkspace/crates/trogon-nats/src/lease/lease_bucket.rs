@@ -46,16 +46,25 @@ mod tests {
     #[test]
     fn bucket_with_dot_is_rejected() {
         // dots are allowed in keys but NOT in buckets
-        assert!(matches!(LeaseBucket::new("my.bucket"), Err(LeaseConfigError::InvalidBucketName(_))));
+        assert!(matches!(
+            LeaseBucket::new("my.bucket"),
+            Err(LeaseConfigError::InvalidBucketName(_))
+        ));
     }
 
     #[test]
     fn bucket_with_slash_is_rejected() {
-        assert!(matches!(LeaseBucket::new("a/b"), Err(LeaseConfigError::InvalidBucketName(_))));
+        assert!(matches!(
+            LeaseBucket::new("a/b"),
+            Err(LeaseConfigError::InvalidBucketName(_))
+        ));
     }
 
     #[test]
     fn bucket_with_space_is_rejected() {
-        assert!(matches!(LeaseBucket::new("bad bucket"), Err(LeaseConfigError::InvalidBucketName(_))));
+        assert!(matches!(
+            LeaseBucket::new("bad bucket"),
+            Err(LeaseConfigError::InvalidBucketName(_))
+        ));
     }
 }

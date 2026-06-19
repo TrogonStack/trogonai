@@ -11,7 +11,7 @@ pub use config::Config;
 pub use runtime::WasmRuntime;
 pub use traits::{
     ChildProcessHandle, Clock, FileMetadata, Fs, IdGenerator, NatsBroker, ProcessSpawner, Runtime,
-    SemaphoreTaskLimiter, StdClock, StdSyncFs, SyncFs, TaskLimiter, TokioFs, TokioProcessSpawner,
-    UuidGenerator, WasmExecutor, WasmRunConfig,
+    SemaphoreTaskLimiter, StdClock, StdSyncFs, SyncFs, TaskLimiter, TokioFs, TokioProcessSpawner, UuidGenerator,
+    WasmExecutor, WasmRunConfig,
 };
 pub use wasm::RealWasmExecutor;

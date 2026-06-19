@@ -78,10 +78,7 @@ mod tests {
 
     #[test]
     fn status_subject() {
-        assert_eq!(
-            status("prod", "prop_abc123"),
-            "vault.proposals.prod.status.prop_abc123"
-        );
+        assert_eq!(status("prod", "prop_abc123"), "vault.proposals.prod.status.prop_abc123");
     }
 
     #[test]
@@ -95,7 +92,10 @@ mod tests {
     #[test]
     fn stream_subjects_includes_state_and_excludes_status() {
         let subjects = stream_subjects();
-        assert!(subjects.iter().any(|s| s.contains("state")), "stream must capture state updates");
+        assert!(
+            subjects.iter().any(|s| s.contains("state")),
+            "stream must capture state updates"
+        );
         for s in &subjects {
             assert!(!s.contains("status"), "stream must not capture status: {s}");
         }

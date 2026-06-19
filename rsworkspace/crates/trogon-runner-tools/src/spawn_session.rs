@@ -1,12 +1,11 @@
 use std::path::PathBuf;
 
-use agent_client_protocol::{
-    CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest, SessionId,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
-};
 use acp_nats::{
-    Bridge, FlushClient, JetStreamGetStream, JetStreamPublisher, PublishClient, RequestClient,
-    SubscribeClient,
+    Bridge, FlushClient, JetStreamGetStream, JetStreamPublisher, PublishClient, RequestClient, SubscribeClient,
+};
+use agent_client_protocol::{
+    CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest, SessionId, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, SetSessionModelRequest,
 };
 use trogon_nats::jetstream::{JsMessageOf, JsRequestMessage};
 use trogon_std::time::GetElapsed;
@@ -64,22 +63,13 @@ where
     }
     if let Some(ctx) = spawn_ctx {
         if !ctx.tool_allowlist.is_empty() {
-            meta.insert(
-                "toolAllowlist".to_string(),
-                serde_json::json!(ctx.tool_allowlist),
-            );
+            meta.insert("toolAllowlist".to_string(), serde_json::json!(ctx.tool_allowlist));
         }
         if !ctx.allowed_tools.is_empty() {
-            meta.insert(
-                "allowedTools".to_string(),
-                serde_json::json!(ctx.allowed_tools),
-            );
+            meta.insert("allowedTools".to_string(), serde_json::json!(ctx.allowed_tools));
         }
         if !ctx.additional_roots.is_empty() {
-            meta.insert(
-                "additionalRoots".to_string(),
-                serde_json::json!(ctx.additional_roots),
-            );
+            meta.insert("additionalRoots".to_string(), serde_json::json!(ctx.additional_roots));
         }
         if !ctx.additional_read_dirs.is_empty() {
             meta.insert(
@@ -154,29 +144,16 @@ where
     J: JetStreamPublisher + JetStreamGetStream,
     JsMessageOf<J>: JsRequestMessage,
 {
-    let prompt_req = PromptRequest::new(
-        SessionId::new(session_id),
-        vec![ContentBlock::from(prompt)],
-    );
+    let prompt_req = PromptRequest::new(SessionId::new(session_id), vec![ContentBlock::from(prompt)]);
 
-    let prompt_result = tokio::time::timeout(
-        timeout,
-        agent_client_protocol::Agent::prompt(bridge, prompt_req),
-    )
-    .await;
+    let prompt_result = tokio::time::timeout(timeout, agent_client_protocol::Agent::prompt(bridge, prompt_req)).await;
 
     // Best-effort close — ignore errors so partial results are still returned.
-    let _ = agent_client_protocol::Agent::close_session(
-        bridge,
-        CloseSessionRequest::new(SessionId::new(session_id)),
-    )
-    .await;
+    let _ =
+        agent_client_protocol::Agent::close_session(bridge, CloseSessionRequest::new(SessionId::new(session_id))).await;
 
     match prompt_result {
-        Err(_elapsed) => Err(format!(
-            "spawn_agent safety-net timeout after {}s",
-            timeout.as_secs()
-        )),
+        Err(_elapsed) => Err(format!("spawn_agent safety-net timeout after {}s", timeout.as_secs())),
         Ok(Err(e)) => Err(format!("prompt failed: {e}")),
         Ok(Ok(_)) => Ok(()),
     }

@@ -8,10 +8,7 @@ use tracing::{info, warn};
 use trogon_transcript::store::TranscriptStore;
 
 use crate::{
-    evaluator::Evaluator,
-    provider::EvaluationProvider,
-    provision::EVALUATIONS_STREAM,
-    store::OutcomesStore,
+    evaluator::Evaluator, provider::EvaluationProvider, provision::EVALUATIONS_STREAM, store::OutcomesStore,
     types::EvaluateTrigger,
 };
 
@@ -43,7 +40,11 @@ pub struct EvaluationService<P: EvaluationProvider, S: OutcomesStore> {
 
 impl<P: EvaluationProvider, S: OutcomesStore> EvaluationService<P, S> {
     pub fn new(js: jetstream::Context, consumer_name: String, evaluator: Evaluator<P, S>) -> Self {
-        Self { js, consumer_name, evaluator }
+        Self {
+            js,
+            consumer_name,
+            evaluator,
+        }
     }
 
     pub async fn run(self) -> Result<(), ServiceError> {

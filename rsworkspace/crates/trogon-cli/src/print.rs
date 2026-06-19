@@ -256,9 +256,7 @@ async fn spawn_auto_deny_permissions_inner<E: std::fmt::Display>(
     let mut sub = match sub {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "error: could not subscribe to permission requests: {e} — approval-gated tools will be denied"
-            );
+            eprintln!("error: could not subscribe to permission requests: {e} — approval-gated tools will be denied");
             return Err(e);
         }
     };
@@ -365,10 +363,7 @@ mod tests {
 
     #[test]
     fn from_stop_reason_end_turn_maps_to_success() {
-        assert_eq!(
-            PrintExitCode::from_stop_reason("end_turn"),
-            PrintExitCode::Success
-        );
+        assert_eq!(PrintExitCode::from_stop_reason("end_turn"), PrintExitCode::Success);
     }
 
     #[test]

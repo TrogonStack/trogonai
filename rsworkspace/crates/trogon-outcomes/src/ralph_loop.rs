@@ -1,7 +1,7 @@
 use std::future::Future;
 
-use trogon_transcript::entry::Role;
 use trogon_transcript::TranscriptEntry;
+use trogon_transcript::entry::Role;
 
 use crate::{
     evaluator::Evaluator,
@@ -82,7 +82,11 @@ pub struct RalphLoop<E: TaskExecutor, P: EvaluationProvider, S: OutcomesStore> {
 impl<E: TaskExecutor, P: EvaluationProvider, S: OutcomesStore> RalphLoop<E, P, S> {
     pub fn new(executor: E, evaluator: Evaluator<P, S>, max_iterations: usize) -> Self {
         assert!(max_iterations > 0, "max_iterations must be at least 1");
-        Self { executor, evaluator, max_iterations }
+        Self {
+            executor,
+            evaluator,
+            max_iterations,
+        }
     }
 
     /// Run the loop for `task` against `rubric_id`.
@@ -97,8 +101,7 @@ impl<E: TaskExecutor, P: EvaluationProvider, S: OutcomesStore> RalphLoop<E, P, S
         actor_key: &str,
         rubric_id: Option<&str>,
     ) -> Result<RalphLoopResult, RalphLoopError> {
-        let rubric_ids: Vec<String> =
-            rubric_id.map(|id| vec![id.to_string()]).unwrap_or_default();
+        let rubric_ids: Vec<String> = rubric_id.map(|id| vec![id.to_string()]).unwrap_or_default();
         let mut feedback: Option<String> = None;
         let mut iterations = Vec::new();
 
@@ -116,7 +119,11 @@ impl<E: TaskExecutor, P: EvaluationProvider, S: OutcomesStore> RalphLoop<E, P, S
 
             if results.is_empty() {
                 // No rubric matched — unconstrained output, treat as passed.
-                return Ok(RalphLoopResult { iterations, final_output: output, passed: true });
+                return Ok(RalphLoopResult {
+                    iterations,
+                    final_output: output,
+                    passed: true,
+                });
             }
 
             // The worst-scoring rubric determines whether the attempt passed.
@@ -131,7 +138,11 @@ impl<E: TaskExecutor, P: EvaluationProvider, S: OutcomesStore> RalphLoop<E, P, S
 
             let passed = worst.passed;
             feedback = Some(format_feedback(attempt + 1, &worst));
-            iterations.push(LoopIteration { attempt, output: output.clone(), result: worst });
+            iterations.push(LoopIteration {
+                attempt,
+                output: output.clone(),
+                result: worst,
+            });
 
             if passed {
                 return Ok(RalphLoopResult {
@@ -143,7 +154,11 @@ impl<E: TaskExecutor, P: EvaluationProvider, S: OutcomesStore> RalphLoop<E, P, S
         }
 
         let final_output = iterations.last().map(|i| i.output.clone()).unwrap_or_default();
-        Ok(RalphLoopResult { iterations, final_output, passed: false })
+        Ok(RalphLoopResult {
+            iterations,
+            final_output,
+            passed: false,
+        })
     }
 }
 
@@ -203,13 +218,13 @@ pub mod mock {
     }
 
     impl TaskExecutor for SequencedTaskExecutor {
-        async fn execute(
-            &self,
-            _task: &str,
-            _feedback: Option<&str>,
-        ) -> Result<String, RalphLoopError> {
+        async fn execute(&self, _task: &str, _feedback: Option<&str>) -> Result<String, RalphLoopError> {
             let mut guard = self.0.lock().unwrap();
-            Ok(if guard.is_empty() { "default output".to_string() } else { guard.remove(0) })
+            Ok(if guard.is_empty() {
+                "default output".to_string()
+            } else {
+                guard.remove(0)
+            })
         }
     }
 }
@@ -222,8 +237,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::store::mock::MockOutcomesStore;
     use crate::store::RubricClient;
+    use crate::store::mock::MockOutcomesStore;
     use crate::types::{Criterion, CriterionScore, Rubric};
 
     // ── MockExecutor ──────────────────────────────────────────────────────────
@@ -270,7 +285,9 @@ mod tests {
 
     impl SequencedProvider {
         fn returning(rounds: Vec<Vec<CriterionScore>>) -> Self {
-            Self { scores: Arc::new(Mutex::new(rounds)) }
+            Self {
+                scores: Arc::new(Mutex::new(rounds)),
+            }
         }
     }
 
@@ -279,8 +296,7 @@ mod tests {
             &'a self,
             _rubric: &'a Rubric,
             _transcript: &'a [TranscriptEntry],
-        ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a
-        {
+        ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a {
             let mut s = self.scores.lock().unwrap();
             let scores = if s.is_empty() {
                 vec![CriterionScore {
@@ -354,13 +370,8 @@ mod tests {
 
     #[tokio::test]
     async fn retries_until_pass() {
-        let executor =
-            MockExecutor::with_responses(["bad output", "better output", "great output"]);
-        let provider = SequencedProvider::returning(vec![
-            failing_scores(),
-            failing_scores(),
-            passing_scores(),
-        ]);
+        let executor = MockExecutor::with_responses(["bad output", "better output", "great output"]);
+        let provider = SequencedProvider::returning(vec![failing_scores(), failing_scores(), passing_scores()]);
         let lp = loop_with_rubric(executor, provider, 5).await;
 
         let result = lp.run("do a task", "pr", "repo/1", Some("r1")).await.unwrap();
@@ -373,11 +384,7 @@ mod tests {
     #[tokio::test]
     async fn stops_at_max_iterations_if_never_passes() {
         let executor = MockExecutor::with_responses(["out1", "out2", "out3"]);
-        let provider = SequencedProvider::returning(vec![
-            failing_scores(),
-            failing_scores(),
-            failing_scores(),
-        ]);
+        let provider = SequencedProvider::returning(vec![failing_scores(), failing_scores(), failing_scores()]);
         let lp = loop_with_rubric(executor, provider, 3).await;
 
         let result = lp.run("do a task", "pr", "repo/1", Some("r1")).await.unwrap();
@@ -391,8 +398,7 @@ mod tests {
     async fn passes_feedback_on_retry() {
         let executor = MockExecutor::with_responses(["bad", "good"]);
         let fb_tracker = executor.received_feedback.clone();
-        let provider =
-            SequencedProvider::returning(vec![failing_scores(), passing_scores()]);
+        let provider = SequencedProvider::returning(vec![failing_scores(), passing_scores()]);
         let lp = loop_with_rubric(executor, provider, 3).await;
 
         lp.run("do a task", "pr", "repo/1", Some("r1")).await.unwrap();
@@ -412,10 +418,7 @@ mod tests {
         let result_store = MockOutcomesStore::new();
         let client = RubricClient::new(rubric_store.clone());
         // Register a rubric filtered to "issue" — won't match "pr".
-        client
-            .put(&rubric("r1").with_actor_type_filter("issue"))
-            .await
-            .unwrap();
+        client.put(&rubric("r1").with_actor_type_filter("issue")).await.unwrap();
         let provider = SequencedProvider::returning(vec![]);
         let evaluator = Evaluator::new(provider, rubric_store, result_store);
         let executor = MockExecutor::with_responses(["output"]);
@@ -474,7 +477,13 @@ mod tests {
         lp.run("task", "pr", "repo/1", Some("r1")).await.unwrap();
 
         let feedback_on_retry = fb_tracker.lock().unwrap()[1].clone().unwrap();
-        assert!(feedback_on_retry.contains("clarity"), "feedback should name the criterion");
-        assert!(feedback_on_retry.contains("too verbose"), "feedback should include reasoning");
+        assert!(
+            feedback_on_retry.contains("clarity"),
+            "feedback should name the criterion"
+        );
+        assert!(
+            feedback_on_retry.contains("too verbose"),
+            "feedback should include reasoning"
+        );
     }
 }

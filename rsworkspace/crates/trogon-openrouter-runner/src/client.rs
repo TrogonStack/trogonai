@@ -56,11 +56,7 @@ impl Message {
         }
     }
 
-    pub fn assistant_with_usage(
-        text: impl Into<String>,
-        prompt_tokens: u64,
-        completion_tokens: u64,
-    ) -> Self {
+    pub fn assistant_with_usage(text: impl Into<String>, prompt_tokens: u64, completion_tokens: u64) -> Self {
         Self {
             role: "assistant".to_string(),
             content: text.into(),
@@ -151,8 +147,12 @@ impl FinishReason {
 /// An event emitted by the OpenRouter SSE stream (OpenAI chat completions format).
 #[derive(Debug, Clone)]
 pub enum OpenRouterEvent {
-    TextDelta { text: String },
-    ToolCallsReady { calls: Vec<AssembledToolCall> },
+    TextDelta {
+        text: String,
+    },
+    ToolCallsReady {
+        calls: Vec<AssembledToolCall>,
+    },
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
@@ -186,8 +186,8 @@ impl Default for OpenRouterClient {
 
 impl OpenRouterClient {
     pub fn new() -> Self {
-        let base_url = std::env::var("OPENROUTER_BASE_URL")
-            .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+        let base_url =
+            std::env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
         let request_timeout = std::env::var("OPENROUTER_PROMPT_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -243,8 +243,7 @@ impl OpenRouterClient {
         api_key: &str,
         tools: &[ToolDef],
     ) -> Result<reqwest::Response, String> {
-        let wire_messages: Vec<serde_json::Value> =
-            messages.iter().map(wire_message).collect();
+        let wire_messages: Vec<serde_json::Value> = messages.iter().map(wire_message).collect();
 
         let mut body = serde_json::json!({
             "model": model,
@@ -255,21 +254,22 @@ impl OpenRouterClient {
 
         if !tools.is_empty() {
             body["tools"] = serde_json::json!(
-                tools.iter().map(|t| serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": t.parameters,
-                    }
-                })).collect::<Vec<_>>()
+                tools
+                    .iter()
+                    .map(|t| serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        }
+                    }))
+                    .collect::<Vec<_>>()
             );
         }
 
-        let site_url = std::env::var("OPENROUTER_SITE_URL")
-            .unwrap_or_else(|_| "https://trogonai.com".to_string());
-        let site_name = std::env::var("OPENROUTER_SITE_NAME")
-            .unwrap_or_else(|_| "TrogonAI".to_string());
+        let site_url = std::env::var("OPENROUTER_SITE_URL").unwrap_or_else(|_| "https://trogonai.com".to_string());
+        let site_name = std::env::var("OPENROUTER_SITE_NAME").unwrap_or_else(|_| "TrogonAI".to_string());
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
         let mut attempt = 0u32;
@@ -434,11 +434,7 @@ fn parse_sse(
     )
 }
 
-fn process_sse_line(
-    line: &str,
-    pending: &mut VecDeque<OpenRouterEvent>,
-    acc: &mut HashMap<usize, PartialToolCall>,
-) {
+fn process_sse_line(line: &str, pending: &mut VecDeque<OpenRouterEvent>, acc: &mut HashMap<usize, PartialToolCall>) {
     let data = match line.strip_prefix("data: ") {
         Some(d) => d.trim(),
         None => return,
@@ -457,11 +453,10 @@ fn process_sse_line(
         let delta = &choice["delta"];
 
         if let Some(text) = delta["content"].as_str()
-            && !text.is_empty() {
-                pending.push_back(OpenRouterEvent::TextDelta {
-                    text: text.to_string(),
-                });
-            }
+            && !text.is_empty()
+        {
+            pending.push_back(OpenRouterEvent::TextDelta { text: text.to_string() });
+        }
 
         if let Some(tool_calls) = delta["tool_calls"].as_array() {
             for entry in tool_calls {
@@ -472,13 +467,15 @@ fn process_sse_line(
                     arguments: String::new(),
                 });
                 if let Some(id) = entry["id"].as_str()
-                    && !id.is_empty() {
-                        partial.id = id.to_string();
-                    }
+                    && !id.is_empty()
+                {
+                    partial.id = id.to_string();
+                }
                 if let Some(name) = entry["function"]["name"].as_str()
-                    && !name.is_empty() {
-                        partial.name = name.to_string();
-                    }
+                    && !name.is_empty()
+                {
+                    partial.name = name.to_string();
+                }
                 if let Some(args) = entry["function"]["arguments"].as_str() {
                     partial.arguments.push_str(args);
                 }
@@ -507,28 +504,23 @@ fn process_sse_line(
 
     // Usage — emitted after Finished; may arrive in a separate chunk with empty choices.
     if let Some(usage) = val.get("usage").and_then(|u| u.as_object())
-        && !usage.is_empty() {
-            let prompt_tokens = usage
-                .get("prompt_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let completion_tokens = usage
-                .get("completion_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let cache_read_tokens = val["usage"]["prompt_tokens_details"]["cached_tokens"]
-                .as_u64()
-                .unwrap_or(0);
-            let cache_creation_tokens = val["usage"]["prompt_tokens_details"]["cache_write_tokens"]
-                .as_u64()
-                .unwrap_or(0);
-            pending.push_back(OpenRouterEvent::Usage {
-                prompt_tokens,
-                completion_tokens,
-                cache_read_tokens,
-                cache_creation_tokens,
-            });
-        }
+        && !usage.is_empty()
+    {
+        let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let cache_read_tokens = val["usage"]["prompt_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .unwrap_or(0);
+        let cache_creation_tokens = val["usage"]["prompt_tokens_details"]["cache_write_tokens"]
+            .as_u64()
+            .unwrap_or(0);
+        pending.push_back(OpenRouterEvent::Usage {
+            prompt_tokens,
+            completion_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -548,20 +540,14 @@ mod tests {
 
     #[test]
     fn parse_text_delta() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#]);
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hello"));
     }
 
     #[test]
     fn parse_finish_reason_stop() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
-        ]);
-        assert!(
-            matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Stop)
-        );
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#]);
+        assert!(matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Stop));
     }
 
     #[test]
@@ -569,9 +555,14 @@ mod tests {
         let events = events_from_lines(&[
             r#"data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#,
         ]);
-        assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, .. })
-        );
+        assert!(matches!(
+            &events[0],
+            OpenRouterEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -603,8 +594,20 @@ mod tests {
         let events: Vec<_> = parse_sse(stream::iter(chunks)).collect().await;
 
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hi"));
-        assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-        assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 5, completion_tokens: 2, .. }));
+        assert!(matches!(
+            &events[1],
+            OpenRouterEvent::Finished {
+                reason: FinishReason::Stop
+            }
+        ));
+        assert!(matches!(
+            &events[2],
+            OpenRouterEvent::Usage {
+                prompt_tokens: 5,
+                completion_tokens: 2,
+                ..
+            }
+        ));
         assert!(matches!(&events[3], OpenRouterEvent::Done));
     }
 
@@ -684,19 +687,14 @@ mod tests {
 
     #[test]
     fn finish_reason_empty_string_becomes_other() {
-        assert_eq!(
-            FinishReason::from_str(""),
-            FinishReason::Other("".to_string())
-        );
+        assert_eq!(FinishReason::from_str(""), FinishReason::Other("".to_string()));
     }
 
     // ── SSE parser edge cases ─────────────────────────────────────────────────
 
     #[test]
     fn skips_empty_content_delta() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":""},"finish_reason":null}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{"content":""},"finish_reason":null}]}"#]);
         assert!(events.is_empty(), "empty content string must not emit TextDelta");
     }
 
@@ -714,19 +712,13 @@ mod tests {
 
     #[test]
     fn parse_finish_reason_length() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{},"finish_reason":"length"}]}"#,
-        ]);
-        assert!(
-            matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Length)
-        );
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{},"finish_reason":"length"}]}"#]);
+        assert!(matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Length));
     }
 
     #[test]
     fn parse_finish_reason_unknown() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}"#]);
         assert!(
             matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Other("content_filter".to_string()))
         );
@@ -738,8 +730,20 @@ mod tests {
             r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#,
         ]);
         assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-        assert!(matches!(&events[1], OpenRouterEvent::Usage { prompt_tokens: 3, completion_tokens: 1, .. }));
+        assert!(matches!(
+            &events[0],
+            OpenRouterEvent::Finished {
+                reason: FinishReason::Stop
+            }
+        ));
+        assert!(matches!(
+            &events[1],
+            OpenRouterEvent::Usage {
+                prompt_tokens: 3,
+                completion_tokens: 1,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -747,9 +751,14 @@ mod tests {
         let events = events_from_lines(&[
             r#"data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0,"total_tokens":7}}"#,
         ]);
-        assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 0, .. })
-        );
+        assert!(matches!(
+            &events[0],
+            OpenRouterEvent::Usage {
+                prompt_tokens: 7,
+                completion_tokens: 0,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -833,18 +842,14 @@ mod tests {
 
     #[test]
     fn parse_content_null_is_skipped() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":null},"finish_reason":null}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{"content":null},"finish_reason":null}]}"#]);
         assert!(events.is_empty(), "null content must not emit TextDelta");
     }
 
     #[test]
     fn parse_finish_reason_null_is_skipped() {
         // finish_reason: null means still generating — must not emit a Finished event.
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":"text"},"finish_reason":null}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{"content":"text"},"finish_reason":null}]}"#]);
         assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { .. }));
     }
@@ -852,42 +857,47 @@ mod tests {
     #[test]
     fn parse_usage_empty_object_is_skipped() {
         // Empty usage object must not emit a Usage event.
-        let events = events_from_lines(&[
-            r#"data: {"choices":[],"usage":{}}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[],"usage":{}}"#]);
         assert!(events.is_empty(), "empty usage object must not emit Usage event");
     }
 
     #[test]
     fn parse_usage_missing_completion_tokens_defaults_to_zero() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[],"usage":{"prompt_tokens":10}}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[],"usage":{"prompt_tokens":10}}"#]);
         assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 0, .. }),
+            matches!(
+                &events[0],
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 0,
+                    ..
+                }
+            ),
             "missing completion_tokens must default to 0: {events:?}"
         );
     }
 
     #[test]
     fn parse_usage_missing_prompt_tokens_defaults_to_zero() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[],"usage":{"completion_tokens":5}}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[],"usage":{"completion_tokens":5}}"#]);
         assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 0, completion_tokens: 5, .. }),
+            matches!(
+                &events[0],
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 0,
+                    completion_tokens: 5,
+                    ..
+                }
+            ),
             "missing prompt_tokens must default to 0: {events:?}"
         );
     }
 
     #[test]
     fn parse_text_with_unicode_characters() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":"こんにちは 🌸"},"finish_reason":null}]}"#,
-        ]);
-        assert!(
-            matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "こんにちは 🌸")
-        );
+        let events =
+            events_from_lines(&[r#"data: {"choices":[{"delta":{"content":"こんにちは 🌸"},"finish_reason":null}]}"#]);
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "こんにちは 🌸"));
     }
 
     #[test]
@@ -951,30 +961,33 @@ mod tests {
     #[test]
     fn finish_reason_stop_and_content_in_same_delta_emits_both() {
         // OpenRouter sometimes sends content AND finish_reason in the same chunk.
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":"bye"},"finish_reason":"stop"}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{"content":"bye"},"finish_reason":"stop"}]}"#]);
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "bye"));
-        assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
+        assert!(matches!(
+            &events[1],
+            OpenRouterEvent::Finished {
+                reason: FinishReason::Stop
+            }
+        ));
     }
 
     #[test]
     fn parse_finish_reason_empty_string_in_line_is_skipped() {
         // finish_reason: "" → !reason.is_empty() guard → no Finished event emitted.
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{"content":"text"},"finish_reason":""}]}"#,
-        ]);
-        assert_eq!(events.len(), 1, "empty string finish_reason must not emit Finished event");
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{"content":"text"},"finish_reason":""}]}"#]);
+        assert_eq!(
+            events.len(),
+            1,
+            "empty string finish_reason must not emit Finished event"
+        );
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "text"));
     }
 
     #[test]
     fn parse_usage_null_is_skipped() {
         // "usage": null → .as_object() returns None → no Usage event emitted.
-        let events = events_from_lines(&[
-            r#"data: {"choices":[],"usage":null}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[],"usage":null}"#]);
         assert!(events.is_empty(), "null usage must not emit Usage event");
     }
 
@@ -1049,7 +1062,10 @@ mod tests {
         let msg = Message::assistant_tool_calls(&[]);
         let json = wire_message(&msg);
         assert_eq!(json["role"], "assistant");
-        assert!(json["content"].is_null(), "content must be null when tool_calls is present");
+        assert!(
+            json["content"].is_null(),
+            "content must be null when tool_calls is present"
+        );
         let arr = json["tool_calls"].as_array().expect("tool_calls must be an array");
         assert!(arr.is_empty(), "tool_calls array must be empty");
     }
@@ -1098,13 +1114,14 @@ mod tests {
 
     #[test]
     fn sse_finish_reason_tool_calls_with_empty_accumulator_emits_empty_ready() {
-        let events = events_from_lines(&[
-            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
-        ]);
+        let events = events_from_lines(&[r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#]);
         assert_eq!(events.len(), 1, "must emit exactly one event");
         match &events[0] {
             OpenRouterEvent::ToolCallsReady { calls } => {
-                assert!(calls.is_empty(), "empty accumulator must produce ToolCallsReady with no calls");
+                assert!(
+                    calls.is_empty(),
+                    "empty accumulator must produce ToolCallsReady with no calls"
+                );
             }
             other => panic!("expected ToolCallsReady, got {other:?}"),
         }

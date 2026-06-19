@@ -126,11 +126,19 @@ mod tests {
     fn merge_accumulates_across_calls() {
         let mut memory = EntityMemory::default();
         memory.merge(
-            vec![RawFact { category: "fact".into(), content: "a".into(), confidence: 1.0 }],
+            vec![RawFact {
+                category: "fact".into(),
+                content: "a".into(),
+                confidence: 1.0,
+            }],
             "sess-1",
         );
         memory.merge(
-            vec![RawFact { category: "fact".into(), content: "b".into(), confidence: 1.0 }],
+            vec![RawFact {
+                category: "fact".into(),
+                content: "b".into(),
+                confidence: 1.0,
+            }],
             "sess-2",
         );
         assert_eq!(memory.facts.len(), 2);

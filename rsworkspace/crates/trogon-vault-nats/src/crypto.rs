@@ -24,9 +24,9 @@ impl std::fmt::Display for CryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::KeyDerivation(msg) => write!(f, "key derivation failed: {msg}"),
-            Self::Encrypt            => write!(f, "AES-GCM encryption failed"),
-            Self::Decrypt            => write!(f, "AES-GCM decryption failed (tag mismatch or corrupt data)"),
-            Self::InvalidCiphertext  => write!(f, "ciphertext too short (minimum 12 bytes for nonce)"),
+            Self::Encrypt => write!(f, "AES-GCM encryption failed"),
+            Self::Decrypt => write!(f, "AES-GCM decryption failed (tag mismatch or corrupt data)"),
+            Self::InvalidCiphertext => write!(f, "ciphertext too short (minimum 12 bytes for nonce)"),
         }
     }
 }
@@ -50,13 +50,11 @@ impl CryptoCtx {
     ///
     /// Returns an error message listing any missing variables or derivation failure.
     pub fn from_env() -> Result<Self, String> {
-        let password = std::env::var("VAULT_MASTER_PASSWORD")
-            .map_err(|_| "missing env var: VAULT_MASTER_PASSWORD".to_string())?;
-        let salt = std::env::var("VAULT_KEY_SALT")
-            .map_err(|_| "missing env var: VAULT_KEY_SALT".to_string())?;
+        let password =
+            std::env::var("VAULT_MASTER_PASSWORD").map_err(|_| "missing env var: VAULT_MASTER_PASSWORD".to_string())?;
+        let salt = std::env::var("VAULT_KEY_SALT").map_err(|_| "missing env var: VAULT_KEY_SALT".to_string())?;
 
-        Self::derive(password.as_bytes(), salt.as_bytes())
-            .map_err(|e| format!("key derivation failed: {e}"))
+        Self::derive(password.as_bytes(), salt.as_bytes()).map_err(|e| format!("key derivation failed: {e}"))
     }
 
     /// Derive the master key from `password` and `salt` using Argon2id.
@@ -64,8 +62,7 @@ impl CryptoCtx {
     /// Parameters: m=64 MiB, t=3 iterations, p=4 lanes.
     /// The `salt` must be at least 8 bytes; 16 bytes (128 bits) is recommended.
     pub fn derive(password: &[u8], salt: &[u8]) -> Result<Self, CryptoError> {
-        let params = Params::new(65536, 3, 4, Some(32))
-            .map_err(|e| CryptoError::KeyDerivation(e.to_string()))?;
+        let params = Params::new(65536, 3, 4, Some(32)).map_err(|e| CryptoError::KeyDerivation(e.to_string()))?;
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
         let mut key = [0u8; 32];
@@ -83,9 +80,7 @@ impl CryptoCtx {
         let cipher = Aes256Gcm::new((&self.key).into());
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
-        let ciphertext = cipher
-            .encrypt(&nonce, plaintext)
-            .map_err(|_| CryptoError::Encrypt)?;
+        let ciphertext = cipher.encrypt(&nonce, plaintext).map_err(|_| CryptoError::Encrypt)?;
 
         let mut out = Vec::with_capacity(12 + ciphertext.len());
         out.extend_from_slice(&nonce);
@@ -102,9 +97,7 @@ impl CryptoCtx {
         let nonce = Nonce::from_slice(nonce_bytes);
         let cipher = Aes256Gcm::new((&self.key).into());
 
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| CryptoError::Decrypt)
+        cipher.decrypt(nonce, ciphertext).map_err(|_| CryptoError::Decrypt)
     }
 }
 
@@ -180,7 +173,7 @@ mod tests {
 
         static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-        const PW:   &str = "VAULT_MASTER_PASSWORD";
+        const PW: &str = "VAULT_MASTER_PASSWORD";
         const SALT: &str = "VAULT_KEY_SALT";
 
         fn clear() {
@@ -195,7 +188,7 @@ mod tests {
             let _g = ENV_LOCK.lock().unwrap();
             clear();
             unsafe {
-                std::env::set_var(PW,   "my-secret-password");
+                std::env::set_var(PW, "my-secret-password");
                 std::env::set_var(SALT, "salt1234567890ab");
             }
             let result = CryptoCtx::from_env();
@@ -207,7 +200,9 @@ mod tests {
         fn errors_when_password_missing() {
             let _g = ENV_LOCK.lock().unwrap();
             clear();
-            unsafe { std::env::set_var(SALT, "salt1234567890ab"); }
+            unsafe {
+                std::env::set_var(SALT, "salt1234567890ab");
+            }
             let err = CryptoCtx::from_env().err().expect("expected Err");
             clear();
             assert!(err.contains(PW), "expected {PW} in error: {err}");
@@ -217,7 +212,9 @@ mod tests {
         fn errors_when_salt_missing() {
             let _g = ENV_LOCK.lock().unwrap();
             clear();
-            unsafe { std::env::set_var(PW, "my-secret-password"); }
+            unsafe {
+                std::env::set_var(PW, "my-secret-password");
+            }
             let err = CryptoCtx::from_env().err().expect("expected Err");
             clear();
             assert!(err.contains(SALT), "expected {SALT} in error: {err}");

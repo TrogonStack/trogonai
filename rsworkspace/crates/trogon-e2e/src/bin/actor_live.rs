@@ -13,9 +13,7 @@ use std::time::Duration;
 use async_nats::jetstream;
 use serde::{Deserialize, Serialize};
 use trogon_actor::{
-    ActorContext, ActorRuntime, EntityActor, StateStore,
-    host::ActorHost,
-    provision_state, state_kv_key,
+    ActorContext, ActorRuntime, EntityActor, StateStore, host::ActorHost, provision_state, state_kv_key,
 };
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
@@ -56,11 +54,7 @@ impl EntityActor for CounterActor {
         "live-counter"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut CounterState,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut CounterState, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         state.last_message = format!("event #{}", state.count);
         ctx.append_user_message(format!("handling event, count now {}", state.count), None)
@@ -102,7 +96,10 @@ async fn test_runtime_saves_state_to_kv(js: &jetstream::Context, nats: &async_na
         let state_store = provision_state(js).await.map_err(|e| e.to_string())?;
 
         let mut actor = CounterActor;
-        runtime.handle_event(&mut actor, &entity_key, 0).await.map_err(|e| format!("{e:?}"))?;
+        runtime
+            .handle_event(&mut actor, &entity_key, 0)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
 
         let kv_key = state_kv_key(CounterActor::actor_type(), &entity_key);
         let entry = state_store
@@ -116,9 +113,19 @@ async fn test_runtime_saves_state_to_kv(js: &jetstream::Context, nats: &async_na
             return Err(format!("expected count=1 after first event, got {}", state.count));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_runtime_state_accumulates_across_events(js: &jetstream::Context, nats: &async_nats::Client) -> bool {
@@ -131,19 +138,36 @@ async fn test_runtime_state_accumulates_across_events(js: &jetstream::Context, n
 
         let mut actor = CounterActor;
         for _ in 0..3 {
-            runtime.handle_event(&mut actor, &entity_key, 0).await.map_err(|e| format!("{e:?}"))?;
+            runtime
+                .handle_event(&mut actor, &entity_key, 0)
+                .await
+                .map_err(|e| format!("{e:?}"))?;
         }
 
         let kv_key = state_kv_key(CounterActor::actor_type(), &entity_key);
-        let entry = state_store.load(&kv_key).await.map_err(|e| e.to_string())?.ok_or("no state")?;
+        let entry = state_store
+            .load(&kv_key)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("no state")?;
         let state: CounterState = serde_json::from_slice(&entry.value).map_err(|e| e.to_string())?;
         if state.count != 3 {
             return Err(format!("expected count=3 after three events, got {}", state.count));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_runtime_writes_transcript(js: &jetstream::Context, nats: &async_nats::Client) -> bool {
@@ -158,18 +182,37 @@ async fn test_runtime_writes_transcript(js: &jetstream::Context, nats: &async_na
         ts.provision().await.map_err(|e| e.to_string())?;
 
         let mut actor = CounterActor;
-        runtime.handle_event(&mut actor, &entity_key, 0).await.map_err(|e| format!("{e:?}"))?;
+        runtime
+            .handle_event(&mut actor, &entity_key, 0)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
 
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        let entries = ts.query(CounterActor::actor_type(), &entity_key).await.map_err(|e| e.to_string())?;
+        let entries = ts
+            .query(CounterActor::actor_type(), &entity_key)
+            .await
+            .map_err(|e| e.to_string())?;
         if entries.len() < 2 {
-            return Err(format!("expected ≥2 transcript entries (user+assistant), got {}", entries.len()));
+            return Err(format!(
+                "expected ≥2 transcript entries (user+assistant), got {}",
+                entries.len()
+            ));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_runtime_occ_two_concurrent_events(js: &jetstream::Context, nats: &async_nats::Client) -> bool {
@@ -196,15 +239,32 @@ async fn test_runtime_occ_two_concurrent_events(js: &jetstream::Context, nats: &
         // Both succeeded — state should be count=2 (both incremented)
         let state_store = provision_state(js).await.map_err(|e| e.to_string())?;
         let kv_key = state_kv_key(CounterActor::actor_type(), &entity_key);
-        let entry = state_store.load(&kv_key).await.map_err(|e| e.to_string())?.ok_or("no state")?;
+        let entry = state_store
+            .load(&kv_key)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("no state")?;
         let state: CounterState = serde_json::from_slice(&entry.value).map_err(|e| e.to_string())?;
         if state.count != 2 {
-            return Err(format!("expected count=2 after two concurrent events, got {}", state.count));
+            return Err(format!(
+                "expected count=2 after two concurrent events, got {}",
+                state.count
+            ));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_actor_host_registers_in_registry(js: &jetstream::Context, nats: &async_nats::Client) -> bool {
@@ -217,29 +277,32 @@ async fn test_actor_host_registers_in_registry(js: &jetstream::Context, nats: &a
         let reg_store = provision_registry(js).await.map_err(|e| e.to_string())?;
         let registry = Registry::new(reg_store);
 
-        let cap = AgentCapability::new(
-            format!("live-counter-host-{id}"),
-            ["counting"],
-            &subject,
-        );
+        let cap = AgentCapability::new(format!("live-counter-host-{id}"), ["counting"], &subject);
         let host = ActorHost::new(runtime, CounterActor, cap.clone());
 
         // Run host in background and give it time to register
         let host_handle = tokio::spawn(async move { host.run().await });
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let found = registry
-            .get(&cap.agent_type)
-            .await
-            .map_err(|e| e.to_string())?;
+        let found = registry.get(&cap.agent_type).await.map_err(|e| e.to_string())?;
 
         host_handle.abort();
 
         found.ok_or_else(|| format!("actor {} not found in registry after host.run()", cap.agent_type))?;
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_actor_host_processes_inbox_message(js: &jetstream::Context, nats: &async_nats::Client) -> bool {
@@ -254,11 +317,7 @@ async fn test_actor_host_processes_inbox_message(js: &jetstream::Context, nats: 
         let runtime = make_runtime(js, nats).await;
         let state_store = provision_state(js).await.map_err(|e| e.to_string())?;
 
-        let cap = AgentCapability::new(
-            format!("live-counter-host3-{id}"),
-            ["counting"],
-            &subject,
-        );
+        let cap = AgentCapability::new(format!("live-counter-host3-{id}"), ["counting"], &subject);
         let host = ActorHost::new(runtime, CounterActor, cap);
 
         let nats_for_publish = nats.clone();
@@ -290,9 +349,19 @@ async fn test_actor_host_processes_inbox_message(js: &jetstream::Context, nats: 
             return Err(format!("expected count=1 after inbox event, got {}", state.count));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

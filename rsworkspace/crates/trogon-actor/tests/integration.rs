@@ -14,8 +14,8 @@ use trogon_actor::{
     runtime::ActorRuntime,
     state::provision_state,
 };
-use trogon_transcript::reader::NatsTranscriptReader;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
+use trogon_transcript::reader::NatsTranscriptReader;
 use trogon_transcript::{
     TranscriptError,
     entry::TranscriptEntry,
@@ -23,20 +23,13 @@ use trogon_transcript::{
     store::TranscriptStore,
 };
 
-async fn setup() -> (
-    async_nats::Client,
-    async_nats::jetstream::Context,
-    impl Drop,
-) {
+async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Drop) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container
-        .get_host_port_ipv4(4222)
-        .await
-        .expect("failed to get port");
+    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -61,11 +54,7 @@ impl EntityActor for CounterActor {
         "counter"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut Counter,
-        _ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut Counter, _ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         Ok(())
     }
@@ -86,9 +75,7 @@ impl EntityActor for Scribe {
     async fn handle(&mut self, state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         ctx.append_user_message("user prompt", None).await.ok();
-        ctx.append_assistant_message("assistant reply", Some(5))
-            .await
-            .ok();
+        ctx.append_assistant_message("assistant reply", Some(5)).await.ok();
         Ok(())
     }
 }
@@ -116,11 +103,7 @@ impl EntityActor for InitActor {
         Ok(())
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut InitState,
-        _ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut InitState, _ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         Ok(())
     }
@@ -144,9 +127,7 @@ async fn provision_state_is_idempotent() {
     let (_nats, js, _container) = setup().await;
 
     provision_state(&js).await.expect("first provision failed");
-    provision_state(&js)
-        .await
-        .expect("second provision should not fail");
+    provision_state(&js).await.expect("second provision should not fail");
 }
 
 /// Pre-create the ACTOR_STATE bucket with Memory storage (provision_state uses File),
@@ -184,18 +165,9 @@ async fn state_persists_across_events() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
-    runtime
-        .handle_event(&mut CounterActor, "entity-1", 0)
-        .await
-        .unwrap();
-    runtime
-        .handle_event(&mut CounterActor, "entity-1", 0)
-        .await
-        .unwrap();
-    runtime
-        .handle_event(&mut CounterActor, "entity-1", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-1", 0).await.unwrap();
 
     // Load state directly to verify persistence.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
@@ -216,10 +188,7 @@ async fn on_create_called_on_first_event_only() {
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
     // First event: on_create sets initialized = true.
-    runtime
-        .handle_event(&mut InitActor, "e-1", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
     let bytes = kv.entry("init-actor.e-1").await.unwrap().unwrap().value;
@@ -228,10 +197,7 @@ async fn on_create_called_on_first_event_only() {
     assert_eq!(state.count, 1);
 
     // Second event: on_create is NOT called again.
-    runtime
-        .handle_event(&mut InitActor, "e-1", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut InitActor, "e-1", 0).await.unwrap();
     let bytes2 = kv.entry("init-actor.e-1").await.unwrap().unwrap().value;
     let state2: InitState = serde_json::from_slice(&bytes2).unwrap();
     assert!(state2.initialized);
@@ -249,18 +215,9 @@ async fn different_entities_have_independent_state() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
 
-    runtime
-        .handle_event(&mut CounterActor, "entity-A", 0)
-        .await
-        .unwrap();
-    runtime
-        .handle_event(&mut CounterActor, "entity-A", 0)
-        .await
-        .unwrap();
-    runtime
-        .handle_event(&mut CounterActor, "entity-B", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-A", 0).await.unwrap();
+    runtime.handle_event(&mut CounterActor, "entity-B", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
 
@@ -302,17 +259,9 @@ async fn concurrent_events_to_same_entity_no_lost_writes() {
     assert!(r2.is_ok(), "second concurrent handler failed: {r2:?}");
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("counter.entity-concurrent")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("counter.entity-concurrent").await.unwrap().unwrap().value;
     let saved: Counter = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(
-        saved.count, 2,
-        "both events must be reflected in final state"
-    );
+    assert_eq!(saved.count, 2, "both events must be reflected in final state");
 }
 
 /// Like `concurrent_events_to_same_entity_no_lost_writes` but starts from an
@@ -349,12 +298,7 @@ async fn concurrent_updates_on_existing_state_trigger_update_occ() {
     assert!(r2.is_ok(), "second concurrent update failed: {r2:?}");
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("counter.entity-update-occ")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("counter.entity-update-occ").await.unwrap().unwrap().value;
     let saved: Counter = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(
         saved.count, 3,
@@ -379,11 +323,7 @@ impl EntityActor for SpawnActor {
         "spawn-actor"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut SpawnState,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut SpawnState, ctx: &ActorContext) -> Result<(), Self::Error> {
         if let Ok(bytes) = ctx
             .spawn_agent::<Self::Error>("security_analysis", Bytes::from_static(b"request"))
             .await
@@ -436,9 +376,7 @@ async fn state_delete_removes_entry() {
 
     // Delete via the StateStore trait (using UFCS to avoid kv::Store's inherent delete()).
     use trogon_actor::state::StateStore;
-    StateStore::delete(&state_store, "counter.to-delete")
-        .await
-        .unwrap();
+    StateStore::delete(&state_store, "counter.to-delete").await.unwrap();
 
     // Entry must be gone after deletion.
     let after = state_store.load("counter.to-delete").await.unwrap();
@@ -458,12 +396,9 @@ async fn corrupted_state_in_kv_returns_deserialize_error() {
 
     // Write corrupt bytes directly into the KV store under the actor's key.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    kv.put(
-        "counter.entity-corrupt",
-        Bytes::from_static(b"not valid json {{{{"),
-    )
-    .await
-    .unwrap();
+    kv.put("counter.entity-corrupt", Bytes::from_static(b"not valid json {{{{"))
+        .await
+        .unwrap();
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     let err = runtime
@@ -491,10 +426,7 @@ async fn transcript_entries_written_to_jetstream() {
     transcript_store.provision().await.unwrap();
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
-    runtime
-        .handle_event(&mut Scribe, "entity-1", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut Scribe, "entity-1", 0).await.unwrap();
 
     let entries = transcript_store.query("scribe", "entity-1").await.unwrap();
     assert_eq!(entries.len(), 2);
@@ -532,11 +464,7 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     transcript_store.provision().await.unwrap();
 
     // Register a sub-agent with a concrete (non-wildcard) inbox subject.
-    let cap = AgentCapability::new(
-        "SecurityActor",
-        ["security_analysis"],
-        "sub-agents.security",
-    );
+    let cap = AgentCapability::new("SecurityActor", ["security_analysis"], "sub-agents.security");
     registry.register(&cap).await.unwrap();
 
     // Spin up a NATS responder on that subject before calling handle_event.
@@ -560,27 +488,16 @@ async fn spawn_agent_records_sub_agent_spawn_entry() {
     });
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
-    runtime
-        .handle_event(&mut SpawnActor, "entity-1", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut SpawnActor, "entity-1", 0).await.unwrap();
 
     // Actor state captured the sub-agent reply payload.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("spawn-actor.entity-1")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("spawn-actor.entity-1").await.unwrap().unwrap().value;
     let state: SpawnState = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(state.spawn_reply, "security-ok");
 
     // A SubAgentSpawn entry must have been written to the transcript.
-    let entries = transcript_store
-        .query("spawn-actor", "entity-1")
-        .await
-        .unwrap();
+    let entries = transcript_store.query("spawn-actor", "entity-1").await.unwrap();
     assert_eq!(entries.len(), 1);
     assert!(
         matches!(
@@ -610,27 +527,16 @@ async fn spawn_agent_no_capability_no_transcript_entry() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // NoCapActor ignores the spawn error — handle_event must still succeed.
-    runtime
-        .handle_event(&mut NoCapActor, "entity-1", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut NoCapActor, "entity-1", 0).await.unwrap();
 
     // Actor state was saved (handle completed normally).
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("no-cap-actor.entity-1")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("no-cap-actor.entity-1").await.unwrap().unwrap().value;
     let saved: Counter = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(saved.count, 1);
 
     // No SubAgentSpawn entry should have been written.
-    let entries = transcript_store
-        .query("no-cap-actor", "entity-1")
-        .await
-        .unwrap();
+    let entries = transcript_store.query("no-cap-actor", "entity-1").await.unwrap();
     assert!(
         entries.is_empty(),
         "expected no transcript entries when no capable agent is found, got: {entries:?}"
@@ -649,13 +555,7 @@ async fn state_store_save_create_returns_other_error_when_stream_deleted() {
     js.delete_stream("KV_ACTOR_STATE").await.unwrap();
 
     use trogon_actor::{SaveError, state::StateStore};
-    let result = StateStore::save(
-        &state_store,
-        "counter.ghost",
-        Bytes::from_static(b"{}"),
-        None,
-    )
-    .await;
+    let result = StateStore::save(&state_store, "counter.ghost", Bytes::from_static(b"{}"), None).await;
     assert!(
         matches!(result, Err(SaveError::Other(_))),
         "expected SaveError::Other when stream is gone (create path), got: {result:?}"
@@ -725,10 +625,7 @@ async fn state_store_load_returns_error_when_stream_deleted() {
 
     use trogon_actor::state::StateStore;
     let result = StateStore::load(&state_store, "counter.ghost").await;
-    assert!(
-        result.is_err(),
-        "expected Err from load when stream is gone"
-    );
+    assert!(result.is_err(), "expected Err from load when stream is gone");
 }
 
 /// Deleting the backing stream causes `kv::Store::delete()` to fail, propagating
@@ -844,9 +741,7 @@ async fn actor_transcript_append_failure_does_not_abort_handle_event() {
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // Scribe calls ctx.append_user_message(...).ok() — if append fails the actor
     // still succeeds. handle_event must return Ok.
-    let result = runtime
-        .handle_event(&mut Scribe, "entity-no-transcript", 0)
-        .await;
+    let result = runtime.handle_event(&mut Scribe, "entity-no-transcript", 0).await;
     assert!(
         result.is_ok(),
         "handle_event must succeed even when transcript appends fail"
@@ -875,9 +770,7 @@ async fn spawn_agent_discover_failure_is_propagated_as_error_string() {
 
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
     // SpawnActor calls ctx.spawn_agent(...) and ignores errors — handle_event must succeed.
-    let result = runtime
-        .handle_event(&mut SpawnActor, "entity-discover-fail", 0)
-        .await;
+    let result = runtime.handle_event(&mut SpawnActor, "entity-discover-fail", 0).await;
     assert!(
         result.is_ok(),
         "handle_event must succeed when discover fails: {result:?}"
@@ -901,11 +794,7 @@ impl EntityActor for HostCounterActor {
         "host-counter"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut Counter,
-        _ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut Counter, _ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         Ok(())
     }
@@ -927,8 +816,7 @@ fn make_host(
     async_nats::jetstream::kv::Store,
     async_nats::jetstream::Context,
 > {
-    let capability =
-        AgentCapability::new("HostCounterActor", ["host_count"], "actors.host-counter.>");
+    let capability = AgentCapability::new("HostCounterActor", ["host_count"], "actors.host-counter.>");
     ActorHost::new(runtime, HostCounterActor, capability)
 }
 
@@ -987,10 +875,7 @@ async fn host_dispatches_nats_message_to_actor() {
         .unwrap()
         .expect("state entry not found — actor may not have handled the message");
     let saved: Counter = serde_json::from_slice(&entry.value).unwrap();
-    assert_eq!(
-        saved.count, 1,
-        "actor should have handled exactly one message"
-    );
+    assert_eq!(saved.count, 1, "actor should have handled exactly one message");
 }
 
 /// Calling `cancel()` on a running host causes `run()` to return `Ok(())`.
@@ -1083,11 +968,7 @@ async fn host_run_returns_register_error_when_registry_unavailable() {
 struct FailPublisher;
 
 impl TranscriptPublisher for FailPublisher {
-    async fn publish(
-        &self,
-        _subject: String,
-        _payload: bytes::Bytes,
-    ) -> Result<(), TranscriptError> {
+    async fn publish(&self, _subject: String, _payload: bytes::Bytes) -> Result<(), TranscriptError> {
         Err(TranscriptError::Publish("always fails".into()))
     }
 }
@@ -1110,11 +991,7 @@ impl EntityActor for RecallActor {
         "recall-actor"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut RecallState,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut RecallState, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.recall_result = ctx.recall_entity_history().await;
         Ok(())
     }
@@ -1132,15 +1009,9 @@ impl EntityActor for RecallScribe {
         "recall-actor" // must match RecallActor's actor_type
     }
 
-    async fn handle(
-        &mut self,
-        _state: &mut RecallState,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, _state: &mut RecallState, ctx: &ActorContext) -> Result<(), Self::Error> {
         ctx.append_user_message("user prompt", None).await.ok();
-        ctx.append_assistant_message("assistant reply", Some(5))
-            .await
-            .ok();
+        ctx.append_assistant_message("assistant reply", Some(5)).await.ok();
         Ok(())
     }
 }
@@ -1174,15 +1045,11 @@ async fn recall_entity_history_returns_past_messages() {
         registry.clone(),
         js.clone(),
     );
-    runtime
-        .handle_event(&mut RecallScribe, "e-recall", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut RecallScribe, "e-recall", 0).await.unwrap();
 
     // Second run: RecallActor has a transcript reader — recall_entity_history() must
     // return a formatted block containing the messages from the first run.
-    let reader: Arc<dyn TranscriptRead> =
-        Arc::new(NatsTranscriptReader::new(js.clone()));
+    let reader: Arc<dyn TranscriptRead> = Arc::new(NatsTranscriptReader::new(js.clone()));
     let runtime_with_recall = ActorRuntime::new(
         state_store.clone(),
         publisher.clone(),
@@ -1199,12 +1066,7 @@ async fn recall_entity_history_returns_past_messages() {
 
     // Load RecallActor state and verify.
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("recall-actor.e-recall")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("recall-actor.e-recall").await.unwrap().unwrap().value;
     let saved: RecallState = serde_json::from_slice(&bytes).unwrap();
 
     let history = saved.recall_result.expect("recall_result must be Some");
@@ -1234,18 +1096,10 @@ async fn recall_entity_history_returns_none_without_reader() {
 
     // No with_transcript_reader() call — recall_fn is None.
     let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
-    runtime
-        .handle_event(&mut RecallActor, "e-no-reader", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut RecallActor, "e-no-reader", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("recall-actor.e-no-reader")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("recall-actor.e-no-reader").await.unwrap().unwrap().value;
     let saved: RecallState = serde_json::from_slice(&bytes).unwrap();
     assert!(
         saved.recall_result.is_none(),
@@ -1269,21 +1123,12 @@ async fn recall_entity_history_returns_none_when_no_prior_entries() {
 
     // Attach reader but entity "e-fresh" has no prior transcript entries.
     let reader: Arc<dyn TranscriptRead> = Arc::new(NatsTranscriptReader::new(js.clone()));
-    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone())
-        .with_transcript_reader(reader);
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone()).with_transcript_reader(reader);
 
-    runtime
-        .handle_event(&mut RecallActor, "e-fresh", 0)
-        .await
-        .unwrap();
+    runtime.handle_event(&mut RecallActor, "e-fresh", 0).await.unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let bytes = kv
-        .entry("recall-actor.e-fresh")
-        .await
-        .unwrap()
-        .unwrap()
-        .value;
+    let bytes = kv.entry("recall-actor.e-fresh").await.unwrap().unwrap().value;
     let saved: RecallState = serde_json::from_slice(&bytes).unwrap();
     assert!(
         saved.recall_result.is_none(),
@@ -1305,26 +1150,16 @@ async fn spawn_fn_transcript_append_failure_does_not_abort_spawn() {
     let registry = Registry::new(registry_store);
 
     // Register a sub-agent with a concrete inbox subject.
-    let cap = AgentCapability::new(
-        "SecurityActor",
-        ["security_analysis"],
-        "sub-agents.security-fail-pub",
-    );
+    let cap = AgentCapability::new("SecurityActor", ["security_analysis"], "sub-agents.security-fail-pub");
     registry.register(&cap).await.unwrap();
 
     // Spin up a responder on the sub-agent's inbox.
     let nats_responder = nats.clone();
-    let mut responder_sub = nats
-        .subscribe("sub-agents.security-fail-pub")
-        .await
-        .unwrap();
+    let mut responder_sub = nats.subscribe("sub-agents.security-fail-pub").await.unwrap();
     tokio::spawn(async move {
         while let Some(msg) = responder_sub.next().await {
             if let Some(reply) = msg.reply {
-                nats_responder
-                    .publish(reply, Bytes::from_static(b"ok"))
-                    .await
-                    .ok();
+                nats_responder.publish(reply, Bytes::from_static(b"ok")).await.ok();
             }
         }
     });
@@ -1332,9 +1167,7 @@ async fn spawn_fn_transcript_append_failure_does_not_abort_spawn() {
     // Use a publisher that always fails — transcript appends are all discarded.
     let runtime = ActorRuntime::new(state_store, FailPublisher, nats, registry, js);
 
-    let result = runtime
-        .handle_event(&mut SpawnActor, "entity-fail-pub", 0)
-        .await;
+    let result = runtime.handle_event(&mut SpawnActor, "entity-fail-pub", 0).await;
 
     assert!(
         result.is_ok(),

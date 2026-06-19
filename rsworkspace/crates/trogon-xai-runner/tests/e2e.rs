@@ -18,15 +18,13 @@ use std::time::Duration;
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    AuthenticateRequest, AuthenticateResponse, BlobResourceContents, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, EmbeddedResource,
-    EmbeddedResourceResource, ExtRequest, ForkSessionRequest, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
+    AuthenticateRequest, AuthenticateResponse, BlobResourceContents, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ContentBlock, EmbeddedResource, EmbeddedResourceResource, ExtRequest, ForkSessionRequest,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
     ResourceLink, ResumeSessionRequest, ResumeSessionResponse, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
-    TextResourceContents,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason, TextResourceContents,
 };
 use async_nats::Message;
 use async_trait::async_trait;
@@ -35,8 +33,8 @@ use futures_util::StreamExt as _;
 use futures_util::stream::{self, LocalBoxStream};
 use trogon_nats::mocks::MockNatsClient;
 use trogon_xai_runner::{
-    AgentConfig, AgentLoading, FinishReason, InputItem, SessionNotifier, SessionStoring,
-    SkillLoading, XaiAgent, XaiEvent, XaiHttpClient,
+    AgentConfig, AgentLoading, FinishReason, InputItem, SessionNotifier, SessionStoring, SkillLoading, XaiAgent,
+    XaiEvent, XaiHttpClient,
 };
 
 // ── Inline mock: xAI HTTP client ─────────────────────────────────────────────
@@ -80,18 +78,12 @@ impl TestHttpClient {
     }
 
     fn push(&self, events: Vec<XaiEvent>) {
-        self.queue
-            .lock()
-            .unwrap()
-            .push_back(TestResponse::Events(events));
+        self.queue.lock().unwrap().push_back(TestResponse::Events(events));
     }
 
     /// Enqueue a slow response — yields `first`, then blocks indefinitely.
     fn push_slow(&self, first: XaiEvent) {
-        self.queue
-            .lock()
-            .unwrap()
-            .push_back(TestResponse::Slow(first));
+        self.queue.lock().unwrap().push_back(TestResponse::Slow(first));
     }
 
     fn last_call(&self) -> Option<HttpCall> {
@@ -169,7 +161,12 @@ struct RecordingStore {
 impl RecordingStore {
     fn new() -> (Self, Arc<Mutex<Vec<trogon_xai_runner::session_store::SessionSnapshot>>>) {
         let saves = Arc::new(Mutex::new(Vec::new()));
-        (Self { saves: Arc::clone(&saves) }, saves)
+        (
+            Self {
+                saves: Arc::clone(&saves),
+            },
+            saves,
+        )
     }
 }
 
@@ -180,7 +177,9 @@ impl trogon_xai_runner::SessionStoring for RecordingStore {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         let snap = snapshot.clone();
         let saves = Arc::clone(&self.saves);
-        Box::pin(async move { saves.lock().unwrap().push(snap); })
+        Box::pin(async move {
+            saves.lock().unwrap().push(snap);
+        })
     }
 
     fn remove<'a>(
@@ -195,7 +194,9 @@ impl trogon_xai_runner::SessionStoring for RecordingStore {
         &'a self,
         _tenant_id: &'a str,
         _session_id: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<trogon_xai_runner::session_store::SessionSnapshot>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<trogon_xai_runner::session_store::SessionSnapshot>> + Send + 'a>,
+    > {
         Box::pin(async move { None })
     }
 }
@@ -284,9 +285,7 @@ impl Harness {
             fn load_config<'a>(
                 &'a self,
                 _: &'a str,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>,
-            > {
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>> {
                 let sp = self.0.to_string();
                 Box::pin(async move {
                     AgentConfig {
@@ -303,9 +302,7 @@ impl Harness {
             fn load<'a>(
                 &'a self,
                 _: &'a [String],
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>,
-            > {
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
                 Box::pin(std::future::ready(None))
             }
         }
@@ -320,18 +317,16 @@ impl Harness {
         let http_clone = http.clone();
         let notifier_clone = notifier.clone();
 
-        let agent =
-            XaiAgent::with_deps(notifier_clone, "grok-3", "test-key", http_clone).with_loaders(
-                "agent-id",
-                Arc::new(FixedPromptLoader(system_prompt)),
-                Arc::new(NullSkillLoader),
-            );
+        let agent = XaiAgent::with_deps(notifier_clone, "grok-3", "test-key", http_clone).with_loaders(
+            "agent-id",
+            Arc::new(FixedPromptLoader(system_prompt)),
+            Arc::new(NullSkillLoader),
+        );
 
         let prefix = AcpPrefix::new("acp").unwrap();
-        let (_, io_task) =
-            AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                tokio::task::spawn_local(fut);
-            });
+        let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+            tokio::task::spawn_local(fut);
+        });
         tokio::task::spawn_local(async move {
             let _ = io_task.await;
         });
@@ -445,11 +440,7 @@ fn env_lock() -> &'static std::sync::Mutex<()> {
 /// Accounts for prior publishes so it can be called multiple times per test.
 async fn create_session(h: &Harness) -> String {
     let before = h.nats.published_payloads().len();
-    h.global(
-        "acp.agent.session.new",
-        NewSessionRequest::new("/tmp"),
-        "r.new",
-    );
+    h.global("acp.agent.session.new", NewSessionRequest::new("/tmp"), "r.new");
     let payloads = h.expect_n_publishes(before + 1).await;
     let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
     val["sessionId"].as_str().unwrap().to_string()
@@ -559,11 +550,7 @@ async fn close_session_via_nats_returns_ok() {
             let sid = create_session(&h).await;
 
             let close_subj = format!("acp.session.{sid}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
 
             let payloads = h.expect_n_publishes(2).await;
             let _: CloseSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
@@ -637,12 +624,8 @@ async fn authenticate_then_new_session_uses_pending_key() {
             let sid = create_session(&h).await;
 
             // Prompt must succeed (key is now attached to the session).
-            h.http.push(vec![
-                XaiEvent::TextDelta {
-                    text: "ok".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -765,10 +748,7 @@ async fn request_without_reply_subject_does_not_publish() {
         .run_until(async {
             let h = Harness::new();
             // `global_notify` injects without a reply subject.
-            h.global_notify(
-                "acp.agent.initialize",
-                InitializeRequest::new(ProtocolVersion::LATEST),
-            );
+            h.global_notify("acp.agent.initialize", InitializeRequest::new(ProtocolVersion::LATEST));
             h.expect_no_new_publishes(0).await;
         })
         .await;
@@ -785,11 +765,7 @@ async fn load_session_via_nats_returns_state() {
             let sid = create_session(&h).await;
 
             let load_subj = format!("acp.session.{sid}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(sid.clone(), "/tmp"),
-                "r.load",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
 
             let payloads = h.expect_n_publishes(2).await;
             let _: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
@@ -808,11 +784,7 @@ async fn resume_session_via_nats_returns_ok() {
             let sid = create_session(&h).await;
 
             let resume_subj = format!("acp.session.{sid}.agent.resume");
-            h.session_req(
-                &resume_subj,
-                ResumeSessionRequest::new(sid.clone(), "/tmp"),
-                "r.resume",
-            );
+            h.session_req(&resume_subj, ResumeSessionRequest::new(sid.clone(), "/tmp"), "r.resume");
 
             let payloads = h.expect_n_publishes(2).await;
             let _: ResumeSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
@@ -848,18 +820,11 @@ async fn fork_session_via_nats_and_prompt() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
-            assert!(
-                !fork_id.is_empty(),
-                "fork must return a non-empty session ID"
-            );
+            assert!(!fork_id.is_empty(), "fork must return a non-empty session ID");
             assert_ne!(fork_id, sid, "fork session ID must differ from source");
 
             // Prompt the forked session — must succeed independently.
@@ -894,21 +859,13 @@ async fn list_sessions_via_nats_returns_sorted() {
             create_session(&h).await;
             create_session(&h).await;
 
-            h.global(
-                "acp.agent.session.list",
-                ListSessionsRequest::new(),
-                "r.list",
-            );
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
             let payloads = h.expect_n_publishes(3).await;
 
             let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
             assert_eq!(resp.sessions.len(), 2, "must list both sessions");
 
-            let ids: Vec<_> = resp
-                .sessions
-                .iter()
-                .map(|s| s.session_id.to_string())
-                .collect();
+            let ids: Vec<_> = resp.sessions.iter().map(|s| s.session_id.to_string()).collect();
             let mut sorted = ids.clone();
             sorted.sort();
             assert_eq!(ids, sorted, "sessions must be sorted by ID: {ids:?}");
@@ -938,11 +895,7 @@ async fn set_session_model_via_nats_updates_model() {
 
             // Verify via load_session that the model change persisted.
             let load_subj = format!("acp.session.{sid}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(sid.clone(), "/tmp"),
-                "r.load",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
             let payloads = h.expect_n_publishes(3).await;
             let resp: LoadSessionResponse = serde_json::from_slice(&payloads[2]).unwrap();
             let current = resp
@@ -950,10 +903,7 @@ async fn set_session_model_via_nats_updates_model() {
                 .expect("load must return model state")
                 .current_model_id
                 .to_string();
-            assert_eq!(
-                current, "grok-3-mini",
-                "model must be updated to grok-3-mini"
-            );
+            assert_eq!(current, "grok-3-mini", "model must be updated to grok-3-mini");
         })
         .await;
 }
@@ -999,8 +949,7 @@ async fn set_session_config_option_via_nats_returns_full_config_options() {
                 "r.config",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let resp: SetSessionConfigOptionResponse =
-                serde_json::from_slice(&payloads[1]).unwrap();
+            let resp: SetSessionConfigOptionResponse = serde_json::from_slice(&payloads[1]).unwrap();
             assert!(
                 !resp.config_options.is_empty(),
                 "response must include the full set of config options"
@@ -1023,11 +972,7 @@ async fn two_sessions_are_isolated() {
 
             // Close session A.
             let close_subj = format!("acp.session.{sid_a}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid_a.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid_a.clone()), "r.close");
             h.expect_n_publishes(3).await; // session A + session B + close response
 
             // Prompt closed session A — must return an ACP error.
@@ -1039,10 +984,7 @@ async fn two_sessions_are_isolated() {
             );
             let payloads = h.expect_n_publishes(4).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
-            assert!(
-                val.get("code").is_some(),
-                "closed session must return ACP error: {val}"
-            );
+            assert!(val.get("code").is_some(), "closed session must return ACP error: {val}");
 
             // Prompt session B — must still work.
             h.http.push(vec![
@@ -1107,10 +1049,7 @@ async fn response_id_reuse_on_second_prompt() {
             );
             h.expect_n_publishes(3).await;
 
-            let call = h
-                .http
-                .last_call()
-                .expect("HTTP client must have recorded a call");
+            let call = h.http.last_call().expect("HTTP client must have recorded a call");
             assert_eq!(
                 call.previous_response_id.as_deref(),
                 Some("resp-cache-abc"),
@@ -1262,10 +1201,7 @@ async fn prompt_full_event_sequence_response_id_usage_finished() {
                 Some("resp-full-seq"),
                 "second prompt must reuse the ResponseId from the Finished-terminated turn"
             );
-            assert_eq!(
-                call.input_len, 1,
-                "only the new user message should be sent"
-            );
+            assert_eq!(call.input_len, 1, "only the new user message should be sent");
         })
         .await;
 }
@@ -1332,10 +1268,7 @@ async fn prompt_function_call_emits_tool_call_notifications() {
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
-                PromptRequest::new(
-                    sid.clone(),
-                    vec![ContentBlock::from("search for something")],
-                ),
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search for something")]),
                 "r.prompt",
             );
             // create_session reply + PromptResponse reply = 2 NATS publishes
@@ -1544,11 +1477,7 @@ async fn close_session_cancels_in_flight_prompt() {
 
             // Close the session — this sends () on the cancel channel.
             let close_subj = format!("acp.session.{sid}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
 
             // Both prompt response and close response must be published.
             // The exact ordering is non-deterministic (two concurrent tasks),
@@ -1637,22 +1566,14 @@ async fn fork_inherits_source_model() {
 
             // Fork the source session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
 
             // Load the fork and verify the inherited model.
             let load_subj = format!("acp.session.{fork_id}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(fork_id.clone(), "/tmp"),
-                "r.load",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(fork_id.clone(), "/tmp"), "r.load");
             let payloads = h.expect_n_publishes(4).await;
             let resp: LoadSessionResponse = serde_json::from_slice(&payloads[3]).unwrap();
             let current = resp
@@ -1660,10 +1581,7 @@ async fn fork_inherits_source_model() {
                 .expect("load must return model state")
                 .current_model_id
                 .to_string();
-            assert_eq!(
-                current, "grok-3-mini",
-                "fork must inherit the source session's model"
-            );
+            assert_eq!(current, "grok-3-mini", "fork must inherit the source session's model");
         })
         .await;
 }
@@ -1683,26 +1601,14 @@ async fn list_sessions_excludes_closed_session() {
 
             // Close session A.
             let close_subj = format!("acp.session.{sid_a}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid_a.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid_a.clone()), "r.close");
             h.expect_n_publishes(3).await; // session_a + session_b + close
 
             // List — must contain only session B.
-            h.global(
-                "acp.agent.session.list",
-                ListSessionsRequest::new(),
-                "r.list",
-            );
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
             let payloads = h.expect_n_publishes(4).await;
             let resp: ListSessionsResponse = serde_json::from_slice(&payloads[3]).unwrap();
-            assert_eq!(
-                resp.sessions.len(),
-                1,
-                "closed session must be removed from the list"
-            );
+            assert_eq!(resp.sessions.len(), 1, "closed session must be removed from the list");
             assert_eq!(
                 resp.sessions[0].session_id.to_string(),
                 sid_b,
@@ -1730,11 +1636,7 @@ async fn list_sessions_returns_cwd() {
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
             let sid = val["sessionId"].as_str().unwrap().to_string();
 
-            h.global(
-                "acp.agent.session.list",
-                ListSessionsRequest::new(),
-                "r.list",
-            );
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
             let payloads = h.expect_n_publishes(2).await;
             let resp: ListSessionsResponse = serde_json::from_slice(&payloads[1]).unwrap();
 
@@ -1761,16 +1663,10 @@ async fn new_session_response_includes_available_models() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/workspace"),
-                "r.new",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/workspace"), "r.new");
             let payloads = h.expect_n_publishes(1).await;
             let resp: NewSessionResponse = serde_json::from_slice(&payloads[0]).unwrap();
-            let models = resp
-                .models
-                .expect("new_session must include a models field");
+            let models = resp.models.expect("new_session must include a models field");
             assert!(
                 !models.available_models.is_empty(),
                 "available_models must not be empty"
@@ -1794,38 +1690,22 @@ async fn fork_cwd_is_independent_from_source() {
         .run_until(async {
             let h = Harness::new();
 
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/source-cwd"),
-                "r.new",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/source-cwd"), "r.new");
             let payloads = h.expect_n_publishes(1).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
             let sid = val["sessionId"].as_str().unwrap().to_string();
 
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork-cwd"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork-cwd"), "r.fork");
             let payloads = h.expect_n_publishes(2).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
             let fork_id = val["sessionId"].as_str().unwrap().to_string();
 
-            h.global(
-                "acp.agent.session.list",
-                ListSessionsRequest::new(),
-                "r.list",
-            );
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
             let payloads = h.expect_n_publishes(3).await;
             let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
 
-            let src = resp
-                .sessions
-                .iter()
-                .find(|s| s.session_id.to_string() == sid)
-                .unwrap();
+            let src = resp.sessions.iter().find(|s| s.session_id.to_string() == sid).unwrap();
             let fork = resp
                 .sessions
                 .iter()
@@ -1890,11 +1770,7 @@ async fn fork_first_prompt_replays_full_history() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
             let fork_id = val["sessionId"].as_str().unwrap().to_string();
@@ -1998,10 +1874,7 @@ async fn prompt_error_event_preserves_previous_response_id() {
                 Some("cached-id"),
                 "stream error must not clear the cached ResponseId"
             );
-            assert_eq!(
-                call.input_len, 1,
-                "ResponseId still valid — only new message sent"
-            );
+            assert_eq!(call.input_len, 1, "ResponseId still valid — only new message sent");
         })
         .await;
 }
@@ -2039,10 +1912,7 @@ async fn prompt_no_text_delta_skips_assistant_history() {
             h.expect_n_publishes(3).await;
 
             let call = h.http.last_call().unwrap();
-            assert_eq!(
-                call.previous_response_id, None,
-                "no ResponseId — must replay history"
-            );
+            assert_eq!(call.previous_response_id, None, "no ResponseId — must replay history");
             assert_eq!(
                 call.input_len, 2,
                 "history must contain only user₁ + user₂ (no empty assistant entry)"
@@ -2115,12 +1985,8 @@ async fn authenticate_empty_key_does_not_override_global_key() {
             let sid = create_session(&h).await;
 
             // Prompt must succeed (global key still in effect).
-            h.http.push(vec![
-                XaiEvent::TextDelta {
-                    text: "ok".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -2210,12 +2076,8 @@ async fn second_authenticate_overwrites_first() {
             let sid = create_session(&h).await;
 
             // A prompt must succeed — meaning the second key was used, not the first.
-            h.http.push(vec![
-                XaiEvent::TextDelta {
-                    text: "ok".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -2373,7 +2235,9 @@ async fn close_session_mid_stream_removes_session_permanently() {
             let sid = create_session(&h).await;
 
             // Slow stream — blocks until cancelled.
-            h.http.push_slow(XaiEvent::TextDelta { text: "partial".to_string() });
+            h.http.push_slow(XaiEvent::TextDelta {
+                text: "partial".to_string(),
+            });
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -2457,11 +2321,7 @@ async fn prompt_with_empty_content_blocks_completes() {
 
             h.http.push(vec![XaiEvent::Done]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
-            h.session_req(
-                &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![]),
-                "r.prompt",
-            );
+            h.session_req(&prompt_subj, PromptRequest::new(sid.clone(), vec![]), "r.prompt");
 
             let payloads = h.expect_n_publishes(2).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
@@ -2486,22 +2346,14 @@ async fn prompt_on_closed_fork_returns_acp_error() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(2).await;
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
 
             // Close the fork immediately.
             let close_subj = format!("acp.session.{fork_id}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(fork_id.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(fork_id.clone()), "r.close");
             h.expect_n_publishes(3).await;
 
             // Prompt the now-closed fork — must return an ACP error.
@@ -2534,10 +2386,7 @@ async fn authenticate_with_meta_without_xai_api_key_does_not_set_pending_key() {
 
             // Authenticate with meta that has a different field — NOT XAI_API_KEY.
             let mut meta = serde_json::Map::new();
-            meta.insert(
-                "SOME_OTHER_FIELD".to_string(),
-                serde_json::json!("irrelevant"),
-            );
+            meta.insert("SOME_OTHER_FIELD".to_string(), serde_json::json!("irrelevant"));
             h.global(
                 "acp.agent.authenticate",
                 AuthenticateRequest::new("xai-api-key").meta(meta),
@@ -2549,12 +2398,8 @@ async fn authenticate_with_meta_without_xai_api_key_does_not_set_pending_key() {
             let sid = create_session(&h).await;
 
             // Prompt must succeed — global key is in effect.
-            h.http.push(vec![
-                XaiEvent::TextDelta {
-                    text: "ok".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
@@ -2648,20 +2493,12 @@ async fn fork_of_closed_session_returns_acp_error() {
 
             // Close the session first.
             let close_subj = format!("acp.session.{sid}.agent.close");
-            h.session_req(
-                &close_subj,
-                CloseSessionRequest::new(sid.clone()),
-                "r.close",
-            );
+            h.session_req(&close_subj, CloseSessionRequest::new(sid.clone()), "r.close");
             h.expect_n_publishes(2).await;
 
             // Attempt to fork the now-closed session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
             assert!(
@@ -2685,11 +2522,7 @@ async fn fork_with_no_model_override_uses_agent_default_on_prompt() {
 
             // Fork the session (source has no override).
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(2).await;
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
@@ -2728,8 +2561,12 @@ async fn prompt_error_mid_stream_partial_text_saved_in_history() {
 
             // Stream yields partial text then an error.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "partial answer".to_string() },
-                XaiEvent::Error { message: "upstream failure".to_string() },
+                XaiEvent::TextDelta {
+                    text: "partial answer".to_string(),
+                },
+                XaiEvent::Error {
+                    message: "upstream failure".to_string(),
+                },
             ]);
             h.session_req(
                 &prompt_subj,
@@ -2773,11 +2610,7 @@ async fn load_session_returns_modes_field_with_default_mode() {
             let sid = create_session(&h).await;
 
             let load_subj = format!("acp.session.{sid}.agent.load");
-            h.session_req(
-                &load_subj,
-                LoadSessionRequest::new(sid.clone(), "/tmp"),
-                "r.load",
-            );
+            h.session_req(&load_subj, LoadSessionRequest::new(sid.clone(), "/tmp"), "r.load");
             let payloads = h.expect_n_publishes(2).await;
             let resp: LoadSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
 
@@ -2787,10 +2620,7 @@ async fn load_session_returns_modes_field_with_default_mode() {
                 "default",
                 "current mode must be 'default'"
             );
-            assert!(
-                !modes.available_modes.is_empty(),
-                "available_modes must be non-empty"
-            );
+            assert!(!modes.available_modes.is_empty(), "available_modes must be non-empty");
         })
         .await;
 }
@@ -2809,10 +2639,7 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
 
             // First auth + session.
             let mut meta1 = serde_json::Map::new();
-            meta1.insert(
-                "XAI_API_KEY".to_string(),
-                serde_json::json!("key-for-session-1"),
-            );
+            meta1.insert("XAI_API_KEY".to_string(), serde_json::json!("key-for-session-1"));
             h.global(
                 "acp.agent.authenticate",
                 AuthenticateRequest::new("xai-api-key").meta(meta1),
@@ -2823,10 +2650,7 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
 
             // Second auth + session.
             let mut meta2 = serde_json::Map::new();
-            meta2.insert(
-                "XAI_API_KEY".to_string(),
-                serde_json::json!("key-for-session-2"),
-            );
+            meta2.insert("XAI_API_KEY".to_string(), serde_json::json!("key-for-session-2"));
             h.global(
                 "acp.agent.authenticate",
                 AuthenticateRequest::new("xai-api-key").meta(meta2),
@@ -2844,10 +2668,7 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
             );
             let payloads = h.expect_n_publishes(5).await; // +session2 +prompt1
             let val1: serde_json::Value = serde_json::from_slice(&payloads[4]).unwrap();
-            assert!(
-                val1.get("code").is_none(),
-                "session1 prompt must succeed: {val1}"
-            );
+            assert!(val1.get("code").is_none(), "session1 prompt must succeed: {val1}");
 
             // Prompt session2 — must also succeed (has key-for-session-2).
             h.http.push(vec![XaiEvent::Done]);
@@ -2858,10 +2679,7 @@ async fn authenticate_new_session_twice_each_session_uses_its_own_key() {
             );
             let payloads = h.expect_n_publishes(6).await;
             let val2: serde_json::Value = serde_json::from_slice(&payloads[5]).unwrap();
-            assert!(
-                val2.get("code").is_none(),
-                "session2 prompt must succeed: {val2}"
-            );
+            assert!(val2.get("code").is_none(), "session2 prompt must succeed: {val2}");
         })
         .await;
 }
@@ -2936,11 +2754,7 @@ async fn prompt_empty_input_with_cached_response_id_sends_single_empty_user_item
 
             // Turn 2: empty content blocks + cached id → shortcut path.
             h.http.push(vec![XaiEvent::Done]);
-            h.session_req(
-                &prompt_subj,
-                PromptRequest::new(sid.clone(), vec![]),
-                "r.p2",
-            );
+            h.session_req(&prompt_subj, PromptRequest::new(sid.clone(), vec![]), "r.p2");
             h.expect_n_publishes(3).await;
 
             let call = h.http.last_call().unwrap();
@@ -2980,11 +2794,7 @@ async fn resume_session_then_prompt_succeeds() {
 
             // Resume the session.
             let resume_subj = format!("acp.session.{sid}.agent.resume");
-            h.session_req(
-                &resume_subj,
-                ResumeSessionRequest::new(sid.clone(), "/tmp"),
-                "r.resume",
-            );
+            h.session_req(&resume_subj, ResumeSessionRequest::new(sid.clone(), "/tmp"), "r.resume");
             h.expect_n_publishes(2).await;
             let payloads = h.nats.published_payloads();
             let _: ResumeSessionResponse = serde_json::from_slice(&payloads[1]).unwrap();
@@ -3042,10 +2852,8 @@ async fn prompt_shortcut_turns_still_accumulate_history() {
 
             // Turn 2 (shortcut): shortcut sends only new user item to HTTP.
             // History update still fires → history: [u1, a1, u2, a2].
-            h.http.push(vec![
-                XaiEvent::TextDelta { text: "a2".to_string() },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
@@ -3058,11 +2866,7 @@ async fn prompt_shortcut_turns_still_accumulate_history() {
 
             // Fork the source → resets last_response_id to None.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             h.expect_n_publishes(4).await;
             let payloads = h.nats.published_payloads();
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[3]).unwrap();
@@ -3155,12 +2959,8 @@ async fn history_trimming_caps_input_at_max_history() {
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
 
             // Turn 1 → history: [u1, a1] (len=2, no trim yet).
-            h.http.push(vec![
-                XaiEvent::TextDelta {
-                    text: "a1".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
@@ -3169,12 +2969,8 @@ async fn history_trimming_caps_input_at_max_history() {
             h.expect_n_publishes(2).await;
 
             // Turn 2 → history grows to [u1, a1, u2, a2] then trimmed to [u2, a2].
-            h.http.push(vec![
-                XaiEvent::TextDelta {
-                    text: "a2".to_string(),
-                },
-                XaiEvent::Done,
-            ]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
@@ -3331,7 +3127,9 @@ async fn fork_session_branch_at_index_via_nats() {
 
             // Prompt source to add one turn to its history.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "reply".to_string() },
+                XaiEvent::TextDelta {
+                    text: "reply".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -3358,7 +3156,9 @@ async fn fork_session_branch_at_index_via_nats() {
 
             // Prompt the fork — history is empty so the xAI API call gets only the new turn.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "fork reply".to_string() },
+                XaiEvent::TextDelta {
+                    text: "fork reply".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -3394,8 +3194,7 @@ async fn ext_list_children_via_nats() {
                 "r.fork1",
             );
             let payloads = h.expect_n_publishes(2).await; // publishes: 2
-            let child1_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
-                .unwrap()["sessionId"]
+            let child1_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -3406,8 +3205,7 @@ async fn ext_list_children_via_nats() {
                 "r.fork2",
             );
             let payloads = h.expect_n_publishes(3).await; // publishes: 3
-            let child2_id = serde_json::from_slice::<serde_json::Value>(&payloads[2])
-                .unwrap()["sessionId"]
+            let child2_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -3451,8 +3249,7 @@ async fn list_sessions_includes_parent_meta_via_nats() {
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(2).await; // publishes: 2
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
-                .unwrap()["sessionId"]
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -3496,8 +3293,7 @@ async fn list_sessions_includes_branched_at_index_in_meta_via_nats() {
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(2).await; // publishes: 2
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
-                .unwrap()["sessionId"]
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -3533,7 +3329,9 @@ async fn fork_session_branch_at_index_out_of_bounds_replays_full_history_via_nat
 
             // Prompt source — adds 1 user + 1 assistant message to history.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "assistant reply".to_string() },
+                XaiEvent::TextDelta {
+                    text: "assistant reply".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -3554,8 +3352,7 @@ async fn fork_session_branch_at_index_out_of_bounds_replays_full_history_via_nat
                 "r.fork",
             );
             let payloads = h.expect_n_publishes(3).await; // publishes: 3
-            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2])
-                .unwrap()["sessionId"]
+            let fork_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -3595,8 +3392,7 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren_via_na
                 "r.fork_b",
             );
             let payloads = h.expect_n_publishes(2).await; // publishes: 2
-            let b_id = serde_json::from_slice::<serde_json::Value>(&payloads[1])
-                .unwrap()["sessionId"]
+            let b_id = serde_json::from_slice::<serde_json::Value>(&payloads[1]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
@@ -3608,17 +3404,13 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren_via_na
                 "r.fork_c",
             );
             let payloads = h.expect_n_publishes(3).await; // publishes: 3
-            let c_id = serde_json::from_slice::<serde_json::Value>(&payloads[2])
-                .unwrap()["sessionId"]
+            let c_id = serde_json::from_slice::<serde_json::Value>(&payloads[2]).unwrap()["sessionId"]
                 .as_str()
                 .unwrap()
                 .to_string();
 
             // list_children(A) must return only B.
-            let params_a = serde_json::value::RawValue::from_string(
-                format!(r#"{{"sessionId":"{}"}}"#, a_id),
-            )
-            .unwrap();
+            let params_a = serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, a_id)).unwrap();
             h.global(
                 "acp.agent.ext.session/list_children",
                 ExtRequest::new("session/list_children", params_a.into()),
@@ -3635,10 +3427,7 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren_via_na
             assert_eq!(children_a, vec![b_id.clone()], "A must have only B as child");
 
             // list_children(B) must return only C.
-            let params_b = serde_json::value::RawValue::from_string(
-                format!(r#"{{"sessionId":"{}"}}"#, b_id),
-            )
-            .unwrap();
+            let params_b = serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, b_id)).unwrap();
             h.global(
                 "acp.agent.ext.session/list_children",
                 ExtRequest::new("session/list_children", params_b.into()),
@@ -3666,10 +3455,7 @@ async fn ext_list_children_returns_empty_for_root_session_via_nats() {
             let h = Harness::new();
             let root_id = create_session(&h).await; // publishes: 1
 
-            let params = serde_json::value::RawValue::from_string(
-                format!(r#"{{"sessionId":"{}"}}"#, root_id),
-            )
-            .unwrap();
+            let params = serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, root_id)).unwrap();
             h.global(
                 "acp.agent.ext.session/list_children",
                 ExtRequest::new("session/list_children", params.into()),
@@ -3698,8 +3484,7 @@ async fn ext_method_unknown_method_returns_acp_error_via_nats() {
             let h = Harness::new();
             let _ = create_session(&h).await; // publishes: 1
 
-            let params =
-                serde_json::value::RawValue::from_string(r#"{}"#.to_string()).unwrap();
+            let params = serde_json::value::RawValue::from_string(r#"{}"#.to_string()).unwrap();
             h.global(
                 "acp.agent.ext.unknown/method",
                 ExtRequest::new("unknown/method", params.into()),
@@ -3770,8 +3555,12 @@ async fn incomplete_continuation_triggers_second_http_call_via_nats() {
 
             // First response: partial text, a response ID, then Incomplete.
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-partial".to_string() },
-                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-partial".to_string(),
+                },
+                XaiEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
                 XaiEvent::Finished {
                     reason: FinishReason::Incomplete,
                     incomplete_reason: Some("max_output_tokens".to_string()),
@@ -3779,7 +3568,9 @@ async fn incomplete_continuation_triggers_second_http_call_via_nats() {
             ]);
             // Continuation response: finishes normally.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: " world".to_string() },
+                XaiEvent::TextDelta {
+                    text: " world".to_string(),
+                },
                 XaiEvent::Done,
             ]);
 
@@ -3820,8 +3611,12 @@ async fn incomplete_continuation_non_max_output_tokens_resends_user_input_via_na
 
             // First response: incomplete due to max_turns (not max_output_tokens).
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-mt".to_string() },
-                XaiEvent::TextDelta { text: "partial".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-mt".to_string(),
+                },
+                XaiEvent::TextDelta {
+                    text: "partial".to_string(),
+                },
                 XaiEvent::Finished {
                     reason: FinishReason::Incomplete,
                     incomplete_reason: Some("max_turns".to_string()),
@@ -3833,10 +3628,7 @@ async fn incomplete_continuation_non_max_output_tokens_resends_user_input_via_na
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
                 &prompt_subj,
-                PromptRequest::new(
-                    sid.clone(),
-                    vec![ContentBlock::from("original message")],
-                ),
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("original message")]),
                 "r.prompt",
             );
             h.expect_n_publishes(2).await;
@@ -3925,8 +3717,7 @@ async fn set_session_config_option_invalid_value_returns_acp_error() {
                 "r.cfg",
             );
             let payloads = h.expect_n_publishes(2).await;
-            let val: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             assert!(
                 val.get("code").is_some(),
                 "invalid config option value must return ACP error; got: {val}"
@@ -3987,7 +3778,9 @@ async fn prompt_finished_other_status_treated_as_end_of_turn_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "partial".to_string() },
+                XaiEvent::TextDelta {
+                    text: "partial".to_string(),
+                },
                 XaiEvent::Finished {
                     reason: FinishReason::Other("some_future_status".to_string()),
                     incomplete_reason: None,
@@ -4021,9 +3814,10 @@ async fn embedded_text_resource_content_forwarded_via_nats() {
                 PromptRequest::new(
                     sid.clone(),
                     vec![ContentBlock::Resource(EmbeddedResource::new(
-                        EmbeddedResourceResource::TextResourceContents(
-                            TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
-                        ),
+                        EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                            "fn main() {}",
+                            "file:///src/main.rs",
+                        )),
                     ))],
                 ),
                 "r.prompt",
@@ -4116,11 +3910,7 @@ async fn authenticate_agent_method_without_server_key_returns_acp_error_via_nats
         .run_until(async {
             // Empty key → no global API key configured.
             let h = Harness::with_api_key("");
-            h.global(
-                "acp.agent.authenticate",
-                AuthenticateRequest::new("agent"),
-                "r.auth",
-            );
+            h.global("acp.agent.authenticate", AuthenticateRequest::new("agent"), "r.auth");
             let payloads = h.expect_n_publishes(1).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
             assert!(
@@ -4221,10 +4011,7 @@ async fn authenticate_empty_key_returns_acp_error_via_nats() {
             );
             let payloads = h.expect_n_publishes(1).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
-            assert!(
-                val.get("code").is_some(),
-                "empty key must return ACP error; got: {val}"
-            );
+            assert!(val.get("code").is_some(), "empty key must return ACP error; got: {val}");
             let msg = val["message"].as_str().unwrap_or("");
             assert!(
                 msg.contains("must not be empty"),
@@ -4260,18 +4047,14 @@ async fn forked_session_inherits_api_key_from_parent_via_nats() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
-            let fork_val: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
 
             // Prompt on forked session — must succeed using inherited key.
-            h.http.push(vec![XaiEvent::TextDelta { text: "hi".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "hi".to_string() }, XaiEvent::Done]);
             let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
             h.session_req(
                 &fork_prompt_subj,
@@ -4301,8 +4084,14 @@ async fn usage_update_notification_sent_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 12, completion_tokens: 7, cached_tokens: 0 },
-                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::Usage {
+                    prompt_tokens: 12,
+                    completion_tokens: 7,
+                    cached_tokens: 0,
+                },
+                XaiEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -4315,9 +4104,9 @@ async fn usage_update_notification_sent_via_nats() {
             h.expect_n_notifications(2).await;
 
             let notifs = h.notifier.notifications.lock().unwrap();
-            let has_usage = notifs.iter().any(|n| {
-                matches!(&n.update, SessionUpdate::UsageUpdate(_))
-            });
+            let has_usage = notifs
+                .iter()
+                .any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
             assert!(
                 has_usage,
                 "XaiEvent::Usage must produce a SessionUpdate::UsageUpdate notification; got: {notifs:?}"
@@ -4340,13 +4129,18 @@ async fn non_bash_function_call_gets_completed_notification_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-tool".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-tool".to_string(),
+                },
                 XaiEvent::FunctionCall {
                     call_id: "cid-unknown".to_string(),
                     name: "unknown_tool".to_string(),
                     arguments: "{}".to_string(),
                 },
-                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                    incomplete_reason: None,
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -4363,8 +4157,7 @@ async fn non_bash_function_call_gets_completed_notification_via_nats() {
             let notifs = h.notifier.notifications.lock().unwrap();
             let completed = notifs.iter().find(|n| {
                 if let SessionUpdate::ToolCallUpdate(u) = &n.update {
-                    u.tool_call_id.to_string() == "cid-unknown"
-                        && u.fields.status == Some(ToolCallStatus::Completed)
+                    u.tool_call_id.to_string() == "cid-unknown" && u.fields.status == Some(ToolCallStatus::Completed)
                 } else {
                     false
                 }
@@ -4393,8 +4186,12 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently_via_nats() {
 
             // Turn 1: succeeds, stores last_response_id = "resp-t1".
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-t1".to_string() },
-                XaiEvent::TextDelta { text: "first".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-t1".to_string(),
+                },
+                XaiEvent::TextDelta {
+                    text: "first".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -4406,12 +4203,14 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently_via_nats() {
             h.expect_n_publishes(2).await;
 
             // Turn 2: first attempt returns a 500-style error → triggers stale-ID retry.
-            h.http.push(vec![
-                XaiEvent::Error { message: "xAI API error 500: internal server error".to_string() },
-            ]);
+            h.http.push(vec![XaiEvent::Error {
+                message: "xAI API error 500: internal server error".to_string(),
+            }]);
             // Turn 2, retry: succeeds.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "second".to_string() },
+                XaiEvent::TextDelta {
+                    text: "second".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -4461,7 +4260,9 @@ async fn api_4xx_error_does_not_trigger_stale_id_retry_via_nats() {
 
             // Turn 1: succeeds, stores response_id.
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-t1".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-t1".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -4473,9 +4274,9 @@ async fn api_4xx_error_does_not_trigger_stale_id_retry_via_nats() {
             h.expect_n_publishes(2).await;
 
             // Turn 2: 401 error — must NOT retry (only one response queued).
-            h.http.push(vec![
-                XaiEvent::Error { message: "xAI API error 401: unauthorized".to_string() },
-            ]);
+            h.http.push(vec![XaiEvent::Error {
+                message: "xAI API error 401: unauthorized".to_string(),
+            }]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 2")]),
@@ -4506,7 +4307,8 @@ async fn binary_blob_resource_content_forwarded_as_text_via_nats() {
             let h = Harness::new();
             let sid = create_session(&h).await;
 
-            h.http.push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -4534,8 +4336,7 @@ async fn binary_blob_resource_content_forwarded_as_text_via_nats() {
                 .next_back()
                 .unwrap_or("");
             assert_eq!(
-                content,
-                "[Binary resource: file:///data.bin (application/octet-stream)]",
+                content, "[Binary resource: file:///data.bin (application/octet-stream)]",
                 "binary blob must be forwarded as a text placeholder via NATS; got: {content:?}"
             );
         })
@@ -4603,7 +4404,9 @@ async fn max_continuations_exhausted_returns_cancelled_via_nats() {
             // 6 incomplete responses — MAX_CONTINUATIONS = 5, guard fires on 6th.
             for i in 0u32..6 {
                 h.http.push(vec![
-                    XaiEvent::ResponseId { id: format!("resp-{i}") },
+                    XaiEvent::ResponseId {
+                        id: format!("resp-{i}"),
+                    },
                     XaiEvent::Finished {
                         reason: FinishReason::Incomplete,
                         incomplete_reason: Some("max_output_tokens".to_string()),
@@ -4695,14 +4498,9 @@ async fn fork_session_inherits_enabled_tools_via_nats() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
-            let fork_val: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
 
             // Prompt the forked session.
@@ -4740,7 +4538,9 @@ async fn set_session_model_clears_last_response_id_via_nats() {
 
             // Turn 1: server returns a ResponseId — agent caches it.
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-model-test".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-model-test".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -4771,8 +4571,7 @@ async fn set_session_model_clears_last_response_id_via_nats() {
             let calls = h.http.calls.lock().unwrap().clone();
             assert_eq!(calls.len(), 2);
             assert_eq!(
-                calls[1].previous_response_id,
-                None,
+                calls[1].previous_response_id, None,
                 "set_session_model must clear the cached response ID; turn 2 must not send previous_response_id"
             );
         })
@@ -4794,7 +4593,9 @@ async fn fork_session_inherits_system_prompt_via_nats() {
 
             // Parent turn: no ResponseId so history is built from scratch.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "parent reply".to_string() },
+                XaiEvent::TextDelta {
+                    text: "parent reply".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -4806,14 +4607,9 @@ async fn fork_session_inherits_system_prompt_via_nats() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
-            let fork_val: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
 
             // Fork's first prompt: no ResponseId → full history with system prompt.
@@ -4862,7 +4658,10 @@ async fn tool_call_response_ends_turn_without_updating_history_via_nats() {
                     name: "web_search".to_string(),
                     arguments: r#"{"query":"rust"}"#.to_string(),
                 },
-                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                    incomplete_reason: None,
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -4918,7 +4717,8 @@ async fn history_truncation_drops_oldest_pair_first_via_nats() {
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
 
             // Turn 1 → history: [u1, a1] = 2, at limit.
-            h.http.push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
@@ -4927,7 +4727,8 @@ async fn history_truncation_drops_oldest_pair_first_via_nats() {
             h.expect_n_publishes(2).await;
 
             // Turn 2 → saves [u1,a1,u2,a2] = 4 > 2 → trim to [u2,a2].
-            h.http.push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
@@ -4983,7 +4784,8 @@ async fn history_at_exactly_the_limit_is_not_trimmed_via_nats() {
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
 
             // Turn 1 → [u1, a1].
-            h.http.push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
@@ -4992,7 +4794,8 @@ async fn history_at_exactly_the_limit_is_not_trimmed_via_nats() {
             h.expect_n_publishes(2).await;
 
             // Turn 2 → [u1, a1, u2, a2] — exactly at max_history=4, no trim.
-            h.http.push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
@@ -5041,7 +4844,8 @@ async fn history_truncation_odd_max_drops_one_pair_via_nats() {
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
 
             // Two turns → saves [u1,a1,u2,a2] = 4 > 3 → trim to [u2,a2].
-            h.http.push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
@@ -5049,7 +4853,8 @@ async fn history_truncation_odd_max_drops_one_pair_via_nats() {
             );
             h.expect_n_publishes(2).await;
 
-            h.http.push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
@@ -5094,11 +4899,7 @@ async fn authenticate_agent_method_uses_server_key_via_nats() {
         .run_until(async {
             let h = Harness::new(); // "test-key" is the configured server key
 
-            h.global(
-                "acp.agent.authenticate",
-                AuthenticateRequest::new("agent"),
-                "r.auth",
-            );
+            h.global("acp.agent.authenticate", AuthenticateRequest::new("agent"), "r.auth");
             let payloads = h.expect_n_publishes(1).await;
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
             assert!(
@@ -5183,11 +4984,7 @@ async fn pending_api_key_consumed_by_first_new_session_via_nats() {
             let sess1 = create_session(&h).await; // total publishes: 2
 
             // sess2 — no pending key remaining.
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/tmp"),
-                "r.sess2",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/tmp"), "r.sess2");
             let payloads = h.expect_n_publishes(3).await;
             let v: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             let sess2 = v["sessionId"].as_str().unwrap().to_string();
@@ -5200,16 +4997,19 @@ async fn pending_api_key_consumed_by_first_new_session_via_nats() {
                 "r.p2",
             );
             let payloads = h.expect_n_publishes(4).await;
-            let val2: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let val2: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             assert!(
                 val2.get("code").is_some(),
                 "sess2 prompt without key must return ACP error; got: {val2}"
             );
 
             // Prompt sess1 — must succeed using the key it absorbed.
-            h.http
-                .push(vec![XaiEvent::TextDelta { text: "reply".to_string() }, XaiEvent::Done]);
+            h.http.push(vec![
+                XaiEvent::TextDelta {
+                    text: "reply".to_string(),
+                },
+                XaiEvent::Done,
+            ]);
             let p1_subj = format!("acp.session.{sess1}.agent.prompt");
             h.session_req(
                 &p1_subj,
@@ -5267,8 +5067,12 @@ async fn session_is_usable_after_cancel_via_nats() {
             );
 
             // Second prompt: normal — must complete.
-            h.http
-                .push(vec![XaiEvent::TextDelta { text: "second reply".to_string() }, XaiEvent::Done]);
+            h.http.push(vec![
+                XaiEvent::TextDelta {
+                    text: "second reply".to_string(),
+                },
+                XaiEvent::Done,
+            ]);
             h.session_req(
                 &prompt_subj,
                 PromptRequest::new(sid.clone(), vec![ContentBlock::from("second")]),
@@ -5361,11 +5165,7 @@ async fn list_sessions_is_empty_before_any_session_via_nats() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-            h.global(
-                "acp.agent.session.list",
-                ListSessionsRequest::new(),
-                "r.list",
-            );
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
             let payloads = h.expect_n_publishes(1).await;
             let resp: ListSessionsResponse = serde_json::from_slice(&payloads[0]).unwrap();
             assert!(
@@ -5386,11 +5186,7 @@ async fn new_session_exposes_all_tool_config_options_as_off_via_nats() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let h = Harness::new();
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new("/tmp"),
-                "r.new",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new("/tmp"), "r.new");
             let payloads = h.expect_n_publishes(1).await;
             // Inspect via raw JSON to avoid importing SessionConfigKind.
             let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
@@ -5480,9 +5276,7 @@ async fn text_is_assembled_from_multiple_deltas_via_nats() {
                 XaiEvent::TextDelta {
                     text: "Hel".to_string(),
                 },
-                XaiEvent::TextDelta {
-                    text: "lo".to_string(),
-                },
+                XaiEvent::TextDelta { text: "lo".to_string() },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -5566,7 +5360,9 @@ async fn fork_histories_are_independent_after_diverging_prompts_via_nats() {
 
             // Shared prompt on parent — no ResponseId so history is stored.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "shared reply".to_string() },
+                XaiEvent::TextDelta {
+                    text: "shared reply".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -5579,14 +5375,9 @@ async fn fork_histories_are_independent_after_diverging_prompts_via_nats() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
-            let fval: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fval: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             let fork_id = fval["sessionId"].as_str().unwrap().to_string();
 
             // Parent-only prompt — verify fork's message does NOT appear.
@@ -5598,8 +5389,7 @@ async fn fork_histories_are_independent_after_diverging_prompts_via_nats() {
             );
             h.expect_n_publishes(4).await;
             let parent_call = h.http.last_call().unwrap();
-            let parent_contents: Vec<_> =
-                parent_call.inputs.iter().filter_map(|i| i.content()).collect();
+            let parent_contents: Vec<_> = parent_call.inputs.iter().filter_map(|i| i.content()).collect();
             assert!(
                 parent_contents.contains(&"parent-only"),
                 "parent inputs must contain 'parent-only'; got: {parent_contents:?}"
@@ -5619,8 +5409,7 @@ async fn fork_histories_are_independent_after_diverging_prompts_via_nats() {
             );
             h.expect_n_publishes(5).await;
             let fork_call = h.http.last_call().unwrap();
-            let fork_contents: Vec<_> =
-                fork_call.inputs.iter().filter_map(|i| i.content()).collect();
+            let fork_contents: Vec<_> = fork_call.inputs.iter().filter_map(|i| i.content()).collect();
             assert!(
                 fork_contents.contains(&"fork-only"),
                 "fork inputs must contain 'fork-only'; got: {fork_contents:?}"
@@ -5855,18 +5644,25 @@ async fn trogon_tool_dispatch_via_nats_sends_follow_up() {
             // Round 1: model requests read_file (path may not exist — we only
             // verify that dispatch happens and output is returned).
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "r-nats-1".to_string() },
+                XaiEvent::ResponseId {
+                    id: "r-nats-1".to_string(),
+                },
                 XaiEvent::FunctionCall {
                     call_id: "cid-rf-nats".to_string(),
                     name: "read_file".to_string(),
                     arguments: r#"{"path":"/nonexistent_integration_test_file.txt"}"#.to_string(),
                 },
-                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                    incomplete_reason: None,
+                },
                 XaiEvent::Done,
             ]);
             // Round 2: model replies after receiving tool output.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::TextDelta {
+                    text: "done".to_string(),
+                },
                 XaiEvent::Done,
             ]);
 
@@ -5879,7 +5675,11 @@ async fn trogon_tool_dispatch_via_nats_sends_follow_up() {
             h.expect_n_publishes(2).await;
 
             let calls = h.http.calls.lock().unwrap();
-            assert_eq!(calls.len(), 2, "agent must make a follow-up call after trogon-tool dispatch");
+            assert_eq!(
+                calls.len(),
+                2,
+                "agent must make a follow-up call after trogon-tool dispatch"
+            );
             let follow_up_inputs = &calls[1].inputs;
             assert!(
                 follow_up_inputs.iter().any(|item| matches!(
@@ -5908,30 +5708,32 @@ async fn trogon_tool_uses_session_cwd_for_relative_path_via_nats() {
 
             // Create a session with the tempdir as cwd.
             let before = h.nats.published_payloads().len();
-            h.global(
-                "acp.agent.session.new",
-                NewSessionRequest::new(&cwd),
-                "r.new_cwd",
-            );
+            h.global("acp.agent.session.new", NewSessionRequest::new(&cwd), "r.new_cwd");
             let payloads = h.expect_n_publishes(before + 1).await;
-            let val: serde_json::Value =
-                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
             let sid = val["sessionId"].as_str().unwrap().to_string();
 
             // Round 1: model requests read_file with a relative path.
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "r-cwd-nats".to_string() },
+                XaiEvent::ResponseId {
+                    id: "r-cwd-nats".to_string(),
+                },
                 XaiEvent::FunctionCall {
                     call_id: "cid-cwd-nats".to_string(),
                     name: "read_file".to_string(),
                     arguments: r#"{"path":"marker.txt"}"#.to_string(),
                 },
-                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                    incomplete_reason: None,
+                },
                 XaiEvent::Done,
             ]);
             // Round 2: model replies after tool output.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::TextDelta {
+                    text: "done".to_string(),
+                },
                 XaiEvent::Done,
             ]);
 
@@ -5947,12 +5749,19 @@ async fn trogon_tool_uses_session_cwd_for_relative_path_via_nats() {
             assert_eq!(calls.len(), 2, "agent must make a follow-up after read_file");
             let output = calls[1].inputs.iter().find_map(|item| {
                 if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
-                    if call_id == "cid-cwd-nats" { Some(output.as_str()) } else { None }
+                    if call_id == "cid-cwd-nats" {
+                        Some(output.as_str())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             });
-            assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-cwd-nats");
+            assert!(
+                output.is_some(),
+                "follow-up must contain FunctionCallOutput for cid-cwd-nats"
+            );
             assert!(
                 output.unwrap().contains("nats-cwd-content"),
                 "tool output must contain file content resolved from session cwd, got: {:?}",
@@ -5972,17 +5781,24 @@ async fn fetch_url_egress_blocked_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "r-egress-nats".to_string() },
+                XaiEvent::ResponseId {
+                    id: "r-egress-nats".to_string(),
+                },
                 XaiEvent::FunctionCall {
                     call_id: "cid-fetch-nats".to_string(),
                     name: "fetch_url".to_string(),
                     arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
                 },
-                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Finished {
+                    reason: FinishReason::ToolCalls,
+                    incomplete_reason: None,
+                },
                 XaiEvent::Done,
             ]);
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "blocked".to_string() },
+                XaiEvent::TextDelta {
+                    text: "blocked".to_string(),
+                },
                 XaiEvent::Done,
             ]);
 
@@ -5998,15 +5814,23 @@ async fn fetch_url_egress_blocked_via_nats() {
             assert_eq!(calls.len(), 2, "agent must make a follow-up after blocked fetch_url");
             let output = calls[1].inputs.iter().find_map(|item| {
                 if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
-                    if call_id == "cid-fetch-nats" { Some(output.as_str()) } else { None }
+                    if call_id == "cid-fetch-nats" {
+                        Some(output.as_str())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             });
-            assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-fetch-nats");
+            assert!(
+                output.is_some(),
+                "follow-up must contain FunctionCallOutput for cid-fetch-nats"
+            );
             assert!(
                 output.unwrap().contains("blocked by egress policy"),
-                "output must contain egress block message, got: {:?}", output
+                "output must contain egress block message, got: {:?}",
+                output
             );
         })
         .await;
@@ -6025,8 +5849,12 @@ async fn export_via_nats_returns_session_history() {
 
             // Prompt to build some history.
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-export-test".to_string() },
-                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-export-test".to_string(),
+                },
+                XaiEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -6086,8 +5914,12 @@ async fn import_via_nats_clears_last_response_id() {
 
             // Turn 1: prompt → sets last_response_id to "resp-turn1".
             h.http.push(vec![
-                XaiEvent::ResponseId { id: "resp-turn1".to_string() },
-                XaiEvent::TextDelta { text: "two".to_string() },
+                XaiEvent::ResponseId {
+                    id: "resp-turn1".to_string(),
+                },
+                XaiEvent::TextDelta {
+                    text: "two".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -6123,7 +5955,9 @@ async fn import_via_nats_clears_last_response_id() {
 
             // Turn 2: prompt after import — must NOT use previous_response_id.
             h.http.push(vec![
-                XaiEvent::TextDelta { text: "four".to_string() },
+                XaiEvent::TextDelta {
+                    text: "four".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -6169,11 +6003,12 @@ async fn cancel_saves_token_totals_to_kv() {
             let agent = XaiAgent::with_deps(notifier.clone(), "grok-3", "test-key", http.clone())
                 .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
             let prefix = acp_nats::acp_prefix::AcpPrefix::new("acp").unwrap();
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
             // Create a session via NATS.
             let msg = async_nats::Message {
@@ -6189,40 +6024,43 @@ async fn cancel_saves_token_totals_to_kv() {
 
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if nats.published_payloads().len() >= 1 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
-            let sid: String = serde_json::from_slice::<serde_json::Value>(
-                &nats.published_payloads()[0],
-            )
-            .unwrap()["sessionId"]
-                .as_str()
-                .unwrap()
-                .to_string();
+            let sid: String =
+                serde_json::from_slice::<serde_json::Value>(&nats.published_payloads()[0]).unwrap()["sessionId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
 
             // First response: Usage + Incomplete → triggers a continuation call.
             http.push(vec![
                 XaiEvent::ResponseId { id: "r1".to_string() },
-                XaiEvent::Usage { prompt_tokens: 7, completion_tokens: 3, cached_tokens: 0 },
+                XaiEvent::Usage {
+                    prompt_tokens: 7,
+                    completion_tokens: 3,
+                    cached_tokens: 0,
+                },
                 XaiEvent::Finished {
                     reason: FinishReason::Incomplete,
                     incomplete_reason: Some("max_output_tokens".to_string()),
                 },
             ]);
             // Second call (continuation): slow — hangs until cancel fires.
-            http.push_slow(XaiEvent::TextDelta { text: "partial".to_string() });
+            http.push_slow(XaiEvent::TextDelta {
+                text: "partial".to_string(),
+            });
 
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             let msg = async_nats::Message {
                 subject: prompt_subj.into(),
                 reply: Some("r.prompt".into()),
-                payload: serde_json::to_vec(&PromptRequest::new(
-                    sid.clone(),
-                    vec![ContentBlock::from("hi")],
-                ))
-                .unwrap()
-                .into(),
+                payload: serde_json::to_vec(&PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]))
+                    .unwrap()
+                    .into(),
                 headers: None,
                 length: 0,
                 status: None,
@@ -6235,7 +6073,9 @@ async fn cancel_saves_token_totals_to_kv() {
             // is populated). Two notifications total.
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if notifier.count() >= 2 { break; }
+                if notifier.count() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for UsageUpdate + AgentMessageChunk notifications; got {}",
@@ -6262,7 +6102,9 @@ async fn cancel_saves_token_totals_to_kv() {
             // Wait for the prompt response (publish 2 = new_session response + prompt response).
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for cancel prompt response"
@@ -6317,11 +6159,12 @@ async fn completion_saves_token_totals_to_kv() {
             let agent = XaiAgent::with_deps(notifier.clone(), "grok-3", "test-key", http.clone())
                 .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
             let prefix = acp_nats::acp_prefix::AcpPrefix::new("acp").unwrap();
-            let (_, io_task) =
-                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            tokio::task::spawn_local(async move { let _ = io_task.await; });
+            let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(async move {
+                let _ = io_task.await;
+            });
 
             // Create a session via NATS.
             let msg = async_nats::Message {
@@ -6337,22 +6180,28 @@ async fn completion_saves_token_totals_to_kv() {
 
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if nats.published_payloads().len() >= 1 {
+                    break;
+                }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
-            let sid: String = serde_json::from_slice::<serde_json::Value>(
-                &nats.published_payloads()[0],
-            )
-            .unwrap()["sessionId"]
-                .as_str()
-                .unwrap()
-                .to_string();
+            let sid: String =
+                serde_json::from_slice::<serde_json::Value>(&nats.published_payloads()[0]).unwrap()["sessionId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
 
             // Normal completion: Usage + TextDelta + Done.
             http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cached_tokens: 0 },
-                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    cached_tokens: 0,
+                },
+                XaiEvent::TextDelta {
+                    text: "done".to_string(),
+                },
                 XaiEvent::Done,
             ]);
 
@@ -6360,12 +6209,9 @@ async fn completion_saves_token_totals_to_kv() {
             let msg = async_nats::Message {
                 subject: prompt_subj.into(),
                 reply: Some("r.prompt".into()),
-                payload: serde_json::to_vec(&PromptRequest::new(
-                    sid.clone(),
-                    vec![ContentBlock::from("hi")],
-                ))
-                .unwrap()
-                .into(),
+                payload: serde_json::to_vec(&PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]))
+                    .unwrap()
+                    .into(),
                 headers: None,
                 length: 0,
                 status: None,
@@ -6376,7 +6222,9 @@ async fn completion_saves_token_totals_to_kv() {
             // Wait for prompt response (publish 2 = session.new + prompt).
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 2 { break; }
+                if nats.published_payloads().len() >= 2 {
+                    break;
+                }
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "timeout waiting for prompt response; got {} publishes",
@@ -6416,7 +6264,11 @@ async fn list_sessions_exposes_token_totals_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 8, completion_tokens: 4, cached_tokens: 0 },
+                XaiEvent::Usage {
+                    prompt_tokens: 8,
+                    completion_tokens: 4,
+                    cached_tokens: 0,
+                },
                 XaiEvent::TextDelta { text: "ok".to_string() },
                 XaiEvent::Done,
             ]);
@@ -6467,8 +6319,14 @@ async fn list_sessions_exposes_cache_read_tokens_in_meta() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 8, completion_tokens: 4, cached_tokens: 50 },
-                XaiEvent::TextDelta { text: "cached".to_string() },
+                XaiEvent::Usage {
+                    prompt_tokens: 8,
+                    completion_tokens: 4,
+                    cached_tokens: 50,
+                },
+                XaiEvent::TextDelta {
+                    text: "cached".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -6514,8 +6372,14 @@ async fn multi_turn_tokens_accumulate_via_nats() {
 
             // Turn 1: 8 input + 4 output.
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 8, completion_tokens: 4, cached_tokens: 0 },
-                XaiEvent::TextDelta { text: "first".to_string() },
+                XaiEvent::Usage {
+                    prompt_tokens: 8,
+                    completion_tokens: 4,
+                    cached_tokens: 0,
+                },
+                XaiEvent::TextDelta {
+                    text: "first".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -6528,8 +6392,14 @@ async fn multi_turn_tokens_accumulate_via_nats() {
 
             // Turn 2: 5 input + 3 output.
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 5, completion_tokens: 3, cached_tokens: 0 },
-                XaiEvent::TextDelta { text: "second".to_string() },
+                XaiEvent::Usage {
+                    prompt_tokens: 5,
+                    completion_tokens: 3,
+                    cached_tokens: 0,
+                },
+                XaiEvent::TextDelta {
+                    text: "second".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             h.session_req(
@@ -6576,8 +6446,14 @@ async fn fork_session_resets_token_totals_via_nats() {
 
             // Prompt source session so it has non-zero token totals.
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 9, completion_tokens: 5, cached_tokens: 0 },
-                XaiEvent::TextDelta { text: "src".to_string() },
+                XaiEvent::Usage {
+                    prompt_tokens: 9,
+                    completion_tokens: 5,
+                    cached_tokens: 0,
+                },
+                XaiEvent::TextDelta {
+                    text: "src".to_string(),
+                },
                 XaiEvent::Done,
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
@@ -6590,11 +6466,7 @@ async fn fork_session_resets_token_totals_via_nats() {
 
             // Fork the session.
             let fork_subj = format!("acp.session.{sid}.agent.fork");
-            h.session_req(
-                &fork_subj,
-                ForkSessionRequest::new(sid.clone(), "/fork"),
-                "r.fork",
-            );
+            h.session_req(&fork_subj, ForkSessionRequest::new(sid.clone(), "/fork"), "r.fork");
             let payloads = h.expect_n_publishes(3).await;
             let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
             let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();

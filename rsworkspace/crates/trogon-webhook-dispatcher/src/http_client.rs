@@ -105,7 +105,12 @@ pub mod mock {
     impl WebhookClient for MockWebhookClient {
         type Error = MockClientError;
 
-        async fn post(&self, url: &str, payload: &[u8], headers: Vec<(String, String)>) -> Result<u16, MockClientError> {
+        async fn post(
+            &self,
+            url: &str,
+            payload: &[u8],
+            headers: Vec<(String, String)>,
+        ) -> Result<u16, MockClientError> {
             self.calls.lock().unwrap().push(RecordedCall {
                 url: url.to_string(),
                 payload: payload.to_vec(),
@@ -120,8 +125,8 @@ pub mod mock {
 
 #[cfg(test)]
 mod tests {
-    use super::mock::MockWebhookClient;
     use super::WebhookClient;
+    use super::mock::MockWebhookClient;
 
     #[tokio::test]
     async fn mock_records_url_and_payload() {

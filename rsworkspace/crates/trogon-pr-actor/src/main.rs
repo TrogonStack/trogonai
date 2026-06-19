@@ -2,7 +2,6 @@ mod config;
 
 use std::time::Duration;
 
-use trogon_telemetry::{ResourceAttribute, ServiceName};
 use clap::Parser;
 use tracing::info;
 use trogon_actor::{ActorRuntime, host::ActorHost, inbox::provision_actor_inbox, provision_state};
@@ -11,6 +10,7 @@ use trogon_registry::{AgentCapability, Registry, provision as provision_registry
 use trogon_service_config::{NatsArgs, RuntimeConfigArgs, load_config, resolve_nats};
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
+use trogon_telemetry::{ResourceAttribute, ServiceName};
 use trogon_transcript::publisher::NatsTranscriptPublisher;
 
 use trogon_pr_actor::actor::PrActor;
@@ -63,19 +63,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Registry::new(registry_store);
     let runtime = ActorRuntime::new(state_store, publisher, nats.clone(), registry, js.clone());
 
-    let capability =
-        AgentCapability::new("PrActor", ["code_review", "pull_request"], "actors.pr.>");
+    let capability = AgentCapability::new("PrActor", ["code_review", "pull_request"], "actors.pr.>");
 
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()?;
-    let actor = PrActor::new(
-        http,
-        cfg.llm_api_url,
-        cfg.llm_api_key,
-        cfg.llm_model,
-        cfg.github_token,
-    );
+    let http = reqwest::Client::builder().timeout(Duration::from_secs(60)).build()?;
+    let actor = PrActor::new(http, cfg.llm_api_url, cfg.llm_api_key, cfg.llm_model, cfg.github_token);
     let host = ActorHost::new(runtime, actor, capability);
 
     info!("PR actor registered, listening on actors.pr.>");

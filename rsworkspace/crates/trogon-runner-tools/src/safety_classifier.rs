@@ -7,7 +7,7 @@
 //! `anthropic-version`). It **fails safe**: any network/parse error or ambiguous
 //! reply yields `Prompt`, so `auto` mode never silently allows on uncertainty.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use std::sync::Arc;
 
@@ -92,8 +92,7 @@ pub fn build_auto_safety_classifier(
     anthropic_base_url: Option<&str>,
     anthropic_token: impl Into<String>,
 ) -> Arc<dyn SafetyClassifier> {
-    let model = std::env::var("AUTO_CLASSIFIER_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
+    let model = std::env::var("AUTO_CLASSIFIER_MODEL").unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
     Arc::new(LlmSafetyClassifier::new(
         http,
         proxy_url,
@@ -234,14 +233,7 @@ mod tests {
             when.method(POST).path("/anthropic/v1/messages");
             then.status(500);
         });
-        let c = LlmSafetyClassifier::new(
-            reqwest::Client::new(),
-            &server.base_url(),
-            None,
-            "tok",
-            "m",
-            vec![],
-        );
+        let c = LlmSafetyClassifier::new(reqwest::Client::new(), &server.base_url(), None, "tok", "m", vec![]);
         assert_eq!(
             c.do_classify("bash", &json!({"command": "rm -rf /"})).await,
             ClassifierVerdict::Prompt

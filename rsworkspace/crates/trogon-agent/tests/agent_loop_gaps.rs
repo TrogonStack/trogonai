@@ -69,8 +69,7 @@ async fn agent_loop_multiple_tool_use_blocks_in_one_response() {
 
     // Request 1 (no tool_result yet) → two tool_use blocks (fallback).
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -89,10 +88,7 @@ async fn agent_loop_multiple_tool_use_blocks_in_one_response() {
     )];
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("go")], &tools, None)
-        .await
-        .unwrap();
+    let result = agent.run(vec![Message::user_text("go")], &tools, None).await.unwrap();
 
     assert_eq!(result, "Both tools done.");
 }
@@ -103,18 +99,14 @@ async fn agent_loop_end_turn_empty_content_returns_empty_string() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "stop_reason": "end_turn", "content": [] }));
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("hi")], &[], None)
-        .await
-        .unwrap();
+    let result = agent.run(vec![Message::user_text("hi")], &[], None).await.unwrap();
 
     assert_eq!(result, "");
 }
@@ -126,8 +118,7 @@ async fn agent_loop_end_turn_with_only_non_text_blocks_returns_empty() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -139,10 +130,7 @@ async fn agent_loop_end_turn_with_only_non_text_blocks_returns_empty() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("hi")], &[], None)
-        .await
-        .unwrap();
+    let result = agent.run(vec![Message::user_text("hi")], &[], None).await.unwrap();
 
     assert_eq!(result, "");
 }

@@ -3,8 +3,8 @@
 //! Run with:
 //!   cargo test -p trogon-runner-tools --test spawn_agent_integration
 
-use std::sync::Arc;
 use futures_util::StreamExt as _;
+use std::sync::Arc;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_mcp::McpCallTool as _;
@@ -65,25 +65,18 @@ async fn call_tool_delivers_request_and_returns_reply() {
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
 
-    let mut sub = registry_client
-        .subscribe("trogon.spawn")
-        .await
-        .unwrap();
+    let mut sub = registry_client.subscribe("trogon.spawn").await.unwrap();
 
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
-            let payload: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let response = format!(
                 "ran agent={} with: {}",
                 payload["agent"].as_str().unwrap_or(""),
                 payload["prompt"].as_str().unwrap_or("")
             );
             if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, response.into())
-                    .await
-                    .unwrap();
+                registry_client.publish(reply, response.into()).await.unwrap();
             }
         }
     });
@@ -109,19 +102,13 @@ async fn call_tool_uses_correct_subject_prefix() {
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
 
-    let mut sub = registry_client
-        .subscribe("myteam.spawn")
-        .await
-        .unwrap();
+    let mut sub = registry_client.subscribe("myteam.spawn").await.unwrap();
 
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
         {
-            registry_client
-                .publish(reply, "ack".into())
-                .await
-                .unwrap();
+            registry_client.publish(reply, "ack".into()).await.unwrap();
         }
     });
 
@@ -130,10 +117,7 @@ async fn call_tool_uses_correct_subject_prefix() {
 
     let tool = SpawnAgentTool::new(client, "myteam", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "prompt": "design auth flow" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "prompt": "design auth flow" }))
         .await;
 
     assert!(result.is_ok());
@@ -147,15 +131,11 @@ async fn call_tool_sends_agent_and_prompt_in_payload() {
     let client = nats_client(port).await;
     let registry_client = nats_client(port).await;
 
-    let mut sub = registry_client
-        .subscribe("t.spawn")
-        .await
-        .unwrap();
+    let mut sub = registry_client.subscribe("t.spawn").await.unwrap();
 
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
-            let v: serde_json::Value =
-                serde_json::from_slice(&msg.payload).expect("payload must be JSON");
+            let v: serde_json::Value = serde_json::from_slice(&msg.payload).expect("payload must be JSON");
 
             assert_eq!(v["agent"].as_str().unwrap(), "reviewer");
             assert_eq!(v["prompt"].as_str().unwrap(), "list files");
@@ -202,10 +182,7 @@ async fn call_tool_accepts_prompt_without_agent() {
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "prompt": "do something" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "prompt": "do something" }))
         .await;
 
     assert!(result.is_ok(), "prompt alone must be sufficient");
@@ -219,17 +196,11 @@ async fn call_tool_errors_on_missing_prompt() {
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "agent": "explore" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "agent": "explore" }))
         .await;
 
     assert!(result.is_err());
-    assert!(
-        result.unwrap_err().contains("prompt"),
-        "error should mention 'prompt'"
-    );
+    assert!(result.unwrap_err().contains("prompt"), "error should mention 'prompt'");
 }
 
 /// `call_tool` returns an error when arguments are an empty object.
@@ -239,9 +210,7 @@ async fn call_tool_errors_on_empty_arguments() {
     let client = nats_client(port).await;
 
     let tool = SpawnAgentTool::new(client, "trogon", "");
-    let result = tool
-        .call_tool("spawn_agent", &serde_json::json!({}))
-        .await;
+    let result = tool.call_tool("spawn_agent", &serde_json::json!({})).await;
 
     assert!(result.is_err());
 }
@@ -264,10 +233,7 @@ async fn call_tool_returns_error_when_no_subscriber_responds() {
     // No subscriber on this subject — NATS will return "no responders" immediately.
     let tool = SpawnAgentTool::new(client, "ghost", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "prompt": "anything" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "prompt": "anything" }))
         .await;
 
     assert!(result.is_err(), "expected error with no subscriber");
@@ -300,10 +266,7 @@ async fn call_tool_returns_registry_reply_verbatim() {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
         {
-            registry_client
-                .publish(reply, expected.into())
-                .await
-                .unwrap();
+            registry_client.publish(reply, expected.into()).await.unwrap();
         }
     });
 
@@ -311,10 +274,7 @@ async fn call_tool_returns_registry_reply_verbatim() {
 
     let tool = SpawnAgentTool::new(client, "ns", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "prompt": "count files" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "prompt": "count files" }))
         .await;
 
     assert_eq!(result.unwrap(), expected);
@@ -334,19 +294,13 @@ async fn call_tool_handles_multiline_registry_reply() {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
         {
-            registry_client
-                .publish(reply, expected.into())
-                .await
-                .unwrap();
+            registry_client.publish(reply, expected.into()).await.unwrap();
         }
     });
 
     let tool = SpawnAgentTool::new(client, "ns2", "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({ "prompt": "outline a plan" }),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({ "prompt": "outline a plan" }))
         .await;
 
     assert_eq!(result.unwrap(), expected);
@@ -365,14 +319,10 @@ async fn call_tool_handles_concurrent_requests() {
 
     tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
-            let v: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let reply_body = format!("done:{}", v["prompt"].as_str().unwrap_or("?"));
             if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, reply_body.into())
-                    .await
-                    .unwrap();
+                registry_client.publish(reply, reply_body.into()).await.unwrap();
             }
         }
     });
@@ -385,11 +335,8 @@ async fn call_tool_handles_concurrent_requests() {
         let prompt = prompt.to_string();
         handles.push(tokio::spawn(async move {
             let tool = SpawnAgentTool::new(client, "cc", "");
-            tool.call_tool(
-                "spawn_agent",
-                &serde_json::json!({ "prompt": prompt }),
-            )
-            .await
+            tool.call_tool("spawn_agent", &serde_json::json!({ "prompt": prompt }))
+                .await
         }));
     }
 

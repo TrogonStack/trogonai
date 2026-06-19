@@ -2,10 +2,13 @@
 use std::time::Duration;
 
 use async_nats::jetstream;
-use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
+use testcontainers_modules::{
+    nats::Nats,
+    testcontainers::{ImageExt, runners::AsyncRunner as _},
+};
 use trogon_memory::{
-    AnthropicMemoryProvider, Dreamer, DreamingService, EntityMemory, MemoryClient, MemoryLlmConfig,
-    MemoryWriter, RawFact, provision_kv, provision_stream, trigger_dreaming, write_memory,
+    AnthropicMemoryProvider, Dreamer, DreamingService, EntityMemory, MemoryClient, MemoryLlmConfig, MemoryWriter,
+    RawFact, provision_kv, provision_stream, trigger_dreaming, write_memory,
 };
 use trogon_transcript::{NatsTranscriptPublisher, Session, store::TranscriptStore};
 
@@ -102,15 +105,17 @@ async fn dreaming_service_extracts_and_stores_memory() {
     let session_id = session.id().to_string();
 
     // Spin up mock LLM
-    let llm_url = spawn_mock_llm(
-        r#"[{"category":"preference","content":"uses tabs not spaces","confidence":0.95}]"#,
-    )
-    .await;
+    let llm_url =
+        spawn_mock_llm(r#"[{"category":"preference","content":"uses tabs not spaces","confidence":0.95}]"#).await;
 
     // Build dreamer
     let http_client = reqwest::Client::new();
     let provider = AnthropicMemoryProvider::with_client(
-        MemoryLlmConfig { api_url: llm_url, api_key: "test".into(), ..Default::default() },
+        MemoryLlmConfig {
+            api_url: llm_url,
+            api_key: "test".into(),
+            ..Default::default()
+        },
         http_client,
     );
     let dreamer = Dreamer::new(provider, kv.clone());
@@ -163,10 +168,18 @@ async fn memory_accumulates_across_multiple_sessions() {
     ])
     .await;
     let provider = AnthropicMemoryProvider::with_client(
-        MemoryLlmConfig { api_url: llm_url, api_key: "test".into(), ..Default::default() },
+        MemoryLlmConfig {
+            api_url: llm_url,
+            api_key: "test".into(),
+            ..Default::default()
+        },
         reqwest::Client::new(),
     );
-    let dreamer = DreamingService::new(js.clone(), "dreamer-multi".to_string(), Dreamer::new(provider, kv.clone()));
+    let dreamer = DreamingService::new(
+        js.clone(),
+        "dreamer-multi".to_string(),
+        Dreamer::new(provider, kv.clone()),
+    );
     tokio::spawn(async move { dreamer.run().await.ok() });
 
     for i in 0..2usize {
@@ -207,12 +220,13 @@ async fn malformed_trigger_payload_is_skipped_gracefully() {
 
     // Single service: the LLM returns facts only for the valid trigger.
     // The malformed payload is skipped before the LLM is called.
-    let llm_url = spawn_mock_llm(
-        r#"[{"category":"fact","content":"still alive","confidence":1.0}]"#,
-    )
-    .await;
+    let llm_url = spawn_mock_llm(r#"[{"category":"fact","content":"still alive","confidence":1.0}]"#).await;
     let provider = AnthropicMemoryProvider::with_client(
-        MemoryLlmConfig { api_url: llm_url, api_key: "test".into(), ..Default::default() },
+        MemoryLlmConfig {
+            api_url: llm_url,
+            api_key: "test".into(),
+            ..Default::default()
+        },
         reqwest::Client::new(),
     );
     let dreamer = Dreamer::new(provider, kv.clone());
@@ -269,7 +283,11 @@ async fn write_memory_persists_facts_via_nats() {
         "pr",
         "owner/repo/42",
         "sess-1",
-        vec![RawFact { category: "preference".into(), content: "uses Rust".into(), confidence: 0.95 }],
+        vec![RawFact {
+            category: "preference".into(),
+            content: "uses Rust".into(),
+            confidence: 0.95,
+        }],
     )
     .await
     .unwrap();
@@ -282,7 +300,11 @@ async fn write_memory_persists_facts_via_nats() {
         "pr",
         "owner/repo/42",
         "sess-1",
-        vec![RawFact { category: "goal".into(), content: "ship by Friday".into(), confidence: 0.8 }],
+        vec![RawFact {
+            category: "goal".into(),
+            content: "ship by Friday".into(),
+            confidence: 0.8,
+        }],
     )
     .await
     .unwrap();
@@ -316,7 +338,11 @@ async fn memory_http_server_serves_and_deletes_memories() {
     let client = MemoryClient::new(kv.clone());
     let mut memory = EntityMemory::default();
     memory.merge(
-        vec![RawFact { category: "fact".into(), content: "prefers Rust".into(), confidence: 0.9 }],
+        vec![RawFact {
+            category: "fact".into(),
+            content: "prefers Rust".into(),
+            confidence: 0.9,
+        }],
         "sess-seed",
     );
     client.put("pr", "owner/repo/99", &memory).await.unwrap();
@@ -343,13 +369,21 @@ async fn memory_http_server_serves_and_deletes_memories() {
     assert_eq!(resp.status().as_u16(), 200);
 
     // GET existing memory → 200 with facts
-    let resp = http.get(format!("{base}/memory/pr/owner/repo/99")).send().await.unwrap();
+    let resp = http
+        .get(format!("{base}/memory/pr/owner/repo/99"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["facts"][0]["content"], "prefers Rust");
 
     // GET missing entity → 404
-    let resp = http.get(format!("{base}/memory/pr/does/not/exist")).send().await.unwrap();
+    let resp = http
+        .get(format!("{base}/memory/pr/does/not/exist"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 
     // DELETE existing memory → 204
@@ -361,6 +395,10 @@ async fn memory_http_server_serves_and_deletes_memories() {
     assert_eq!(resp.status().as_u16(), 204);
 
     // GET after delete → 404
-    let resp = http.get(format!("{base}/memory/pr/owner/repo/99")).send().await.unwrap();
+    let resp = http
+        .get(format!("{base}/memory/pr/owner/repo/99"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status().as_u16(), 404);
 }

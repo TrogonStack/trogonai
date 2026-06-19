@@ -52,11 +52,7 @@ pub enum CodexEvent {
     /// A text message chunk from the model.
     TextDelta { text: String },
     /// A tool/command execution started.
-    ToolStarted {
-        id: String,
-        name: String,
-        input: Value,
-    },
+    ToolStarted { id: String, name: String, input: Value },
     /// A tool/command completed.
     ToolCompleted { id: String, output: String },
     /// The turn finished.
@@ -146,14 +142,9 @@ impl CodexProcess {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(30);
-        tokio::time::timeout(
-            std::time::Duration::from_secs(spawn_timeout_secs),
-            process.initialize(),
-        )
-        .await
-        .map_err(|_| {
-            format!("codex app-server handshake timed out after {spawn_timeout_secs} s")
-        })??;
+        tokio::time::timeout(std::time::Duration::from_secs(spawn_timeout_secs), process.initialize())
+            .await
+            .map_err(|_| format!("codex app-server handshake timed out after {spawn_timeout_secs} s"))??;
 
         Ok(process)
     }
@@ -187,20 +178,14 @@ impl CodexProcess {
     }
 
     /// Resume an existing thread. Returns the same `thread_id`.
-    pub async fn thread_resume(
-        &self,
-        thread_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn thread_resume(&self, thread_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let params = serde_json::json!({ "threadId": thread_id });
         self.request("thread/resume", Some(params)).await?;
         Ok(thread_id.to_string())
     }
 
     /// Fork a thread. Returns the new `threadId`.
-    pub async fn thread_fork(
-        &self,
-        thread_id: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn thread_fork(&self, thread_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let params = serde_json::json!({ "threadId": thread_id });
         let result = self.request("thread/fork", Some(params)).await?;
         let new_id = result["threadId"]
@@ -224,10 +209,7 @@ impl CodexProcess {
         approval_policy: Option<&str>,
     ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = broadcast::channel(256);
-        self.turn_senders
-            .lock()
-            .await
-            .insert(thread_id.to_string(), tx);
+        self.turn_senders.lock().await.insert(thread_id.to_string(), tx);
 
         let mut params = serde_json::json!({
             "threadId": thread_id,
@@ -249,10 +231,7 @@ impl CodexProcess {
     }
 
     /// Interrupt the current turn for a thread.
-    pub async fn turn_interrupt(
-        &self,
-        thread_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn turn_interrupt(&self, thread_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let params = serde_json::json!({ "threadId": thread_id });
         self.request("turn/interrupt", Some(params)).await?;
         // MED-23: drop the interrupted turn's broadcast sender. Events are keyed by
@@ -314,12 +293,7 @@ impl CodexProcess {
     ///
     /// When the subprocess exits, `alive` is set to false and all pending requests
     /// are resolved with an error so callers don't hang.
-    async fn read_loop(
-        stdout: ChildStdout,
-        pending: PendingMap,
-        turn_senders: TurnSenders,
-        alive: Arc<AtomicBool>,
-    ) {
+    async fn read_loop(stdout: ChildStdout, pending: PendingMap, turn_senders: TurnSenders, alive: Arc<AtomicBool>) {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
             debug!(line = %line, "codex ← recv");
@@ -349,16 +323,12 @@ impl CodexProcess {
                     };
                     let _ = tx.send(result);
                 } else {
-                    debug!(
-                        id = id_u64,
-                        "codex: response arrived for unknown/dropped request"
-                    );
+                    debug!(id = id_u64, "codex: response arrived for unknown/dropped request");
                 }
             } else if let Some(method) = &msg.method {
                 // It's a server notification — route to the right thread's channel.
                 if let Some((thread_id, event)) = Self::parse_event(method, msg.params.as_ref()) {
-                    let is_terminal =
-                        matches!(event, CodexEvent::TurnCompleted | CodexEvent::Error { .. });
+                    let is_terminal = matches!(event, CodexEvent::TurnCompleted | CodexEvent::Error { .. });
                     let mut senders = turn_senders.lock().await;
                     if thread_id.is_empty() {
                         // No thread_id in params — broadcast to all active turns.
@@ -419,10 +389,7 @@ impl CodexProcess {
                             }
                         }
                         if text.is_empty() {
-                            trace!(
-                                thread_id,
-                                "codex: message item had no output_text blocks; skipping"
-                            );
+                            trace!(thread_id, "codex: message item had no output_text blocks; skipping");
                             return None;
                         }
                         CodexEvent::TextDelta { text }
@@ -443,11 +410,7 @@ impl CodexProcess {
                                 .unwrap_or(Value::Null);
                             CodexEvent::ToolStarted { id, name, input }
                         } else {
-                            let output = item
-                                .get("output")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
+                            let output = item.get("output").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             CodexEvent::ToolCompleted { id, output }
                         }
                     }
@@ -498,8 +461,7 @@ impl CodexProcessClient for CodexProcess {
         model: Option<&str>,
         approval_policy: Option<&str>,
     ) -> Result<broadcast::Receiver<CodexEvent>, DynError> {
-        self.turn_start(thread_id, user_input, model, approval_policy)
-            .await
+        self.turn_start(thread_id, user_input, model, approval_policy).await
     }
 
     async fn turn_interrupt(&self, thread_id: &str) -> Result<(), DynError> {
@@ -604,9 +566,7 @@ mod tests {
         });
         let (tid, event) = parse("item/completed", params).unwrap();
         assert_eq!(tid, "t5");
-        assert!(
-            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done")
-        );
+        assert!(matches!(event, CodexEvent::ToolCompleted { id, output } if id == "call-2" && output == "done"));
     }
 
     #[test]
@@ -705,9 +665,7 @@ mod tests {
         });
         let (tid, event) = parse("item/completed", params).unwrap();
         assert_eq!(tid, "t12");
-        assert!(
-            matches!(event, CodexEvent::ToolCompleted { id, output } if id == "fn-2" && output == "file contents")
-        );
+        assert!(matches!(event, CodexEvent::ToolCompleted { id, output } if id == "fn-2" && output == "file contents"));
     }
 
     // ── None params ───────────────────────────────────────────────────────────

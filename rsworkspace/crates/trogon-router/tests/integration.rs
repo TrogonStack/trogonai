@@ -55,10 +55,7 @@ async fn setup() -> (
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container
-        .get_host_port_ipv4(4222)
-        .await
-        .expect("failed to get port");
+    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -71,11 +68,7 @@ async fn setup() -> (
 }
 
 fn pr_actor() -> AgentCapability {
-    AgentCapability::new(
-        "PrActor",
-        ["code_review", "security_analysis"],
-        "actors.pr.>",
-    )
+    AgentCapability::new("PrActor", ["code_review", "security_analysis"], "actors.pr.>")
 }
 
 /// Publish a message after a brief delay so the router has time to subscribe.
@@ -191,12 +184,7 @@ async fn unroutable_event_does_not_forward_to_any_actor() {
         router.run(&["trogon.events.>"]).await.ok();
     });
 
-    publish_after_subscribe(
-        &nats_clone,
-        "trogon.events.unknown.thing",
-        Bytes::from_static(b"{}"),
-    )
-    .await;
+    publish_after_subscribe(&nats_clone, "trogon.events.unknown.thing", Bytes::from_static(b"{}")).await;
 
     tokio::time::sleep(Duration::from_millis(300)).await;
     router_handle.abort();
@@ -229,12 +217,7 @@ async fn router_records_unroutable_entry_in_transcript() {
         router.run(&["trogon.events.>"]).await.ok();
     });
 
-    publish_after_subscribe(
-        &nats_clone,
-        "trogon.events.github.push",
-        Bytes::from_static(b"{}"),
-    )
-    .await;
+    publish_after_subscribe(&nats_clone, "trogon.events.github.push", Bytes::from_static(b"{}")).await;
 
     tokio::time::sleep(Duration::from_millis(300)).await;
     router_handle.abort();
@@ -401,12 +384,7 @@ async fn router_loop_continues_after_routing_error() {
     });
 
     // Publish the first event (triggers UnknownAgentType error).
-    publish_after_subscribe(
-        &nats_clone,
-        "trogon.events.github.push",
-        Bytes::from_static(b"{}"),
-    )
-    .await;
+    publish_after_subscribe(&nats_clone, "trogon.events.github.push", Bytes::from_static(b"{}")).await;
 
     // Allow the router time to process the first (failed) event.
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -467,10 +445,7 @@ async fn router_prompt_contains_live_registry_data() {
 
     let prompts = llm.take_prompts();
     assert_eq!(prompts.len(), 1);
-    assert!(
-        prompts[0].contains("PrActor"),
-        "prompt should include registered agent"
-    );
+    assert!(prompts[0].contains("PrActor"), "prompt should include registered agent");
     assert!(
         prompts[0].contains("code_review"),
         "prompt should include agent capabilities"

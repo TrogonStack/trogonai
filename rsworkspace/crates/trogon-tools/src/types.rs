@@ -92,8 +92,12 @@ pub enum ImageSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
-    Text { text: String },
-    Image { source: ImageSource },
+    Text {
+        text: String,
+    },
+    Image {
+        source: ImageSource,
+    },
     Thinking {
         thinking: String,
         // Anthropic requires `thinking` blocks to be echoed back unchanged — including
@@ -210,7 +214,9 @@ mod tests {
 
     #[test]
     fn image_source_url_serializes_with_type_tag() {
-        let src = ImageSource::Url { url: "http://x".to_string() };
+        let src = ImageSource::Url {
+            url: "http://x".to_string(),
+        };
         let json = serde_json::to_string(&src).unwrap();
         assert!(json.contains("\"type\":\"url\""), "must have type tag: {json}");
     }
@@ -255,12 +261,16 @@ mod tests {
     #[test]
     fn content_block_image_roundtrip() {
         let block = ContentBlock::Image {
-            source: ImageSource::Url { url: "https://img.example.com/photo.jpg".to_string() },
+            source: ImageSource::Url {
+                url: "https://img.example.com/photo.jpg".to_string(),
+            },
         };
         let json = serde_json::to_string(&block).unwrap();
         let back: ContentBlock = serde_json::from_str(&json).unwrap();
         match back {
-            ContentBlock::Image { source: ImageSource::Url { url } } => {
+            ContentBlock::Image {
+                source: ImageSource::Url { url },
+            } => {
                 assert_eq!(url, "https://img.example.com/photo.jpg");
             }
             other => panic!("unexpected variant: {other:?}"),
@@ -276,7 +286,10 @@ mod tests {
             },
         };
         let json = serde_json::to_string(&block).unwrap();
-        assert!(json.contains("\"type\":\"image\""), "ContentBlock must have type tag: {json}");
+        assert!(
+            json.contains("\"type\":\"image\""),
+            "ContentBlock must have type tag: {json}"
+        );
     }
 
     // ── ContentBlock::Thinking ────────────────────────────────────────────────
@@ -300,7 +313,10 @@ mod tests {
 
     #[test]
     fn content_block_thinking_serializes_with_type_tag() {
-        let block = ContentBlock::Thinking { thinking: "t".to_string(), signature: None };
+        let block = ContentBlock::Thinking {
+            thinking: "t".to_string(),
+            signature: None,
+        };
         let json = serde_json::to_string(&block).unwrap();
         assert!(json.contains("\"type\":\"thinking\""), "must have type tag: {json}");
     }
@@ -318,7 +334,12 @@ mod tests {
         let json = serde_json::to_string(&block).unwrap();
         let back: ContentBlock = serde_json::from_str(&json).unwrap();
         match back {
-            ContentBlock::ToolUse { id, name, input, parent_tool_use_id } => {
+            ContentBlock::ToolUse {
+                id,
+                name,
+                input,
+                parent_tool_use_id,
+            } => {
                 assert_eq!(id, "call-1");
                 assert_eq!(name, "bash");
                 assert_eq!(input["command"], "ls");
@@ -385,7 +406,9 @@ mod tests {
         let json = serde_json::to_string(&block).unwrap();
         let back: ContentBlock = serde_json::from_str(&json).unwrap();
         match back {
-            ContentBlock::ToolResult { tool_use_id, content, .. } => {
+            ContentBlock::ToolResult {
+                tool_use_id, content, ..
+            } => {
                 assert_eq!(tool_use_id, "call-1");
                 assert_eq!(content, "command output");
             }
@@ -409,14 +432,24 @@ mod tests {
     #[test]
     fn message_tool_results_builds_user_message_with_tool_result_blocks() {
         let results = vec![
-            ToolResult { tool_use_id: "c1".to_string(), content: "out1".to_string(), blocks: vec![] },
-            ToolResult { tool_use_id: "c2".to_string(), content: "out2".to_string(), blocks: vec![] },
+            ToolResult {
+                tool_use_id: "c1".to_string(),
+                content: "out1".to_string(),
+                blocks: vec![],
+            },
+            ToolResult {
+                tool_use_id: "c2".to_string(),
+                content: "out2".to_string(),
+                blocks: vec![],
+            },
         ];
         let msg = Message::tool_results(results);
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content.len(), 2);
         match &msg.content[0] {
-            ContentBlock::ToolResult { tool_use_id, content, .. } => {
+            ContentBlock::ToolResult {
+                tool_use_id, content, ..
+            } => {
                 assert_eq!(tool_use_id, "c1");
                 assert_eq!(content, "out1");
             }

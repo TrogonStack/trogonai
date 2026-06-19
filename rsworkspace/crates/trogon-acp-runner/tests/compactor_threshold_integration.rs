@@ -69,15 +69,11 @@ async fn compactor_called_when_messages_exceed_85_percent_of_token_budget() {
             // Subscribe to the compactor subject and reply so compact_messages completes.
             let was_called_inner = was_called.clone();
             let reply_nats = nats.clone();
-            let mut sub = nats
-                .subscribe("trogon.compactor.compact")
-                .await
-                .unwrap();
+            let mut sub = nats.subscribe("trogon.compactor.compact").await.unwrap();
             tokio::task::spawn_local(async move {
                 if let Some(msg) = sub.next().await {
                     was_called_inner.store(true, Ordering::SeqCst);
-                    let req: serde_json::Value =
-                        serde_json::from_slice(&msg.payload).unwrap_or_default();
+                    let req: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                     let resp = serde_json::json!({
                         "messages": req["messages"],
                         "compacted": false,
@@ -150,16 +146,12 @@ async fn compactor_not_called_when_messages_below_85_percent_of_token_budget() {
             // Subscribe to detect any spurious compact request.
             let was_called_inner = was_called.clone();
             let reply_nats = nats.clone();
-            let mut sub = nats
-                .subscribe("trogon.compactor.compact")
-                .await
-                .unwrap();
+            let mut sub = nats.subscribe("trogon.compactor.compact").await.unwrap();
             tokio::task::spawn_local(async move {
                 if let Some(msg) = sub.next().await {
                     was_called_inner.store(true, Ordering::SeqCst);
                     // Reply to avoid hanging compact_messages.
-                    let req: serde_json::Value =
-                        serde_json::from_slice(&msg.payload).unwrap_or_default();
+                    let req: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                     let resp = serde_json::json!({
                         "messages": req["messages"],
                         "compacted": false,

@@ -6,9 +6,7 @@
 use std::sync::Arc;
 
 use httpmock::prelude::*;
-use trogon_agent_core::agent_loop::{
-    AgentError, AgentEvent, AgentLoop, ContentBlock, Message, PermissionChecker,
-};
+use trogon_agent_core::agent_loop::{AgentError, AgentEvent, AgentLoop, ContentBlock, Message, PermissionChecker};
 use trogon_agent_core::tools::{ToolContext, tool_def};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -131,25 +129,40 @@ fn sse_event(event_type: &str, data: serde_json::Value) -> String {
 
 fn sse_end_turn(text: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -157,25 +170,40 @@ fn sse_end_turn(text: &str) -> String {
 
 fn sse_max_tokens() -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": "partial response"}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "max_tokens"},
-            "usage": {"output_tokens": 4096}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": "partial response"}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 4096}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -183,25 +211,40 @@ fn sse_max_tokens() -> String {
 
 fn sse_tool_use() -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "input_json_delta", "partial_json": "{}"}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use"},
-            "usage": {"output_tokens": 10}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": "{}"}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 10}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -209,25 +252,40 @@ fn sse_tool_use() -> String {
 
 fn sse_unknown_stop() -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": "partial"}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "pause"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": "partial"}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "pause"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -235,34 +293,58 @@ fn sse_unknown_stop() -> String {
 
 fn sse_thinking_end_turn(thought: &str, text: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "thinking", "thinking": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "thinking_delta", "thinking": thought}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 1,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 1,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": thought}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 1,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 1,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 1}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -270,34 +352,58 @@ fn sse_thinking_end_turn(thought: &str, text: &str) -> String {
 
 fn sse_max_tokens_with_thinking() -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "thinking", "thinking": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "thinking_delta", "thinking": "partial thoughts"}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 1,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 1,
-            "delta": {"type": "text_delta", "text": "partial answer"}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "max_tokens"},
-            "usage": {"output_tokens": 4096}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "partial thoughts"}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 1,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 1,
+                "delta": {"type": "text_delta", "text": "partial answer"}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 1}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 4096}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -411,10 +517,7 @@ async fn run_chat_returns_text_and_updated_messages() {
     let (text, updated) = agent.run_chat(initial, &[], None).await.unwrap();
 
     assert_eq!(text, "Chat reply");
-    assert!(
-        updated.len() >= 2,
-        "expected at least user + assistant in history"
-    );
+    assert!(updated.len() >= 2, "expected at least user + assistant in history");
     assert_eq!(updated.last().unwrap().role, "assistant");
 }
 
@@ -452,9 +555,7 @@ async fn run_chat_max_tokens_returns_error() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run_chat(vec![Message::user_text("hi")], &[], None)
-        .await;
+    let result = agent.run_chat(vec![Message::user_text("hi")], &[], None).await;
 
     assert!(matches!(result, Err(AgentError::MaxTokens)));
 }
@@ -489,9 +590,7 @@ async fn run_chat_streaming_emits_text_delta_and_usage_summary() {
         "expected TextDelta event with correct text"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
+        events.iter().any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
         "expected UsageSummary event"
     );
 }
@@ -510,10 +609,7 @@ async fn run_chat_streaming_returns_updated_history() {
     let agent = make_agent(&server.base_url());
     let initial = vec![Message::user_text("tell me something")];
     let (tx, _rx) = tokio::sync::mpsc::channel(32);
-    let updated = agent
-        .run_chat_streaming(initial, &[], None, tx, None)
-        .await
-        .unwrap();
+    let updated = agent.run_chat_streaming(initial, &[], None, tx, None).await.unwrap();
 
     assert!(updated.len() >= 2);
     assert_eq!(updated.last().unwrap().role, "assistant");
@@ -553,9 +649,7 @@ async fn run_chat_streaming_max_tokens_emits_usage_and_returns_error() {
 
     let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
+        events.iter().any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
         "expected UsageSummary event on max_tokens"
     );
 }
@@ -573,9 +667,7 @@ async fn run_chat_streaming_max_tokens_emits_usage_and_returns_error() {
 async fn run_tool_use_then_end_turn() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("Done after tool"));
@@ -588,9 +680,7 @@ async fn run_tool_use_then_end_turn() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("use a tool")], &[], None)
-        .await;
+    let result = agent.run(vec![Message::user_text("use a tool")], &[], None).await;
 
     assert_eq!(result.unwrap(), "Done after tool");
 }
@@ -601,9 +691,7 @@ async fn run_tool_use_then_end_turn() {
 async fn run_chat_tool_use_then_end_turn() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("Chat done after tool"));
@@ -616,18 +704,11 @@ async fn run_chat_tool_use_then_end_turn() {
     });
 
     let agent = make_agent(&server.base_url());
-    let (text, msgs) = agent
-        .run_chat(vec![Message::user_text("hi")], &[], None)
-        .await
-        .unwrap();
+    let (text, msgs) = agent.run_chat(vec![Message::user_text("hi")], &[], None).await.unwrap();
 
     assert_eq!(text, "Chat done after tool");
     // History: user → assistant(tool_use) → user(tool_result) → assistant(text)
-    assert!(
-        msgs.len() >= 4,
-        "expected at least 4 messages, got {}",
-        msgs.len()
-    );
+    assert!(msgs.len() >= 4, "expected at least 4 messages, got {}", msgs.len());
 }
 
 /// `run_chat_streaming()` emits `ToolCallStarted` and `ToolCallFinished` events
@@ -636,9 +717,7 @@ async fn run_chat_tool_use_then_end_turn() {
 async fn run_chat_streaming_emits_tool_call_events() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("Done after tool"));
@@ -661,21 +740,19 @@ async fn run_chat_streaming_emits_tool_call_events() {
     let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert!(
-        events.iter().any(
-            |e| matches!(e, AgentEvent::ToolCallStarted { name, .. } if name == "unknown_tool")
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolCallStarted { name, .. } if name == "unknown_tool")),
         "expected ToolCallStarted event"
+    );
+    assert!(
+        events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { .. })),
+        "expected ToolCallFinished event"
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, AgentEvent::ToolCallFinished { .. })),
-        "expected ToolCallFinished event"
-    );
-    assert!(
-        events.iter().any(
-            |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("Done after tool"))
-        ),
+            .any(|e| matches!(e, AgentEvent::TextDelta { text } if text.contains("Done after tool"))),
         "expected final TextDelta after tool"
     );
 }
@@ -712,9 +789,7 @@ async fn run_chat_unexpected_stop_reason() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run_chat(vec![Message::user_text("hi")], &[], None)
-        .await;
+    let result = agent.run_chat(vec![Message::user_text("hi")], &[], None).await;
 
     assert!(matches!(result, Err(AgentError::UnexpectedStopReason(_))));
 }
@@ -755,9 +830,7 @@ async fn run_chat_max_iterations_reached() {
     let mut agent = make_agent(&server.base_url());
     agent.max_iterations = 2;
 
-    let result = agent
-        .run_chat(vec![Message::user_text("hi")], &[], None)
-        .await;
+    let result = agent.run_chat(vec![Message::user_text("hi")], &[], None).await;
 
     assert!(matches!(result, Err(AgentError::MaxIterationsReached)));
 }
@@ -827,9 +900,7 @@ async fn run_with_extra_headers_and_tools() {
         post_tool_observer: None,
     };
 
-    let result = agent
-        .run(vec![Message::user_text("hi")], &tools, None)
-        .await;
+    let result = agent.run(vec![Message::user_text("hi")], &tools, None).await;
     assert_eq!(result.unwrap(), "ok");
 }
 
@@ -875,11 +946,7 @@ async fn run_chat_with_system_prompt_tools_and_extra_headers() {
     };
 
     let (text, msgs) = agent
-        .run_chat(
-            vec![Message::user_text("hi")],
-            &tools,
-            Some("You are helpful."),
-        )
+        .run_chat(vec![Message::user_text("hi")], &tools, Some("You are helpful."))
         .await
         .unwrap();
     assert_eq!(text, "chat ok");
@@ -919,10 +986,7 @@ async fn run_chat_with_thinking_block_in_end_turn() {
     });
 
     let agent = make_agent(&server.base_url());
-    let (text, _msgs) = agent
-        .run_chat(vec![Message::user_text("hi")], &[], None)
-        .await
-        .unwrap();
+    let (text, _msgs) = agent.run_chat(vec![Message::user_text("hi")], &[], None).await.unwrap();
 
     assert_eq!(text, "chat answer");
 }
@@ -988,15 +1052,15 @@ async fn run_chat_streaming_comprehensive() {
     let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     assert!(
-        events.iter().any(
-            |e| matches!(e, AgentEvent::ThinkingDelta { text } if text.contains("internal reasoning"))
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ThinkingDelta { text } if text.contains("internal reasoning"))),
         "expected ThinkingDelta event"
     );
     assert!(
-        events.iter().any(
-            |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("streamed reply"))
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TextDelta { text } if text.contains("streamed reply"))),
         "expected TextDelta event"
     );
 }
@@ -1023,15 +1087,13 @@ async fn run_chat_streaming_max_tokens_with_thinking_block() {
 
     let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
+        events.iter().any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
         "expected UsageSummary on max_tokens"
     );
     assert!(
-        events.iter().any(
-            |e| matches!(e, AgentEvent::TextDelta { text } if text.contains("partial answer"))
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TextDelta { text } if text.contains("partial answer"))),
         "expected TextDelta with partial text"
     );
 }
@@ -1060,9 +1122,7 @@ async fn run_chat_streaming_permission_denied() {
     let server = MockServer::start();
     // First call returns tool_use; second (with tool_result) returns end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("done"));
@@ -1136,9 +1196,7 @@ async fn run_200_ok_with_invalid_json_body_returns_error() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("Say hello")], &[], None)
-        .await;
+    let result = agent.run(vec![Message::user_text("Say hello")], &[], None).await;
 
     assert!(
         matches!(result, Err(AgentError::Http(_))),
@@ -1160,9 +1218,7 @@ async fn run_200_ok_with_missing_stop_reason_returns_error() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("Say hello")], &[], None)
-        .await;
+    let result = agent.run(vec![Message::user_text("Say hello")], &[], None).await;
 
     assert!(
         matches!(result, Err(AgentError::Http(_))),
@@ -1184,9 +1240,7 @@ async fn run_500_with_plain_text_body_returns_error() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("Say hello")], &[], None)
-        .await;
+    let result = agent.run(vec![Message::user_text("Say hello")], &[], None).await;
 
     assert!(
         matches!(result, Err(AgentError::Http(_))),
@@ -1207,9 +1261,7 @@ async fn run_429_rate_limit_returns_error() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("Say hello")], &[], None)
-        .await;
+    let result = agent.run(vec![Message::user_text("Say hello")], &[], None).await;
 
     assert!(
         matches!(result, Err(AgentError::Http(_))),
@@ -1307,10 +1359,7 @@ async fn run_chat_streaming_steer_appended_to_tool_results_turn() {
         )
         .await;
 
-    assert!(
-        result.is_ok(),
-        "run_chat_streaming with steer must succeed: {result:?}"
-    );
+    assert!(result.is_ok(), "run_chat_streaming with steer must succeed: {result:?}");
     assert_eq!(
         result.unwrap().last().unwrap().role,
         "assistant",
@@ -1324,9 +1373,7 @@ async fn run_chat_streaming_steer_appended_to_tool_results_turn() {
 async fn run_chat_streaming_steer_present_in_returned_messages() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("Done"));
@@ -1349,19 +1396,18 @@ async fn run_chat_streaming_steer_present_in_returned_messages() {
         .unwrap();
 
     // Find the tool-results user turn (role == "user" containing a ToolResult block).
-    let tool_results_turn = messages.iter().find(|m| {
-        m.role == "user"
-            && m.content
-                .iter()
-                .any(|c| matches!(c, ContentBlock::ToolResult { .. }))
-    });
+    let tool_results_turn = messages
+        .iter()
+        .find(|m| m.role == "user" && m.content.iter().any(|c| matches!(c, ContentBlock::ToolResult { .. })));
     assert!(
         tool_results_turn.is_some(),
         "expected a tool-results user turn in message history"
     );
-    let has_steer = tool_results_turn.unwrap().content.iter().any(|c| {
-        matches!(c, ContentBlock::Text { text } if text == "steer guidance")
-    });
+    let has_steer = tool_results_turn
+        .unwrap()
+        .content
+        .iter()
+        .any(|c| matches!(c, ContentBlock::Text { text } if text == "steer guidance"));
     assert!(
         has_steer,
         "steer text must appear as a Text block in the tool-results turn"
@@ -1437,9 +1483,9 @@ async fn run_chat_streaming_steer_ignored_without_tool_use() {
 
     // The steer text must not appear anywhere in the returned message history.
     let steer_found = messages.iter().any(|m| {
-        m.content.iter().any(|c| {
-            matches!(c, ContentBlock::Text { text } if text.contains("ignored steer"))
-        })
+        m.content
+            .iter()
+            .any(|c| matches!(c, ContentBlock::Text { text } if text.contains("ignored steer")))
     });
     assert!(
         !steer_found,
@@ -1457,9 +1503,7 @@ async fn run_chat_streaming_steer_ignored_without_tool_use() {
 async fn run_chat_streaming_steer_none_is_noop() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("Done no steer"));
@@ -1483,10 +1527,7 @@ async fn run_chat_streaming_steer_none_is_noop() {
         )
         .await;
 
-    assert!(
-        result.is_ok(),
-        "tool use without steer must still succeed: {result:?}"
-    );
+    assert!(result.is_ok(), "tool use without steer must still succeed: {result:?}");
 }
 
 // ── PR 1: real tool dispatch integration ─────────────────────────────────────
@@ -1517,18 +1558,16 @@ async fn run_chat_multiple_tool_use_blocks_all_results_sent_back() {
     // First call: two tool_use blocks in one response.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [
-                        {"type": "tool_use", "id": "tu_a", "name": "read_file", "input": {"path": "a.txt"}},
-                        {"type": "tool_use", "id": "tu_b", "name": "read_file", "input": {"path": "b.txt"}}
-                    ]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [
+                    {"type": "tool_use", "id": "tu_a", "name": "read_file", "input": {"path": "a.txt"}},
+                    {"type": "tool_use", "id": "tu_b", "name": "read_file", "input": {"path": "b.txt"}}
+                ]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -1536,8 +1575,8 @@ async fn run_chat_multiple_tool_use_blocks_all_results_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, msgs) = agent
@@ -1547,11 +1586,14 @@ async fn run_chat_multiple_tool_use_blocks_all_results_sent_back() {
 
     assert_eq!(text, "both files read");
     // The tool_results message must contain two ToolResult blocks.
-    let tool_result_msg = msgs.iter().find(|m| {
-        m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
-    });
+    let tool_result_msg = msgs
+        .iter()
+        .find(|m| m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })));
     assert!(tool_result_msg.is_some(), "expected a tool_results message");
-    let result_count = tool_result_msg.unwrap().content.iter()
+    let result_count = tool_result_msg
+        .unwrap()
+        .content
+        .iter()
         .filter(|b| matches!(b, ContentBlock::ToolResult { .. }))
         .count();
     assert_eq!(result_count, 2, "expected 2 tool results, got {result_count}");
@@ -1565,9 +1607,7 @@ async fn run_chat_tool_error_propagated_as_tool_result() {
 
     // Second call: the tool_result must contain an error string, not a crash.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("handled error"));
@@ -1576,20 +1616,18 @@ async fn run_chat_tool_error_propagated_as_tool_result() {
     // First call: tool_use for read_file on a file that does not exist.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_err",
-                        "name": "read_file",
-                        "input": {"path": "does_not_exist.txt"}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_err",
+                    "name": "read_file",
+                    "input": {"path": "does_not_exist.txt"}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     // Use a tempdir as cwd so the file is guaranteed to not exist.
@@ -1599,8 +1637,8 @@ async fn run_chat_tool_error_propagated_as_tool_result() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let result = agent
@@ -1639,20 +1677,18 @@ async fn run_chat_real_read_file_tool_result_sent_back() {
     // First call: return a tool_use for read_file targeting the temp file.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_rf_001",
-                        "name": "read_file",
-                        "input": {"path": "hello.txt"}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_rf_001",
+                    "name": "read_file",
+                    "input": {"path": "hello.txt"}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -1660,8 +1696,8 @@ async fn run_chat_real_read_file_tool_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -1688,9 +1724,7 @@ async fn run_chat_cwd_is_propagated_to_tool_execution() {
 
     // Second call: the tool_result must contain the content from the cwd file.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("cwd_marker_value");
+        when.method(POST).path("/messages").body_contains("cwd_marker_value");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(end_turn_body("cwd confirmed"));
@@ -1699,20 +1733,18 @@ async fn run_chat_cwd_is_propagated_to_tool_execution() {
     // First call: tool_use for read_file with a relative path.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_cwd_001",
-                        "name": "read_file",
-                        "input": {"path": "marker.txt"}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_cwd_001",
+                    "name": "read_file",
+                    "input": {"path": "marker.txt"}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -1720,13 +1752,11 @@ async fn run_chat_cwd_is_propagated_to_tool_execution() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
-    let result = agent
-        .run_chat(vec![Message::user_text("check cwd")], &[], None)
-        .await;
+    let result = agent.run_chat(vec![Message::user_text("check cwd")], &[], None).await;
 
     assert_eq!(result.unwrap().0, "cwd confirmed");
 }
@@ -1755,11 +1785,7 @@ async fn run_chat_all_tool_defs_present_in_request_body() {
 
     let agent = make_agent(&server.base_url());
     let (text, _) = agent
-        .run_chat(
-            vec![Message::user_text("hi")],
-            &all_tool_defs(),
-            None,
-        )
+        .run_chat(vec![Message::user_text("hi")], &all_tool_defs(), None)
         .await
         .unwrap();
 
@@ -1792,20 +1818,18 @@ async fn run_chat_real_write_file_creates_file_on_disk() {
     // First call: tool_use for write_file.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_wf_001",
-                        "name": "write_file",
-                        "input": {"path": "output.txt", "content": "written_by_agent"}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_wf_001",
+                    "name": "write_file",
+                    "input": {"path": "output.txt", "content": "written_by_agent"}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -1813,8 +1837,8 @@ async fn run_chat_real_write_file_creates_file_on_disk() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -1855,24 +1879,22 @@ async fn run_chat_real_str_replace_modifies_file_on_disk() {
     // First call: tool_use for str_replace.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_sr_001",
-                        "name": "str_replace",
-                        "input": {
-                            "path": "src.rs",
-                            "old_str": "old_name",
-                            "new_str": "new_name"
-                        }
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_sr_001",
+                    "name": "str_replace",
+                    "input": {
+                        "path": "src.rs",
+                        "old_str": "old_name",
+                        "new_str": "new_name"
+                    }
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -1880,8 +1902,8 @@ async fn run_chat_real_str_replace_modifies_file_on_disk() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -1890,9 +1912,7 @@ async fn run_chat_real_str_replace_modifies_file_on_disk() {
         .unwrap();
 
     assert_eq!(text, "file edited");
-    let contents = tokio::fs::read_to_string(dir.path().join("src.rs"))
-        .await
-        .unwrap();
+    let contents = tokio::fs::read_to_string(dir.path().join("src.rs")).await.unwrap();
     assert!(contents.contains("new_name"), "got: {contents}");
     assert!(!contents.contains("old_name"), "old name still present: {contents}");
 }
@@ -1913,9 +1933,7 @@ async fn run_chat_real_git_status_result_sent_back() {
         .current_dir(dir.path())
         .output()
         .unwrap();
-    tokio::fs::write(dir.path().join("untracked.rs"), "")
-        .await
-        .unwrap();
+    tokio::fs::write(dir.path().join("untracked.rs"), "").await.unwrap();
 
     let server = MockServer::start();
 
@@ -1933,20 +1951,18 @@ async fn run_chat_real_git_status_result_sent_back() {
     // First call: tool_use for git_status.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_gs_001",
-                        "name": "git_status",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_gs_001",
+                    "name": "git_status",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -1954,8 +1970,8 @@ async fn run_chat_real_git_status_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -1991,20 +2007,18 @@ async fn run_chat_real_list_dir_result_sent_back() {
 
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_ld_001",
-                        "name": "list_dir",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_ld_001",
+                    "name": "list_dir",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2012,8 +2026,8 @@ async fn run_chat_real_list_dir_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2050,20 +2064,18 @@ async fn run_chat_real_glob_result_sent_back() {
 
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_gb_001",
-                        "name": "glob",
-                        "input": { "pattern": "*.rs" }
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_gb_001",
+                    "name": "glob",
+                    "input": { "pattern": "*.rs" }
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2071,8 +2083,8 @@ async fn run_chat_real_glob_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2093,7 +2105,11 @@ async fn run_chat_real_git_diff_result_sent_back() {
 
     let dir = TempDir::new().unwrap();
 
-    Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["config", "user.email", "test@test.com"])
         .current_dir(dir.path())
@@ -2104,14 +2120,22 @@ async fn run_chat_real_git_diff_result_sent_back() {
         .current_dir(dir.path())
         .output()
         .unwrap();
-    tokio::fs::write(dir.path().join("file.rs"), "fn original() {}\n").await.unwrap();
-    Command::new("git").args(["add", "."]).current_dir(dir.path()).output().unwrap();
+    tokio::fs::write(dir.path().join("file.rs"), "fn original() {}\n")
+        .await
+        .unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["commit", "-m", "init"])
         .current_dir(dir.path())
         .output()
         .unwrap();
-    tokio::fs::write(dir.path().join("file.rs"), "fn modified() {}\n").await.unwrap();
+    tokio::fs::write(dir.path().join("file.rs"), "fn modified() {}\n")
+        .await
+        .unwrap();
 
     let server = MockServer::start();
 
@@ -2127,20 +2151,18 @@ async fn run_chat_real_git_diff_result_sent_back() {
 
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_gd_001",
-                        "name": "git_diff",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_gd_001",
+                    "name": "git_diff",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2148,8 +2170,8 @@ async fn run_chat_real_git_diff_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2170,7 +2192,11 @@ async fn run_chat_real_git_log_result_sent_back() {
 
     let dir = TempDir::new().unwrap();
 
-    Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["config", "user.email", "test@test.com"])
         .current_dir(dir.path())
@@ -2182,7 +2208,11 @@ async fn run_chat_real_git_log_result_sent_back() {
         .output()
         .unwrap();
     tokio::fs::write(dir.path().join("readme.txt"), "hello").await.unwrap();
-    Command::new("git").args(["add", "."]).current_dir(dir.path()).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["commit", "-m", "initial-commit-marker"])
         .current_dir(dir.path())
@@ -2203,20 +2233,18 @@ async fn run_chat_real_git_log_result_sent_back() {
 
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_gl_001",
-                        "name": "git_log",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_gl_001",
+                    "name": "git_log",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2224,8 +2252,8 @@ async fn run_chat_real_git_log_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2256,12 +2284,9 @@ async fn run_chat_real_notebook_edit_modifies_cell() {
             "execution_count": null
         }]
     });
-    tokio::fs::write(
-        dir.path().join("nb.ipynb"),
-        serde_json::to_string(&notebook).unwrap(),
-    )
-    .await
-    .unwrap();
+    tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&notebook).unwrap())
+        .await
+        .unwrap();
 
     let server = MockServer::start();
 
@@ -2277,24 +2302,22 @@ async fn run_chat_real_notebook_edit_modifies_cell() {
 
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_nb_001",
-                        "name": "notebook_edit",
-                        "input": {
-                            "path": "nb.ipynb",
-                            "cell_index": 0,
-                            "content": "new_content"
-                        }
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_nb_001",
+                    "name": "notebook_edit",
+                    "input": {
+                        "path": "nb.ipynb",
+                        "cell_index": 0,
+                        "content": "new_content"
+                    }
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2302,8 +2325,8 @@ async fn run_chat_real_notebook_edit_modifies_cell() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2339,20 +2362,18 @@ async fn run_chat_real_fetch_url_ssrf_blocked_result_sent_back() {
 
     api_server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_fu_001",
-                        "name": "fetch_url",
-                        "input": { "url": "http://10.0.0.1/secret", "raw": true }
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_fu_001",
+                    "name": "fetch_url",
+                    "input": { "url": "http://10.0.0.1/secret", "raw": true }
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&api_server.base_url());
@@ -2360,8 +2381,8 @@ async fn run_chat_real_fetch_url_ssrf_blocked_result_sent_back() {
         proxy_url: String::new(),
         cwd: ".".to_string(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _) = agent
@@ -2395,24 +2416,22 @@ async fn run_chat_real_todo_write_result_sent_back() {
     // First call: return a tool_use for todo_write.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_tw_001",
-                        "name": "todo_write",
-                        "input": {
-                            "id": "task-1",
-                            "content": "write integration tests",
-                            "status": "in_progress"
-                        }
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_tw_001",
+                    "name": "todo_write",
+                    "input": {
+                        "id": "task-1",
+                        "content": "write integration tests",
+                        "status": "in_progress"
+                    }
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2420,8 +2439,8 @@ async fn run_chat_real_todo_write_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2435,7 +2454,10 @@ async fn run_chat_real_todo_write_result_sent_back() {
     let todo_path = dir.path().join(".trogon/todos.json");
     let raw = tokio::fs::read_to_string(&todo_path).await.unwrap();
     assert!(raw.contains("task-1"), "todo file must contain the item id: {raw}");
-    assert!(raw.contains("write integration tests"), "todo file must contain the content: {raw}");
+    assert!(
+        raw.contains("write integration tests"),
+        "todo file must contain the content: {raw}"
+    );
     assert!(raw.contains("in_progress"), "todo file must contain the status: {raw}");
 }
 
@@ -2481,20 +2503,18 @@ async fn run_chat_real_todo_read_result_sent_back() {
     // First call: return a tool_use for todo_read.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_tr_001",
-                        "name": "todo_read",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_tr_001",
+                    "name": "todo_read",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2502,8 +2522,8 @@ async fn run_chat_real_todo_read_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2537,20 +2557,18 @@ async fn run_chat_real_todo_read_empty_store_result_sent_back() {
     // First call: return a tool_use for todo_read against an empty directory.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_tr_002",
-                        "name": "todo_read",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_tr_002",
+                    "name": "todo_read",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2558,8 +2576,8 @@ async fn run_chat_real_todo_read_empty_store_result_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2577,34 +2595,58 @@ async fn run_chat_real_todo_read_empty_store_result_sent_back() {
 
 fn sse_two_tool_use(id_a: &str, path_a: &str, id_b: &str, path_b: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "tool_use", "id": id_a, "name": "read_file"}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "input_json_delta", "partial_json": format!("{{\"path\":\"{path_a}\"}}") }
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 1,
-            "content_block": {"type": "tool_use", "id": id_b, "name": "read_file"}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 1,
-            "delta": {"type": "input_json_delta", "partial_json": format!("{{\"path\":\"{path_b}\"}}") }
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use"},
-            "usage": {"output_tokens": 20}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": id_a, "name": "read_file"}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": format!("{{\"path\":\"{path_a}\"}}") }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 1,
+                "content_block": {"type": "tool_use", "id": id_b, "name": "read_file"}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": format!("{{\"path\":\"{path_b}\"}}") }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 1}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 20}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -2618,8 +2660,12 @@ async fn run_chat_streaming_parallel_tools_all_results_sent_back() {
     use tempfile::TempDir;
 
     let dir = TempDir::new().unwrap();
-    tokio::fs::write(dir.path().join("alpha.txt"), "content_alpha").await.unwrap();
-    tokio::fs::write(dir.path().join("beta.txt"), "content_beta").await.unwrap();
+    tokio::fs::write(dir.path().join("alpha.txt"), "content_alpha")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("beta.txt"), "content_beta")
+        .await
+        .unwrap();
 
     let server = MockServer::start();
 
@@ -2647,8 +2693,8 @@ async fn run_chat_streaming_parallel_tools_all_results_sent_back() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (tx, _rx) = tokio::sync::mpsc::channel(64);
@@ -2658,11 +2704,14 @@ async fn run_chat_streaming_parallel_tools_all_results_sent_back() {
 
     assert!(result.is_ok(), "parallel tool execution must succeed: {result:?}");
     let msgs = result.unwrap();
-    let tool_result_msg = msgs.iter().find(|m| {
-        m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
-    });
+    let tool_result_msg = msgs
+        .iter()
+        .find(|m| m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })));
     assert!(tool_result_msg.is_some(), "expected a tool_results message in history");
-    let result_count = tool_result_msg.unwrap().content.iter()
+    let result_count = tool_result_msg
+        .unwrap()
+        .content
+        .iter()
         .filter(|b| matches!(b, ContentBlock::ToolResult { .. }))
         .count();
     assert_eq!(result_count, 2, "expected 2 tool results, got {result_count}");
@@ -2681,9 +2730,7 @@ async fn run_chat_streaming_parallel_tools_emit_events_for_each() {
     let server = MockServer::start();
 
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("events ok"));
@@ -2700,8 +2747,8 @@ async fn run_chat_streaming_parallel_tools_emit_events_for_each() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
@@ -2712,19 +2759,55 @@ async fn run_chat_streaming_parallel_tools_emit_events_for_each() {
 
     let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
-    let started_ids: Vec<String> = events.iter()
-        .filter_map(|e| if let AgentEvent::ToolCallStarted { id, .. } = e { Some(id.clone()) } else { None })
+    let started_ids: Vec<String> = events
+        .iter()
+        .filter_map(|e| {
+            if let AgentEvent::ToolCallStarted { id, .. } = e {
+                Some(id.clone())
+            } else {
+                None
+            }
+        })
         .collect();
-    let finished_ids: Vec<String> = events.iter()
-        .filter_map(|e| if let AgentEvent::ToolCallFinished { id, .. } = e { Some(id.clone()) } else { None })
+    let finished_ids: Vec<String> = events
+        .iter()
+        .filter_map(|e| {
+            if let AgentEvent::ToolCallFinished { id, .. } = e {
+                Some(id.clone())
+            } else {
+                None
+            }
+        })
         .collect();
 
-    assert_eq!(started_ids.len(), 2, "expected 2 ToolCallStarted events, got {}", started_ids.len());
-    assert_eq!(finished_ids.len(), 2, "expected 2 ToolCallFinished events, got {}", finished_ids.len());
-    assert!(started_ids.contains(&"tu_evx".to_string()), "tu_evx must have a ToolCallStarted");
-    assert!(started_ids.contains(&"tu_evy".to_string()), "tu_evy must have a ToolCallStarted");
-    assert!(finished_ids.contains(&"tu_evx".to_string()), "tu_evx must have a ToolCallFinished");
-    assert!(finished_ids.contains(&"tu_evy".to_string()), "tu_evy must have a ToolCallFinished");
+    assert_eq!(
+        started_ids.len(),
+        2,
+        "expected 2 ToolCallStarted events, got {}",
+        started_ids.len()
+    );
+    assert_eq!(
+        finished_ids.len(),
+        2,
+        "expected 2 ToolCallFinished events, got {}",
+        finished_ids.len()
+    );
+    assert!(
+        started_ids.contains(&"tu_evx".to_string()),
+        "tu_evx must have a ToolCallStarted"
+    );
+    assert!(
+        started_ids.contains(&"tu_evy".to_string()),
+        "tu_evy must have a ToolCallStarted"
+    );
+    assert!(
+        finished_ids.contains(&"tu_evx".to_string()),
+        "tu_evx must have a ToolCallFinished"
+    );
+    assert!(
+        finished_ids.contains(&"tu_evy".to_string()),
+        "tu_evy must have a ToolCallFinished"
+    );
 }
 
 /// The tool_results message preserves the original tool call order even though
@@ -2734,15 +2817,17 @@ async fn run_chat_streaming_parallel_tools_order_preserved() {
     use tempfile::TempDir;
 
     let dir = TempDir::new().unwrap();
-    tokio::fs::write(dir.path().join("first.txt"), "first_content").await.unwrap();
-    tokio::fs::write(dir.path().join("second.txt"), "second_content").await.unwrap();
+    tokio::fs::write(dir.path().join("first.txt"), "first_content")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("second.txt"), "second_content")
+        .await
+        .unwrap();
 
     let server = MockServer::start();
 
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn("order ok"));
@@ -2759,8 +2844,8 @@ async fn run_chat_streaming_parallel_tools_order_preserved() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (tx, _rx) = tokio::sync::mpsc::channel(64);
@@ -2769,26 +2854,41 @@ async fn run_chat_streaming_parallel_tools_order_preserved() {
         .await
         .unwrap();
 
-    let tool_result_msg = msgs.iter().find(|m| {
-        m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
-    }).expect("expected a tool_results message");
+    let tool_result_msg = msgs
+        .iter()
+        .find(|m| m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })))
+        .expect("expected a tool_results message");
 
-    let results: Vec<&ContentBlock> = tool_result_msg.content.iter()
+    let results: Vec<&ContentBlock> = tool_result_msg
+        .content
+        .iter()
         .filter(|b| matches!(b, ContentBlock::ToolResult { .. }))
         .collect();
 
     assert_eq!(results.len(), 2, "expected 2 results");
     // First result must correspond to tu_ord1 (first.txt).
-    if let ContentBlock::ToolResult { tool_use_id, content, .. } = results[0] {
+    if let ContentBlock::ToolResult {
+        tool_use_id, content, ..
+    } = results[0]
+    {
         assert_eq!(tool_use_id, "tu_ord1", "first result must match first tool call");
-        assert!(content.contains("first_content"), "first result must contain first file content");
+        assert!(
+            content.contains("first_content"),
+            "first result must contain first file content"
+        );
     } else {
         panic!("first result is not a ToolResult");
     }
     // Second result must correspond to tu_ord2 (second.txt).
-    if let ContentBlock::ToolResult { tool_use_id, content, .. } = results[1] {
+    if let ContentBlock::ToolResult {
+        tool_use_id, content, ..
+    } = results[1]
+    {
         assert_eq!(tool_use_id, "tu_ord2", "second result must match second tool call");
-        assert!(content.contains("second_content"), "second result must contain second file content");
+        assert!(
+            content.contains("second_content"),
+            "second result must contain second file content"
+        );
     } else {
         panic!("second result is not a ToolResult");
     }
@@ -2821,43 +2921,39 @@ async fn run_chat_real_todo_write_then_read_roundtrip() {
             .path("/messages")
             .body_contains("tool_result")
             .body_contains("OK");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_rtr_002",
-                        "name": "todo_read",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_rtr_002",
+                    "name": "todo_read",
+                    "input": {}
+                }]
+            })
+            .to_string(),
+        );
     });
 
     // First call: return a todo_write tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_rtr_001",
-                        "name": "todo_write",
-                        "input": {
-                            "id": "roundtrip-item",
-                            "content": "verify roundtrip",
-                            "status": "pending"
-                        }
-                    }]
-                })
-                .to_string(),
-            );
+        then.status(200).header("Content-Type", "application/json").body(
+            serde_json::json!({
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tu_rtr_001",
+                    "name": "todo_write",
+                    "input": {
+                        "id": "roundtrip-item",
+                        "content": "verify roundtrip",
+                        "status": "pending"
+                    }
+                }]
+            })
+            .to_string(),
+        );
     });
 
     let mut agent = make_agent(&server.base_url());
@@ -2865,8 +2961,8 @@ async fn run_chat_real_todo_write_then_read_roundtrip() {
         proxy_url: "http://127.0.0.1:1".to_string(),
         cwd: dir.path().to_string_lossy().into_owned(),
         http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
+        web_search_api_key: None,
+        web_search_endpoint: None,
     });
 
     let (text, _msgs) = agent
@@ -2887,29 +2983,44 @@ fn sse_end_turn_with_tokens(
     cache_read: u32,
 ) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": 0,
-                "cache_creation_input_tokens": cache_creation,
-                "cache_read_input_tokens": cache_read
-            }}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": output_tokens}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": cache_creation,
+                    "cache_read_input_tokens": cache_read
+                }}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": output_tokens}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -2945,7 +3056,12 @@ async fn run_chat_streaming_usage_summary_token_values_match_sse() {
                 cache_read_tokens,
             } = e
             {
-                Some((*input_tokens, *output_tokens, *cache_creation_tokens, *cache_read_tokens))
+                Some((
+                    *input_tokens,
+                    *output_tokens,
+                    *cache_creation_tokens,
+                    *cache_read_tokens,
+                ))
             } else {
                 None
             }
@@ -2954,7 +3070,10 @@ async fn run_chat_streaming_usage_summary_token_values_match_sse() {
 
     assert_eq!(inp, 42, "input_tokens must match SSE message_start value");
     assert_eq!(out, 17, "output_tokens must match SSE message_delta value");
-    assert_eq!(cc, 100, "cache_creation_tokens must match SSE cache_creation_input_tokens");
+    assert_eq!(
+        cc, 100,
+        "cache_creation_tokens must match SSE cache_creation_input_tokens"
+    );
     assert_eq!(cr, 25, "cache_read_tokens must match SSE cache_read_input_tokens");
 }
 
@@ -2999,7 +3118,12 @@ async fn run_chat_streaming_tool_use_does_not_emit_usage_summary_until_end_turn(
     );
 
     // Cumulative: tool_use round (input=10, output=10) + end_turn round (input=10, output=5)
-    if let AgentEvent::UsageSummary { input_tokens, output_tokens, .. } = summaries[0] {
+    if let AgentEvent::UsageSummary {
+        input_tokens,
+        output_tokens,
+        ..
+    } = summaries[0]
+    {
         assert_eq!(*input_tokens, 20, "cumulative input must be 20 (10 + 10)");
         assert_eq!(*output_tokens, 15, "cumulative output must be 15 (10 + 5)");
     }

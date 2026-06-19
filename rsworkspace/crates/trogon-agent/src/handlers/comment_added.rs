@@ -28,17 +28,12 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let repo = event["repository"]["name"].as_str()?;
     let issue_number = event["issue"]["number"].as_u64()?;
     let comment_body = event["comment"]["body"].as_str().unwrap_or("");
-    let commenter = event["comment"]["user"]["login"]
-        .as_str()
-        .unwrap_or("unknown");
+    let commenter = event["comment"]["user"]["login"].as_str().unwrap_or("unknown");
     let is_pr = event["issue"]["pull_request"].is_object();
 
     let kind = if is_pr { "pull request" } else { "issue" };
 
-    info!(
-        owner,
-        repo, issue_number, commenter, "Starting comment-added agent"
-    );
+    info!(owner, repo, issue_number, commenter, "Starting comment-added agent");
 
     let prompt = format!(
         "{commenter} commented on {kind} #{issue_number} in {owner}/{repo}:\n\
@@ -158,10 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        assert!(matches!(
-            handle(&make_agent(), b"not json").await,
-            Some(Err(_))
-        ));
+        assert!(matches!(handle(&make_agent(), b"not json").await, Some(Err(_))));
     }
 
     #[tokio::test]

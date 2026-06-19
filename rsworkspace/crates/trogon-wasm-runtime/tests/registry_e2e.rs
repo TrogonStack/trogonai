@@ -9,7 +9,7 @@
 //!   cargo test -p trogon-wasm-runtime --test registry_e2e
 
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+use testcontainers_modules::testcontainers::{runners::AsyncRunner, ImageExt};
 
 #[tokio::test]
 async fn wasm_runtime_registers_with_correct_acp_prefix_metadata() {

@@ -82,11 +82,7 @@ impl SkillStore {
             if !key.starts_with(&prefix) {
                 continue;
             }
-            if let Some(bytes) = self
-                .versions_kv
-                .get(&key)
-                .await
-                .map_err(|e| e.to_string())?
+            if let Some(bytes) = self.versions_kv.get(&key).await.map_err(|e| e.to_string())?
                 && let Ok(v) = serde_json::from_slice::<SkillVersion>(&bytes)
             {
                 versions.push(v);
@@ -108,18 +104,13 @@ impl SkillStore {
 }
 
 impl SkillRepository for SkillStore {
-    fn list(
-        &self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>>
-    {
+    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Skill>, String>> + Send + '_>> {
         Box::pin(async move { self.list().await })
     }
     fn get<'a>(
         &'a self,
         id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Skill>, String>> + Send + 'a>> {
         Box::pin(async move { self.get(id).await })
     }
     fn put<'a>(
@@ -137,9 +128,7 @@ impl SkillRepository for SkillStore {
     fn list_versions<'a>(
         &'a self,
         skill_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SkillVersion>, String>> + Send + 'a>> {
         Box::pin(async move { self.list_versions(skill_id).await })
     }
     fn put_version<'a>(

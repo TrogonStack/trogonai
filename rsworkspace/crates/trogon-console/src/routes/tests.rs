@@ -10,9 +10,7 @@ use tower::util::ServiceExt as _;
 use crate::{
     models::session::{ConsoleSession, SessionStatus},
     server::{AppState, build_router},
-    store::mock::{
-        MockAgentStore, MockCredentialStore, MockEnvironmentStore, MockSessionStore, MockSkillStore,
-    },
+    store::mock::{MockAgentStore, MockCredentialStore, MockEnvironmentStore, MockSessionStore, MockSkillStore},
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -42,11 +40,7 @@ fn json_request(method: &str, uri: &str, body: Value) -> Request<Body> {
 }
 
 fn get_request(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 fn delete_request(uri: &str) -> Request<Body> {
@@ -113,10 +107,7 @@ async fn create_and_get_agent() {
 #[tokio::test]
 async fn get_agent_not_found() {
     let app = build_router(mock_state());
-    let resp = app
-        .oneshot(get_request("/agents/nonexistent"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/agents/nonexistent")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -209,11 +200,7 @@ async fn list_agent_versions() {
 
     // Update to produce version 2
     build_router(Arc::clone(&state))
-        .oneshot(json_request(
-            "PUT",
-            &format!("/agents/{id}"),
-            json!({ "name": "V2" }),
-        ))
+        .oneshot(json_request("PUT", &format!("/agents/{id}"), json!({ "name": "V2" })))
         .await
         .unwrap();
 
@@ -308,10 +295,7 @@ async fn create_skill_version_and_list() {
     // when run within the same day, so we get at least 1 entry with the latest content.
     let versions_arr = versions.as_array().unwrap();
     assert!(!versions_arr.is_empty());
-    let contents: Vec<_> = versions_arr
-        .iter()
-        .map(|v| v["content"].as_str().unwrap())
-        .collect();
+    let contents: Vec<_> = versions_arr.iter().map(|v| v["content"].as_str().unwrap()).collect();
     assert!(contents.contains(&"v2 content"));
 }
 
@@ -355,11 +339,7 @@ async fn update_environment() {
     let state = mock_state();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request(
-            "POST",
-            "/environments",
-            json!({ "name": "Staging" }),
-        ))
+        .oneshot(json_request("POST", "/environments", json!({ "name": "Staging" })))
         .await
         .unwrap();
     let created: Value = body_json(resp.into_body()).await;
@@ -383,11 +363,7 @@ async fn archive_environment() {
     let state = mock_state();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request(
-            "POST",
-            "/environments",
-            json!({ "name": "Old Env" }),
-        ))
+        .oneshot(json_request("POST", "/environments", json!({ "name": "Old Env" })))
         .await
         .unwrap();
     let created: Value = body_json(resp.into_body()).await;
@@ -413,11 +389,7 @@ async fn delete_environment() {
     let state = mock_state();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request(
-            "POST",
-            "/environments",
-            json!({ "name": "Temp" }),
-        ))
+        .oneshot(json_request("POST", "/environments", json!({ "name": "Temp" })))
         .await
         .unwrap();
     let created: Value = body_json(resp.into_body()).await;
@@ -441,10 +413,7 @@ async fn delete_environment() {
 #[tokio::test]
 async fn get_vault_before_creation_returns_404() {
     let app = build_router(mock_state());
-    let resp = app
-        .oneshot(get_request("/environments/env_xyz/vault"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/environments/env_xyz/vault")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -506,9 +475,7 @@ async fn list_and_delete_credentials() {
 
     let cred_id = creds_arr[0]["id"].as_str().unwrap();
     let resp = build_router(Arc::clone(&state))
-        .oneshot(delete_request(&format!(
-            "/environments/env_del/credentials/{cred_id}"
-        )))
+        .oneshot(delete_request(&format!("/environments/env_del/credentials/{cred_id}")))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
@@ -749,11 +716,7 @@ async fn create_agent_store_error_returns_500() {
 async fn update_agent_store_error_returns_500() {
     let app = build_router(fail_agents_state());
     let resp = app
-        .oneshot(json_request(
-            "PUT",
-            "/agents/any_id",
-            json!({ "name": "X" }),
-        ))
+        .oneshot(json_request("PUT", "/agents/any_id", json!({ "name": "X" })))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -769,20 +732,14 @@ async fn delete_agent_store_error_returns_500() {
 #[tokio::test]
 async fn list_agent_versions_store_error_returns_500() {
     let app = build_router(fail_agents_state());
-    let resp = app
-        .oneshot(get_request("/agents/any_id/versions"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/agents/any_id/versions")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
 async fn list_agent_sessions_store_error_returns_500() {
     let app = build_router(fail_sessions_state());
-    let resp = app
-        .oneshot(get_request("/agents/any_id/sessions"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/agents/any_id/sessions")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -790,11 +747,7 @@ async fn list_agent_sessions_store_error_returns_500() {
 async fn update_agent_not_found_returns_404() {
     let app = build_router(mock_state());
     let resp = app
-        .oneshot(json_request(
-            "PUT",
-            "/agents/ghost_id",
-            json!({ "name": "X" }),
-        ))
+        .oneshot(json_request("PUT", "/agents/ghost_id", json!({ "name": "X" })))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -895,10 +848,7 @@ async fn create_skill_version_store_error_returns_500() {
 #[tokio::test]
 async fn list_skill_versions_store_error_returns_500() {
     let app = build_router(fail_skills_state());
-    let resp = app
-        .oneshot(get_request("/skills/any_id/versions"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/skills/any_id/versions")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -928,10 +878,7 @@ async fn list_environments_store_error_returns_500() {
 #[tokio::test]
 async fn get_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
-    let resp = app
-        .oneshot(get_request("/environments/any_id"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/environments/any_id")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -939,11 +886,7 @@ async fn get_environment_store_error_returns_500() {
 async fn create_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
     let resp = app
-        .oneshot(json_request(
-            "POST",
-            "/environments",
-            json!({ "name": "E" }),
-        ))
+        .oneshot(json_request("POST", "/environments", json!({ "name": "E" })))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -953,11 +896,7 @@ async fn create_environment_store_error_returns_500() {
 async fn update_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
     let resp = app
-        .oneshot(json_request(
-            "PUT",
-            "/environments/any_id",
-            json!({ "name": "E" }),
-        ))
+        .oneshot(json_request("PUT", "/environments/any_id", json!({ "name": "E" })))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -982,20 +921,14 @@ async fn archive_environment_store_error_returns_500() {
 #[tokio::test]
 async fn delete_environment_store_error_returns_500() {
     let app = build_router(fail_environments_state());
-    let resp = app
-        .oneshot(delete_request("/environments/any_id"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(delete_request("/environments/any_id")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
 async fn get_environment_not_found_returns_404() {
     let app = build_router(mock_state());
-    let resp = app
-        .oneshot(get_request("/environments/ghost_id"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/environments/ghost_id")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -1003,11 +936,7 @@ async fn get_environment_not_found_returns_404() {
 async fn update_environment_not_found_returns_404() {
     let app = build_router(mock_state());
     let resp = app
-        .oneshot(json_request(
-            "PUT",
-            "/environments/ghost_id",
-            json!({ "name": "X" }),
-        ))
+        .oneshot(json_request("PUT", "/environments/ghost_id", json!({ "name": "X" })))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -1034,11 +963,7 @@ async fn update_environment_all_fields() {
     let state = mock_state();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(json_request(
-            "POST",
-            "/environments",
-            json!({ "name": "Old" }),
-        ))
+        .oneshot(json_request("POST", "/environments", json!({ "name": "Old" })))
         .await
         .unwrap();
     let created: Value = body_json(resp.into_body()).await;
@@ -1071,10 +996,7 @@ async fn update_environment_all_fields() {
 #[tokio::test]
 async fn get_vault_store_error_returns_500() {
     let app = build_router(fail_credentials_state());
-    let resp = app
-        .oneshot(get_request("/environments/env1/vault"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/environments/env1/vault")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -1191,9 +1113,7 @@ async fn get_credential_found() {
     let cred_id = created["id"].as_str().unwrap();
 
     let resp = build_router(Arc::clone(&state))
-        .oneshot(get_request(&format!(
-            "/environments/env_get/credentials/{cred_id}"
-        )))
+        .oneshot(get_request(&format!("/environments/env_get/credentials/{cred_id}")))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -1425,10 +1345,7 @@ async fn get_agent_version_unknown_returns_404() {
 #[tokio::test]
 async fn get_agent_version_store_error_returns_500() {
     let app = build_router(fail_agents_state());
-    let resp = app
-        .oneshot(get_request("/agents/any_id/versions/1"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/agents/any_id/versions/1")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
@@ -1620,11 +1537,7 @@ async fn list_environments_with_two_items_invokes_sort() {
     let state = mock_state();
     for name in ["Prod", "Dev"] {
         build_router(Arc::clone(&state))
-            .oneshot(json_request(
-                "POST",
-                "/environments",
-                json!({ "name": name }),
-            ))
+            .oneshot(json_request("POST", "/environments", json!({ "name": name })))
             .await
             .unwrap();
     }
@@ -1694,11 +1607,7 @@ async fn update_agent_put_error_returns_500() {
         sessions: Arc::new(MockSessionStore::new()),
     }));
     let resp = app
-        .oneshot(json_request(
-            "PUT",
-            "/agents/agent_put_fail",
-            json!({ "name": "Y" }),
-        ))
+        .oneshot(json_request("PUT", "/agents/agent_put_fail", json!({ "name": "Y" })))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);

@@ -13,7 +13,10 @@ pub struct RotationSlot {
 
 impl RotationSlot {
     pub fn new(current: String) -> Self {
-        Self { current, previous: None }
+        Self {
+            current,
+            previous: None,
+        }
     }
 
     /// Return the previous value if it has not yet expired.
@@ -48,10 +51,7 @@ mod tests {
     fn valid_previous_returns_none_after_expiry() {
         let mut slot = RotationSlot::new("key-v2".to_string());
         // Expired one second ago.
-        slot.previous = Some((
-            "key-v1".to_string(),
-            Instant::now() - Duration::from_secs(1),
-        ));
+        slot.previous = Some(("key-v1".to_string(), Instant::now() - Duration::from_secs(1)));
         assert!(slot.valid_previous().is_none());
     }
 }

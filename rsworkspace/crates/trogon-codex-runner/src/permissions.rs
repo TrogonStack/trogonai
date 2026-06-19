@@ -79,10 +79,7 @@ mod tests {
 
     #[test]
     fn plan_mode_is_refused() {
-        assert!(matches!(
-            mode_gate_action("plan"),
-            ModeGateAction::Refuse { .. }
-        ));
+        assert!(matches!(mode_gate_action("plan"), ModeGateAction::Refuse { .. }));
     }
 
     #[test]
@@ -120,9 +117,6 @@ mod tests {
 
     #[test]
     fn unknown_mode_is_refused() {
-        assert!(matches!(
-            mode_gate_action("full-auto"),
-            ModeGateAction::Refuse { .. }
-        ));
+        assert!(matches!(mode_gate_action("full-auto"), ModeGateAction::Refuse { .. }));
     }
 }

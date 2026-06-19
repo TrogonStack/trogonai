@@ -68,22 +68,15 @@ impl PromiseRepository for NoOpPromiseStore {
         &'a self,
         _tenant_id: &'a str,
         _promise_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>>
+    {
         Box::pin(async { Ok(None) })
     }
 
     fn put_promise<'a>(
         &'a self,
         _promise: &'a AgentPromise,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
         Box::pin(async { Ok(1) })
     }
 
@@ -93,9 +86,7 @@ impl PromiseRepository for NoOpPromiseStore {
         _promise_id: &'a str,
         _promise: &'a AgentPromise,
         _revision: u64,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
         Box::pin(async { Ok(1) })
     }
 
@@ -104,11 +95,8 @@ impl PromiseRepository for NoOpPromiseStore {
         _tenant_id: &'a str,
         _promise_id: &'a str,
         _cache_key: &'a str,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a,
-        >,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>>
+    {
         Box::pin(async { Ok(None) })
     }
 
@@ -118,22 +106,15 @@ impl PromiseRepository for NoOpPromiseStore {
         _promise_id: &'a str,
         _cache_key: &'a str,
         _result: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), PromiseStoreError>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
         Box::pin(async { Ok(()) })
     }
 
     fn list_running<'a>(
         &'a self,
         _tenant_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>
+    {
         Box::pin(async { Ok(vec![]) })
     }
 }
@@ -646,8 +627,7 @@ async fn send_message_returns_agent_response() {
 
     // Mock Anthropic: immediate end_turn.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("Hello from agent"));
@@ -687,8 +667,7 @@ async fn send_message_auto_names_session_from_first_message() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("ok"));
@@ -736,8 +715,7 @@ async fn send_message_history_persisted_for_second_turn() {
 
     // Both turns return end_turn.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("Paris"));
@@ -785,10 +763,7 @@ async fn send_message_history_persisted_for_second_turn() {
     let count_after_t2 = r2["message_count"].as_u64().unwrap();
 
     // History must have grown.
-    assert!(
-        count_after_t2 > count_after_t1,
-        "second turn must append to history"
-    );
+    assert!(count_after_t2 > count_after_t1, "second turn must append to history");
     // At least 4 messages: user, assistant, user, assistant.
     assert!(count_after_t2 >= 4);
 }
@@ -868,8 +843,7 @@ async fn send_message_anthropic_500_returns_500() {
 
     // Anthropic proxy always returns 500 — agent gets an HTTP error parsing JSON.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(500).body("Internal Server Error");
     });
 
@@ -895,11 +869,7 @@ async fn send_message_anthropic_500_returns_500() {
         .await
         .unwrap();
 
-    assert_eq!(
-        res.status(),
-        500,
-        "Anthropic 500 must propagate as HTTP 500"
-    );
+    assert_eq!(res.status(), 500, "Anthropic 500 must propagate as HTTP 500");
 }
 
 #[tokio::test]
@@ -1015,8 +985,7 @@ async fn send_message_completes_after_concurrent_session_delete() {
 
     // Slow mock: Anthropic takes 400 ms to respond, giving us time to delete.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("reply after delete"))
@@ -1085,8 +1054,7 @@ async fn concurrent_sends_to_same_session_both_succeed() {
 
     // Slow Anthropic mock so both requests are in-flight at the same time.
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("concurrent reply"))
@@ -1224,10 +1192,7 @@ async fn list_promises_returns_empty_json_array() {
         .unwrap();
     assert_eq!(res.status(), 200);
     let body: Vec<serde_json::Value> = res.json().await.unwrap();
-    assert!(
-        body.is_empty(),
-        "NoOpPromiseStore must return empty list; got {body:?}"
-    );
+    assert!(body.is_empty(), "NoOpPromiseStore must return empty list; got {body:?}");
 }
 
 #[tokio::test]
@@ -1284,8 +1249,7 @@ async fn send_message_computes_duration_ms() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("ok"));
@@ -1372,8 +1336,7 @@ async fn send_message_persists_usage_on_assistant_message() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_with_usage("Paris", 42, 7));
@@ -1433,8 +1396,7 @@ async fn send_message_response_includes_token_counts() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_with_usage("hi", 10, 5));
@@ -1487,8 +1449,7 @@ async fn send_message_accumulates_token_totals_across_turns() {
             .json_body(end_turn_with_usage("turn two", 20, 8));
     });
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_with_usage("turn one", 10, 5));
@@ -1534,14 +1495,8 @@ async fn send_message_accumulates_token_totals_across_turns() {
         .await
         .unwrap();
 
-    assert_eq!(
-        got["total_input_tokens"], 30,
-        "total_input_tokens must be 10 + 20 = 30"
-    );
-    assert_eq!(
-        got["total_output_tokens"], 13,
-        "total_output_tokens must be 5 + 8 = 13"
-    );
+    assert_eq!(got["total_input_tokens"], 30, "total_input_tokens must be 10 + 20 = 30");
+    assert_eq!(got["total_output_tokens"], 13, "total_output_tokens must be 5 + 8 = 13");
 }
 
 #[tokio::test]
@@ -1569,8 +1524,7 @@ async fn update_session_does_not_reset_token_totals() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_with_usage("ok", 15, 6));
@@ -1625,8 +1579,7 @@ async fn list_sessions_includes_token_totals() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_with_usage("ok", 25, 9));
@@ -1671,8 +1624,14 @@ async fn list_sessions_includes_token_totals() {
         .find(|s| s["id"] == id)
         .expect("session must appear in list");
 
-    assert_eq!(session["total_input_tokens"], 25, "list must surface accumulated input tokens");
-    assert_eq!(session["total_output_tokens"], 9, "list must surface accumulated output tokens");
+    assert_eq!(
+        session["total_input_tokens"], 25,
+        "list must surface accumulated input tokens"
+    );
+    assert_eq!(
+        session["total_output_tokens"], 9,
+        "list must surface accumulated output tokens"
+    );
 }
 
 #[tokio::test]
@@ -1680,8 +1639,7 @@ async fn send_message_without_llm_usage_returns_zero_tokens() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("no usage here"));
@@ -1725,8 +1683,14 @@ async fn send_message_without_llm_usage_returns_zero_tokens() {
         .json()
         .await
         .unwrap();
-    assert_eq!(got["total_input_tokens"], 0, "no-usage turn must not increment total_input_tokens");
-    assert_eq!(got["total_output_tokens"], 0, "no-usage turn must not increment total_output_tokens");
+    assert_eq!(
+        got["total_input_tokens"], 0,
+        "no-usage turn must not increment total_input_tokens"
+    );
+    assert_eq!(
+        got["total_output_tokens"], 0,
+        "no-usage turn must not increment total_output_tokens"
+    );
 }
 
 #[tokio::test]
@@ -1734,8 +1698,7 @@ async fn update_session_response_includes_token_totals() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn_with_usage("ok", 11, 4));
@@ -1774,8 +1737,14 @@ async fn update_session_response_includes_token_totals() {
         .await
         .unwrap();
 
-    assert_eq!(patch_res["total_input_tokens"], 11, "PATCH response must include accumulated token totals");
-    assert_eq!(patch_res["total_output_tokens"], 4, "PATCH response must include accumulated token totals");
+    assert_eq!(
+        patch_res["total_input_tokens"], 11,
+        "PATCH response must include accumulated token totals"
+    );
+    assert_eq!(
+        patch_res["total_output_tokens"], 4,
+        "PATCH response must include accumulated token totals"
+    );
 }
 
 #[tokio::test]
@@ -1783,8 +1752,7 @@ async fn send_message_persists_cache_tokens_on_assistant_message() {
     let env = start().await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -1840,7 +1808,10 @@ async fn send_message_persists_cache_tokens_on_assistant_message() {
 
     assert_eq!(assistant["usage"]["input_tokens"], 20);
     assert_eq!(assistant["usage"]["output_tokens"], 8);
-    assert_eq!(assistant["usage"]["cache_creation_input_tokens"], 500, "cache_creation_input_tokens must be persisted on message");
+    assert_eq!(
+        assistant["usage"]["cache_creation_input_tokens"], 500,
+        "cache_creation_input_tokens must be persisted on message"
+    );
 
     assert_eq!(
         got["total_input_tokens"], 20,
@@ -1999,8 +1970,7 @@ async fn send_message_calls_compactor_when_wired() {
         if let Some(msg) = sub.next().await {
             called2.store(true, Ordering::SeqCst);
             if let Some(reply) = msg.reply {
-                let req: serde_json::Value =
-                    serde_json::from_slice(&msg.payload).unwrap_or_default();
+                let req: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
                 let resp = serde_json::json!({
                     "messages": req.get("messages").cloned().unwrap_or(serde_json::json!([])),
                     "compacted": false,
@@ -2019,8 +1989,7 @@ async fn send_message_calls_compactor_when_wired() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("hi"));
@@ -2069,10 +2038,7 @@ async fn send_message_uses_compacted_messages_when_compactor_returns_compacted_t
 
     let nats2 = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats2
-            .subscribe("trogon.compactor.compact")
-            .await
-            .expect("subscribe");
+        let mut sub = nats2.subscribe("trogon.compactor.compact").await.expect("subscribe");
         if let Some(msg) = sub.next().await {
             if let Some(reply) = msg.reply {
                 // Return a compacted single-message history.
@@ -2144,8 +2110,7 @@ async fn send_message_succeeds_when_compactor_unavailable() {
     // No compactor subscriber — NATS request returns "no responders".
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("ok"));
@@ -2190,10 +2155,7 @@ async fn send_message_succeeds_when_compactor_returns_invalid_json() {
 
     let nats2 = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats2
-            .subscribe("trogon.compactor.compact")
-            .await
-            .expect("subscribe");
+        let mut sub = nats2.subscribe("trogon.compactor.compact").await.expect("subscribe");
         if let Some(msg) = sub.next().await {
             if let Some(reply) = msg.reply {
                 nats2
@@ -2207,8 +2169,7 @@ async fn send_message_succeeds_when_compactor_returns_invalid_json() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     env.mock_server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(end_turn("ok"));
@@ -2253,10 +2214,7 @@ async fn send_message_uses_compactor_messages_when_compacted_is_false() {
 
     let nats2 = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats2
-            .subscribe("trogon.compactor.compact")
-            .await
-            .expect("subscribe");
+        let mut sub = nats2.subscribe("trogon.compactor.compact").await.expect("subscribe");
         if let Some(msg) = sub.next().await {
             if let Some(reply) = msg.reply {
                 // Return a single message with a recognisable marker; compacted=false.

@@ -215,26 +215,23 @@ async fn webhook_http_triggers_full_pipeline_with_real_key() {
     // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
     // The GitHub server created GITHUB above; create the others manually.
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "LINEAR".to_string(),
-            subjects: vec!["linear.Issue.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .expect("Failed to create LINEAR stream");
+        name: "LINEAR".to_string(),
+        subjects: vec!["linear.Issue.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to create LINEAR stream");
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "CRON_TICKS".to_string(),
-            subjects: vec!["cron.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .expect("Failed to create CRON_TICKS stream");
+        name: "CRON_TICKS".to_string(),
+        subjects: vec!["cron.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to create CRON_TICKS stream");
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -325,9 +322,7 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
         })
         .await;
 
@@ -416,26 +411,23 @@ async fn linear_webhook_http_triggers_full_pipeline_with_real_key() {
     // The agent runner requires GITHUB, LINEAR, and CRON_TICKS streams to exist.
     // The Linear server created LINEAR above; create the others manually.
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "GITHUB".to_string(),
-            subjects: vec!["github.pull_request".to_string()],
-            ..Default::default()
-        })
-        .await
-        .expect("Failed to create GITHUB stream");
+        name: "GITHUB".to_string(),
+        subjects: vec!["github.pull_request".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to create GITHUB stream");
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "CRON_TICKS".to_string(),
-            subjects: vec!["cron.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .expect("Failed to create CRON_TICKS stream");
+        name: "CRON_TICKS".to_string(),
+        subjects: vec!["cron.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("Failed to create CRON_TICKS stream");
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -528,8 +520,7 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
     let mock_server = MockServer::start_async().await;
     mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"LGTM from automation."}]}"#);
@@ -558,9 +549,7 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
     }
 
     // ── 5. Seed a matching automation ──────────────────────────────────────
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&Automation {
             id: "auto-webhook-e2e".to_string(),
@@ -608,10 +597,7 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
     drop(listener);
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: mock_server.base_url(),
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -643,12 +629,7 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -679,11 +660,7 @@ async fn github_webhook_produces_run_record_accessible_via_api() {
         .await
         .expect("POST to GitHub webhook server failed");
 
-    assert_eq!(
-        resp.status(),
-        200,
-        "webhook server must accept signed request"
-    );
+    assert_eq!(resp.status(), 200, "webhook server must accept signed request");
 
     // ── 9. Poll GET /runs until the RunRecord appears ──────────────────────
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
@@ -751,8 +728,7 @@ async fn linear_webhook_produces_run_record_accessible_via_api() {
     let mock_server = MockServer::start_async().await;
     mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged via Linear webhook."}]}"#);
@@ -778,9 +754,7 @@ async fn linear_webhook_produces_run_record_accessible_via_api() {
         .unwrap_or_else(|e| panic!("create stream {name}: {e}"));
     }
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&Automation {
             id: "auto-linear-e2e".to_string(),
@@ -827,10 +801,7 @@ async fn linear_webhook_produces_run_record_accessible_via_api() {
     drop(listener);
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: mock_server.base_url(),
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -861,12 +832,7 @@ async fn linear_webhook_produces_run_record_accessible_via_api() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -965,8 +931,7 @@ async fn github_webhook_failed_run_appears_in_runs_api_as_failed() {
     let mock_server = MockServer::start_async().await;
     mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(400)
                 .header("content-type", "application/json")
                 .body(r#"{"error":{"type":"invalid_request_error","message":"bad request"}}"#);
@@ -992,9 +957,7 @@ async fn github_webhook_failed_run_appears_in_runs_api_as_failed() {
         .unwrap_or_else(|e| panic!("create stream {name}: {e}"));
     }
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&Automation {
             id: "auto-fail-e2e".to_string(),
@@ -1040,10 +1003,7 @@ async fn github_webhook_failed_run_appears_in_runs_api_as_failed() {
     drop(listener);
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: mock_server.base_url(),
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1074,12 +1034,7 @@ async fn github_webhook_failed_run_appears_in_runs_api_as_failed() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;

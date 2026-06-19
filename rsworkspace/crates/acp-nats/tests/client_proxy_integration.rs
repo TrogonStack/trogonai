@@ -12,13 +12,12 @@ use std::time::Duration;
 use acp_nats::client;
 use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, StdJsonSerialize};
 use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest,
-    KillTerminalResponse, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, PromptResponse,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     StopReason, TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate,
-    ToolCallUpdateFields, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    ToolCallUpdateFields, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -56,10 +55,7 @@ impl MockClient {
 
 #[async_trait(?Send)]
 impl Client for MockClient {
-    async fn session_notification(
-        &self,
-        notification: SessionNotification,
-    ) -> agent_client_protocol::Result<()> {
+    async fn session_notification(&self, notification: SessionNotification) -> agent_client_protocol::Result<()> {
         self.calls
             .borrow_mut()
             .push(format!("session_notification:{:?}", notification));
@@ -70,42 +66,28 @@ impl Client for MockClient {
         &self,
         _: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-        self.calls
-            .borrow_mut()
-            .push("request_permission".to_string());
+        self.calls.borrow_mut().push("request_permission".to_string());
         Ok(RequestPermissionResponse::new(
             agent_client_protocol::RequestPermissionOutcome::Cancelled,
         ))
     }
 
-    async fn read_text_file(
-        &self,
-        _: ReadTextFileRequest,
-    ) -> agent_client_protocol::Result<ReadTextFileResponse> {
+    async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
         self.calls.borrow_mut().push("read_text_file".to_string());
         Ok(ReadTextFileResponse::new(self.read_file_content.clone()))
     }
 
-    async fn write_text_file(
-        &self,
-        _: WriteTextFileRequest,
-    ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+    async fn write_text_file(&self, _: WriteTextFileRequest) -> agent_client_protocol::Result<WriteTextFileResponse> {
         self.calls.borrow_mut().push("write_text_file".to_string());
         Ok(WriteTextFileResponse::new())
     }
 
-    async fn create_terminal(
-        &self,
-        _: CreateTerminalRequest,
-    ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+    async fn create_terminal(&self, _: CreateTerminalRequest) -> agent_client_protocol::Result<CreateTerminalResponse> {
         self.calls.borrow_mut().push("create_terminal".to_string());
         Ok(CreateTerminalResponse::new(self.terminal_id.clone()))
     }
 
-    async fn terminal_output(
-        &self,
-        _: TerminalOutputRequest,
-    ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+    async fn terminal_output(&self, _: TerminalOutputRequest) -> agent_client_protocol::Result<TerminalOutputResponse> {
         self.calls.borrow_mut().push("terminal_output".to_string());
         Ok(TerminalOutputResponse::new("some output", false))
     }
@@ -122,18 +104,13 @@ impl Client for MockClient {
         &self,
         _: WaitForTerminalExitRequest,
     ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
-        self.calls
-            .borrow_mut()
-            .push("wait_for_terminal_exit".to_string());
+        self.calls.borrow_mut().push("wait_for_terminal_exit".to_string());
         Ok(WaitForTerminalExitResponse::new(
             TerminalExitStatus::new().exit_code(0u32),
         ))
     }
 
-    async fn kill_terminal(
-        &self,
-        _: KillTerminalRequest,
-    ) -> agent_client_protocol::Result<KillTerminalResponse> {
+    async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
         self.calls.borrow_mut().push("kill_terminal".to_string());
         Ok(KillTerminalResponse::new())
     }
@@ -156,7 +133,10 @@ async fn nats_client(port: u16) -> async_nats::Client {
         .expect("Failed to connect to NATS")
 }
 
-fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient> {
+fn make_bridge(
+    nats: async_nats::Client,
+    prefix: &str,
+) -> Bridge<async_nats::Client, SystemClock, trogon_nats::jetstream::NatsJetStreamClient> {
     let config = Config::new(
         AcpPrefix::new(prefix).unwrap(),
         NatsConfig {
@@ -165,9 +145,7 @@ fn make_bridge(nats: async_nats::Client, prefix: &str) -> Bridge<async_nats::Cli
         },
     )
     .with_operation_timeout(Duration::from_millis(500));
-    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(
-        async_nats::jetstream::new(nats.clone()),
-    );
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
@@ -222,10 +200,7 @@ async fn fs_read_text_file_through_proxy_returns_file_content() {
                 "expected result in reply, got: {}",
                 response
             );
-            assert_eq!(
-                response["result"]["content"].as_str().unwrap(),
-                "file content"
-            );
+            assert_eq!(response["result"]["content"].as_str().unwrap(), "file content");
         })
         .await;
 }
@@ -345,10 +320,7 @@ async fn session_update_through_proxy_calls_client() {
 
     #[async_trait(?Send)]
     impl Client for TrackingClient {
-        async fn session_notification(
-            &self,
-            _: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
             self.called.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
@@ -364,9 +336,7 @@ async fn session_update_through_proxy_calls_client() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let client_rc = Rc::new(TrackingClient {
-                called: called_clone,
-            });
+            let client_rc = Rc::new(TrackingClient { called: called_clone });
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
@@ -576,10 +546,7 @@ async fn terminal_wait_for_exit_through_proxy_returns_exit_code() {
             };
             let payload = serde_json::to_vec(&envelope).unwrap();
             let reply = nats1
-                .request(
-                    "acp.session.sess-1.client.terminal.wait_for_exit",
-                    Bytes::from(payload),
-                )
+                .request("acp.session.sess-1.client.terminal.wait_for_exit", Bytes::from(payload))
                 .await
                 .expect("request must succeed");
 

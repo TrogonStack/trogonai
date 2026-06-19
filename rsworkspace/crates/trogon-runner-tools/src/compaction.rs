@@ -83,9 +83,7 @@ pub fn compaction_settings_from_env() -> (usize, u8) {
 
 /// Heuristic token estimate: serialized JSON byte length / 4.
 pub fn estimate_tokens(messages: &[Message]) -> usize {
-    serde_json::to_string(messages)
-        .map(|s| s.len() / 4)
-        .unwrap_or(0)
+    serde_json::to_string(messages).map(|s| s.len() / 4).unwrap_or(0)
 }
 
 /// Returns `true` when [`estimate_tokens`] exceeds `threshold_pct` % of `token_budget`.
@@ -97,12 +95,7 @@ pub fn over_threshold(messages: &[Message], token_budget: usize, threshold_pct: 
 ///
 /// Automatic compaction honors the token-budget threshold; manual `/compact` passes
 /// `force = true` to compact regardless of fill level.
-pub fn compaction_requested(
-    messages: &[Message],
-    token_budget: usize,
-    threshold_pct: u8,
-    force: bool,
-) -> bool {
+pub fn compaction_requested(messages: &[Message], token_budget: usize, threshold_pct: u8, force: bool) -> bool {
     force || over_threshold(messages, token_budget, threshold_pct)
 }
 
@@ -143,8 +136,8 @@ pub async fn maybe_compact(
         return Err(CompactError::InvalidResponse(err.error));
     }
 
-    let resp: CompactResp = serde_json::from_slice(&reply.payload)
-        .map_err(|e| CompactError::InvalidResponse(e.to_string()))?;
+    let resp: CompactResp =
+        serde_json::from_slice(&reply.payload).map_err(|e| CompactError::InvalidResponse(e.to_string()))?;
 
     if resp.compacted {
         Ok(Some(resp.messages))
@@ -168,14 +161,22 @@ mod tests {
     #[test]
     fn over_threshold_false_for_small_history() {
         let msgs = vec![user_msg("hello")];
-        assert!(!over_threshold(&msgs, DEFAULT_TOKEN_BUDGET, DEFAULT_COMPACT_THRESHOLD_PCT));
+        assert!(!over_threshold(
+            &msgs,
+            DEFAULT_TOKEN_BUDGET,
+            DEFAULT_COMPACT_THRESHOLD_PCT
+        ));
     }
 
     #[test]
     fn over_threshold_true_when_estimate_exceeds_pct() {
         let big = "x".repeat(DEFAULT_TOKEN_BUDGET * 4);
         let msgs = vec![user_msg(&big)];
-        assert!(over_threshold(&msgs, DEFAULT_TOKEN_BUDGET, DEFAULT_COMPACT_THRESHOLD_PCT));
+        assert!(over_threshold(
+            &msgs,
+            DEFAULT_TOKEN_BUDGET,
+            DEFAULT_COMPACT_THRESHOLD_PCT
+        ));
     }
 
     #[test]

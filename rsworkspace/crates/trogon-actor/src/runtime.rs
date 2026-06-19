@@ -29,8 +29,7 @@ use crate::{
     telemetry::metrics,
 };
 
-type SpawnFn =
-    Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
+type SpawnFn = Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
 
 /// Orchestrates a single event invocation for an [`EntityActor`].
 ///
@@ -125,11 +124,7 @@ where
 
         for attempt in 0..=MAX_OCC_RETRIES {
             if attempt > 0 {
-                tracing::warn!(
-                    attempt,
-                    entity_key,
-                    "optimistic concurrency conflict — retrying"
-                );
+                tracing::warn!(attempt, entity_key, "optimistic concurrency conflict — retrying");
                 metrics::inc_occ_retry(A::actor_type());
             }
 
@@ -141,8 +136,7 @@ where
                 .map_err(|e| ActorError::State(e.to_string()))?
             {
                 Some(entry) => {
-                    let s = serde_json::from_slice::<A::State>(&entry.value)
-                        .map_err(ActorError::Deserialize)?;
+                    let s = serde_json::from_slice::<A::State>(&entry.value).map_err(ActorError::Deserialize)?;
                     (s, Some(entry.revision))
                 }
                 None => {
@@ -153,32 +147,27 @@ where
             };
 
             // ── 2. Open transcript session ────────────────────────────────────
-            let session = Arc::new(Session::new(
-                self.publisher.clone(),
-                A::actor_type(),
-                entity_key,
-            ));
+            let session = Arc::new(Session::new(self.publisher.clone(), A::actor_type(), entity_key));
             let session_id = session.id().to_string();
 
             // ── 3. Build ActorContext (type-erased closures) ──────────────────
-            let recall_fn: Option<RecallFn> =
-                self.transcript_reader.as_ref().map(|reader| {
-                    let reader = Arc::clone(reader);
-                    let actor_type = A::actor_type().to_string();
-                    let key = entity_key.to_string();
-                    let f: RecallFn = Arc::new(move || {
-                        let reader = Arc::clone(&reader);
-                        let actor_type = actor_type.clone();
-                        let key = key.clone();
-                        Box::pin(async move {
-                            match reader.query_entity(&actor_type, &key).await {
-                                Ok(entries) => crate::recall::format_history(&entries),
-                                Err(_) => None,
-                            }
-                        })
-                    });
-                    f
+            let recall_fn: Option<RecallFn> = self.transcript_reader.as_ref().map(|reader| {
+                let reader = Arc::clone(reader);
+                let actor_type = A::actor_type().to_string();
+                let key = entity_key.to_string();
+                let f: RecallFn = Arc::new(move || {
+                    let reader = Arc::clone(&reader);
+                    let actor_type = actor_type.clone();
+                    let key = key.clone();
+                    Box::pin(async move {
+                        match reader.query_entity(&actor_type, &key).await {
+                            Ok(entries) => crate::recall::format_history(&entries),
+                            Err(_) => None,
+                        }
+                    })
                 });
+                f
+            });
 
             let ctx = build_context::<A, P, N, R, J>(
                 entity_key,
@@ -192,10 +181,7 @@ where
             );
 
             // ── 4. Handle event ───────────────────────────────────────────────
-            actor
-                .handle(&mut state, &ctx)
-                .await
-                .map_err(ActorError::Actor)?;
+            actor.handle(&mut state, &ctx).await.map_err(ActorError::Actor)?;
 
             // ── 5. Save state with OCC ────────────────────────────────────────
             let bytes = serde_json::to_vec(&state).map_err(ActorError::Serialize)?;
@@ -237,9 +223,7 @@ where
     let session_for_spawn = Arc::clone(&session);
 
     // Append function: delegates to the session, converts error to String.
-    let append_fn: Arc<
-        dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync,
-    > = {
+    let append_fn: Arc<dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync> = {
         Arc::new(move |entry| {
             let s = Arc::clone(&session);
             Box::pin(async move { s.append(entry).await.map_err(|e| e.to_string()) })
@@ -302,12 +286,10 @@ where
                 // AckFuture (fire-and-forget ACK) to avoid lifetime complexity
                 // inside BoxFuture<'static>.  The sub-agent's reply serves as
                 // the implicit confirmation that the message was processed.
-                js.publish_with_headers(subject, headers, payload)
-                    .await
-                    .map_err(|e| {
-                        metrics::inc_spawn_error(actor_type, &capability);
-                        format!("JetStream spawn publish failed: {e}")
-                    })?;
+                js.publish_with_headers(subject, headers, payload).await.map_err(|e| {
+                    metrics::inc_spawn_error(actor_type, &capability);
+                    format!("JetStream spawn publish failed: {e}")
+                })?;
 
                 // Wait for the sub-agent to post its reply on the inbox.
                 let reply = tokio::time::timeout(SPAWN_AGENT_TIMEOUT, reply_sub.next())
@@ -380,11 +362,7 @@ mod tests {
             "counter"
         }
 
-        async fn handle(
-            &mut self,
-            state: &mut Counter,
-            _ctx: &ActorContext,
-        ) -> Result<(), Self::Error> {
+        async fn handle(&mut self, state: &mut Counter, _ctx: &ActorContext) -> Result<(), Self::Error> {
             state.count += 1;
             *self.handled.lock().unwrap() += 1;
             Ok(())
@@ -413,10 +391,7 @@ mod tests {
         let runtime = make_runtime();
         let (mut actor, handled) = CounterActor::new();
 
-        runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
 
         assert_eq!(*handled.lock().unwrap(), 1);
 
@@ -431,14 +406,8 @@ mod tests {
         let runtime = make_runtime();
         let (mut actor, _) = CounterActor::new();
 
-        runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap();
-        runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
 
         let kv_key = state_kv_key("counter", "entity-1");
         let entry = runtime.state.load(&kv_key).await.unwrap().unwrap();
@@ -452,10 +421,7 @@ mod tests {
         runtime.state.inject_conflicts(2);
 
         let (mut actor, handled) = CounterActor::new();
-        runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap();
+        runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap();
 
         assert_eq!(*handled.lock().unwrap(), 3);
     }
@@ -466,10 +432,7 @@ mod tests {
         runtime.state.inject_conflicts(MAX_OCC_RETRIES + 1);
 
         let (mut actor, _) = CounterActor::new();
-        let err = runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap_err();
+        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
 
         assert!(matches!(err, ActorError::RetryLimitExceeded));
     }
@@ -479,10 +442,7 @@ mod tests {
         let runtime = make_runtime();
         runtime.state.inject_save_error();
         let (mut actor, _) = CounterActor::new();
-        let err = runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap_err();
+        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
         assert!(matches!(err, ActorError::State(_)));
     }
 
@@ -491,10 +451,7 @@ mod tests {
         let runtime = make_runtime();
         runtime.state.inject_load_error();
         let (mut actor, _) = CounterActor::new();
-        let err = runtime
-            .handle_event(&mut actor, "entity-1", 0)
-            .await
-            .unwrap_err();
+        let err = runtime.handle_event(&mut actor, "entity-1", 0).await.unwrap_err();
         assert!(matches!(err, ActorError::State(_)));
     }
 
@@ -507,11 +464,7 @@ mod tests {
             fn actor_type() -> &'static str {
                 "scribe"
             }
-            async fn handle(
-                &mut self,
-                _state: &mut Counter,
-                ctx: &ActorContext,
-            ) -> Result<(), Self::Error> {
+            async fn handle(&mut self, _state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
                 ctx.append_user_message("hello", None).await.ok();
                 ctx.append_assistant_message("hi", Some(5)).await.ok();
                 Ok(())
@@ -580,11 +533,7 @@ mod tests {
             fn actor_type() -> &'static str {
                 "spawner"
             }
-            async fn handle(
-                &mut self,
-                _state: &mut Counter,
-                ctx: &ActorContext,
-            ) -> Result<(), Self::Error> {
+            async fn handle(&mut self, _state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
                 let reply = ctx
                     .spawn_agent::<Self::Error>("analyze", bytes::Bytes::new())
                     .await
@@ -623,23 +572,14 @@ mod tests {
             fn actor_type() -> &'static str {
                 "no-cap"
             }
-            async fn handle(
-                &mut self,
-                _state: &mut Counter,
-                ctx: &ActorContext,
-            ) -> Result<(), Self::Error> {
-                let result = ctx
-                    .spawn_agent::<Self::Error>("missing_cap", bytes::Bytes::new())
-                    .await;
+            async fn handle(&mut self, _state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
+                let result = ctx.spawn_agent::<Self::Error>("missing_cap", bytes::Bytes::new()).await;
                 assert!(result.is_err());
                 Ok(())
             }
         }
 
-        runtime
-            .handle_event(&mut NoCapActor, "e-1", 0)
-            .await
-            .unwrap();
+        runtime.handle_event(&mut NoCapActor, "e-1", 0).await.unwrap();
     }
 
     // ── Recall wiring ─────────────────────────────────────────────────────────
@@ -663,8 +603,7 @@ mod tests {
             tokens: None,
         }]);
 
-        let runtime = make_runtime()
-            .with_transcript_reader(Arc::new(reader) as Arc<dyn TranscriptRead>);
+        let runtime = make_runtime().with_transcript_reader(Arc::new(reader) as Arc<dyn TranscriptRead>);
 
         // Actor captures whatever recall_entity_history() returns.
         let recall_result: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -679,11 +618,7 @@ mod tests {
             fn actor_type() -> &'static str {
                 "recall-capture"
             }
-            async fn handle(
-                &mut self,
-                _state: &mut Counter,
-                ctx: &ActorContext,
-            ) -> Result<(), Self::Error> {
+            async fn handle(&mut self, _state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
                 *self.out.lock().unwrap() = ctx.recall_entity_history().await;
                 Ok(())
             }
@@ -712,9 +647,9 @@ mod tests {
     /// the error and `recall_entity_history()` returns `None`.
     #[tokio::test]
     async fn recall_reader_error_is_silenced_to_none() {
-        use std::sync::Arc;
         use futures_util::future::BoxFuture;
-        use trogon_transcript::{TranscriptRead, TranscriptError, entry::TranscriptEntry};
+        use std::sync::Arc;
+        use trogon_transcript::{TranscriptError, TranscriptRead, entry::TranscriptEntry};
 
         struct ErrReader;
         impl TranscriptRead for ErrReader {
@@ -729,8 +664,7 @@ mod tests {
             }
         }
 
-        let runtime = make_runtime()
-            .with_transcript_reader(Arc::new(ErrReader));
+        let runtime = make_runtime().with_transcript_reader(Arc::new(ErrReader));
 
         let recall_result: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let recall_result_clone = Arc::clone(&recall_result);
@@ -744,11 +678,7 @@ mod tests {
             fn actor_type() -> &'static str {
                 "recall-err"
             }
-            async fn handle(
-                &mut self,
-                _state: &mut Counter,
-                ctx: &ActorContext,
-            ) -> Result<(), Self::Error> {
+            async fn handle(&mut self, _state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
                 *self.out.lock().unwrap() = ctx.recall_entity_history().await;
                 Ok(())
             }
@@ -805,22 +735,13 @@ mod tests {
             fn actor_type() -> &'static str {
                 "req-fail"
             }
-            async fn handle(
-                &mut self,
-                _state: &mut Counter,
-                ctx: &ActorContext,
-            ) -> Result<(), Self::Error> {
-                let result = ctx
-                    .spawn_agent::<Self::Error>("analyze", bytes::Bytes::new())
-                    .await;
+            async fn handle(&mut self, _state: &mut Counter, ctx: &ActorContext) -> Result<(), Self::Error> {
+                let result = ctx.spawn_agent::<Self::Error>("analyze", bytes::Bytes::new()).await;
                 assert!(result.is_err());
                 Ok(())
             }
         }
 
-        runtime
-            .handle_event(&mut ReqFailActor, "e-1", 0)
-            .await
-            .unwrap();
+        runtime.handle_event(&mut ReqFailActor, "e-1", 0).await.unwrap();
     }
 }

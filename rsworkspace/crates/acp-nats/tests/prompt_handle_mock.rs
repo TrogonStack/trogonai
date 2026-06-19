@@ -14,8 +14,7 @@ use agent_client_protocol::{Agent, PromptRequest};
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
 use trogon_nats::jetstream::{
-    GetStreamError, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamPublisher,
-    MockJetStreamStream,
+    GetStreamError, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamPublisher, MockJetStreamStream,
 };
 use trogon_nats::mocks::MockError;
 use trogon_std::time::SystemClock;
@@ -37,9 +36,7 @@ impl MockJs {
 
 impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
     type PublishError = MockError;
-    type AckFuture = std::future::Ready<
-        Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-    >;
+    type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
     async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
         &self,
@@ -47,9 +44,7 @@ impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
     ) -> Result<Self::AckFuture, Self::PublishError> {
-        self.publisher
-            .publish_with_headers(subject, headers, payload)
-            .await
+        self.publisher.publish_with_headers(subject, headers, payload).await
     }
 }
 
@@ -57,10 +52,7 @@ impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
     type Error = GetStreamError;
     type Stream = MockJetStreamStream;
 
-    async fn get_stream<T: AsRef<str> + Send>(
-        &self,
-        stream_name: T,
-    ) -> Result<MockJetStreamStream, Self::Error> {
+    async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<MockJetStreamStream, Self::Error> {
         self.consumer_factory.get_stream(stream_name).await
     }
 }
@@ -112,9 +104,7 @@ impl trogon_nats::client::SubscribeClient for MultiStreamMock {
     ) -> Result<Self::Subscription, Self::SubscribeError> {
         match self.streams.lock().unwrap().pop_front() {
             Some(rx) => Ok(Box::pin(rx) as BoxStream<'static, async_nats::Message>),
-            None => Err(MockErr(
-                "mock: no stream available for subscribe".to_string(),
-            )),
+            None => Err(MockErr("mock: no stream available for subscribe".to_string())),
         }
     }
 }
@@ -260,9 +250,7 @@ async fn event_stream_timeout_after_600_seconds_returns_error() {
                 let (tx, _rx) = tokio::sync::mpsc::channel(1);
                 let bridge = Bridge::new(mock, js, SystemClock, &meter, config, tx);
 
-                bridge
-                    .prompt(PromptRequest::new("session-123", vec![]))
-                    .await
+                bridge.prompt(PromptRequest::new("session-123", vec![])).await
             });
 
             // Yield to let the spawned task start and register the timer.
@@ -275,10 +263,7 @@ async fn event_stream_timeout_after_600_seconds_returns_error() {
             tokio::task::yield_now().await;
 
             let result = handle.await.unwrap();
-            assert!(
-                result.is_err(),
-                "expected Err from timeout, got: {result:?}"
-            );
+            assert!(result.is_err(), "expected Err from timeout, got: {result:?}");
             assert!(
                 result.unwrap_err().to_string().contains("timed out"),
                 "expected 'timed out' in error message"

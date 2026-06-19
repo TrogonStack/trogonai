@@ -93,11 +93,7 @@ impl TextBlock {
 pub trait SessionStoring: Send + Sync + 'static {
     fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()>;
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()>;
-    fn load<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        session_id: &'a str,
-    ) -> BoxFuture<'a, Option<SessionSnapshot>>;
+    fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>>;
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -170,11 +166,7 @@ impl SessionStoring for NatsSessionStore {
         Box::pin(self.remove_impl(tenant_id, session_id))
     }
 
-    fn load<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        session_id: &'a str,
-    ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+    fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>> {
         Box::pin(self.load_impl(tenant_id, session_id))
     }
 }
@@ -182,9 +174,7 @@ impl SessionStoring for NatsSessionStore {
 // ── Timestamp helper ──────────────────────────────────────────────────────────
 
 pub fn now_iso() -> String {
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = d.as_secs();
     let millis = d.subsec_millis();
     let time_secs = secs % 86400;

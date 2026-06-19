@@ -56,7 +56,10 @@ pub async fn load_trogon_md(cwd: &str) -> Option<String> {
     candidates.reverse();
     for path in candidates {
         if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            let base = path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+            let base = path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."));
             let mut visited = vec![path.clone()];
             parts.push(expand_imports(&content, &base, 0, &mut visited));
         }
@@ -122,14 +125,15 @@ fn expand_imports(content: &str, base_dir: &Path, depth: usize, visited: &mut Ve
             chars.next();
         }
         let token = &content[start..end];
-        let resolved = resolve_import(token, base_dir)
-            .map(|p| p.canonicalize().unwrap_or(p));
+        let resolved = resolve_import(token, base_dir).map(|p| p.canonicalize().unwrap_or(p));
         match resolved {
             Some(path) if !visited.contains(&path) => {
                 match std::fs::read_to_string(&path) {
                     Ok(imported) => {
-                        let import_base =
-                            path.parent().map(Path::to_path_buf).unwrap_or_else(|| base_dir.to_path_buf());
+                        let import_base = path
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| base_dir.to_path_buf());
                         visited.push(path);
                         result.push_str(&expand_imports(&imported, &import_base, depth + 1, visited));
                         visited.pop();
@@ -186,7 +190,11 @@ async fn load_path_scoped_rules(cwd: &str) -> Vec<String> {
                 if body.is_empty() {
                     continue;
                 }
-                let scope = if globs.is_empty() { "all files".to_string() } else { globs.join(", ") };
+                let scope = if globs.is_empty() {
+                    "all files".to_string()
+                } else {
+                    globs.join(", ")
+                };
                 out.push(format!("## Rule (applies to: {scope})\n\n{body}"));
             }
         }
@@ -211,9 +219,7 @@ fn parse_rule_frontmatter(content: &str) -> (Vec<String>, &str) {
     let mut globs = Vec::new();
     for line in front.lines() {
         let line = line.trim();
-        let value = line
-            .strip_prefix("globs:")
-            .or_else(|| line.strip_prefix("glob:"));
+        let value = line.strip_prefix("globs:").or_else(|| line.strip_prefix("glob:"));
         if let Some(v) = value {
             let v = v.trim().trim_start_matches('[').trim_end_matches(']');
             for g in v.split(',') {
@@ -398,7 +404,10 @@ mod tests {
         let root_pos = result.find("root section").unwrap();
         let mid_pos = result.find("mid section").unwrap();
         let leaf_pos = result.find("leaf section").unwrap();
-        assert!(root_pos < mid_pos && mid_pos < leaf_pos, "order must be root→mid→leaf, got: {result}");
+        assert!(
+            root_pos < mid_pos && mid_pos < leaf_pos,
+            "order must be root→mid→leaf, got: {result}"
+        );
     }
 
     // Serialize tests that override HOME to prevent parallel-test interference.

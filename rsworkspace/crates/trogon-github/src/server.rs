@@ -4,10 +4,7 @@ use std::time::Duration;
 use crate::config::GithubConfig;
 use crate::signature;
 use async_nats::jetstream::stream;
-use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
-};
+use axum::{Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post};
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
 use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
@@ -40,10 +37,7 @@ pub async fn serve(
     serve_impl(config, NatsJetStreamClient::new(jetstream::new(nats))).await
 }
 
-async fn serve_impl<J>(
-    config: GithubConfig,
-    js: J,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+async fn serve_impl<J>(config: GithubConfig, js: J) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
     <J as JetStreamContext>::Error: 'static,
@@ -113,18 +107,12 @@ async fn handle_health() -> StatusCode {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook<J>(
-    State(state): State<AppState<J>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode
+async fn handle_webhook<J>(State(state): State<AppState<J>>, headers: HeaderMap, body: Bytes) -> StatusCode
 where
     J: JetStreamPublisher + Clone + Send + Sync + 'static,
 {
     if let Some(secret) = &state.webhook_secret {
-        let sig = headers
-            .get("x-hub-signature-256")
-            .and_then(|v| v.to_str().ok());
+        let sig = headers.get("x-hub-signature-256").and_then(|v| v.to_str().ok());
 
         match sig {
             Some(sig) if signature::verify(secret, &body, sig) => {}
@@ -165,30 +153,21 @@ where
     nats_headers.insert("X-GitHub-Event", event.as_str());
     nats_headers.insert("X-GitHub-Delivery", delivery.as_str());
 
-    match state
-        .js
-        .publish_with_headers(subject.clone(), nats_headers, body)
-        .await
-    {
-        Ok(ack_future) => {
-            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
-                Ok(Ok(_)) => {
-                    info!("Published GitHub event to NATS");
-                    StatusCode::OK
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-                Err(_) => {
-                    warn!(
-                        ack_timeout_ms = state.ack_timeout.as_millis(),
-                        "NATS ack timed out"
-                    );
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
+    match state.js.publish_with_headers(subject.clone(), nats_headers, body).await {
+        Ok(ack_future) => match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
+            Ok(Ok(_)) => {
+                info!("Published GitHub event to NATS");
+                StatusCode::OK
             }
-        }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NATS ack failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Err(_) => {
+                warn!(ack_timeout_ms = state.ack_timeout.as_millis(), "NATS ack timed out");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        },
         Err(e) => {
             warn!(error = %e, "Failed to publish GitHub event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -241,12 +220,7 @@ mod tests {
             .with_state(state)
     }
 
-    fn webhook_request(
-        body: &[u8],
-        event: &str,
-        delivery: &str,
-        sig: Option<&str>,
-    ) -> Request<Body> {
+    fn webhook_request(body: &[u8], event: &str, delivery: &str, sig: Option<&str>) -> Request<Body> {
         let mut builder = Request::builder()
             .method("POST")
             .uri("/webhook")
@@ -287,10 +261,7 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].subject, "github.push");
         assert_eq!(msgs[0].payload, bytes::Bytes::from(body.as_ref()));
-        assert_eq!(
-            msgs[0].headers.get("X-GitHub-Event").map(|v| v.as_str()),
-            Some("push")
-        );
+        assert_eq!(msgs[0].headers.get("X-GitHub-Event").map(|v| v.as_str()), Some("push"));
         assert_eq!(
             msgs[0].headers.get("X-GitHub-Delivery").map(|v| v.as_str()),
             Some("del-1")
@@ -302,12 +273,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let resp = app
-            .oneshot(webhook_request(
-                b"{}",
-                "push",
-                "del-2",
-                Some("sha256=deadbeef"),
-            ))
+            .oneshot(webhook_request(b"{}", "push", "del-2", Some("sha256=deadbeef")))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -455,9 +421,7 @@ mod tests {
             type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
             fn into_future(self) -> Self::IntoFuture {
                 match self {
-                    AckFuture::Fail => {
-                        Box::pin(async { Err(MockError("simulated ack failure".to_string())) })
-                    }
+                    AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
                     AckFuture::Hang => Box::pin(std::future::pending()),
                 }
             }
@@ -533,9 +497,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 

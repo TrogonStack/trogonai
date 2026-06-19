@@ -2,11 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use acp_nats::prompt_event::PromptEvent;
 use agent_client_protocol::{
-    ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, Plan, PlanEntry,
-    PlanEntryPriority, PlanEntryStatus, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOption, SessionModeId, SessionNotification, SessionUpdate, ToolCall,
-    ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind, UsageUpdate,
+    ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, Plan, PlanEntry, PlanEntryPriority,
+    PlanEntryStatus, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, SessionModeId,
+    SessionNotification, SessionUpdate, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
 
 /// Fallback context-window size (tokens) used when the runner does not report one.
@@ -66,28 +65,23 @@ impl PromptEventConverter {
     /// Returns `(notifications, outcome)`. When `outcome` is `Some`, this is the
     /// last event and no more events should be processed.
     #[cfg_attr(coverage, coverage(off))]
-    pub fn convert(
-        &mut self,
-        event: PromptEvent,
-    ) -> (Vec<SessionNotification>, Option<PromptOutcome>) {
+    pub fn convert(&mut self, event: PromptEvent) -> (Vec<SessionNotification>, Option<PromptOutcome>) {
         match event {
             PromptEvent::TextDelta { text } => {
-                let notif = self.notif(SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                    ContentBlock::from(text),
-                )));
+                let notif = self.notif(SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
+                    text,
+                ))));
                 (vec![notif], None)
             }
 
             PromptEvent::ThinkingDelta { text } => {
-                let notif = self.notif(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
-                    ContentBlock::from(text),
-                )));
+                let notif = self.notif(SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::from(
+                    text,
+                ))));
                 (vec![notif], None)
             }
 
-            PromptEvent::Done { stop_reason } => {
-                (vec![], Some(PromptOutcome::Done { stop_reason }))
-            }
+            PromptEvent::Done { stop_reason } => (vec![], Some(PromptOutcome::Done { stop_reason })),
 
             PromptEvent::Error { message } => (vec![], Some(PromptOutcome::Error { message })),
 
@@ -99,21 +93,19 @@ impl PromptEventConverter {
                 context_window,
                 ..
             } => {
-                let used =
-                    (input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens)
-                        as u64;
+                let used = (input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens) as u64;
                 let size = context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW);
                 let notif = self.notif(SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)));
                 (vec![notif], None)
             }
 
             PromptEvent::ModeChanged { mode, model } => {
-                let mode_notif = self.notif(SessionUpdate::CurrentModeUpdate(
-                    CurrentModeUpdate::new(SessionModeId::from(mode.clone())),
-                ));
-                let cfg_notif = self.notif(SessionUpdate::ConfigOptionUpdate(
-                    ConfigOptionUpdate::new(build_plan_mode_config_options(&mode, &model)),
-                ));
+                let mode_notif = self.notif(SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(
+                    SessionModeId::from(mode.clone()),
+                )));
+                let cfg_notif = self.notif(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+                    build_plan_mode_config_options(&mode, &model),
+                )));
                 (vec![mode_notif, cfg_notif], None)
             }
 
@@ -121,9 +113,9 @@ impl PromptEventConverter {
                 let text = system_status_to_text(&message);
                 match text {
                     Some(t) => {
-                        let notif = self.notif(SessionUpdate::AgentMessageChunk(
-                            ContentChunk::new(ContentBlock::from(t)),
-                        ));
+                        let notif = self.notif(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                            ContentBlock::from(t),
+                        )));
                         (vec![notif], None)
                     }
                     None => (vec![], None),
@@ -148,8 +140,7 @@ impl PromptEventConverter {
                     return (vec![notif], None);
                 }
 
-                self.tool_cache
-                    .insert(id.clone(), (name.clone(), input.clone()));
+                self.tool_cache.insert(id.clone(), (name.clone(), input.clone()));
 
                 let kind = tool_kind_for(&name);
                 let locations = tool_locations_from_input(&name, &input);
@@ -195,16 +186,8 @@ impl PromptEventConverter {
 
                 let fields = ToolCallUpdateFields::new()
                     .status(status)
-                    .content(if content.is_empty() {
-                        None
-                    } else {
-                        Some(content)
-                    })
-                    .locations(if locations.is_empty() {
-                        None
-                    } else {
-                        Some(locations)
-                    })
+                    .content(if content.is_empty() { None } else { Some(content) })
+                    .locations(if locations.is_empty() { None } else { Some(locations) })
                     .raw_output(serde_json::Value::String(output));
 
                 let update = ToolCallUpdate::new(ToolCallId::new(id), fields).meta(meta);
@@ -263,15 +246,9 @@ fn tool_locations_from_input(name: &str, input: &serde_json::Value) -> Vec<ToolC
 }
 
 #[cfg_attr(coverage, coverage(off))]
-fn build_tool_call_meta(
-    tool_name: &str,
-    parent_tool_use_id: Option<&str>,
-) -> Option<agent_client_protocol::Meta> {
+fn build_tool_call_meta(tool_name: &str, parent_tool_use_id: Option<&str>) -> Option<agent_client_protocol::Meta> {
     let mut claude_code = serde_json::Map::new();
-    claude_code.insert(
-        "toolName".to_string(),
-        serde_json::Value::String(tool_name.to_string()),
-    );
+    claude_code.insert("toolName".to_string(), serde_json::Value::String(tool_name.to_string()));
     if let Some(parent_id) = parent_tool_use_id {
         claude_code.insert(
             "parentToolUseId".to_string(),
@@ -279,10 +256,7 @@ fn build_tool_call_meta(
         );
     }
     let mut meta = serde_json::Map::new();
-    meta.insert(
-        "claudeCode".to_string(),
-        serde_json::Value::Object(claude_code),
-    );
+    meta.insert("claudeCode".to_string(), serde_json::Value::Object(claude_code));
     Some(meta)
 }
 
@@ -306,11 +280,7 @@ fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry
             Some(PlanEntry::new(content, priority, status))
         })
         .collect();
-    if entries.is_empty() {
-        None
-    } else {
-        Some(entries)
-    }
+    if entries.is_empty() { None } else { Some(entries) }
 }
 
 #[cfg_attr(coverage, coverage(off))]
@@ -413,10 +383,7 @@ fn tool_result_content(
                 return (vec![], vec![]);
             };
             let content: Vec<ToolCallContent> = if status == ToolCallStatus::Completed {
-                let new_text = input
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(output);
+                let new_text = input.get("content").and_then(|v| v.as_str()).unwrap_or(output);
                 vec![ToolCallContent::from(agent_client_protocol::Diff::new(
                     file_path, new_text,
                 ))]
@@ -494,10 +461,7 @@ mod tests {
         let meta = build_tool_call_meta("Read", Some("parent-id-42")).unwrap();
         let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
         assert_eq!(cc.get("toolName").and_then(|v| v.as_str()), Some("Read"));
-        assert_eq!(
-            cc.get("parentToolUseId").and_then(|v| v.as_str()),
-            Some("parent-id-42")
-        );
+        assert_eq!(cc.get("parentToolUseId").and_then(|v| v.as_str()), Some("parent-id-42"));
     }
 
     // ── todo_write_to_plan_entries ────────────────────────────────────────────
@@ -514,7 +478,8 @@ mod tests {
 
     #[test]
     fn todo_write_to_plan_entries_basic_entry() {
-        let input = serde_json::json!({"todos": [{"content": "do something", "status": "pending", "priority": "high"}]});
+        let input =
+            serde_json::json!({"todos": [{"content": "do something", "status": "pending", "priority": "high"}]});
         let entries = todo_write_to_plan_entries(&input).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].content, "do something");
@@ -650,8 +615,7 @@ mod tests {
     #[test]
     fn tool_result_content_write_uses_output_when_no_content_field() {
         let input = serde_json::json!({"file_path": "/out/file.txt"});
-        let (content, locs) =
-            tool_result_content("Write", &input, "fallback output", ToolCallStatus::Completed);
+        let (content, locs) = tool_result_content("Write", &input, "fallback output", ToolCallStatus::Completed);
         assert_eq!(content.len(), 1);
         assert_eq!(locs.len(), 1);
     }
@@ -659,8 +623,7 @@ mod tests {
     #[test]
     fn tool_result_content_read_completed_returns_fenced_content_and_location() {
         let input = serde_json::json!({"file_path": "/src/lib.rs"});
-        let (content, locs) =
-            tool_result_content("Read", &input, "fn main() {}", ToolCallStatus::Completed);
+        let (content, locs) = tool_result_content("Read", &input, "fn main() {}", ToolCallStatus::Completed);
         assert_eq!(content.len(), 1);
         assert_eq!(locs.len(), 1);
         assert_eq!(locs[0].path.to_str().unwrap(), "/src/lib.rs");
@@ -677,8 +640,7 @@ mod tests {
     #[test]
     fn tool_result_content_default_tool_returns_empty() {
         let input = serde_json::json!({});
-        let (content, locs) =
-            tool_result_content("Bash", &input, "output", ToolCallStatus::Completed);
+        let (content, locs) = tool_result_content("Bash", &input, "output", ToolCallStatus::Completed);
         assert!(content.is_empty());
         assert!(locs.is_empty());
     }
@@ -735,10 +697,7 @@ mod tests {
     fn markdown_fence_plain_text_uses_triple_backtick() {
         let fenced = markdown_fence("hello world");
         assert!(fenced.starts_with("```\n"), "expected ```, got: {fenced}");
-        assert!(
-            fenced.ends_with("\n```"),
-            "expected trailing ```, got: {fenced}"
-        );
+        assert!(fenced.ends_with("\n```"), "expected trailing ```, got: {fenced}");
         assert!(fenced.contains("hello world"));
     }
 

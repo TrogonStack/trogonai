@@ -32,12 +32,7 @@ use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiSessionNoti
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-async fn start_nats() -> (
-    ContainerAsync<Nats>,
-    async_nats::Client,
-    jetstream::Context,
-    u16,
-) {
+async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context, u16) {
     let container = Nats::default()
         .with_cmd(["--jetstream"])
         .start()
@@ -76,7 +71,11 @@ fn make_agent_loop() -> AgentLoop {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             web_search_api_key: None,
-            web_search_endpoint: None, proxy_url: String::new(), cwd: String::new(), http_client: reqwest::Client::new() }),
+            web_search_endpoint: None,
+            proxy_url: String::new(),
+            cwd: String::new(),
+            http_client: reqwest::Client::new(),
+        }),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -119,21 +118,19 @@ async fn start_rpc_server(nats: async_nats::Client, js: jetstream::Context) -> N
         let (_, io_task) = AgentSideNatsConnection::new(ta, nats, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
     tokio::time::sleep(Duration::from_millis(500)).await;
     verification_store
 }
 
-async fn start_ws_server(
-    nats_port: u16,
-) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
+async fn start_ws_server(nats_port: u16) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
     let nats_client = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("connect to NATS for WS bridge");
-    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(
-        async_nats::jetstream::new(nats_client.clone()),
-    );
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let config = make_config(nats_port);
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let (conn_tx, conn_rx) = mpsc::unbounded_channel::<ConnectionRequest>();
@@ -167,9 +164,7 @@ async fn start_ws_server(
     (format!("ws://{addr}/ws"), shutdown_tx, conn_thread)
 }
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Read the next Text message from a WS stream, skipping non-Text frames.
 async fn next_text(ws: &mut WsStream) -> String {
@@ -218,13 +213,9 @@ async fn start_xai_agent(nats: async_nats::Client, mock: Arc<MockXaiHttpClient>)
             let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
             let notifier = XaiSessionNotifier::new(nats.clone(), prefix.clone());
             let agent = XaiAgent::with_deps(notifier, "grok-4", "dummy", mock);
-            let (_, io_task) = AgentSideNatsConnection::with_jetstream(
-                agent,
-                nats,
-                js_client,
-                prefix,
-                |fut| { tokio::task::spawn_local(fut); },
-            );
+            let (_, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js_client, prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             io_task.await.ok();
         }));
     });
@@ -257,13 +248,9 @@ async fn start_codex_agent(nats: async_nats::Client) {
             let prefix = AcpPrefix::new("acp").unwrap();
             let js_client = NatsJetStreamClient::new(jetstream::new(nats.clone()));
             let agent = DefaultCodexAgent::with_nats(nats.clone(), prefix.clone(), "o4-mini");
-            let (_, io_task) = AgentSideNatsConnection::with_jetstream(
-                agent,
-                nats,
-                js_client,
-                prefix,
-                |fut| { tokio::task::spawn_local(fut); },
-            );
+            let (_, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js_client, prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             io_task.await.ok();
         }));
     });
@@ -366,9 +353,7 @@ async fn e2e_list_sessions_returns_created_sessions() {
 
     let val: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(val["id"], 5);
-    let sessions = val["result"]["sessions"]
-        .as_array()
-        .expect("must have sessions array");
+    let sessions = val["result"]["sessions"].as_array().expect("must have sessions array");
     assert_eq!(sessions.len(), 2, "expected 2 sessions: {text}");
 
     shutdown_tx.send(true).unwrap();
@@ -384,8 +369,7 @@ async fn e2e_authenticate_returns_ok() {
 
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
 
-    let req =
-        r#"{"jsonrpc":"2.0","id":6,"method":"authenticate","params":{"methodId":"password"}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":6,"method":"authenticate","params":{"methodId":"password"}}"#;
     ws.send(Message::Text(req.into())).await.unwrap();
 
     let text = tokio::time::timeout(Duration::from_secs(10), next_text(&mut ws))
@@ -410,7 +394,9 @@ async fn e2e_ws_prompt_returns_stop_reason() {
 
     let mock = Arc::new(MockXaiHttpClient::default());
     mock.push_response(vec![
-        XaiEvent::TextDelta { text: "hello from ws".to_string() },
+        XaiEvent::TextDelta {
+            text: "hello from ws".to_string(),
+        },
         XaiEvent::Done,
     ]);
     start_xai_agent(nats, mock).await;
@@ -452,9 +438,7 @@ async fn e2e_ws_prompt_returns_stop_reason() {
             "prompt": [{"type": "text", "text": "ping"}]
         }
     });
-    ws.send(Message::Text(prompt_msg.to_string().into()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(prompt_msg.to_string().into())).await.unwrap();
 
     let prompt_val = next_with_id(&mut ws, 3).await;
     assert!(
@@ -509,9 +493,7 @@ async fn e2e_ws_session_load_reconnects_to_existing_session() {
             "mcpServers": []
         }
     });
-    ws.send(Message::Text(load_msg.to_string().into()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(load_msg.to_string().into())).await.unwrap();
 
     let load_val = next_with_id(&mut ws, 3).await;
     assert!(
@@ -536,7 +518,9 @@ async fn e2e_ws_cancel_accepted_and_prompt_completes() {
     setup_streams(&js).await;
     let mock = Arc::new(MockXaiHttpClient::default());
     mock.push_response(vec![
-        XaiEvent::TextDelta { text: "pong".to_string() },
+        XaiEvent::TextDelta {
+            text: "pong".to_string(),
+        },
         XaiEvent::Done,
     ]);
     start_xai_agent(nats, mock).await;
@@ -974,8 +958,14 @@ async fn e2e_ws_codex_set_session_mode() {
     ws.send(Message::Text(msg.to_string().into())).await.unwrap();
 
     let val = next_with_id(&mut ws, 3).await;
-    assert!(val["result"].is_object(), "session/set_mode must return a result: {val}");
-    assert!(val["error"].is_null(), "session/set_mode must not return an error: {val}");
+    assert!(
+        val["result"].is_object(),
+        "session/set_mode must return a result: {val}"
+    );
+    assert!(
+        val["error"].is_null(),
+        "session/set_mode must not return an error: {val}"
+    );
 
     shutdown_tx.send(true).unwrap();
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;
@@ -1019,8 +1009,14 @@ async fn e2e_ws_codex_set_session_model() {
     ws.send(Message::Text(msg.to_string().into())).await.unwrap();
 
     let val = next_with_id(&mut ws, 3).await;
-    assert!(val["result"].is_object(), "session/set_model must return a result: {val}");
-    assert!(val["error"].is_null(), "session/set_model must not return an error: {val}");
+    assert!(
+        val["result"].is_object(),
+        "session/set_model must return a result: {val}"
+    );
+    assert!(
+        val["error"].is_null(),
+        "session/set_model must not return an error: {val}"
+    );
 
     shutdown_tx.send(true).unwrap();
     let _ = tokio::task::spawn_blocking(move || conn_thread.join()).await;

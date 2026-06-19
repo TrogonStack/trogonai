@@ -7,11 +7,11 @@
 //! Run with:
 //!   cargo test -p trogon-runner-tools --test spawn_session_tests
 
-use agent_client_protocol::{NewSessionResponse, PromptResponse, SessionId, StopReason};
 use acp_nats::{AcpPrefix, Bridge, Config};
+use agent_client_protocol::{NewSessionResponse, PromptResponse, SessionId, StopReason};
 use trogon_nats::jetstream::{
-    JetStreamGetStream, JetStreamPublisher, MockJetStreamConsumerFactory,
-    MockJetStreamConsumer, MockJetStreamPublisher, MockJetStreamStream, MockJsMessage,
+    JetStreamGetStream, JetStreamPublisher, MockJetStreamConsumer, MockJetStreamConsumerFactory,
+    MockJetStreamPublisher, MockJetStreamStream, MockJsMessage,
 };
 use trogon_nats::{AdvancedMockNatsClient, NatsAuth, NatsConfig};
 use trogon_runner_tools::spawn_session::{create_sub_session, run_sub_session};
@@ -52,10 +52,7 @@ impl JetStreamGetStream for MockJs {
     type Error = async_nats::jetstream::context::GetStreamError;
     type Stream = MockJetStreamStream;
 
-    async fn get_stream<T: AsRef<str> + Send>(
-        &self,
-        stream_name: T,
-    ) -> Result<MockJetStreamStream, Self::Error> {
+    async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<MockJetStreamStream, Self::Error> {
         self.consumer_factory.get_stream(stream_name).await
     }
 }
@@ -163,7 +160,11 @@ async fn create_sub_session_bypass_mode_applies_set_session_mode() {
     );
 
     let result = create_sub_session(&bridge, "/tmp", "bypassPermissions", None, None, None, None).await;
-    assert!(result.is_ok(), "expected Ok in bypassPermissions mode, got: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "expected Ok in bypassPermissions mode, got: {:?}",
+        result.unwrap_err()
+    );
     assert_eq!(result.unwrap(), session_id.to_string());
 }
 
@@ -198,7 +199,13 @@ async fn run_sub_session_returns_ok_on_success() {
     // close_session also uses JetStream (one more get_stream call).
     enqueue_js_response(&js, &agent_client_protocol::CloseSessionResponse::new());
 
-    let result = run_sub_session(&bridge, "sess-run-001", "hello from test", std::time::Duration::from_secs(30)).await;
+    let result = run_sub_session(
+        &bridge,
+        "sess-run-001",
+        "hello from test",
+        std::time::Duration::from_secs(30),
+    )
+    .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
@@ -213,7 +220,13 @@ async fn run_sub_session_returns_error_on_prompt_failure() {
     let (_mock, _js, bridge) = make_mock_bridge("acp");
 
     // No JetStream responses — prompt will fail immediately.
-    let result = run_sub_session(&bridge, "sess-run-002", "fail prompt", std::time::Duration::from_secs(30)).await;
+    let result = run_sub_session(
+        &bridge,
+        "sess-run-002",
+        "fail prompt",
+        std::time::Duration::from_secs(30),
+    )
+    .await;
 
     assert!(result.is_err(), "expected Err when prompt fails");
     assert!(

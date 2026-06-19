@@ -18,10 +18,9 @@ use acp_nats::AcpPrefix;
 use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    Agent as _, CloseSessionRequest, ContentBlock, CreateTerminalResponse, ExtRequest,
-    ForkSessionRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, PromptResponse,
-    SessionConfigKind, SessionId, SetSessionConfigOptionRequest, SetSessionModelRequest,
-    TerminalOutputResponse,
+    Agent as _, CloseSessionRequest, ContentBlock, CreateTerminalResponse, ExtRequest, ForkSessionRequest,
+    LoadSessionRequest, NewSessionRequest, PromptRequest, PromptResponse, SessionConfigKind, SessionId,
+    SetSessionConfigOptionRequest, SetSessionModelRequest, TerminalOutputResponse,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -31,8 +30,7 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_openrouter_runner::{
-    AssembledToolCall, Message, NatsSessionNotifier, OpenRouterAgent, OpenRouterEvent,
-    OpenRouterHttpClient, ToolDef,
+    AssembledToolCall, Message, NatsSessionNotifier, OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, ToolDef,
 };
 
 // ── No-op HTTP client stub ────────────────────────────────────────────────────
@@ -81,7 +79,9 @@ async fn start_agent(nats: async_nats::Client) {
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats_for_thread, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 }
@@ -157,7 +157,9 @@ async fn e2e_ext_session_get_state_returns_cwd() {
     .expect("timed out waiting for session/new")
     .expect("NATS request failed");
     let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
-    let session_id = new_resp["sessionId"].as_str().expect("session/new must return sessionId");
+    let session_id = new_resp["sessionId"]
+        .as_str()
+        .expect("session/new must return sessionId");
 
     let ext_payload = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap();
     let ext_msg = tokio::time::timeout(
@@ -250,7 +252,9 @@ async fn openrouter_runner_registers_with_model_ids_in_metadata() {
         .expect("get must not error")
         .expect("registered entry must exist");
 
-    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let models = entry.metadata["models"]
+        .as_array()
+        .expect("metadata.models must be array");
     let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         model_strings.contains(&"anthropic/claude-3-5-sonnet"),
@@ -309,8 +313,16 @@ async fn find_by_model_returns_correct_runner_for_multi_runner_registry() {
         .expect("register codex");
 
     // grok-4 → xai
-    let xai = registry.find_by_model("grok-4").await.unwrap().expect("grok-4 must resolve");
-    assert_eq!(xai.agent_type, "xai", "grok-4 must route to xai; got: {}", xai.agent_type);
+    let xai = registry
+        .find_by_model("grok-4")
+        .await
+        .unwrap()
+        .expect("grok-4 must resolve");
+    assert_eq!(
+        xai.agent_type, "xai",
+        "grok-4 must route to xai; got: {}",
+        xai.agent_type
+    );
     assert_eq!(xai.metadata["acp_prefix"].as_str(), Some("acp.xai"));
 
     // anthropic/claude-3-5-sonnet → openrouter
@@ -331,7 +343,11 @@ async fn find_by_model_returns_correct_runner_for_multi_runner_registry() {
     assert_eq!(or2.agent_type, "openrouter", "gpt-4o must route to openrouter");
 
     // o4-mini → codex
-    let codex = registry.find_by_model("o4-mini").await.unwrap().expect("o4-mini must resolve");
+    let codex = registry
+        .find_by_model("o4-mini")
+        .await
+        .unwrap()
+        .expect("o4-mini must resolve");
     assert_eq!(codex.agent_type, "codex", "o4-mini must route to codex");
     assert_eq!(codex.metadata["acp_prefix"].as_str(), Some("acp.codex"));
 
@@ -363,7 +379,10 @@ async fn provision_streams_is_idempotent() {
     assert!(first.is_ok(), "first provision_streams call must succeed: {first:?}");
 
     let second = provision_streams(&js, &prefix).await;
-    assert!(second.is_ok(), "second provision_streams call must succeed (idempotent): {second:?}");
+    assert!(
+        second.is_ok(),
+        "second provision_streams call must succeed (idempotent): {second:?}"
+    );
 }
 
 // ── QueuedHttpClient: returns canned responses for bash e2e test ──────────────
@@ -375,7 +394,9 @@ struct QueuedHttpClient {
 
 impl QueuedHttpClient {
     fn new() -> Self {
-        Self { queue: Arc::new(Mutex::new(VecDeque::new())) }
+        Self {
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+        }
     }
 
     fn push(&self, events: Vec<OpenRouterEvent>) {
@@ -421,10 +442,22 @@ async fn execute_bash_via_nats_delivers_output() {
     registry.register(&exec_cap).await.unwrap();
 
     // Subscribe to terminal NATS subjects and reply with mock output
-    let mut sub_create = nats.subscribe("acp.wasm.session.*.client.terminal.create").await.unwrap();
-    let mut sub_wait = nats.subscribe("acp.wasm.session.*.client.terminal.wait_for_exit").await.unwrap();
-    let mut sub_output = nats.subscribe("acp.wasm.session.*.client.terminal.output").await.unwrap();
-    let mut sub_release = nats.subscribe("acp.wasm.session.*.client.terminal.release").await.unwrap();
+    let mut sub_create = nats
+        .subscribe("acp.wasm.session.*.client.terminal.create")
+        .await
+        .unwrap();
+    let mut sub_wait = nats
+        .subscribe("acp.wasm.session.*.client.terminal.wait_for_exit")
+        .await
+        .unwrap();
+    let mut sub_output = nats
+        .subscribe("acp.wasm.session.*.client.terminal.output")
+        .await
+        .unwrap();
+    let mut sub_release = nats
+        .subscribe("acp.wasm.session.*.client.terminal.release")
+        .await
+        .unwrap();
 
     let nats_responder = nats.clone();
     tokio::spawn(async move {
@@ -466,7 +499,9 @@ async fn execute_bash_via_nats_delivers_output() {
             arguments: r#"{"command":"echo hello"}"#.to_string(),
         }],
     }]);
-    http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "done".to_string(),
+    }]);
 
     // Start agent with execution backend on a separate thread
     let http_for_agent = http.clone();
@@ -484,7 +519,9 @@ async fn execute_bash_via_nats_delivers_output() {
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats_for_agent, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -502,10 +539,8 @@ async fn execute_bash_via_nats_delivers_output() {
 
     // Send prompt that triggers bash tool call
     let prompt_subj = format!("acp.session.{sid}.agent.prompt");
-    let prompt_payload = serde_json::to_vec(
-        &PromptRequest::new(sid.clone(), vec![ContentBlock::from("run bash")]),
-    )
-    .unwrap();
+    let prompt_payload =
+        serde_json::to_vec(&PromptRequest::new(sid.clone(), vec![ContentBlock::from("run bash")])).unwrap();
     let resp_msg = tokio::time::timeout(
         Duration::from_secs(15),
         nats.request(prompt_subj, prompt_payload.into()),
@@ -514,11 +549,10 @@ async fn execute_bash_via_nats_delivers_output() {
     .expect("timed out waiting for prompt response after bash execution")
     .expect("NATS request failed");
 
-    let resp: PromptResponse = serde_json::from_slice(&resp_msg.payload)
-        .unwrap_or_else(|e| {
-            let raw = String::from_utf8_lossy(&resp_msg.payload);
-            panic!("failed to parse PromptResponse: {e}\nraw: {raw}");
-        });
+    let resp: PromptResponse = serde_json::from_slice(&resp_msg.payload).unwrap_or_else(|e| {
+        let raw = String::from_utf8_lossy(&resp_msg.payload);
+        panic!("failed to parse PromptResponse: {e}\nraw: {raw}");
+    });
     assert!(
         matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn),
         "bash e2e must complete with EndTurn: {:?}",
@@ -552,8 +586,8 @@ async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
     // ── Agent 1: create session, disable read_file, close ─────────────────────
     let session_id = {
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-        let agent1 = OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient)
-            .with_session_store(store.clone());
+        let agent1 =
+            OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient).with_session_store(store.clone());
 
         tokio::task::LocalSet::new()
             .run_until(async move {
@@ -564,11 +598,7 @@ async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
                 let sid = new_resp.session_id.clone();
 
                 agent1
-                    .set_session_config_option(SetSessionConfigOptionRequest::new(
-                        sid.clone(),
-                        "read_file",
-                        "disabled",
-                    ))
+                    .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "disabled"))
                     .await
                     .expect("set_config_option");
 
@@ -585,16 +615,13 @@ async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
 
     // ── Agent 2: fresh instance, same store, no sessions in memory ────────────
     let notifier2 = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-    let agent2 = OpenRouterAgent::with_deps(notifier2, "test-model", "", NoOpHttpClient)
-        .with_session_store(store.clone());
+    let agent2 =
+        OpenRouterAgent::with_deps(notifier2, "test-model", "", NoOpHttpClient).with_session_store(store.clone());
 
     tokio::task::LocalSet::new()
         .run_until(async move {
             let load_resp = agent2
-                .load_session(LoadSessionRequest::new(
-                    SessionId::from(session_id.clone()),
-                    "/",
-                ))
+                .load_session(LoadSessionRequest::new(SessionId::from(session_id.clone()), "/"))
                 .await
                 .expect("load_session must succeed via KV fallback");
 
@@ -648,8 +675,8 @@ async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
     // Agent 1: new_session → disable read_file → fork_session (saves fork snapshot to KV)
     let fork_id = {
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-        let agent1 = OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient)
-            .with_session_store(store.clone());
+        let agent1 =
+            OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient).with_session_store(store.clone());
 
         tokio::task::LocalSet::new()
             .run_until(async move {
@@ -680,8 +707,8 @@ async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
 
     // Agent 2: fresh instance, same store, load fork session
     let notifier2 = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-    let agent2 = OpenRouterAgent::with_deps(notifier2, "test-model", "", NoOpHttpClient)
-        .with_session_store(store.clone());
+    let agent2 =
+        OpenRouterAgent::with_deps(notifier2, "test-model", "", NoOpHttpClient).with_session_store(store.clone());
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -718,7 +745,9 @@ struct RecordingHttpClient {
 
 impl RecordingHttpClient {
     fn new() -> Self {
-        Self { calls: Arc::new(Mutex::new(Vec::new())) }
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 }
 
@@ -752,11 +781,13 @@ async fn history_and_model_survive_kv_round_trip() {
     // new_session → set_session_model → prompt (adds history) → close_session (saves to KV).
     let session_id = {
         let http = QueuedHttpClient::new();
-        http.push(vec![OpenRouterEvent::TextDelta { text: "Reply from AI".to_string() }]);
+        http.push(vec![OpenRouterEvent::TextDelta {
+            text: "Reply from AI".to_string(),
+        }]);
         let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
         // "saved-model" is agent1's default, so it passes set_session_model validation.
-        let agent1 = OpenRouterAgent::with_deps(notifier, "saved-model", "test-key", http)
-            .with_session_store(store.clone());
+        let agent1 =
+            OpenRouterAgent::with_deps(notifier, "saved-model", "test-key", http).with_session_store(store.clone());
 
         tokio::task::LocalSet::new()
             .run_until(async move {
@@ -772,7 +803,10 @@ async fn history_and_model_survive_kv_round_trip() {
                     .expect("set_session_model");
 
                 agent1
-                    .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("ask something")]))
+                    .prompt(PromptRequest::new(
+                        sid.clone(),
+                        vec![ContentBlock::from("ask something")],
+                    ))
                     .await
                     .expect("prompt");
 
@@ -791,8 +825,8 @@ async fn history_and_model_survive_kv_round_trip() {
     let recorder = RecordingHttpClient::new();
     let calls = recorder.calls.clone();
     let notifier2 = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-    let agent2 = OpenRouterAgent::with_deps(notifier2, "test-model", "test-key", recorder)
-        .with_session_store(store.clone());
+    let agent2 =
+        OpenRouterAgent::with_deps(notifier2, "test-model", "test-key", recorder).with_session_store(store.clone());
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -802,7 +836,8 @@ async fn history_and_model_survive_kv_round_trip() {
                 .expect("load_session must succeed via KV");
 
             // Model must come from the KV snapshot ("saved-model"), not from agent2's default ("test-model").
-            let restored_model = load_resp.models
+            let restored_model = load_resp
+                .models
                 .as_ref()
                 .map(|m| m.current_model_id.0.as_ref().to_string());
             assert_eq!(
@@ -820,7 +855,9 @@ async fn history_and_model_survive_kv_round_trip() {
                 .expect("follow-up prompt");
 
             let recorded = calls.lock().unwrap();
-            let msgs = recorded.last().expect("at least one chat_stream call must have been made");
+            let msgs = recorded
+                .last()
+                .expect("at least one chat_stream call must have been made");
             // The messages array sent to the API must include the prior turn's user + assistant
             // messages in addition to the new "follow-up" user message.
             assert!(
@@ -828,7 +865,8 @@ async fn history_and_model_survive_kv_round_trip() {
                 "restored history must include prior user message; messages: {msgs:?}"
             );
             assert!(
-                msgs.iter().any(|m| m.role == "assistant" && m.content == "Reply from AI"),
+                msgs.iter()
+                    .any(|m| m.role == "assistant" && m.content == "Reply from AI"),
                 "restored history must include prior assistant reply; messages: {msgs:?}"
             );
         })
@@ -878,8 +916,8 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
 
     // Agent: load_session → verify all trogon tools are restored
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient)
-        .with_session_store(store.clone());
+    let agent =
+        OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient).with_session_store(store.clone());
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -906,10 +944,7 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
                 enabled.contains(&"write_file".to_string()),
                 "write_file must be re-enabled from pre-fix snapshot"
             );
-            let all_names: Vec<String> = trogon_tools::all_tool_defs()
-                .iter()
-                .map(|d| d.name.clone())
-                .collect();
+            let all_names: Vec<String> = trogon_tools::all_tool_defs().iter().map(|d| d.name.clone()).collect();
             for name in &all_names {
                 assert!(
                     enabled.contains(name),
@@ -940,8 +975,8 @@ async fn ext_method_export_import_round_trip_with_nats_store() {
     );
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
-    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient)
-        .with_session_store(store.clone());
+    let agent =
+        OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient).with_session_store(store.clone());
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -959,12 +994,10 @@ async fn ext_method_export_import_round_trip_with_nats_store() {
                 .session_id;
 
             // ── 2. Import a message into sid1 ─────────────────────────────────
-            let import_params = serde_json::value::RawValue::from_string(
-                format!(
-                    r#"{{"sessionId":"{}","messages":[{{"role":"user","text":"nats test"}}]}}"#,
-                    sid1
-                ),
-            )
+            let import_params = serde_json::value::RawValue::from_string(format!(
+                r#"{{"sessionId":"{}","messages":[{{"role":"user","text":"nats test"}}]}}"#,
+                sid1
+            ))
             .unwrap();
             agent
                 .ext_method(ExtRequest::new("session/import", import_params.into()))
@@ -972,30 +1005,25 @@ async fn ext_method_export_import_round_trip_with_nats_store() {
                 .expect("session/import into sid1");
 
             // ── 3. Export from sid1 ───────────────────────────────────────────
-            let export1_params = serde_json::value::RawValue::from_string(
-                format!(r#"{{"sessionId":"{}"}}"#, sid1),
-            )
-            .unwrap();
+            let export1_params =
+                serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, sid1)).unwrap();
             let export1_resp = agent
                 .ext_method(ExtRequest::new("session/export", export1_params.into()))
                 .await
                 .expect("session/export from sid1");
 
             let portable1: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                serde_json::from_str(export1_resp.0.get())
-                    .expect("parse sid1 export as Vec<PortableMessage>");
+                serde_json::from_str(export1_resp.0.get()).expect("parse sid1 export as Vec<PortableMessage>");
             assert_eq!(portable1.len(), 1, "sid1 export must have 1 message");
             assert_eq!(portable1[0].role, "user", "sid1 message role must be user");
-            assert_eq!(
-                portable1[0].text, "nats test",
-                "sid1 message text must be 'nats test'"
-            );
+            assert_eq!(portable1[0].text, "nats test", "sid1 message text must be 'nats test'");
 
             // ── 4. Import sid1's export into sid2 ────────────────────────────
             let export1_json = export1_resp.0.get().to_string();
-            let import2_params = serde_json::value::RawValue::from_string(
-                format!(r#"{{"sessionId":"{}","messages":{}}}"#, sid2, export1_json),
-            )
+            let import2_params = serde_json::value::RawValue::from_string(format!(
+                r#"{{"sessionId":"{}","messages":{}}}"#,
+                sid2, export1_json
+            ))
             .unwrap();
             agent
                 .ext_method(ExtRequest::new("session/import", import2_params.into()))
@@ -1003,18 +1031,15 @@ async fn ext_method_export_import_round_trip_with_nats_store() {
                 .expect("session/import into sid2");
 
             // ── 5. Export from sid2 and verify same content ───────────────────
-            let export2_params = serde_json::value::RawValue::from_string(
-                format!(r#"{{"sessionId":"{}"}}"#, sid2),
-            )
-            .unwrap();
+            let export2_params =
+                serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"{}"}}"#, sid2)).unwrap();
             let export2_resp = agent
                 .ext_method(ExtRequest::new("session/export", export2_params.into()))
                 .await
                 .expect("session/export from sid2");
 
             let portable2: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                serde_json::from_str(export2_resp.0.get())
-                    .expect("parse sid2 export as Vec<PortableMessage>");
+                serde_json::from_str(export2_resp.0.get()).expect("parse sid2 export as Vec<PortableMessage>");
             assert_eq!(
                 portable2.len(),
                 portable1.len(),
@@ -1106,8 +1131,7 @@ async fn openrouter_bash_stateful_terminal_reused_on_second_call_same_session() 
     let wasm_prefix = "wasm";
 
     let registry = setup_openrouter_execution_registry(&nats, wasm_prefix).await;
-    let (create_count, _outputs) =
-        spawn_stateful_terminal_responder_openrouter(nats.clone(), wasm_prefix);
+    let (create_count, _outputs) = spawn_stateful_terminal_responder_openrouter(nats.clone(), wasm_prefix);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let http = QueuedHttpClient::new();
@@ -1119,7 +1143,9 @@ async fn openrouter_bash_stateful_terminal_reused_on_second_call_same_session() 
             arguments: r#"{"command":"echo a"}"#.to_string(),
         }],
     }]);
-    http.push(vec![OpenRouterEvent::TextDelta { text: "done 1".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "done 1".to_string(),
+    }]);
     // Prompt 2 (same session): bash call again
     http.push(vec![OpenRouterEvent::ToolCallsReady {
         calls: vec![AssembledToolCall {
@@ -1128,7 +1154,9 @@ async fn openrouter_bash_stateful_terminal_reused_on_second_call_same_session() 
             arguments: r#"{"command":"echo b"}"#.to_string(),
         }],
     }]);
-    http.push(vec![OpenRouterEvent::TextDelta { text: "done 2".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "done 2".to_string(),
+    }]);
 
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
@@ -1141,7 +1169,10 @@ async fn openrouter_bash_stateful_terminal_reused_on_second_call_same_session() 
             let sid = sess.session_id.to_string();
 
             let r1 = agent
-                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("first bash call")]))
+                .prompt(PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("first bash call")],
+                ))
                 .await
                 .unwrap();
             assert!(
@@ -1151,7 +1182,10 @@ async fn openrouter_bash_stateful_terminal_reused_on_second_call_same_session() 
             );
 
             let r2 = agent
-                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("second bash call")]))
+                .prompt(PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("second bash call")],
+                ))
                 .await
                 .unwrap();
             assert!(
@@ -1226,7 +1260,9 @@ async fn openrouter_bash_stateful_terminal_released_on_close_session() {
             arguments: r#"{"command":"echo hi"}"#.to_string(),
         }],
     }]);
-    http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "done".to_string(),
+    }]);
 
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
@@ -1244,12 +1280,12 @@ async fn openrouter_bash_stateful_terminal_released_on_close_session() {
                 .await
                 .unwrap();
 
-            assert!(!*released_check.lock().unwrap(), "release must not be sent before close_session");
+            assert!(
+                !*released_check.lock().unwrap(),
+                "release must not be sent before close_session"
+            );
 
-            agent
-                .close_session(CloseSessionRequest::new(sid))
-                .await
-                .unwrap();
+            agent.close_session(CloseSessionRequest::new(sid)).await.unwrap();
         })
         .await;
 
@@ -1290,7 +1326,9 @@ async fn openrouter_bash_stateful_no_release_when_no_bash_called() {
 
     // HTTP returns plain text — no bash call
     let http = QueuedHttpClient::new();
-    http.push(vec![OpenRouterEvent::TextDelta { text: "hello".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "hello".to_string(),
+    }]);
 
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
@@ -1308,10 +1346,7 @@ async fn openrouter_bash_stateful_no_release_when_no_bash_called() {
                 .await
                 .unwrap();
 
-            agent
-                .close_session(CloseSessionRequest::new(sid))
-                .await
-                .unwrap();
+            agent.close_session(CloseSessionRequest::new(sid)).await.unwrap();
 
             assert!(
                 !*released_check.lock().unwrap(),
@@ -1329,8 +1364,7 @@ async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
     let wasm_prefix = "wasm";
 
     let registry = setup_openrouter_execution_registry(&nats, wasm_prefix).await;
-    let (create_count, _outputs) =
-        spawn_stateful_terminal_responder_openrouter(nats.clone(), wasm_prefix);
+    let (create_count, _outputs) = spawn_stateful_terminal_responder_openrouter(nats.clone(), wasm_prefix);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let http = QueuedHttpClient::new();
@@ -1342,7 +1376,9 @@ async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
             arguments: r#"{"command":"echo parent"}"#.to_string(),
         }],
     }]);
-    http.push(vec![OpenRouterEvent::TextDelta { text: "parent done".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "parent done".to_string(),
+    }]);
     // Forked session: bash call (must create a NEW independent terminal)
     http.push(vec![OpenRouterEvent::ToolCallsReady {
         calls: vec![AssembledToolCall {
@@ -1351,7 +1387,9 @@ async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
             arguments: r#"{"command":"echo fork"}"#.to_string(),
         }],
     }]);
-    http.push(vec![OpenRouterEvent::TextDelta { text: "fork done".to_string() }]);
+    http.push(vec![OpenRouterEvent::TextDelta {
+        text: "fork done".to_string(),
+    }]);
 
     let prefix = AcpPrefix::new("acp").unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
@@ -1365,7 +1403,10 @@ async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
             let sid_a = sess_a.session_id.to_string();
 
             let r_a = agent
-                .prompt(PromptRequest::new(sid_a.clone(), vec![ContentBlock::from("parent bash")]))
+                .prompt(PromptRequest::new(
+                    sid_a.clone(),
+                    vec![ContentBlock::from("parent bash")],
+                ))
                 .await
                 .unwrap();
             assert!(
@@ -1386,7 +1427,10 @@ async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
             let sid_b = fork.session_id.to_string();
 
             let r_b = agent
-                .prompt(PromptRequest::new(sid_b.clone(), vec![ContentBlock::from("forked bash")]))
+                .prompt(PromptRequest::new(
+                    sid_b.clone(),
+                    vec![ContentBlock::from("forked bash")],
+                ))
                 .await
                 .unwrap();
             assert!(
@@ -1402,4 +1446,3 @@ async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
         })
         .await;
 }
-

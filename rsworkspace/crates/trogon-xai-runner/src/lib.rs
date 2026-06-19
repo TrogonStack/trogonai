@@ -1,7 +1,7 @@
 mod agent;
 pub mod agent_loader;
-pub mod compaction;
 mod client;
+pub mod compaction;
 mod http_client;
 mod session_notifier;
 pub mod session_store;
@@ -13,8 +13,7 @@ pub use client::{FinishReason, InputItem, Message, ToolSpec, XaiClient, XaiEvent
 pub use http_client::XaiHttpClient;
 pub use session_notifier::{NatsSessionNotifier, SessionNotifier};
 pub use session_store::{
-    DefaultSessionStore, NatsSessionStore, SessionStoring, open_default_session_store,
-    session_store_from_open,
+    DefaultSessionStore, NatsSessionStore, SessionStoring, open_default_session_store, session_store_from_open,
 };
 pub use skill_loader::{SkillLoader, SkillLoading};
 

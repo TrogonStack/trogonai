@@ -103,9 +103,7 @@ async fn binary_agent_starts_and_stays_alive_with_valid_config() {
     tokio::time::sleep(Duration::from_millis(800)).await;
 
     // The process must still be running — it should block waiting for events.
-    let exit = child
-        .try_wait()
-        .expect("Failed to poll agent process status");
+    let exit = child.try_wait().expect("Failed to poll agent process status");
     assert!(
         exit.is_none(),
         "Agent binary crashed during startup; exit status: {:?}",

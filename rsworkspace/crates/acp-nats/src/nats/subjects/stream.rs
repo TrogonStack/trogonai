@@ -151,14 +151,8 @@ mod tests {
     #[test]
     fn stream_name_replaces_dots_with_underscores() {
         let p = prefix("my.multi.part");
-        assert_eq!(
-            AcpStream::Commands.stream_name(&p),
-            "MY_MULTI_PART_COMMANDS"
-        );
-        assert_eq!(
-            AcpStream::GlobalExt.stream_name(&p),
-            "MY_MULTI_PART_GLOBAL_EXT"
-        );
+        assert_eq!(AcpStream::Commands.stream_name(&p), "MY_MULTI_PART_COMMANDS");
+        assert_eq!(AcpStream::GlobalExt.stream_name(&p), "MY_MULTI_PART_GLOBAL_EXT");
     }
 
     #[test]
@@ -170,10 +164,7 @@ mod tests {
         assert!(patterns.contains(&"acp.session.*.agent.cancel".to_string()));
         assert!(patterns.contains(&"acp.session.*.agent.load".to_string()));
         for pat in &patterns {
-            assert!(
-                pat.starts_with("acp."),
-                "every pattern must start with prefix: {pat}"
-            );
+            assert!(pat.starts_with("acp."), "every pattern must start with prefix: {pat}");
         }
     }
 
@@ -232,11 +223,7 @@ mod tests {
         let p = prefix("acp");
         for variant in AcpStream::ALL {
             let cfg = variant.config(&p);
-            assert_eq!(
-                cfg.name,
-                variant.stream_name(&p),
-                "config.name mismatch for {variant}"
-            );
+            assert_eq!(cfg.name, variant.stream_name(&p), "config.name mismatch for {variant}");
         }
     }
 

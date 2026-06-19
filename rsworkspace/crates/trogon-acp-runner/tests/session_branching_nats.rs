@@ -25,16 +25,14 @@
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent, ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
-    NewSessionRequest, ProtocolVersion,
+    Agent, ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest, NewSessionRequest, ProtocolVersion,
 };
 use async_nats::jetstream;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::RwLock;
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent,
-    agent_runner::mock::MockAgentRunner,
+    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent, agent_runner::mock::MockAgentRunner,
     session_notifier::mock::MockSessionNotifier,
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message};
@@ -102,11 +100,23 @@ async fn nats_session_store_list_children_returns_children() {
 
             // Save two direct children.
             store
-                .save(child1, &SessionState { parent_session_id: Some(parent_id.to_string()), ..Default::default() })
+                .save(
+                    child1,
+                    &SessionState {
+                        parent_session_id: Some(parent_id.to_string()),
+                        ..Default::default()
+                    },
+                )
                 .await
                 .unwrap();
             store
-                .save(child2, &SessionState { parent_session_id: Some(parent_id.to_string()), ..Default::default() })
+                .save(
+                    child2,
+                    &SessionState {
+                        parent_session_id: Some(parent_id.to_string()),
+                        ..Default::default()
+                    },
+                )
                 .await
                 .unwrap();
 
@@ -120,7 +130,10 @@ async fn nats_session_store_list_children_returns_children() {
 
             // Unrelated session must not appear.
             let children_of_unrelated = store.list_children(unrelated).await.unwrap();
-            assert!(children_of_unrelated.is_empty(), "unrelated session must have no children");
+            assert!(
+                children_of_unrelated.is_empty(),
+                "unrelated session must have no children"
+            );
         })
         .await;
 }
@@ -151,9 +164,7 @@ async fn fork_session_persists_parent_and_branch_index_to_nats_kv() {
             )
             .unwrap();
             let fork_id = agent
-                .fork_session(
-                    ForkSessionRequest::new(parent_id.clone(), "/fork").meta(meta),
-                )
+                .fork_session(ForkSessionRequest::new(parent_id.clone(), "/fork").meta(meta))
                 .await
                 .unwrap()
                 .session_id
@@ -363,8 +374,9 @@ async fn ext_list_children_missing_session_id_returns_empty_children() {
             let store = NatsSessionStore::open(&js).await.unwrap();
             let agent = make_agent(store);
 
-            let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string("{}".to_string()).unwrap().into();
+            let params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string("{}".to_string())
+                .unwrap()
+                .into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/list_children", params))
                 .await
@@ -502,10 +514,7 @@ async fn list_sessions_shows_parent_session_id_in_meta_with_real_store() {
                 .session_id
                 .to_string();
 
-            let list_resp = agent
-                .list_sessions(ListSessionsRequest::new())
-                .await
-                .unwrap();
+            let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             let fork_info = list_resp
                 .sessions
@@ -551,9 +560,7 @@ async fn fork_session_branch_at_index_wrong_type_persists_full_copy_to_nats_kv()
                 .to_string();
 
             let mut state = store.load(&parent_id).await.unwrap();
-            state.messages = (0..4)
-                .map(|i| Message::user_text(format!("msg-{i}")))
-                .collect();
+            state.messages = (0..4).map(|i| Message::user_text(format!("msg-{i}"))).collect();
             store.save(&parent_id, &state).await.unwrap();
 
             let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
@@ -574,8 +581,7 @@ async fn fork_session_branch_at_index_wrong_type_persists_full_copy_to_nats_kv()
                 "wrong-type branchAtIndex must be ignored — full history must be copied"
             );
             assert_eq!(
-                fork_state.branched_at_index,
-                None,
+                fork_state.branched_at_index, None,
                 "branched_at_index must be None when branchAtIndex had wrong type"
             );
         })
@@ -615,10 +621,7 @@ async fn list_sessions_preserves_parent_session_id_after_parent_deleted_with_rea
             let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
             assert!(
-                list_resp
-                    .sessions
-                    .iter()
-                    .all(|s| s.session_id.to_string() != parent_id),
+                list_resp.sessions.iter().all(|s| s.session_id.to_string() != parent_id),
                 "deleted parent must not appear in list_sessions"
             );
 
@@ -707,7 +710,10 @@ async fn fork_session_nonexistent_source_succeeds_with_real_store() {
                 Some("ghost-session-id"),
                 "fork must record the nonexistent parent session ID in NATS KV"
             );
-            assert!(fork_state.messages.is_empty(), "fork of nonexistent session must have empty history");
+            assert!(
+                fork_state.messages.is_empty(),
+                "fork of nonexistent session must have empty history"
+            );
         })
         .await;
 }
@@ -727,9 +733,7 @@ async fn ext_method_export_reads_from_nats_kv() {
             let state = SessionState {
                 messages: vec![
                     Message::user_text("question"),
-                    Message::assistant(vec![AgentContentBlock::Text {
-                        text: "answer".into(),
-                    }]),
+                    Message::assistant(vec![AgentContentBlock::Text { text: "answer".into() }]),
                 ],
                 ..Default::default()
             };
@@ -738,18 +742,15 @@ async fn ext_method_export_reads_from_nats_kv() {
             let agent = make_agent(store);
 
             let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({"sessionId": "export-kv-1"}).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({"sessionId": "export-kv-1"}).to_string())
+                    .unwrap()
+                    .into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/export", params))
                 .await
                 .unwrap();
 
-            let portable: Vec<PortableMessage> =
-                serde_json::from_str(resp.0.get()).unwrap();
+            let portable: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
 
             assert_eq!(portable.len(), 2, "must export exactly 2 messages");
             assert_eq!(portable[0].role, "user");
@@ -776,19 +777,16 @@ async fn ext_method_import_writes_to_nats_kv() {
 
             let agent = make_agent(store.clone());
 
-            let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({
-                        "sessionId": "import-kv-1",
-                        "messages": [{"role": "user", "text": "imported"}]
-                    })
-                    .to_string(),
-                )
-                .unwrap()
-                .into();
-            let result = agent
-                .ext_method(ExtRequest::new("session/import", params))
-                .await;
+            let params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(
+                serde_json::json!({
+                    "sessionId": "import-kv-1",
+                    "messages": [{"role": "user", "text": "imported"}]
+                })
+                .to_string(),
+            )
+            .unwrap()
+            .into();
+            let result = agent.ext_method(ExtRequest::new("session/import", params)).await;
             assert!(result.is_ok(), "import must succeed");
 
             let loaded = store.load("import-kv-1").await.unwrap();
@@ -833,30 +831,26 @@ async fn ext_method_export_import_round_trip_via_nats_kv() {
 
             // Export from source.
             let export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({"sessionId": "rt-src"}).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({"sessionId": "rt-src"}).to_string())
+                    .unwrap()
+                    .into();
             let export_resp = agent
                 .ext_method(ExtRequest::new("session/export", export_params))
                 .await
                 .unwrap();
 
-            let exported: Vec<PortableMessage> =
-                serde_json::from_str(export_resp.0.get()).unwrap();
+            let exported: Vec<PortableMessage> = serde_json::from_str(export_resp.0.get()).unwrap();
 
             // Import into destination.
-            let import_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({
-                        "sessionId": "rt-dst",
-                        "messages": serde_json::to_value(&exported).unwrap()
-                    })
-                    .to_string(),
-                )
-                .unwrap()
-                .into();
+            let import_params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(
+                serde_json::json!({
+                    "sessionId": "rt-dst",
+                    "messages": serde_json::to_value(&exported).unwrap()
+                })
+                .to_string(),
+            )
+            .unwrap()
+            .into();
             agent
                 .ext_method(ExtRequest::new("session/import", import_params))
                 .await
@@ -864,7 +858,11 @@ async fn ext_method_export_import_round_trip_via_nats_kv() {
 
             // Verify destination.
             let dst_state = store.load("rt-dst").await.unwrap();
-            assert_eq!(dst_state.messages.len(), 3, "destination must have 3 messages after round-trip");
+            assert_eq!(
+                dst_state.messages.len(),
+                3,
+                "destination must have 3 messages after round-trip"
+            );
             assert_eq!(dst_state.messages[0].role, "user");
             assert_eq!(dst_state.messages[1].role, "assistant");
             assert_eq!(dst_state.messages[2].role, "user");
@@ -934,7 +932,9 @@ async fn ext_method_codex_style_import_converts_blocks_in_nats_kv() {
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
                         role: "user".to_string(),
-                        blocks: vec![PortableBlock::Text { text: "use a tool".to_string() }],
+                        blocks: vec![PortableBlock::Text {
+                            text: "use a tool".to_string(),
+                        }],
                     },
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
@@ -957,12 +957,11 @@ async fn ext_method_codex_style_import_converts_blocks_in_nats_kv() {
             };
             let messages_json = serde_json::to_string(&export).unwrap();
 
-            let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    format!(r#"{{"sessionId":"codex-acp-1","messages":{messages_json}}}"#),
-                )
-                .unwrap()
-                .into();
+            let params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(format!(
+                r#"{{"sessionId":"codex-acp-1","messages":{messages_json}}}"#
+            ))
+            .unwrap()
+            .into();
             agent
                 .ext_method(ExtRequest::new("session/import", params))
                 .await

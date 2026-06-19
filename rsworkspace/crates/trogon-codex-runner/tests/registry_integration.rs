@@ -24,9 +24,7 @@ fn parse_model_ids(models_str: &str) -> Vec<String> {
 fn make_cap() -> AgentCapability {
     AgentCapability {
         agent_type: AGENT_TYPE.to_string(),
-        capabilities: RunnerCapability::to_strings(
-            trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap(),
-        ),
+        capabilities: RunnerCapability::to_strings(trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap()),
         nats_subject: format!("{CODEX_PREFIX}.agent.>"),
         current_load: 0,
         metadata: serde_json::json!({

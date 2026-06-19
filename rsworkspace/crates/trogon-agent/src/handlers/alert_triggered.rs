@@ -25,11 +25,7 @@ use crate::tools::{ToolDef, slack};
 /// Run the alert-triage agent from a raw Datadog webhook payload.
 ///
 /// Always handles the event — returns `Some(Ok)` on success, `Some(Err)` on failure.
-pub async fn handle(
-    agent: &AgentLoop,
-    nats_subject: &str,
-    payload: &[u8],
-) -> Option<Result<String, String>> {
+pub async fn handle(agent: &AgentLoop, nats_subject: &str, payload: &[u8]) -> Option<Result<String, String>> {
     let event: Value = match serde_json::from_slice(payload) {
         Ok(v) => v,
         Err(e) => return Some(Err(format!("JSON parse error: {e}"))),
@@ -40,10 +36,7 @@ pub async fn handle(
     let alert_id = event["alert_id"].as_str().unwrap_or("unknown");
     let host = event["host"].as_str().unwrap_or("unknown");
 
-    info!(
-        alert_id,
-        title, transition, host, "Starting Datadog alert handler"
-    );
+    info!(alert_id, title, transition, host, "Starting Datadog alert handler");
 
     let prompt = format!(
         "You are an on-call assistant handling a Datadog alert.\n\
@@ -63,10 +56,7 @@ pub async fn handle(
 
     let tools = alert_tools();
 
-    let mem_path = agent
-        .memory_path
-        .as_deref()
-        .unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
         (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
@@ -97,10 +87,7 @@ mod tests {
         let tools = alert_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"send_slack_message"), "slack tool missing");
-        assert!(
-            names.contains(&"read_slack_channel"),
-            "read channel tool missing"
-        );
+        assert!(names.contains(&"read_slack_channel"), "read channel tool missing");
     }
 
     fn make_agent() -> AgentLoop {
@@ -150,9 +137,7 @@ mod tests {
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
 
-        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![
-            end_turn("alert handled"),
-        ]));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("alert handled")]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
             anthropic_client: mock_client,
@@ -192,9 +177,7 @@ mod tests {
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
 
-        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![
-            end_turn("handled"),
-        ]));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("handled")]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
             anthropic_client: mock_client,
@@ -224,13 +207,16 @@ mod tests {
     async fn handle_proceeds_without_memory_when_fetch_fails() {
         // Agent has memory_owner/repo set, but the config returns None — handler
         // must still call the Anthropic API (with None system prompt) rather than failing.
-        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::agent_loop::AgentLoop;
+        use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::mock::{MockAgentConfig, MockToolDispatcher};
         use std::sync::Arc;
 
-        let tool_ctx = Arc::new(MockAgentConfig { github_contents: None, ..Default::default() });
+        let tool_ctx = Arc::new(MockAgentConfig {
+            github_contents: None,
+            ..Default::default()
+        });
         let agent = AgentLoop {
             // Anthropic is called once even without memory — pre-load one response.
             anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("ok")])),
@@ -272,9 +258,7 @@ mod tests {
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
 
-        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![
-            end_turn("recovery noted"),
-        ]));
+        let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("recovery noted")]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
             anthropic_client: mock_client,

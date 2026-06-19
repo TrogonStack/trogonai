@@ -42,10 +42,7 @@ async fn nats_client(port: u16) -> async_nats::Client {
 
 fn make_config(nats_port: u16, proxy_url: &str) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: proxy_url.to_string(),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -161,8 +158,7 @@ async fn runner_dispatches_github_pr_event_to_anthropic() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -207,8 +203,7 @@ async fn runner_dispatches_linear_issue_event_to_anthropic() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -252,8 +247,7 @@ async fn runner_skips_irrelevant_github_pr_action() {
     // No mock registered — any call would return 404 and the test should never reach it.
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -299,8 +293,7 @@ async fn runner_skips_irrelevant_linear_event() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -346,8 +339,7 @@ async fn runner_pr_handler_json_error_does_not_crash() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -360,19 +352,12 @@ async fn runner_pr_handler_json_error_does_not_crash() {
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     // First: publish garbage bytes → handler JSON parse error, no proxy call.
-    js.publish(
-        "github.pull_request",
-        Bytes::from_static(b"not json at all"),
-    )
-    .await
-    .expect("publish failed");
+    js.publish("github.pull_request", Bytes::from_static(b"not json at all"))
+        .await
+        .expect("publish failed");
 
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(
-        mock.hits_async().await,
-        0,
-        "proxy must not be called for invalid JSON"
-    );
+    assert_eq!(mock.hits_async().await, 0, "proxy must not be called for invalid JSON");
 
     // Second: publish a valid event → runner is still alive and processes it.
     let valid = json!({
@@ -403,8 +388,7 @@ async fn runner_issue_handler_json_error_does_not_crash() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -422,11 +406,7 @@ async fn runner_issue_handler_json_error_does_not_crash() {
         .expect("publish failed");
 
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(
-        mock.hits_async().await,
-        0,
-        "proxy must not be called for invalid JSON"
-    );
+    assert_eq!(mock.hits_async().await, 0, "proxy must not be called for invalid JSON");
 
     // Valid event → runner still alive.
     let valid = json!({
@@ -597,8 +577,7 @@ async fn runner_dispatches_pr_merged_event_to_anthropic() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -642,8 +621,7 @@ async fn runner_dispatches_issue_comment_event_to_anthropic() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -683,8 +661,7 @@ async fn runner_dispatches_push_event_to_anthropic() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -726,8 +703,7 @@ async fn runner_dispatches_ci_failure_event_to_anthropic() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -773,8 +749,7 @@ async fn runner_respects_custom_stream_names() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -853,8 +828,7 @@ async fn runner_creates_github_stream_when_missing_and_dispatches_event() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());
@@ -902,8 +876,7 @@ async fn runner_creates_linear_stream_when_missing_and_dispatches_event() {
     let proxy = MockServer::start_async().await;
     let mock = proxy
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());

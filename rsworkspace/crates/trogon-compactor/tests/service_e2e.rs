@@ -120,9 +120,7 @@ async fn start_openai_compat_mock(expect_model: &str) -> (httpmock::MockServer, 
     let needle = format!("\"model\":\"{expect_model}\"");
     server
         .mock_async(move |when, then| {
-            when.method("POST")
-                .path("/v1/chat/completions")
-                .body_contains(needle);
+            when.method("POST").path("/v1/chat/completions").body_contains(needle);
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({
@@ -161,8 +159,7 @@ async fn compactor_service_responds_to_nats_compact_request() {
         .await
         .expect("NATS request to compactor must succeed");
 
-    let resp: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("response must be valid JSON");
+    let resp: serde_json::Value = serde_json::from_slice(&reply.payload).expect("response must be valid JSON");
 
     assert_eq!(
         resp["compacted"].as_bool(),
@@ -182,9 +179,7 @@ async fn compactor_service_responds_to_nats_compact_request() {
         resp["kept_count"].as_u64().is_some(),
         "expected kept_count in response; got: {resp}"
     );
-    let first_text = resp["messages"][0]["content"][0]["text"]
-        .as_str()
-        .unwrap_or("");
+    let first_text = resp["messages"][0]["content"][0]["text"].as_str().unwrap_or("");
     assert!(
         first_text.contains("context-summary"),
         "expected <context-summary> tag in first compacted message; got: {first_text}"
@@ -219,8 +214,7 @@ async fn compactor_service_ignores_fire_and_forget_and_keeps_serving() {
         .await
         .expect("service must still respond after fire-and-forget");
 
-    let resp: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("response must be valid JSON");
+    let resp: serde_json::Value = serde_json::from_slice(&reply.payload).expect("response must be valid JSON");
 
     assert!(
         resp.get("messages").is_some(),
@@ -259,8 +253,7 @@ async fn compactor_service_uses_openai_compat_provider_and_model_override() {
         .request(service::COMPACT_SUBJECT, payload.into())
         .await
         .expect("NATS request must succeed");
-    let resp: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("valid JSON");
+    let resp: serde_json::Value = serde_json::from_slice(&reply.payload).expect("valid JSON");
 
     // compacted=true proves: routed to OpenAI-compat AND used the override model
     // (the mock only matches "grok-3-mini").
@@ -309,8 +302,7 @@ async fn compactor_service_uses_session_model_when_no_override() {
         .request(service::COMPACT_SUBJECT, payload.into())
         .await
         .expect("NATS request must succeed");
-    let resp: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("valid JSON");
+    let resp: serde_json::Value = serde_json::from_slice(&reply.payload).expect("valid JSON");
 
     assert_eq!(
         resp["compacted"].as_bool(),

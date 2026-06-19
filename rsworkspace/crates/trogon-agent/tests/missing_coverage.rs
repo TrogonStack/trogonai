@@ -164,8 +164,7 @@ async fn pr_review_handle_reopened_runs_agent() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -394,12 +393,7 @@ async fn get_linear_issue_null_returns_not_found_error() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    let result = dispatch_tool(
-        &ctx,
-        "get_linear_issue",
-        &json!({ "issue_id": "NONEXISTENT-0" }),
-    )
-    .await;
+    let result = dispatch_tool(&ctx, "get_linear_issue", &json!({ "issue_id": "NONEXISTENT-0" })).await;
 
     assert!(
         result.starts_with("Tool error:") && result.contains("not found"),

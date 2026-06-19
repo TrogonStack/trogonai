@@ -9,11 +9,10 @@ fn main() {
     // Re-run if the lockfile changes (e.g. wasmtime version bump).
     println!("cargo:rerun-if-changed={}", lockfile.display());
 
-    let content = std::fs::read_to_string(&lockfile)
-        .expect("Could not read Cargo.lock — is the workspace root correct?");
+    let content =
+        std::fs::read_to_string(&lockfile).expect("Could not read Cargo.lock — is the workspace root correct?");
 
-    let version = extract_version(&content, "wasmtime")
-        .expect("Could not find 'wasmtime' package in Cargo.lock");
+    let version = extract_version(&content, "wasmtime").expect("Could not find 'wasmtime' package in Cargo.lock");
 
     println!("cargo:rustc-env=WASMTIME_VERSION={version}");
 }
@@ -31,10 +30,7 @@ fn extract_version(lockfile: &str, package: &str) -> Option<String> {
             in_block = true;
         }
         if in_block && line.starts_with("version = ") {
-            let v = line
-                .trim_start_matches("version = ")
-                .trim_matches('"')
-                .to_string();
+            let v = line.trim_start_matches("version = ").trim_matches('"').to_string();
             return Some(v);
         }
     }

@@ -23,10 +23,7 @@ mod tests {
     #[test]
     fn extract_string_id() {
         let payload = br#"{"id":"req-abc","method":"prompt","params":{}}"#;
-        assert_eq!(
-            extract_request_id(payload),
-            RequestId::Str("req-abc".to_string())
-        );
+        assert_eq!(extract_request_id(payload), RequestId::Str("req-abc".to_string()));
     }
 
     #[test]

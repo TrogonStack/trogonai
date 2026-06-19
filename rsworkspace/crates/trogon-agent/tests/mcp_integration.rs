@@ -58,11 +58,7 @@ fn make_agent_with_mcp(
         memory_repo: None,
         memory_path: None,
         mcp_tool_defs: vec![mcp_tool_def(prefixed_name, description)],
-        mcp_dispatch: vec![(
-            prefixed_name.to_string(),
-            original_name.to_string(),
-            mcp_client,
-        )],
+        mcp_dispatch: vec![(prefixed_name.to_string(), original_name.to_string(), mcp_client)],
         flag_client: Arc::new(AlwaysOnFlagClient),
         tenant_id: "test".to_string(),
         promise_store: None,
@@ -114,8 +110,7 @@ async fn mcp_tool_call_is_dispatched_and_result_fed_back() {
 
     // Fallback: first Anthropic call (no tool_result in body yet).
     proxy.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -185,8 +180,7 @@ async fn mcp_tool_error_is_returned_as_tool_result() {
 
     // Fallback: first call — model requests MCP tool.
     proxy.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -241,8 +235,7 @@ async fn unknown_tool_falls_through_to_builtin_dispatcher() {
 
     // Fallback: first call — model requests a tool NOT in MCP dispatch table.
     proxy.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -270,11 +263,7 @@ async fn unknown_tool_falls_through_to_builtin_dispatcher() {
 
     // Should complete without error — unknown tool result is fed back as text.
     let result = agent
-        .run(
-            vec![Message::user_text("use a nonexistent tool")],
-            &[],
-            None,
-        )
+        .run(vec![Message::user_text("use a nonexistent tool")], &[], None)
         .await
         .expect("agent should complete");
 
@@ -328,10 +317,7 @@ async fn init_mcp_servers_skips_unreachable_server() {
         tool_defs.is_empty(),
         "tool_defs must be empty for unreachable MCP server"
     );
-    assert!(
-        dispatch.is_empty(),
-        "dispatch must be empty for unreachable MCP server"
-    );
+    assert!(dispatch.is_empty(), "dispatch must be empty for unreachable MCP server");
 }
 
 /// MCP tool definitions are merged into the tool list sent to Anthropic.

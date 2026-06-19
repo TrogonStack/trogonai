@@ -7,20 +7,13 @@ use trogon_pr_actor::actor::{PrActor, PrState};
 use trogon_registry::{Registry, provision as provision_registry};
 use trogon_transcript::publisher::NatsTranscriptPublisher;
 
-async fn setup() -> (
-    async_nats::Client,
-    async_nats::jetstream::Context,
-    impl Drop,
-) {
+async fn setup() -> (async_nats::Client, async_nats::jetstream::Context, impl Drop) {
     let container = Nats::default()
         .with_cmd(["-js"])
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container
-        .get_host_port_ipv4(4222)
-        .await
-        .expect("failed to get port");
+    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -58,11 +51,7 @@ async fn pr_actor_first_event_creates_state() {
         .unwrap();
 
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
-    let entry = kv
-        .entry("pr.acme.repo.1")
-        .await
-        .unwrap()
-        .expect("state entry missing");
+    let entry = kv.entry("pr.acme.repo.1").await.unwrap().expect("state entry missing");
     let state: PrState = serde_json::from_slice(&entry.value).unwrap();
     assert_eq!(state.events_processed, 1);
 }
@@ -84,10 +73,7 @@ async fn pr_actor_state_accumulates_across_events() {
     let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
     let bytes = kv.entry("pr.acme.repo.99").await.unwrap().unwrap().value;
     let state: PrState = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(
-        state.events_processed, 3,
-        "all three events must be counted"
-    );
+    assert_eq!(state.events_processed, 3, "all three events must be counted");
 }
 
 /// Two distinct entity keys produce independent state entries — they do not

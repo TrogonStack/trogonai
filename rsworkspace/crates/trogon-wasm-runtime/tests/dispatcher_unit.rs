@@ -5,10 +5,9 @@
 /// for each ACP subject pattern, and that replies are published back.
 use agent_client_protocol::{
     ContentBlock, ContentChunk, CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest,
-    ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest, SessionId,
-    SessionNotification, SessionUpdate, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TextContent, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
-    WriteTextFileRequest,
+    ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest, SessionId, SessionNotification,
+    SessionUpdate, TerminalExitStatus, TerminalId, TerminalOutputRequest, TextContent, ToolCallUpdate,
+    ToolCallUpdateFields, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use bytes::Bytes;
 use futures::Stream;
@@ -106,10 +105,7 @@ impl MockBroker {
 impl NatsBroker for MockBroker {
     type Sub = MockStream;
 
-    async fn subscribe(
-        &self,
-        _subject: &str,
-    ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+    async fn subscribe(&self, _subject: &str) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
         let rx = self
             .rx
             .lock()
@@ -124,10 +120,7 @@ impl NatsBroker for MockBroker {
         subject: async_nats::Subject,
         payload: Bytes,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.published
-            .lock()
-            .unwrap()
-            .push((subject.to_string(), payload));
+        self.published.lock().unwrap().push((subject.to_string(), payload));
         Ok(())
     }
 
@@ -197,9 +190,9 @@ impl Runtime for MockRuntime {
             session_id: session_id.to_string(),
             command: req.command.clone(),
         });
-        Ok(agent_client_protocol::CreateTerminalResponse::new(
-            TerminalId::new("mock-terminal"),
-        ))
+        Ok(agent_client_protocol::CreateTerminalResponse::new(TerminalId::new(
+            "mock-terminal",
+        )))
     }
 
     async fn handle_terminal_output(
@@ -225,11 +218,7 @@ impl Runtime for MockRuntime {
         Ok(agent_client_protocol::KillTerminalResponse::new())
     }
 
-    async fn handle_write_to_terminal(
-        &self,
-        terminal_id: &str,
-        _data: &[u8],
-    ) -> agent_client_protocol::Result<()> {
+    async fn handle_write_to_terminal(&self, terminal_id: &str, _data: &[u8]) -> agent_client_protocol::Result<()> {
         self.calls.borrow_mut().push(Call::WriteToTerminal {
             terminal_id: terminal_id.to_string(),
         });
@@ -400,11 +389,7 @@ async fn routes_terminal_create() {
     let payload = serde_json::to_vec(&req).unwrap();
 
     let (calls, published) = run_dispatcher(|broker, _rt| async move {
-        broker.send(
-            &subject("terminal.create"),
-            "reply.terminal.create",
-            payload,
-        );
+        broker.send(&subject("terminal.create"), "reply.terminal.create", payload);
         tokio::task::yield_now().await;
     })
     .await;
@@ -417,8 +402,7 @@ async fn routes_terminal_create() {
         "expected CreateTerminal call, got: {calls:?}"
     );
     assert!(!published.is_empty(), "expected a reply to be published");
-    let reply_body: serde_json::Value =
-        serde_json::from_slice(&published[0].1).expect("reply should be valid JSON");
+    let reply_body: serde_json::Value = serde_json::from_slice(&published[0].1).expect("reply should be valid JSON");
     // ACP serializes with camelCase.
     assert!(
         reply_body.get("terminalId").is_some(),
@@ -506,11 +490,7 @@ async fn routes_terminal_wait_for_exit() {
 
 #[tokio::test]
 async fn routes_fs_write_text_file() {
-    let req = WriteTextFileRequest::new(
-        SessionId::from(SESSION),
-        PathBuf::from("/hello.txt"),
-        "hello",
-    );
+    let req = WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/hello.txt"), "hello");
     let payload = serde_json::to_vec(&req).unwrap();
 
     let (calls, _published) = run_dispatcher(|broker, _rt| async move {
@@ -540,9 +520,7 @@ async fn routes_fs_read_text_file() {
     .await;
 
     assert!(
-        calls
-            .iter()
-            .any(|c| matches!(c, Call::ReadTextFile { session_id, path }
+        calls.iter().any(|c| matches!(c, Call::ReadTextFile { session_id, path }
             if session_id == SESSION && path == &PathBuf::from("/hello.txt"))),
         "expected ReadTextFile call, got: {calls:?}"
     );
@@ -558,11 +536,7 @@ async fn routes_session_request_permission() {
     let payload = serde_json::to_vec(&req).unwrap();
 
     let (calls, _published) = run_dispatcher(|broker, _rt| async move {
-        broker.send(
-            &subject("session.request_permission"),
-            "reply.perm",
-            payload,
-        );
+        broker.send(&subject("session.request_permission"), "reply.perm", payload);
         tokio::task::yield_now().await;
     })
     .await;
@@ -576,10 +550,7 @@ async fn routes_session_request_permission() {
 #[tokio::test]
 async fn routes_session_update_fire_and_forget() {
     let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new("hi")));
-    let notif = SessionNotification::new(
-        SessionId::from(SESSION),
-        SessionUpdate::AgentMessageChunk(chunk),
-    );
+    let notif = SessionNotification::new(SessionId::from(SESSION), SessionUpdate::AgentMessageChunk(chunk));
     let payload = serde_json::to_vec(&notif).unwrap();
 
     let (calls, published) = run_dispatcher(|broker, _rt| async move {
@@ -589,9 +560,9 @@ async fn routes_session_update_fire_and_forget() {
     .await;
 
     assert!(
-        calls.iter().any(
-            |c| matches!(c, Call::SessionNotification { session_id } if session_id == SESSION)
-        ),
+        calls
+            .iter()
+            .any(|c| matches!(c, Call::SessionNotification { session_id } if session_id == SESSION)),
         "expected SessionNotification call, got: {calls:?}"
     );
     // Fire-and-forget — no reply expected.
@@ -615,9 +586,7 @@ async fn returns_error_for_invalid_json() {
 
     // The runtime should NOT have been called.
     assert!(
-        !calls
-            .iter()
-            .any(|c| matches!(c, Call::CreateTerminal { .. })),
+        !calls.iter().any(|c| matches!(c, Call::CreateTerminal { .. })),
         "runtime should not be called on bad payload, got: {calls:?}"
     );
     // An error reply should have been published.
@@ -629,11 +598,7 @@ async fn returns_error_for_invalid_json() {
 #[tokio::test]
 async fn ignores_unparseable_subject() {
     let (calls, published) = run_dispatcher(|broker, _rt| async move {
-        broker.send(
-            "garbage.subject",
-            "reply.garbage",
-            Bytes::from_static(b"{}"),
-        );
+        broker.send("garbage.subject", "reply.garbage", Bytes::from_static(b"{}"));
         tokio::task::yield_now().await;
     })
     .await;
@@ -658,12 +623,7 @@ async fn dispatcher_subscribes_with_queue_group_trogon_wasm_runtime() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            tokio::task::spawn_local(dispatcher::run(
-                broker_clone,
-                PREFIX.to_string(),
-                runtime,
-                shutdown_rx,
-            ));
+            tokio::task::spawn_local(dispatcher::run(broker_clone, PREFIX.to_string(), runtime, shutdown_rx));
             tokio::task::yield_now().await;
             let _ = shutdown_tx.send(true);
             for _ in 0..5 {

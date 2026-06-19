@@ -16,8 +16,8 @@ use trogon_console::{
     run_with,
     server::{AppState, build_router},
     store::{
-        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore,
-        sessions::SessionReader, skills::SkillStore,
+        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore, sessions::SessionReader,
+        skills::SkillStore,
     },
 };
 
@@ -117,12 +117,7 @@ async fn agent_create_list_get_update_delete() {
     assert_eq!(created["skill_ids"], json!(["skill_abc"]));
 
     // List — agent appears
-    let resp = env
-        .client
-        .get(format!("{base}/agents"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/agents")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     let ids: Vec<&str> = list
@@ -192,12 +187,7 @@ async fn agent_create_list_get_update_delete() {
     assert_eq!(resp.status().as_u16(), 204);
 
     // List — agent no longer present (NATS KV delete marks as tombstone; keys() skips tombstones)
-    let resp = env
-        .client
-        .get(format!("{base}/agents"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/agents")).send().await.unwrap();
     let list: Value = resp.json().await.unwrap();
     let ids_after: Vec<&str> = list
         .as_array()
@@ -205,10 +195,7 @@ async fn agent_create_list_get_update_delete() {
         .iter()
         .filter_map(|a| a["id"].as_str())
         .collect();
-    assert!(
-        !ids_after.contains(&agent_id.as_str()),
-        "deleted agent still in list"
-    );
+    assert!(!ids_after.contains(&agent_id.as_str()), "deleted agent still in list");
 }
 
 // ── Skill CRUD ────────────────────────────────────────────────────────────────
@@ -245,12 +232,7 @@ async fn skill_create_list_get_add_version() {
     assert_eq!(v1.len(), 8, "version must be YYYYMMDD: {v1}");
 
     // List
-    let resp = env
-        .client
-        .get(format!("{base}/skills"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/skills")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     let ids: Vec<&str> = list
@@ -331,10 +313,7 @@ async fn skill_create_list_get_add_version() {
         .unwrap();
     let versions: Value = resp.json().await.unwrap();
     assert_eq!(versions.as_array().unwrap().len(), 1);
-    assert_eq!(
-        versions[0]["content"],
-        "## PDF Extractor v2\nImproved extraction."
-    );
+    assert_eq!(versions[0]["content"], "## PDF Extractor v2\nImproved extraction.");
 }
 
 // ── Session round-trip (write RawSession → read via console API) ──────────────
@@ -400,10 +379,7 @@ async fn session_read_reflects_token_counts_and_agent_id() {
 
     let key = format!("{tenant_id}.{session_id}");
     let bytes = serde_json::to_vec(&raw_session).unwrap();
-    sessions_kv
-        .put(&key, Bytes::from(bytes))
-        .await
-        .expect("put session");
+    sessions_kv.put(&key, Bytes::from(bytes)).await.expect("put session");
 
     // GET via console API
     let resp = env
@@ -421,10 +397,7 @@ async fn session_read_reflects_token_counts_and_agent_id() {
     // Token sums from both assistant messages
     assert_eq!(s["input_tokens"], 25, "10 + 15");
     assert_eq!(s["output_tokens"], 8, "5 + 3");
-    assert_eq!(
-        s["cache_write_tokens"], 3,
-        "cache_creation from first message"
-    );
+    assert_eq!(s["cache_write_tokens"], 3, "cache_creation from first message");
     assert_eq!(s["cache_read_tokens"], 2, "cache_read from first message");
     assert_eq!(s["duration_ms"], 42000);
     assert_eq!(s["agent_id"], "agent_deadadd");
@@ -463,12 +436,7 @@ async fn session_list_returns_all_sessions() {
             .unwrap();
     }
 
-    let resp = env
-        .client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/sessions")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     assert_eq!(list.as_array().unwrap().len(), 3);
@@ -601,12 +569,7 @@ async fn environment_create_list_get_update_delete() {
     assert_eq!(created["archived"], false);
 
     // List — environment appears
-    let resp = env
-        .client
-        .get(format!("{base}/environments"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/environments")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     let ids: Vec<&str> = list
@@ -827,15 +790,7 @@ async fn credential_create_list_delete() {
         .await
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
-    assert_eq!(
-        resp.json::<Value>()
-            .await
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        0
-    );
+    assert_eq!(resp.json::<Value>().await.unwrap().as_array().unwrap().len(), 0);
 
     // Create two credentials
     let mut cred_ids = vec![];
@@ -873,10 +828,7 @@ async fn credential_create_list_delete() {
     // Delete first credential
     let resp = env
         .client
-        .delete(format!(
-            "{base}/environments/{env_id}/credentials/{}",
-            cred_ids[0]
-        ))
+        .delete(format!("{base}/environments/{env_id}/credentials/{}", cred_ids[0]))
         .send()
         .await
         .unwrap();
@@ -908,10 +860,7 @@ async fn credential_isolation_between_environments() {
             .send()
             .await
             .unwrap();
-        resp.json::<Value>().await.unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string()
     };
     let env_b_id = {
         let resp = env
@@ -921,21 +870,24 @@ async fn credential_isolation_between_environments() {
             .send()
             .await
             .unwrap();
-        resp.json::<Value>().await.unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string()
     };
 
     // Add 2 credentials to env_A, 1 to env_B
     for name in ["A-cred-1", "A-cred-2"] {
-        env.client.post(format!("{base}/environments/{env_a_id}/credentials"))
+        env.client
+            .post(format!("{base}/environments/{env_a_id}/credentials"))
             .json(&json!({ "name": name, "type": "bearer_token", "mcp_server_url": "https://a.example.com" }))
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
     }
-    env.client.post(format!("{base}/environments/{env_b_id}/credentials"))
+    env.client
+        .post(format!("{base}/environments/{env_b_id}/credentials"))
         .json(&json!({ "name": "B-cred-1", "type": "bearer_token", "mcp_server_url": "https://b.example.com" }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
     // env_A sees 2, env_B sees 1 — no cross-contamination
     let list_a: Value = env
@@ -947,11 +899,7 @@ async fn credential_isolation_between_environments() {
         .json()
         .await
         .unwrap();
-    assert_eq!(
-        list_a.as_array().unwrap().len(),
-        2,
-        "env_A should have 2 credentials"
-    );
+    assert_eq!(list_a.as_array().unwrap().len(), 2, "env_A should have 2 credentials");
 
     let list_b: Value = env
         .client
@@ -962,11 +910,7 @@ async fn credential_isolation_between_environments() {
         .json()
         .await
         .unwrap();
-    assert_eq!(
-        list_b.as_array().unwrap().len(),
-        1,
-        "env_B should have 1 credential"
-    );
+    assert_eq!(list_b.as_array().unwrap().len(), 1, "env_B should have 1 credential");
 
     // Verify env_A creds all belong to env_A
     for cred in list_a.as_array().unwrap() {
@@ -1011,25 +955,15 @@ async fn agent_partial_update_preserves_unchanged_fields() {
     let updated: Value = resp.json().await.unwrap();
 
     assert_eq!(updated["name"], "RenamedAgent", "name was updated");
-    assert_eq!(
-        updated["description"], "Original description",
-        "description unchanged"
-    );
+    assert_eq!(updated["description"], "Original description", "description unchanged");
     assert_eq!(updated["model"]["id"], "claude-opus-4-7", "model unchanged");
-    assert_eq!(
-        updated["system_prompt"], "Be helpful.",
-        "system_prompt unchanged"
-    );
+    assert_eq!(updated["system_prompt"], "Be helpful.", "system_prompt unchanged");
     assert_eq!(
         updated["skill_ids"],
         json!(["skill_a", "skill_b"]),
         "skill_ids unchanged"
     );
-    assert_eq!(
-        updated["mcp_servers"],
-        json!(["mcp_server_1"]),
-        "mcp_servers unchanged"
-    );
+    assert_eq!(updated["mcp_servers"], json!(["mcp_server_1"]), "mcp_servers unchanged");
     assert_eq!(updated["version"], 2, "version bumped");
 }
 
@@ -1096,18 +1030,10 @@ async fn agent_list_sorted_by_updated_at_desc() {
         .await
         .unwrap();
 
-    let resp = env
-        .client
-        .get(format!("{base}/agents"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/agents")).send().await.unwrap();
     let list: Value = resp.json().await.unwrap();
     let arr = list.as_array().unwrap();
-    assert_eq!(
-        arr[0]["id"], agent_ids[0],
-        "most recently updated agent must be first"
-    );
+    assert_eq!(arr[0]["id"], agent_ids[0], "most recently updated agent must be first");
 }
 
 // ── Skill additional behaviors ────────────────────────────────────────────────
@@ -1131,10 +1057,7 @@ async fn skill_create_with_custom_provider() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 201);
     let created: Value = resp.json().await.unwrap();
-    assert_eq!(
-        created["provider"], "anthropic",
-        "custom provider must be stored as-is"
-    );
+    assert_eq!(created["provider"], "anthropic", "custom provider must be stored as-is");
 
     // Round-trip: GET returns the same provider
     let skill_id = created["id"].as_str().unwrap();
@@ -1157,10 +1080,7 @@ async fn skill_versions_for_nonexistent_skill_returns_empty_list() {
     // for an unknown skill_id. This is the documented behavior.
     let resp = env
         .client
-        .get(format!(
-            "{}/skills/skill_nonexistent/versions",
-            env.base_url
-        ))
+        .get(format!("{}/skills/skill_nonexistent/versions", env.base_url))
         .send()
         .await
         .unwrap();
@@ -1212,10 +1132,7 @@ async fn session_status_running_when_last_message_is_user() {
         "updated_at": "1776384001"
     });
     sessions_kv
-        .put(
-            "t1.sess_running",
-            Bytes::from(serde_json::to_vec(&raw).unwrap()),
-        )
+        .put("t1.sess_running", Bytes::from(serde_json::to_vec(&raw).unwrap()))
         .await
         .unwrap();
 
@@ -1258,10 +1175,7 @@ async fn session_with_no_messages_has_zero_counts_and_idle_status() {
         "updated_at": "1776384000"
     });
     sessions_kv
-        .put(
-            "t2.sess_empty",
-            Bytes::from(serde_json::to_vec(&raw).unwrap()),
-        )
+        .put("t2.sess_empty", Bytes::from(serde_json::to_vec(&raw).unwrap()))
         .await
         .unwrap();
 
@@ -1320,21 +1234,13 @@ async fn session_list_sorted_by_updated_at_desc() {
             .unwrap();
     }
 
-    let resp = env
-        .client
-        .get(format!("{base}/sessions"))
-        .send()
-        .await
-        .unwrap();
+    let resp = env.client.get(format!("{base}/sessions")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let list: Value = resp.json().await.unwrap();
     let arr = list.as_array().unwrap();
     assert_eq!(arr.len(), 3);
     // Sorted descending by updated_at — newest first
-    assert_eq!(
-        arr[0]["id"], "sess_newest",
-        "highest updated_at must be first"
-    );
+    assert_eq!(arr[0]["id"], "sess_newest", "highest updated_at must be first");
     assert_eq!(arr[1]["id"], "sess_mid");
     assert_eq!(arr[2]["id"], "sess_old");
 }
@@ -1353,10 +1259,7 @@ async fn credential_get_by_id() {
         .send()
         .await
         .unwrap();
-    let env_id = resp.json::<Value>().await.unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let env_id = resp.json::<Value>().await.unwrap()["id"].as_str().unwrap().to_string();
 
     // Create a credential
     let resp = env
@@ -1377,9 +1280,7 @@ async fn credential_get_by_id() {
     // GET it by id
     let resp = env
         .client
-        .get(format!(
-            "{base}/environments/{env_id}/credentials/{cred_id}"
-        ))
+        .get(format!("{base}/environments/{env_id}/credentials/{cred_id}"))
         .send()
         .await
         .unwrap();
@@ -1392,9 +1293,7 @@ async fn credential_get_by_id() {
     // GET non-existent returns 404
     let resp = env
         .client
-        .get(format!(
-            "{base}/environments/{env_id}/credentials/crd_ghost"
-        ))
+        .get(format!("{base}/environments/{env_id}/credentials/crd_ghost"))
         .send()
         .await
         .unwrap();
@@ -1467,26 +1366,14 @@ async fn mcp_registry_returns_known_servers() {
 
     // Every entry must have name and url fields.
     for entry in arr {
-        assert!(
-            entry["name"].is_string(),
-            "each server must have a name field"
-        );
-        assert!(
-            entry["url"].is_string(),
-            "each server must have a url field"
-        );
+        assert!(entry["name"].is_string(), "each server must have a name field");
+        assert!(entry["url"].is_string(), "each server must have a url field");
     }
 
     // Well-known entries must be present.
     let names: Vec<&str> = arr.iter().filter_map(|e| e["name"].as_str()).collect();
-    assert!(
-        names.contains(&"GitHub"),
-        "GitHub must be in the MCP registry"
-    );
-    assert!(
-        names.contains(&"Linear"),
-        "Linear must be in the MCP registry"
-    );
+    assert!(names.contains(&"GitHub"), "GitHub must be in the MCP registry");
+    assert!(names.contains(&"Linear"), "Linear must be in the MCP registry");
 }
 
 // ── run_with entry point ──────────────────────────────────────────────────────

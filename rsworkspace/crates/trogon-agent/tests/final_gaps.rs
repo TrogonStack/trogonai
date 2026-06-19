@@ -88,24 +88,14 @@ fn dummy_ctx() -> ToolContext {
 #[tokio::test]
 async fn list_pr_files_missing_owner_returns_error() {
     let ctx = dummy_ctx();
-    let result = dispatch_tool(
-        &ctx,
-        "list_pr_files",
-        &json!({ "repo": "r", "pr_number": 1 }),
-    )
-    .await;
+    let result = dispatch_tool(&ctx, "list_pr_files", &json!({ "repo": "r", "pr_number": 1 })).await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 
 #[tokio::test]
 async fn list_pr_files_missing_repo_returns_error() {
     let ctx = dummy_ctx();
-    let result = dispatch_tool(
-        &ctx,
-        "list_pr_files",
-        &json!({ "owner": "o", "pr_number": 1 }),
-    )
-    .await;
+    let result = dispatch_tool(&ctx, "list_pr_files", &json!({ "owner": "o", "pr_number": 1 })).await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 
@@ -119,12 +109,7 @@ async fn list_pr_files_missing_pr_number_returns_error() {
 #[tokio::test]
 async fn get_file_contents_missing_path_returns_error() {
     let ctx = dummy_ctx();
-    let result = dispatch_tool(
-        &ctx,
-        "get_file_contents",
-        &json!({ "owner": "o", "repo": "r" }),
-    )
-    .await;
+    let result = dispatch_tool(&ctx, "get_file_contents", &json!({ "owner": "o", "repo": "r" })).await;
     assert!(result.contains("Tool error"), "got: {result}");
 }
 

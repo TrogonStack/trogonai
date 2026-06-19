@@ -9,14 +9,10 @@ use std::time::Duration;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_nats::{
-    FlushPolicy, NatsAuth, NatsConfig, NatsError, PublishOptions, connect, publish, request,
-    request_with_timeout,
+    FlushPolicy, NatsAuth, NatsConfig, NatsError, PublishOptions, connect, publish, request, request_with_timeout,
 };
 
-async fn start_nats() -> (
-    testcontainers_modules::testcontainers::ContainerAsync<Nats>,
-    u16,
-) {
+async fn start_nats() -> (testcontainers_modules::testcontainers::ContainerAsync<Nats>, u16) {
     let container = Nats::default()
         .start()
         .await
@@ -80,14 +76,9 @@ async fn publish_with_flush_delivers_to_subscriber() {
         .flush_policy(FlushPolicy::no_retries())
         .build();
 
-    publish(
-        &client,
-        "test.msg.publish_flush",
-        &Ping { value: 99 },
-        options,
-    )
-    .await
-    .expect("publish with flush should succeed");
+    publish(&client, "test.msg.publish_flush", &Ping { value: 99 }, options)
+        .await
+        .expect("publish with flush should succeed");
 
     let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
         .await
@@ -118,8 +109,7 @@ async fn request_receives_reply() {
         }
     });
 
-    let result: Result<Pong, NatsError> =
-        request(&client, "test.msg.request", &Ping { value: 7 }).await;
+    let result: Result<Pong, NatsError> = request(&client, "test.msg.request", &Ping { value: 7 }).await;
 
     assert!(result.is_ok(), "request should succeed: {result:?}");
     assert_eq!(result.unwrap(), Pong { echoed: 7 });
@@ -143,10 +133,7 @@ async fn request_with_timeout_times_out_when_no_responder() {
     .await;
 
     assert!(
-        matches!(
-            result,
-            Err(NatsError::Timeout { .. }) | Err(NatsError::Request { .. })
-        ),
+        matches!(result, Err(NatsError::Timeout { .. }) | Err(NatsError::Request { .. })),
         "expected Timeout or Request error, got: {result:?}",
     );
 }

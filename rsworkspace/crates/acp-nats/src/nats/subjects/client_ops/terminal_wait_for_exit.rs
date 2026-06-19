@@ -45,9 +45,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = TerminalWaitForExitSubject::new(&prefix(), &session_id());
-        assert_eq!(
-            s.to_string(),
-            "acp.session.ses1.client.terminal.wait_for_exit"
-        );
+        assert_eq!(s.to_string(), "acp.session.ses1.client.terminal.wait_for_exit");
     }
 }

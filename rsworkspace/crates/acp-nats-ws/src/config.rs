@@ -26,10 +26,7 @@ pub struct WsConfig {
 }
 
 #[cfg_attr(coverage, coverage(off))]
-pub fn config_from_args<E: ReadEnv>(
-    args: Args,
-    env_provider: &E,
-) -> Result<WsConfig, AcpPrefixError> {
+pub fn config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<WsConfig, AcpPrefixError> {
     let raw_prefix = args
         .acp_prefix
         .or_else(|| env_provider.var(acp_nats::ENV_ACP_PREFIX).ok())

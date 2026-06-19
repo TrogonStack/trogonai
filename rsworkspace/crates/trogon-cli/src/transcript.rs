@@ -56,13 +56,7 @@ impl<'a, F: Fs + ?Sized> SessionTranscriptRecorder<'a, F> {
     }
 
     /// Append one turn. Write failures are logged and ignored.
-    pub fn record_turn(
-        &self,
-        user: &str,
-        assistant: &str,
-        stop: Option<&TurnStop>,
-        interrupted: bool,
-    ) {
+    pub fn record_turn(&self, user: &str, assistant: &str, stop: Option<&TurnStop>, interrupted: bool) {
         let (stop_reason, error) = match stop {
             Some(TurnStop::Done { reason }) => (Some(reason.clone()), None),
             Some(TurnStop::Error(msg)) => (None, Some(msg.clone())),
@@ -85,9 +79,8 @@ impl<'a, F: Fs + ?Sized> SessionTranscriptRecorder<'a, F> {
         if let Some(dir) = self.path.parent() {
             self.fs.create_dir_all(dir)?;
         }
-        let mut line = serde_json::to_string(turn).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-        })?;
+        let mut line = serde_json::to_string(turn)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
         line.push('\n');
         let mut contents = self.fs.read_to_string(&self.path).unwrap_or_default();
         contents.push_str(&line);

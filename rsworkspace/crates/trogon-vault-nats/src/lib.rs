@@ -14,11 +14,11 @@ pub mod kv_ops;
 pub mod slot;
 
 pub use audit::{Audit, AuditEvent, AuditPublisher, NoopAudit, ensure_audit_stream, ensure_audit_stream_with_max_age};
-pub use kv_ops::KvOps;
 pub use backend::NatsKvVault;
 pub use bucket::ensure_vault_bucket;
 pub use crypto::CryptoCtx;
 pub use error::NatsKvVaultError;
+pub use kv_ops::KvOps;
 pub use slot::RotationSlot;
 
 /// Read the rotation grace period from `VAULT_GRACE_PERIOD_SECS`.
@@ -43,25 +43,35 @@ mod grace_period_tests {
     #[test]
     fn defaults_to_30_secs_when_unset() {
         let _g = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::remove_var(VAR); }
+        unsafe {
+            std::env::remove_var(VAR);
+        }
         assert_eq!(grace_period_from_env(), std::time::Duration::from_secs(30));
     }
 
     #[test]
     fn returns_configured_value() {
         let _g = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var(VAR, "60"); }
+        unsafe {
+            std::env::set_var(VAR, "60");
+        }
         let d = grace_period_from_env();
-        unsafe { std::env::remove_var(VAR); }
+        unsafe {
+            std::env::remove_var(VAR);
+        }
         assert_eq!(d, std::time::Duration::from_secs(60));
     }
 
     #[test]
     fn falls_back_on_non_numeric_value() {
         let _g = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var(VAR, "not-a-number"); }
+        unsafe {
+            std::env::set_var(VAR, "not-a-number");
+        }
         let d = grace_period_from_env();
-        unsafe { std::env::remove_var(VAR); }
+        unsafe {
+            std::env::remove_var(VAR);
+        }
         assert_eq!(d, std::time::Duration::from_secs(30));
     }
 }

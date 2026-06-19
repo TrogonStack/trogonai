@@ -250,11 +250,7 @@ async fn create_automation<A: AutomationRepository, R: RunRepository>(
     };
     match state.store.put(&automation).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (
-            StatusCode::CREATED,
-            axum::Json(AutomationResponse::from(automation)),
-        )
-            .into_response(),
+        Ok(()) => (StatusCode::CREATED, axum::Json(AutomationResponse::from(automation))).into_response(),
     }
 }
 
@@ -308,11 +304,7 @@ async fn update_automation<A: AutomationRepository, R: RunRepository>(
     };
     match state.store.put(&updated).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (
-            StatusCode::OK,
-            axum::Json(AutomationResponse::from(updated)),
-        )
-            .into_response(),
+        Ok(()) => (StatusCode::OK, axum::Json(AutomationResponse::from(updated))).into_response(),
     }
 }
 
@@ -371,11 +363,7 @@ async fn set_enabled<A: AutomationRepository, R: RunRepository>(
     automation.updated_at = now_iso8601();
     match state.store.put(&automation).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (
-            StatusCode::OK,
-            axum::Json(AutomationResponse::from(automation)),
-        )
-            .into_response(),
+        Ok(()) => (StatusCode::OK, axum::Json(AutomationResponse::from(automation))).into_response(),
     }
 }
 
@@ -445,14 +433,8 @@ pub fn router<A: AutomationRepository, R: RunRepository>(state: AppState<A, R>) 
                 .delete(delete_automation::<A, R>),
         )
         .route("/automations/{id}/enable", patch(enable_automation::<A, R>))
-        .route(
-            "/automations/{id}/disable",
-            patch(disable_automation::<A, R>),
-        )
-        .route(
-            "/automations/{id}/runs",
-            get(list_runs_for_automation::<A, R>),
-        )
+        .route("/automations/{id}/disable", patch(disable_automation::<A, R>))
+        .route("/automations/{id}/runs", get(list_runs_for_automation::<A, R>))
         .route("/runs", get(list_runs::<A, R>))
         .route("/stats", get(get_stats::<A, R>))
         .with_state(state)
@@ -507,9 +489,7 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
         let resp = app.oneshot(get_req("/automations", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json, serde_json::json!([]));
     }
@@ -523,9 +503,7 @@ mod tests {
         let app = mock_app(store, MockRunStore::new());
         let resp = app.oneshot(get_req("/automations", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json.as_array().unwrap().len(), 2);
     }
@@ -562,9 +540,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
         assert_eq!(json["name"], "Test Auto");
         assert_eq!(json["tenant_id"], "acme");
@@ -576,10 +552,7 @@ mod tests {
     #[tokio::test]
     async fn get_automation_returns_404_when_not_found() {
         let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
-        let resp = app
-            .oneshot(get_req("/automations/no-such", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/automations/no-such", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
@@ -588,14 +561,9 @@ mod tests {
         let store = MockAutomationStore::new();
         store.insert(sample_automation("a1", "acme"));
         let app = mock_app(store, MockRunStore::new());
-        let resp = app
-            .oneshot(get_req("/automations/a1", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/automations/a1", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["id"], "a1");
     }
@@ -718,9 +686,7 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
         let resp = app.oneshot(get_req("/runs", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json, serde_json::json!([]));
     }
@@ -732,9 +698,7 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), MockRunStore::new());
         let resp = app.oneshot(get_req("/stats", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["total"], 0);
         assert_eq!(json["successful_7d"], 0);
@@ -856,15 +820,9 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), run_store);
         let resp = app.oneshot(get_req("/runs", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            json.as_array().unwrap().len(),
-            2,
-            "must return only acme's 2 runs"
-        );
+        assert_eq!(json.as_array().unwrap().len(), 2, "must return only acme's 2 runs");
     }
 
     #[tokio::test]
@@ -878,9 +836,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = json.as_array().unwrap();
         assert_eq!(arr.len(), 1);
@@ -908,14 +864,9 @@ mod tests {
         run_store.insert(sample_run("r2", "a1", "acme"));
         run_store.insert(sample_run("r3", "a2", "acme")); // different automation
         let app = mock_app(MockAutomationStore::new(), run_store);
-        let resp = app
-            .oneshot(get_req("/automations/a1/runs", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/automations/a1/runs", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             json.as_array().unwrap().len(),
@@ -953,9 +904,7 @@ mod tests {
         let app = mock_app(MockAutomationStore::new(), run_store);
         let resp = app.oneshot(get_req("/stats", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["total"], 2);
         assert_eq!(json["successful_7d"], 1);
@@ -975,10 +924,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_automations_store_error_returns_500() {
-        let resp = error_app()
-            .oneshot(get_req("/automations", "acme"))
-            .await
-            .unwrap();
+        let resp = error_app().oneshot(get_req("/automations", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -998,10 +944,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_automation_store_error_returns_500() {
-        let resp = error_app()
-            .oneshot(get_req("/automations/a1", "acme"))
-            .await
-            .unwrap();
+        let resp = error_app().oneshot(get_req("/automations/a1", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -1060,10 +1003,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_stats_store_error_returns_500() {
-        let resp = error_app()
-            .oneshot(get_req("/stats", "acme"))
-            .await
-            .unwrap();
+        let resp = error_app().oneshot(get_req("/stats", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -1131,9 +1071,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
         assert_eq!(json["variables"]["repo"], "myrepo");
     }

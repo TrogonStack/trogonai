@@ -136,10 +136,7 @@ async fn todo_read_returns_only_active_todos() {
     .await
     .unwrap();
 
-    let result = tool
-        .call_tool("todo_read", &serde_json::json!({}))
-        .await
-        .unwrap();
+    let result = tool.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
 
     assert!(result.contains("t1"), "pending must appear, got: {result}");
     assert!(result.contains("t2"), "in_progress must appear, got: {result}");
@@ -152,10 +149,7 @@ async fn todo_read_empty_session_returns_no_active_message() {
     let store = NatsSessionStore::open(&js).await.unwrap();
     let tool = NatsTodoTool::new("sess-6", store.clone());
 
-    let result = tool
-        .call_tool("todo_read", &serde_json::json!({}))
-        .await
-        .unwrap();
+    let result = tool.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
     assert_eq!(result, "No active todos.");
 }
 
@@ -172,10 +166,7 @@ async fn todo_read_after_all_completed_returns_no_active_message() {
     .await
     .unwrap();
 
-    let result = tool
-        .call_tool("todo_read", &serde_json::json!({}))
-        .await
-        .unwrap();
+    let result = tool.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
     assert_eq!(result, "No active todos.");
 }
 
@@ -197,14 +188,8 @@ async fn todos_are_isolated_per_session() {
         .await
         .unwrap();
 
-    let result_b = tool_b
-        .call_tool("todo_read", &serde_json::json!({}))
-        .await
-        .unwrap();
-    assert_eq!(
-        result_b, "No active todos.",
-        "session B must not see session A's todos"
-    );
+    let result_b = tool_b.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
+    assert_eq!(result_b, "No active todos.", "session B must not see session A's todos");
 
     let state_a = store.load("sess-a").await.unwrap();
     assert_eq!(state_a.todos.len(), 1);

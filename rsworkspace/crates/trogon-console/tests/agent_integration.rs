@@ -31,8 +31,8 @@ use tokio::net::TcpListener;
 use trogon_console::{
     server::{AppState, build_router},
     store::{
-        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore,
-        sessions::SessionReader, skills::SkillStore,
+        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore, sessions::SessionReader,
+        skills::SkillStore,
     },
 };
 
@@ -96,8 +96,7 @@ async fn kv_get_json(js: &jetstream::Context, bucket: &str, key: &str) -> Value 
         .await
         .unwrap_or_else(|e| panic!("kv.get({key}): {e}"))
         .unwrap_or_else(|| panic!("key {key} not found in {bucket}"));
-    serde_json::from_slice(&bytes)
-        .unwrap_or_else(|e| panic!("JSON parse error for {bucket}/{key}: {e}"))
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("JSON parse error for {bucket}/{key}: {e}"))
 }
 
 // ── SkillLoader contract: CONSOLE_SKILLS and CONSOLE_SKILL_VERSIONS ───────────
@@ -179,12 +178,7 @@ async fn adding_skill_version_updates_latest_version_in_kv() {
     assert_eq!(stored_latest, v2, "latest_version should be updated to v2");
 
     // v2 version entry must exist with new content
-    let ver = kv_get_json(
-        &env.js,
-        "CONSOLE_SKILL_VERSIONS",
-        &format!("{skill_id}.{v2}"),
-    )
-    .await;
+    let ver = kv_get_json(&env.js, "CONSOLE_SKILL_VERSIONS", &format!("{skill_id}.{v2}")).await;
     assert_eq!(ver["content"], "v2 content");
 
     // v1 version entry may still exist (no cleanup expected) or may be overwritten
@@ -252,10 +246,7 @@ async fn agent_without_skills_has_empty_skill_ids_in_kv() {
     let ids = entry["skill_ids"]
         .as_array()
         .unwrap_or_else(|| panic!("skill_ids missing: {entry}"));
-    assert!(
-        ids.is_empty(),
-        "bare agent should have empty skill_ids: {ids:?}"
-    );
+    assert!(ids.is_empty(), "bare agent should have empty skill_ids: {ids:?}");
 }
 
 /// After PUT /agents/{id} updating skill_ids, CONSOLE_AGENTS reflects the new list.
@@ -348,11 +339,7 @@ async fn full_round_trip_kv_structure_is_complete() {
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect();
-    assert_eq!(
-        skill_ids,
-        vec![skill_id],
-        "agent must reference the created skill"
-    );
+    assert_eq!(skill_ids, vec![skill_id], "agent must reference the created skill");
 
     // Step 2: SkillLoader would read latest_version from CONSOLE_SKILLS
     let skill_meta = kv_get_json(&env.js, "CONSOLE_SKILLS", skill_id).await;

@@ -74,13 +74,7 @@ async fn delete_removes_entry() {
     let a = sample_automation("del1", "github.push");
     store.put(&a).await.expect("put");
     store.delete("test-tenant", "del1").await.expect("delete");
-    assert!(
-        store
-            .get("test-tenant", "del1")
-            .await
-            .expect("get")
-            .is_none()
-    );
+    assert!(store.get("test-tenant", "del1").await.expect("get").is_none());
 }
 
 #[tokio::test]
@@ -114,11 +108,7 @@ async fn put_overwrites_existing_entry() {
     a.name = "Updated name".to_string();
     store.put(&a).await.expect("put updated");
 
-    let fetched = store
-        .get("test-tenant", "upd1")
-        .await
-        .expect("get")
-        .expect("exists");
+    let fetched = store.get("test-tenant", "upd1").await.expect("get").expect("exists");
     assert_eq!(fetched.name, "Updated name");
 }
 
@@ -297,10 +287,7 @@ async fn cross_tenant_get_returns_none() {
 
     // A different tenant cannot see tenant-a's automation.
     let result = store.get("other-tenant", "iso1").await.expect("get");
-    assert!(
-        result.is_none(),
-        "other-tenant must not see test-tenant's automation"
-    );
+    assert!(result.is_none(), "other-tenant must not see test-tenant's automation");
 }
 
 #[tokio::test]
@@ -342,11 +329,7 @@ async fn automation_with_mcp_servers_round_trips() {
         },
     ];
     store.put(&a).await.expect("put");
-    let fetched = store
-        .get("test-tenant", "mcp1")
-        .await
-        .expect("get")
-        .expect("exists");
+    let fetched = store.get("test-tenant", "mcp1").await.expect("get").expect("exists");
     assert_eq!(fetched.mcp_servers.len(), 2);
     assert_eq!(fetched.mcp_servers[0].name, "search");
 }
@@ -376,19 +359,12 @@ async fn list_skips_unreadable_entry_and_returns_valid_ones() {
         .get_key_value(trogon_automations::store::BUCKET)
         .await
         .expect("get KV bucket");
-    kv.put(
-        "test-tenant.corrupted",
-        bytes::Bytes::from(b"not valid json" as &[u8]),
-    )
-    .await
-    .expect("inject bad bytes");
+    kv.put("test-tenant.corrupted", bytes::Bytes::from(b"not valid json" as &[u8]))
+        .await
+        .expect("inject bad bytes");
 
     // list() must return only the valid automation and silently skip the corrupt one.
     let result = store.list("test-tenant").await.expect("list");
-    assert_eq!(
-        result.len(),
-        1,
-        "only the valid automation should be returned"
-    );
+    assert_eq!(result.len(), 1, "only the valid automation should be returned");
     assert_eq!(result[0].id, "good-1");
 }

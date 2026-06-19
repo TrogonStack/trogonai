@@ -206,7 +206,10 @@ fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     let end = rest.find("\n---")?;
     let (yaml, body) = rest.split_at(end);
     let body = body.strip_prefix("\n---").unwrap_or(body);
-    let body = body.strip_prefix('\n').or_else(|| body.strip_prefix("\r\n")).unwrap_or(body);
+    let body = body
+        .strip_prefix('\n')
+        .or_else(|| body.strip_prefix("\r\n"))
+        .unwrap_or(body);
     Some((yaml, body))
 }
 
@@ -270,10 +273,7 @@ mod tests {
 
     #[test]
     fn substitute_arguments_and_positional() {
-        assert_eq!(
-            substitute_args("All: $ARGUMENTS", "hello world"),
-            "All: hello world"
-        );
+        assert_eq!(substitute_args("All: $ARGUMENTS", "hello world"), "All: hello world");
         assert_eq!(
             substitute_args("First=$1 second=$2 rest=$ARGUMENTS", "a b c d"),
             "First=a second=b rest=a b c d"
@@ -327,9 +327,16 @@ mod tests {
         let home = tmp.path().join("home");
         fs::create_dir_all(project.join(".claude/commands")).unwrap();
         fs::create_dir_all(home.join(".claude/commands")).unwrap();
-        fs::write(home.join(".claude/commands/dup.md"), "---\ndescription: user\n---\nuser\n").unwrap();
-        fs::write(project.join(".claude/commands/dup.md"), "---\ndescription: project\n---\nproject\n")
-            .unwrap();
+        fs::write(
+            home.join(".claude/commands/dup.md"),
+            "---\ndescription: user\n---\nuser\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join(".claude/commands/dup.md"),
+            "---\ndescription: project\n---\nproject\n",
+        )
+        .unwrap();
 
         let mut by_name = HashMap::new();
         for dir in [home.join(".claude/commands"), project.join(".claude/commands")] {

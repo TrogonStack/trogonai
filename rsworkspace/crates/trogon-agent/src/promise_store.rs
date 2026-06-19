@@ -209,10 +209,7 @@ impl PromiseStore {
             .await
             .map_err(|e| PromiseStoreError(e.to_string()))?;
 
-        Ok(Self {
-            promises,
-            tool_results,
-        })
+        Ok(Self { promises, tool_results })
     }
 
     /// Store a promise (create or overwrite), returning the new KV revision.
@@ -314,10 +311,7 @@ impl PromiseStore {
     /// If startup latency from this scan becomes observable, consider switching to
     /// the raw JetStream direct-get API or maintaining a secondary `Running` index
     /// in a separate KV key.
-    async fn list_running_inner(
-        &self,
-        tenant_id: &str,
-    ) -> Result<Vec<AgentPromise>, PromiseStoreError> {
+    async fn list_running_inner(&self, tenant_id: &str) -> Result<Vec<AgentPromise>, PromiseStoreError> {
         use futures_util::TryStreamExt;
         let prefix = format!("{tenant_id}.");
         let mut keys = self
@@ -326,11 +320,7 @@ impl PromiseStore {
             .await
             .map_err(|e| PromiseStoreError(e.to_string()))?;
         let mut result = Vec::new();
-        while let Some(key) = keys
-            .try_next()
-            .await
-            .map_err(|e| PromiseStoreError(e.to_string()))?
-        {
+        while let Some(key) = keys.try_next().await.map_err(|e| PromiseStoreError(e.to_string()))? {
             if !key.starts_with(&prefix) {
                 continue;
             }
@@ -362,8 +352,7 @@ impl PromiseStore {
         {
             None => Ok(None),
             Some(bytes) => {
-                let s = String::from_utf8(bytes.to_vec())
-                    .map_err(|e| PromiseStoreError(e.to_string()))?;
+                let s = String::from_utf8(bytes.to_vec()).map_err(|e| PromiseStoreError(e.to_string()))?;
                 Ok(Some(s))
             }
         }
@@ -429,8 +418,7 @@ impl PromiseRepository for PromiseStore {
         &'a self,
         tenant_id: &'a str,
         promise_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>>
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>> {
         Box::pin(async move { self.get_promise(tenant_id, promise_id).await })
     }
 
@@ -448,10 +436,7 @@ impl PromiseRepository for PromiseStore {
         promise: &'a AgentPromise,
         revision: u64,
     ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
-        Box::pin(async move {
-            self.update_promise(tenant_id, promise_id, promise, revision)
-                .await
-        })
+        Box::pin(async move { self.update_promise(tenant_id, promise_id, promise, revision).await })
     }
 
     fn get_tool_result<'a>(
@@ -470,17 +455,13 @@ impl PromiseRepository for PromiseStore {
         cache_key: &'a str,
         result: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
-        Box::pin(async move {
-            self.put_tool_result(tenant_id, promise_id, cache_key, result)
-                .await
-        })
+        Box::pin(async move { self.put_tool_result(tenant_id, promise_id, cache_key, result).await })
     }
 
     fn list_running<'a>(
         &'a self,
         tenant_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
         Box::pin(async move { self.list_running_inner(tenant_id).await })
     }
 }
@@ -522,9 +503,7 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>> {
             let key = format!("{tenant_id}.{promise_id}");
             let data = Arc::clone(&self.promises);
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
@@ -558,9 +537,9 @@ pub mod mock {
             Box::pin(async move {
                 let mut guard = data.lock().unwrap();
                 match guard.get(&key) {
-                    Some((_, current_rev)) if *current_rev != revision => Err(PromiseStoreError(
-                        format!("CAS mismatch: expected revision {revision}, got {current_rev}"),
-                    )),
+                    Some((_, current_rev)) if *current_rev != revision => Err(PromiseStoreError(format!(
+                        "CAS mismatch: expected revision {revision}, got {current_rev}"
+                    ))),
                     _ => {
                         let new_rev = revision + 1;
                         guard.insert(key, (promise, new_rev));
@@ -575,8 +554,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
             let key = tool_result_key(tenant_id, promise_id, cache_key);
             let data = Arc::clone(&self.tool_results);
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
@@ -601,8 +579,7 @@ pub mod mock {
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.promises);
             let prefix = format!("{tenant_id}.");
             Box::pin(async move {
@@ -652,21 +629,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -676,11 +647,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            let already = self
-                .conflict_fired
-                .swap(true, std::sync::atomic::Ordering::SeqCst);
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            let already = self.conflict_fired.swap(true, std::sync::atomic::Ordering::SeqCst);
             if !already {
                 // First call: return a CAS conflict error without writing.
                 return Box::pin(async move {
@@ -689,8 +657,7 @@ pub mod mock {
                     ))
                 });
             }
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -698,9 +665,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -710,22 +675,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -770,13 +728,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             let conflict_fired = Arc::clone(&self.conflict_fired);
             let inner = self.inner.clone();
             let tid = tenant_id.to_string();
@@ -796,8 +749,7 @@ pub mod mock {
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -807,15 +759,12 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 // Call 0 is the pre-LLM heartbeat — let it succeed.
-                return self
-                    .inner
-                    .update_promise(tenant_id, promise_id, promise, revision);
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
             }
             let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
@@ -825,8 +774,7 @@ pub mod mock {
                     ))
                 });
             }
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -834,9 +782,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -846,22 +792,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -903,13 +842,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             let conflict_fired = Arc::clone(&self.conflict_fired);
             let inner = self.inner.clone();
             let tid = tenant_id.to_string();
@@ -926,8 +860,7 @@ pub mod mock {
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -937,15 +870,12 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 // Call 0 is the pre-LLM heartbeat — let it succeed.
-                return self
-                    .inner
-                    .update_promise(tenant_id, promise_id, promise, revision);
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
             }
             let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
@@ -955,8 +885,7 @@ pub mod mock {
                     ))
                 });
             }
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -964,9 +893,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -976,22 +903,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1026,21 +946,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1050,8 +964,7 @@ pub mod mock {
             _promise_id: &'a str,
             _promise: &'a super::AgentPromise,
             _revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
 
@@ -1060,9 +973,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1072,22 +983,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1122,21 +1026,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1146,10 +1044,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1157,9 +1053,7 @@ pub mod mock {
             _tenant_id: &'a str,
             _promise_id: &'a str,
             _cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
 
@@ -1169,22 +1063,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1219,21 +1106,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1243,10 +1124,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1254,9 +1133,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1266,21 +1143,15 @@ pub mod mock {
             _promise_id: &'a str,
             _cache_key: &'a str,
             _result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1312,21 +1183,15 @@ pub mod mock {
             &'a self,
             _tenant_id: &'a str,
             _promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             Box::pin(std::future::pending())
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1336,10 +1201,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1347,9 +1210,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1359,22 +1220,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1406,25 +1260,15 @@ pub mod mock {
             &'a self,
             _tenant_id: &'a str,
             _promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async {
-                Err(super::PromiseStoreError(
-                    "injected KV read error".to_string(),
-                ))
-            })
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Err(super::PromiseStoreError("injected KV read error".to_string())) })
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1434,10 +1278,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1445,9 +1287,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1457,22 +1297,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1504,21 +1337,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1528,10 +1355,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1539,14 +1364,8 @@ pub mod mock {
             _tenant_id: &'a str,
             _promise_id: &'a str,
             _cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
-            Box::pin(async {
-                Err(super::PromiseStoreError(
-                    "injected get_tool_result error".to_string(),
-                ))
-            })
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
+            Box::pin(async { Err(super::PromiseStoreError("injected get_tool_result error".to_string())) })
         }
 
         fn put_tool_result<'a>(
@@ -1555,22 +1374,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1602,21 +1414,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1626,10 +1432,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1637,9 +1441,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1649,25 +1451,15 @@ pub mod mock {
             _promise_id: &'a str,
             _cache_key: &'a str,
             _result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            Box::pin(async {
-                Err(super::PromiseStoreError(
-                    "injected put_tool_result error".to_string(),
-                ))
-            })
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            Box::pin(async { Err(super::PromiseStoreError("injected put_tool_result error".to_string())) })
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1707,13 +1499,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             let fired = Arc::clone(&self.conflict_fired);
             let inner = self.inner.clone();
             let tid = tenant_id.to_string();
@@ -1731,8 +1518,7 @@ pub mod mock {
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1742,15 +1528,12 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 // Call 0 is the pre-LLM heartbeat — let it succeed.
-                return self
-                    .inner
-                    .update_promise(tenant_id, promise_id, promise, revision);
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
             }
             let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
@@ -1760,8 +1543,7 @@ pub mod mock {
                     ))
                 });
             }
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1769,9 +1551,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1781,22 +1561,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1840,13 +1613,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             let conflict_fired = Arc::clone(&self.conflict_fired);
             let inner = self.inner.clone();
             let tid = tenant_id.to_string();
@@ -1854,10 +1622,7 @@ pub mod mock {
             Box::pin(async move {
                 if conflict_fired.load(std::sync::atomic::Ordering::SeqCst) {
                     // After CAS conflict: hang indefinitely to trigger the NATS_KV_TIMEOUT.
-                    std::future::pending::<
-                        Result<Option<super::PromiseEntry>, super::PromiseStoreError>,
-                    >()
-                    .await
+                    std::future::pending::<Result<Option<super::PromiseEntry>, super::PromiseStoreError>>().await
                 } else {
                     inner.get_promise(&tid, &pid).await
                 }
@@ -1867,8 +1632,7 @@ pub mod mock {
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -1878,15 +1642,12 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 // Call 0 is the pre-LLM heartbeat — let it succeed.
-                return self
-                    .inner
-                    .update_promise(tenant_id, promise_id, promise, revision);
+                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
             }
             let already = self.conflict_fired.swap(true, Ordering::SeqCst);
             if !already {
@@ -1896,8 +1657,7 @@ pub mod mock {
                     ))
                 });
             }
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -1905,9 +1665,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -1917,22 +1675,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -1965,21 +1716,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             _promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
 
@@ -1989,10 +1734,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -2000,9 +1743,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -2012,22 +1753,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -2060,26 +1794,16 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             _promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            Box::pin(async {
-                Err(super::PromiseStoreError(
-                    "simulated put_promise failure".to_string(),
-                ))
-            })
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            Box::pin(async { Err(super::PromiseStoreError("simulated put_promise failure".to_string())) })
         }
 
         fn update_promise<'a>(
@@ -2088,10 +1812,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -2099,9 +1821,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -2111,22 +1831,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -2159,21 +1872,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -2183,10 +1890,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -2194,9 +1899,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -2206,22 +1909,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             Box::pin(std::future::pending())
         }
     }
@@ -2254,21 +1950,15 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.get_promise(tenant_id, promise_id)
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -2278,10 +1968,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -2289,9 +1977,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -2301,27 +1987,16 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async {
-                Err(super::PromiseStoreError(
-                    "injected list_running error".to_string(),
-                ))
-            })
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
+            Box::pin(async { Err(super::PromiseStoreError("injected list_running error".to_string())) })
         }
     }
 
@@ -2355,21 +2030,15 @@ pub mod mock {
             &'a self,
             _tenant_id: &'a str,
             _promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             Box::pin(async { Ok(None) })
         }
 
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -2379,10 +2048,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -2390,9 +2057,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -2402,22 +2067,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -2452,13 +2110,8 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             promise_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<super::PromiseEntry>, super::PromiseStoreError>> + Send + 'a>>
+        {
             let inner = self.inner.clone();
             let tid = tenant_id.to_string();
             let pid = promise_id.to_string();
@@ -2475,8 +2128,7 @@ pub mod mock {
         fn put_promise<'a>(
             &'a self,
             promise: &'a super::AgentPromise,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.put_promise(promise)
         }
 
@@ -2486,10 +2138,8 @@ pub mod mock {
             promise_id: &'a str,
             promise: &'a super::AgentPromise,
             revision: u64,
-        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .update_promise(tenant_id, promise_id, promise, revision)
+        ) -> Pin<Box<dyn Future<Output = Result<u64, super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -2497,9 +2147,7 @@ pub mod mock {
             tenant_id: &'a str,
             promise_id: &'a str,
             cache_key: &'a str,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, super::PromiseStoreError>> + Send + 'a>> {
             self.inner.get_tool_result(tenant_id, promise_id, cache_key)
         }
 
@@ -2509,22 +2157,15 @@ pub mod mock {
             promise_id: &'a str,
             cache_key: &'a str,
             result: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>>
-        {
-            self.inner
-                .put_tool_result(tenant_id, promise_id, cache_key, result)
+        ) -> Pin<Box<dyn Future<Output = Result<(), super::PromiseStoreError>> + Send + 'a>> {
+            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<super::AgentPromise>, super::PromiseStoreError>> + Send + 'a>>
+        {
             self.inner.list_running(tenant_id)
         }
     }
@@ -2637,8 +2278,8 @@ mod tests {
             "trigger": null,
             "nats_subject": "github.pull_request"
         }"#;
-        let p: AgentPromise = serde_json::from_str(json)
-            .expect("AgentPromise must deserialize even without the system_prompt key");
+        let p: AgentPromise =
+            serde_json::from_str(json).expect("AgentPromise must deserialize even without the system_prompt key");
         assert!(
             p.system_prompt.is_none(),
             "system_prompt must default to None when the key is absent from the serialized JSON"
@@ -2664,18 +2305,12 @@ mod tests {
         let mut updated = p.clone();
         updated.iteration = 1;
         let rev2 = store.put_promise(&updated).await.unwrap();
-        assert_eq!(
-            rev2, 2,
-            "second put on existing key must increment revision to 2"
-        );
+        assert_eq!(rev2, 2, "second put on existing key must increment revision to 2");
 
         // Verify the stored value and revision reflect the second write.
         let (fetched, stored_rev) = store.get_promise("acme", "run-1").await.unwrap().unwrap();
         assert_eq!(stored_rev, 2, "stored revision must be 2 after second put");
-        assert_eq!(
-            fetched.iteration, 1,
-            "stored value must reflect the second put"
-        );
+        assert_eq!(fetched.iteration, 1, "stored value must reflect the second put");
     }
 
     #[tokio::test]
@@ -2685,11 +2320,7 @@ mod tests {
         let rev = store.put_promise(&p).await.unwrap();
         assert_eq!(rev, 1);
 
-        let (fetched, fetched_rev) = store
-            .get_promise("acme", "run-1")
-            .await
-            .unwrap()
-            .expect("should exist");
+        let (fetched, fetched_rev) = store.get_promise("acme", "run-1").await.unwrap().expect("should exist");
         assert_eq!(fetched.id, "run-1");
         assert_eq!(fetched_rev, 1);
     }
@@ -2702,17 +2333,11 @@ mod tests {
 
         let mut updated = p.clone();
         updated.iteration = 1;
-        let new_rev = store
-            .update_promise("acme", "run-1", &updated, rev)
-            .await
-            .unwrap();
+        let new_rev = store.update_promise("acme", "run-1", &updated, rev).await.unwrap();
         assert_eq!(new_rev, 2);
 
         // Stale revision should fail.
-        let err = store
-            .update_promise("acme", "run-1", &updated, rev)
-            .await
-            .unwrap_err();
+        let err = store.update_promise("acme", "run-1", &updated, rev).await.unwrap_err();
         assert!(err.to_string().contains("CAS mismatch"));
     }
 
@@ -2730,10 +2355,7 @@ mod tests {
         let p = sample_promise("nonexistent");
 
         // No prior `put_promise` — the key does not exist.
-        let new_rev = store
-            .update_promise("acme", "nonexistent", &p, 0)
-            .await
-            .unwrap();
+        let new_rev = store.update_promise("acme", "nonexistent", &p, 0).await.unwrap();
         assert_eq!(new_rev, 1, "upsert must return revision 0 + 1 = 1");
 
         let (fetched, rev) = store
@@ -2754,10 +2376,7 @@ mod tests {
             .put_tool_result("acme", "run-1", cache_key, "result text")
             .await
             .unwrap();
-        let cached = store
-            .get_tool_result("acme", "run-1", cache_key)
-            .await
-            .unwrap();
+        let cached = store.get_tool_result("acme", "run-1", cache_key).await.unwrap();
         assert_eq!(cached, Some("result text".to_string()));
     }
 
@@ -2863,10 +2482,7 @@ mod tests {
 
         let other_results = store.list_running("other-tenant").await.unwrap();
         assert_eq!(other_results.len(), 1);
-        assert_eq!(
-            other_results[0].id, "p2",
-            "must only return other-tenant's promise"
-        );
+        assert_eq!(other_results[0].id, "p2", "must only return other-tenant's promise");
 
         let empty = store.list_running("unknown").await.unwrap();
         assert!(empty.is_empty(), "unknown tenant must return empty list");
@@ -2938,9 +2554,7 @@ mod integration_tests {
     #[tokio::test]
     async fn open_is_idempotent() {
         let (_, js, _c) = make_store().await;
-        PromiseStore::open(&js)
-            .await
-            .expect("second open() must succeed");
+        PromiseStore::open(&js).await.expect("second open() must succeed");
     }
 
     /// `put_promise` followed by `get_promise` must return the original value
@@ -2960,10 +2574,7 @@ mod integration_tests {
         assert_eq!(fetched.id, "run-1");
         assert_eq!(fetched.tenant_id, "tenant1");
         assert_eq!(fetched.status, PromiseStatus::Running);
-        assert_eq!(
-            fetched_rev, rev,
-            "returned revision must match put() revision"
-        );
+        assert_eq!(fetched_rev, rev, "returned revision must match put() revision");
     }
 
     /// A second `put_promise` on the same key must overwrite the stored value.
@@ -3035,10 +2646,7 @@ mod integration_tests {
             .await
             .unwrap_err();
         // The exact error message is NATS-specific; just assert it's non-empty.
-        assert!(
-            !err.to_string().is_empty(),
-            "CAS mismatch must produce an error"
-        );
+        assert!(!err.to_string().is_empty(), "CAS mismatch must produce an error");
     }
 
     /// A two-writer CAS race: both workers read the same revision, only the
@@ -3052,10 +2660,7 @@ mod integration_tests {
         // First writer wins.
         let mut first = p.clone();
         first.worker_id = "worker-a".to_string();
-        let new_rev = store
-            .update_promise("tenant1", "run-race", &first, rev)
-            .await
-            .unwrap();
+        let new_rev = store.update_promise("tenant1", "run-race", &first, rev).await.unwrap();
         assert!(new_rev > rev);
 
         // Second writer uses the original (now stale) revision — must fail.
@@ -3065,10 +2670,7 @@ mod integration_tests {
             .update_promise("tenant1", "run-race", &second, rev)
             .await
             .unwrap_err();
-        assert!(
-            !err.to_string().is_empty(),
-            "second writer must lose the CAS race"
-        );
+        assert!(!err.to_string().is_empty(), "second writer must lose the CAS race");
 
         // The stored value must be the first writer's update.
         let (fetched, _) = store
@@ -3076,10 +2678,7 @@ mod integration_tests {
             .await
             .unwrap()
             .expect("must exist");
-        assert_eq!(
-            fetched.worker_id, "worker-a",
-            "first writer's update must be stored"
-        );
+        assert_eq!(fetched.worker_id, "worker-a", "first writer's update must be stored");
     }
 
     /// `list_running` must return only promises with `status = Running`.
@@ -3162,9 +2761,7 @@ mod integration_tests {
             .get_key_value(AGENT_PROMISES_BUCKET)
             .await
             .expect("bucket must be accessible");
-        kv.delete("tenant1.to-delete")
-            .await
-            .expect("delete must succeed");
+        kv.delete("tenant1.to-delete").await.expect("delete must succeed");
 
         // list_running must skip the tombstone entry and return empty.
         let after = store.list_running("tenant1").await.unwrap();
@@ -3185,10 +2782,7 @@ mod integration_tests {
             .put_tool_result("tenant1", "run-1", cache_key, "tool result text")
             .await
             .unwrap();
-        let result = store
-            .get_tool_result("tenant1", "run-1", cache_key)
-            .await
-            .unwrap();
+        let result = store.get_tool_result("tenant1", "run-1", cache_key).await.unwrap();
         assert_eq!(result, Some("tool result text".to_string()));
     }
 
@@ -3220,10 +2814,7 @@ mod integration_tests {
             .put_tool_result("tenant1", "run-1", cache_key, "second result")
             .await
             .unwrap();
-        let result = store
-            .get_tool_result("tenant1", "run-1", cache_key)
-            .await
-            .unwrap();
+        let result = store.get_tool_result("tenant1", "run-1", cache_key).await.unwrap();
         assert_eq!(
             result,
             Some("second result".to_string()),
@@ -3243,10 +2834,7 @@ mod integration_tests {
             .unwrap();
 
         // A different promise must not see run-A's cached result.
-        let result = store
-            .get_tool_result("tenant1", "run-B", cache_key)
-            .await
-            .unwrap();
+        let result = store.get_tool_result("tenant1", "run-B", cache_key).await.unwrap();
         assert!(
             result.is_none(),
             "run-B must not see run-A's tool result; got: {result:?}"

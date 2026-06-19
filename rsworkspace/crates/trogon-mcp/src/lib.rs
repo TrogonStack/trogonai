@@ -22,10 +22,7 @@
 mod client;
 mod stdio;
 
-pub use client::{
-    McpCallTool, McpClient, McpPrompt, McpPromptArgument, McpResource, McpResourceContent,
-    McpTool,
-};
+pub use client::{McpCallTool, McpClient, McpPrompt, McpPromptArgument, McpResource, McpResourceContent, McpTool};
 pub use stdio::StdioMcpClient;
 
 #[cfg(feature = "test-support")]

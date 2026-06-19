@@ -5,16 +5,13 @@ use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
-use trogon_xai_runner::{
-    AgentLoader, NatsSessionNotifier, SkillLoader, XaiAgent, open_default_session_store,
-};
+use trogon_xai_runner::{AgentLoader, NatsSessionNotifier, SkillLoader, XaiAgent, open_default_session_store};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     // MED-34: default to a runner-specific prefix so the spawn subscriber does not
     // share `acp.agent.spawn` with the openrouter runner (which would round-robin
     // spawn requests to the wrong backend). The dev script still overrides this.
@@ -76,7 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // ── Registry self-registration ────────────────────────────────────────────
 
     let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "xai".to_string());
-    let reg_store = trogon_registry::provision(&js_ctx).await
+    let reg_store = trogon_registry::provision(&js_ctx)
+        .await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
     let model_ids: Vec<String> = models
@@ -108,12 +106,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    let nats_config = acp_nats::NatsConfig { servers: vec![nats_url.clone()], auth: acp_nats::NatsAuth::None };
+    let nats_config = acp_nats::NatsConfig {
+        servers: vec![nats_url.clone()],
+        auth: acp_nats::NatsAuth::None,
+    };
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let proxy_url =
-        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
     let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
     let classifier_http = reqwest::Client::new();
@@ -148,9 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        agent = agent.with_default_session_store(
-            open_default_session_store(&js, session_ttl_secs).await,
-        );
+        agent = agent.with_default_session_store(open_default_session_store(&js, session_ttl_secs).await);
     }
 
     let local = tokio::task::LocalSet::new();
@@ -160,8 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_for_perm = nats.clone();
     let prefix_for_perm = acp_prefix.clone();
 
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
     agent = agent.with_elicitation(elic_tx);
     let nats_for_elic = nats.clone();
     let prefix_for_elic = acp_prefix.clone();
@@ -191,10 +188,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             });
 
-            let (_conn, io_task) =
-                AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
             // LOW-16: register AFTER the ACP subscription is established so
             // incoming requests are not received before we can handle them.
             if let Err(e) = registry_for_register.register(&cap).await {

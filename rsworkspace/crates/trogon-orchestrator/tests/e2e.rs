@@ -2,10 +2,12 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
-use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
+use testcontainers_modules::{
+    nats::Nats,
+    testcontainers::{ImageExt, runners::AsyncRunner as _},
+};
 use trogon_orchestrator::{
-    AnthropicOrchestratorProvider, OrchestratorAuthStyle, OrchestratorEngine,
-    OrchestratorLlmConfig,
+    AnthropicOrchestratorProvider, OrchestratorAuthStyle, OrchestratorEngine, OrchestratorLlmConfig,
     caller::NatsAgentCaller,
 };
 use trogon_registry::{AgentCapability, Registry, provision};
@@ -86,7 +88,10 @@ async fn orchestrator_plans_and_dispatches_to_registered_agent() {
     tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
             if let Some(reply) = msg.reply {
-                nats_reply.publish(reply, bytes::Bytes::from_static(b"Review complete: LGTM")).await.ok();
+                nats_reply
+                    .publish(reply, bytes::Bytes::from_static(b"Review complete: LGTM"))
+                    .await
+                    .ok();
             }
         }
     });
@@ -144,7 +149,11 @@ async fn orchestrator_reports_failed_subtask_for_unregistered_capability() {
     assert_eq!(result.sub_results.len(), 1);
     assert!(!result.sub_results[0].success, "subtask should have failed");
     assert!(
-        result.sub_results[0].error.as_deref().unwrap().contains("no agent registered"),
+        result.sub_results[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("no agent registered"),
         "error should mention missing agent"
     );
     // Synthesis still produced despite failure
@@ -171,7 +180,11 @@ async fn orchestrator_dispatches_to_multiple_agents_in_parallel() {
         .await
         .unwrap();
     registry
-        .register(&AgentCapability::new("SecurityActor", ["security_scan"], "actors.security.>"))
+        .register(&AgentCapability::new(
+            "SecurityActor",
+            ["security_scan"],
+            "actors.security.>",
+        ))
         .await
         .unwrap();
 
@@ -207,6 +220,9 @@ async fn orchestrator_dispatches_to_multiple_agents_in_parallel() {
     let result = engine.orchestrate("Full review of PR #100").await.unwrap();
 
     assert_eq!(result.sub_results.len(), 2);
-    assert!(result.sub_results.iter().all(|r| r.success), "all subtasks should succeed");
+    assert!(
+        result.sub_results.iter().all(|r| r.success),
+        "all subtasks should succeed"
+    );
     assert_eq!(result.synthesis, "Both agents passed. Safe to merge.");
 }

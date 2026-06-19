@@ -52,14 +52,7 @@ fn make_tool(
     session_id: &str,
     timeout: Duration,
 ) -> WasmRuntimeBashTool<MemorySessionStore> {
-    WasmRuntimeBashTool::new(
-        nats,
-        prefix,
-        session_id,
-        sandbox(),
-        timeout,
-        MemorySessionStore::new(),
-    )
+    WasmRuntimeBashTool::new(nats, prefix, session_id, sandbox(), timeout, MemorySessionStore::new())
 }
 
 /// Spawn a mock wasm-runtime that handles the three NATS subjects.
@@ -190,9 +183,7 @@ async fn call_tool_errors_on_null_command() {
     let client = nats_client(port).await;
 
     let tool = make_tool(client, "t", "s1", Duration::from_secs(5));
-    let result = tool
-        .call_tool("bash", &serde_json::json!({ "command": null }))
-        .await;
+    let result = tool.call_tool("bash", &serde_json::json!({ "command": null })).await;
 
     assert!(result.is_err());
 }
@@ -271,7 +262,11 @@ async fn call_tool_accepts_nonzero_exit_code() {
         .call_tool("bash", &serde_json::json!({ "command": "cat missing" }))
         .await;
 
-    assert!(result.is_ok(), "non-zero exit should still be Ok: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "non-zero exit should still be Ok: {:?}",
+        result.unwrap_err()
+    );
     assert!(result.unwrap().contains("error: file not found"));
 }
 
@@ -371,14 +366,7 @@ async fn call_tool_reuses_existing_terminal_id() {
 
     tokio::task::yield_now().await;
 
-    let tool = WasmRuntimeBashTool::new(
-        tool_client,
-        "wp",
-        "sess5",
-        sandbox(),
-        Duration::from_secs(5),
-        store,
-    );
+    let tool = WasmRuntimeBashTool::new(tool_client, "wp", "sess5", sandbox(), Duration::from_secs(5), store);
 
     let result = tool
         .call_tool("bash", &serde_json::json!({ "command": "echo reused" }))
@@ -406,9 +394,7 @@ async fn call_tool_uses_correct_nats_prefix() {
     .await;
 
     let tool = make_tool(tool_client, "team.prod", "s6", Duration::from_secs(5));
-    let result = tool
-        .call_tool("bash", &serde_json::json!({ "command": "true" }))
-        .await;
+    let result = tool.call_tool("bash", &serde_json::json!({ "command": "true" })).await;
 
     assert!(result.is_ok(), "prefix routing failed: {:?}", result.unwrap_err());
 }
@@ -557,7 +543,10 @@ async fn call_tool_timeout_includes_partial_output() {
         .unwrap_err();
 
     assert!(err.contains("timeout"), "must mention timeout: {err}");
-    assert!(err.contains("partial output line"), "must include partial output: {err}");
+    assert!(
+        err.contains("partial output line"),
+        "must include partial output: {err}"
+    );
 }
 
 // ── cwd forwarding ────────────────────────────────────────────────────────────
@@ -592,9 +581,7 @@ async fn call_tool_sends_session_cwd_in_create_terminal_request() {
                 let payload = msg.payload.to_vec();
                 if let Some(reply) = msg.reply {
                     let resp = serde_json::json!({ "terminalId": tid });
-                    c.publish(reply, serde_json::to_vec(&resp).unwrap().into())
-                        .await
-                        .ok();
+                    c.publish(reply, serde_json::to_vec(&resp).unwrap().into()).await.ok();
                 }
                 create_tx.send(payload).ok();
             }
@@ -618,9 +605,7 @@ async fn call_tool_sends_session_cwd_in_create_terminal_request() {
                         String::new()
                     };
                     let resp = serde_json::json!({ "output": out });
-                    c.publish(reply, serde_json::to_vec(&resp).unwrap().into())
-                        .await
-                        .ok();
+                    c.publish(reply, serde_json::to_vec(&resp).unwrap().into()).await.ok();
                 }
             }
         });

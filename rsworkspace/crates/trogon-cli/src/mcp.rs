@@ -3,9 +3,7 @@
 use crate::fs::Fs;
 use crate::mcp_oauth::{OAuthStore, StoredToken};
 use crate::stdio_mcp_bridge::StdioMcpBridge;
-use agent_client_protocol::{
-    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
-};
+use agent_client_protocol::{EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -946,10 +944,7 @@ mod tests {
 
     #[test]
     fn expand_mcp_config_paths_splits_commas() {
-        let paths = expand_mcp_config_paths(&[
-            PathBuf::from("a.json,b.json"),
-            PathBuf::from("c.json"),
-        ]);
+        let paths = expand_mcp_config_paths(&[PathBuf::from("a.json,b.json"), PathBuf::from("c.json")]);
         assert_eq!(
             paths,
             vec![
@@ -969,11 +964,8 @@ mod tests {
         )
         .unwrap();
         let cli_path = PathBuf::from("/tmp/cli-mcp.json");
-        fs.write(
-            &cli_path,
-            br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#,
-        )
-        .unwrap();
+        fs.write(&cli_path, br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#)
+            .unwrap();
 
         let mgr = McpManager::load_for_cli(&fs, None, &[cli_path], true);
         assert_eq!(mgr.configured_servers().len(), 1);
@@ -995,11 +987,8 @@ mod tests {
         )
         .unwrap();
         let cli_path = PathBuf::from("/tmp/cli-mcp.json");
-        fs.write(
-            &cli_path,
-            br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#,
-        )
-        .unwrap();
+        fs.write(&cli_path, br#"{"servers":[{"name":"cli","command":"cat","args":[]}]}"#)
+            .unwrap();
 
         let mgr = McpManager::load_for_cli(&fs, Some(&project), &[cli_path], false);
         let names: Vec<_> = mgr.configured_servers().iter().map(|s| s.name.as_str()).collect();

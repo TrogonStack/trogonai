@@ -97,10 +97,12 @@ async fn forward_to_client<C: Client>(
         serde_json::from_slice(payload).map_err(RequestPermissionError::InvalidRequest)?;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
-        return Err(RequestPermissionError::InvalidRequest(serde_json::Error::custom(format!(
-            "params.sessionId ({}) does not match subject session id ({})",
-            params_session_id, expected_session_id
-        ))));
+        return Err(RequestPermissionError::InvalidRequest(serde_json::Error::custom(
+            format!(
+                "params.sessionId ({}) does not match subject session id ({})",
+                params_session_id, expected_session_id
+            ),
+        )));
     }
     client
         .request_permission(request)
@@ -284,7 +286,15 @@ mod tests {
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
         let payload = make_raw_payload(make_request());
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
         // Verify the reply is a valid RequestPermissionResponse (raw JSON, not JSON-RPC wrapped)
@@ -312,7 +322,15 @@ mod tests {
         let request = RequestPermissionRequest::new("session-other", tool_call, vec![]);
         let payload = make_raw_payload(request);
 
-        handle(&payload, &client, Some("_INBOX.err"), &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
         // Error path publishes a Cancelled response
@@ -326,7 +344,15 @@ mod tests {
         let nats = MockNatsClient::new();
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
 
-        handle(b"not json", &client, Some("_INBOX.err"), &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            b"not json",
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
         let payloads = nats.published_payloads();
@@ -340,7 +366,15 @@ mod tests {
         let client = FailingClient;
         let payload = make_raw_payload(make_request());
 
-        handle(&payload, &client, Some("_INBOX.err"), &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
         let payloads = nats.published_payloads();
@@ -355,7 +389,15 @@ mod tests {
         let serializer = FailNextSerialize::new(1);
         let payload = make_raw_payload(make_request());
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &serializer).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "session-001",
+            &serializer,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -367,7 +409,15 @@ mod tests {
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
         let payload = make_raw_payload(make_request());
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -379,7 +429,15 @@ mod tests {
         let client = MockClient::new(RequestPermissionOutcome::Cancelled);
         let payload = make_raw_payload(make_request());
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "session-001", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "session-001",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert!(nats.published_messages().is_empty());
     }

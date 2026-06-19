@@ -42,10 +42,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
         .and_then(|prs| prs.first())
         .and_then(|pr| pr["number"].as_u64());
 
-    info!(
-        owner,
-        repo, check_name, conclusion, "Starting CI-completed agent"
-    );
+    info!(owner, repo, check_name, conclusion, "Starting CI-completed agent");
 
     let pr_context = match pr_number {
         Some(n) => format!("This check is associated with PR #{n}."),
@@ -149,11 +146,7 @@ mod tests {
             "check_run": {"name": "CI", "conclusion": null, "pull_requests": [], "details_url": ""},
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(
-            handle(&agent, &serde_json::to_vec(&payload).unwrap())
-                .await
-                .is_none()
-        );
+        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
     }
 
     #[tokio::test]
@@ -164,11 +157,7 @@ mod tests {
             "check_run": {"name": "CI", "conclusion": "success", "pull_requests": [], "details_url": ""},
             "repository": {"owner": {"login": "o"}, "name": "r"}
         });
-        assert!(
-            handle(&agent, &serde_json::to_vec(&payload).unwrap())
-                .await
-                .is_none()
-        );
+        assert!(handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none());
     }
 
     /// Invalid JSON payload must return `Some(Err(...))` — same pattern as
@@ -215,9 +204,7 @@ mod tests {
                 "repository": {"owner": {"login": "o"}, "name": "r"}
             });
             assert!(
-                handle(&agent, &serde_json::to_vec(&payload).unwrap())
-                    .await
-                    .is_none(),
+                handle(&agent, &serde_json::to_vec(&payload).unwrap()).await.is_none(),
                 "conclusion '{conclusion}' must be skipped"
             );
         }

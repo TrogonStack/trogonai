@@ -16,8 +16,7 @@ use bytes::Bytes;
 use futures_util::Stream;
 
 use crate::traits::{
-    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
-    StreamingHttpResponse,
+    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient, StreamingHttpResponse,
 };
 
 // ── MockNatsClient ────────────────────────────────────────────────────────────
@@ -65,19 +64,8 @@ impl NatsClient for MockNatsClient {
     type Sub = MockSubscription;
 
     async fn subscribe(&self, subject: String) -> Result<MockSubscription, String> {
-        let mut msgs: VecDeque<_> = self
-            .next_subscription
-            .lock()
-            .unwrap()
-            .drain(..)
-            .collect();
-        msgs.extend(
-            self.subscriptions
-                .lock()
-                .unwrap()
-                .remove(&subject)
-                .unwrap_or_default(),
-        );
+        let mut msgs: VecDeque<_> = self.next_subscription.lock().unwrap().drain(..).collect();
+        msgs.extend(self.subscriptions.lock().unwrap().remove(&subject).unwrap_or_default());
         Ok(MockSubscription::new(msgs))
     }
 
@@ -143,10 +131,7 @@ impl JetStreamPublisher for MockJetStreamPublisher {
         _headers: async_nats::HeaderMap,
         payload: Bytes,
     ) -> Result<(), String> {
-        self.published
-            .lock()
-            .unwrap()
-            .push(PublishedMsg { subject, payload });
+        self.published.lock().unwrap().push(PublishedMsg { subject, payload });
         Ok(())
     }
 }
@@ -200,16 +185,8 @@ impl MockHttpClient {
     ///
     /// `chunks` is the sequence of byte slices the stream will yield, one at a
     /// time, in order.
-    pub fn push_streaming_ok(
-        &self,
-        status: u16,
-        headers: Vec<(String, String)>,
-        chunks: Vec<Vec<u8>>,
-    ) {
-        self.streaming
-            .lock()
-            .unwrap()
-            .push_back(Ok((status, headers, chunks)));
+    pub fn push_streaming_ok(&self, status: u16, headers: Vec<(String, String)>, chunks: Vec<Vec<u8>>) {
+        self.streaming.lock().unwrap().push_back(Ok((status, headers, chunks)));
     }
 
     /// Queue a transport error for the next `send_request_streaming` call.
@@ -257,9 +234,8 @@ impl HttpClient for MockHttpClient {
 
         match entry {
             Ok((status, headers, chunks)) => {
-                let chunk_stream = futures_util::stream::iter(
-                    chunks.into_iter().map(|c| Ok::<Bytes, String>(Bytes::from(c))),
-                );
+                let chunk_stream =
+                    futures_util::stream::iter(chunks.into_iter().map(|c| Ok::<Bytes, String>(Bytes::from(c))));
                 Ok(StreamingHttpResponse {
                     status,
                     headers,
@@ -304,11 +280,7 @@ impl MockJetStreamConsumerClient {
 impl JetStreamConsumerClient for MockJetStreamConsumerClient {
     type Messages = MockMessages;
 
-    async fn get_messages(
-        &self,
-        _stream_name: &str,
-        _consumer_name: &str,
-    ) -> Result<MockMessages, String> {
+    async fn get_messages(&self, _stream_name: &str, _consumer_name: &str) -> Result<MockMessages, String> {
         let msgs = std::mem::take(&mut *self.messages.lock().unwrap());
         Ok(MockMessages { msgs })
     }

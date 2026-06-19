@@ -49,17 +49,8 @@ pub trait SlackHttpClient: Send + Sync + 'static {
 
 #[cfg(feature = "slack")]
 impl SlackHttpClient for reqwest::Client {
-    async fn post_json<'a>(
-        &'a self,
-        url: &'a str,
-        body: &'a serde_json::Value,
-    ) -> Result<u16, String> {
-        let resp = self
-            .post(url)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+    async fn post_json<'a>(&'a self, url: &'a str, body: &'a serde_json::Value) -> Result<u16, String> {
+        let resp = self.post(url).json(body).send().await.map_err(|e| e.to_string())?;
         Ok(resp.status().as_u16())
     }
 }
@@ -69,14 +60,17 @@ impl SlackHttpClient for reqwest::Client {
 /// Enable with the `slack` Cargo feature.
 #[cfg(feature = "slack")]
 pub struct SlackWebhookNotifier<H = reqwest::Client> {
-    client:      H,
+    client: H,
     webhook_url: String,
 }
 
 #[cfg(feature = "slack")]
 impl SlackWebhookNotifier<reqwest::Client> {
     pub fn new(webhook_url: impl Into<String>) -> Self {
-        Self { client: reqwest::Client::new(), webhook_url: webhook_url.into() }
+        Self {
+            client: reqwest::Client::new(),
+            webhook_url: webhook_url.into(),
+        }
     }
 
     /// Build from `VAULT_SLACK_WEBHOOK_URL` env var.
@@ -90,7 +84,10 @@ impl SlackWebhookNotifier<reqwest::Client> {
 #[cfg(feature = "slack")]
 impl<H: SlackHttpClient> SlackWebhookNotifier<H> {
     pub fn with_client(webhook_url: impl Into<String>, client: H) -> Self {
-        Self { client, webhook_url: webhook_url.into() }
+        Self {
+            client,
+            webhook_url: webhook_url.into(),
+        }
     }
 
     async fn post(&self, text: &str) {
@@ -115,26 +112,29 @@ impl<H: SlackHttpClient> Notifier for SlackWebhookNotifier<H> {
              ```{{\"proposal_id\":\"{id}\",\"approved_by\":\"<name>\",\"plaintext\":\"<api-key>\"}}```\n\
              *To reject*, publish to `vault.proposals.{vault}.reject`:\n\
              ```{{\"proposal_id\":\"{id}\",\"rejected_by\":\"<name>\",\"reason\":\"<optional>\"}}```",
-            id    = proposal.id,
-            key   = proposal.credential_key,
-            svc   = proposal.service,
-            msg   = proposal.message,
+            id = proposal.id,
+            key = proposal.credential_key,
+            svc = proposal.service,
+            msg = proposal.message,
             vault = vault_name,
-        )).await;
+        ))
+        .await;
     }
 
     async fn notify_approved(&self, proposal: &Proposal, approved_by: &str) {
         self.post(&format!(
             ":white_check_mark: *Approved* by `{approved_by}`\nProposal `{}` for `{}`",
             proposal.id, proposal.credential_key,
-        )).await;
+        ))
+        .await;
     }
 
     async fn notify_rejected(&self, proposal: &Proposal, rejected_by: &str, reason: &str) {
         self.post(&format!(
             ":x: *Rejected* by `{rejected_by}` — {reason}\nProposal `{}` for `{}`",
             proposal.id, proposal.credential_key,
-        )).await;
+        ))
+        .await;
     }
 }
 
@@ -183,25 +183,30 @@ mod tests {
 
     fn pending() -> Proposal {
         Proposal {
-            id:             "prop_abc".into(),
+            id: "prop_abc".into(),
             credential_key: "tok_stripe_prod_abc".into(),
-            service:        "api.stripe.com".into(),
-            message:        "need access for payments".into(),
-            requested_at:   None,
-            status:         ProposalStatus::Pending,
+            service: "api.stripe.com".into(),
+            message: "need access for payments".into(),
+            requested_at: None,
+            status: ProposalStatus::Pending,
         }
     }
 
     fn approved() -> Proposal {
         Proposal {
-            status: ProposalStatus::Approved { approved_by: "mario".into() },
+            status: ProposalStatus::Approved {
+                approved_by: "mario".into(),
+            },
             ..pending()
         }
     }
 
     fn rejected() -> Proposal {
         Proposal {
-            status: ProposalStatus::Rejected { rejected_by: "luigi".into(), reason: "not authorised".into() },
+            status: ProposalStatus::Rejected {
+                rejected_by: "luigi".into(),
+                reason: "not authorised".into(),
+            },
             ..pending()
         }
     }
@@ -225,16 +230,22 @@ mod tests {
     #[cfg(feature = "slack")]
     #[test]
     fn slack_from_env_errors_when_var_missing() {
-        unsafe { std::env::remove_var("VAULT_SLACK_WEBHOOK_URL"); }
+        unsafe {
+            std::env::remove_var("VAULT_SLACK_WEBHOOK_URL");
+        }
         assert!(SlackWebhookNotifier::from_env().is_err());
     }
 
     #[cfg(feature = "slack")]
     #[test]
     fn slack_from_env_succeeds_when_var_set() {
-        unsafe { std::env::set_var("VAULT_SLACK_WEBHOOK_URL", "https://hooks.slack.example/T123/B456/xyz"); }
+        unsafe {
+            std::env::set_var("VAULT_SLACK_WEBHOOK_URL", "https://hooks.slack.example/T123/B456/xyz");
+        }
         let result = SlackWebhookNotifier::from_env();
-        unsafe { std::env::remove_var("VAULT_SLACK_WEBHOOK_URL"); }
+        unsafe {
+            std::env::remove_var("VAULT_SLACK_WEBHOOK_URL");
+        }
         assert!(result.is_ok());
     }
 
@@ -242,23 +253,29 @@ mod tests {
 
     #[cfg(feature = "slack")]
     mod slack_tests {
-        use std::sync::Mutex;
         use super::*;
+        use std::sync::Mutex;
 
         #[derive(Default)]
         struct MockSlackHttpClient {
             response_status: u16,
-            last_url:  Mutex<Option<String>>,
+            last_url: Mutex<Option<String>>,
             last_body: Mutex<Option<serde_json::Value>>,
         }
 
         impl MockSlackHttpClient {
             fn ok() -> Self {
-                Self { response_status: 200, ..Default::default() }
+                Self {
+                    response_status: 200,
+                    ..Default::default()
+                }
             }
 
             fn error(status: u16) -> Self {
-                Self { response_status: status, ..Default::default() }
+                Self {
+                    response_status: status,
+                    ..Default::default()
+                }
             }
 
             fn last_url(&self) -> Option<String> {

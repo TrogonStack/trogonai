@@ -42,11 +42,7 @@ impl SubTaskResult {
         }
     }
 
-    pub fn err(
-        subtask_id: impl Into<String>,
-        capability: impl Into<String>,
-        error: impl Into<String>,
-    ) -> Self {
+    pub fn err(subtask_id: impl Into<String>, capability: impl Into<String>, error: impl Into<String>) -> Self {
         Self {
             subtask_id: subtask_id.into(),
             capability: capability.into(),
@@ -170,7 +166,10 @@ mod tests {
     fn orchestration_result_serde_round_trip() {
         let result = OrchestrationResult {
             task: "Review PR #5".into(),
-            plan: TaskPlan { subtasks: vec![], reasoning: "none".into() },
+            plan: TaskPlan {
+                subtasks: vec![],
+                reasoning: "none".into(),
+            },
             sub_results: vec![SubTaskResult::ok("1", "review", b"ok".to_vec())],
             synthesis: "All good.".into(),
         };

@@ -9,20 +9,14 @@ type DynError = Box<dyn std::error::Error + Send + Sync>;
 /// Sends ACP [`SessionNotification`]s to the client for a single session.
 #[async_trait(?Send)]
 pub trait SessionNotifier {
-    async fn session_notification(
-        &self,
-        notif: SessionNotification,
-    ) -> agent_client_protocol::Result<()>;
+    async fn session_notification(&self, notif: SessionNotification) -> agent_client_protocol::Result<()>;
 }
 
 /// Creates a [`SessionNotifier`] bound to a specific ACP session.
 pub trait SessionNotifierFactory {
     type Notifier: SessionNotifier;
 
-    fn make_notifier(
-        &self,
-        session_id: &SessionId,
-    ) -> agent_client_protocol::Result<Self::Notifier>;
+    fn make_notifier(&self, session_id: &SessionId) -> agent_client_protocol::Result<Self::Notifier>;
 }
 
 /// Public interface of a running `codex app-server` subprocess.

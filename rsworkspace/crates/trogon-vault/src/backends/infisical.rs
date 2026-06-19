@@ -34,11 +34,7 @@ pub struct InfisicalConfig {
 }
 
 impl InfisicalConfig {
-    pub fn new(
-        base_url: impl Into<String>,
-        project_id: impl Into<String>,
-        auth: InfisicalAuth,
-    ) -> Self {
+    pub fn new(base_url: impl Into<String>, project_id: impl Into<String>, auth: InfisicalAuth) -> Self {
         Self {
             base_url: base_url.into(),
             project_id: project_id.into(),
@@ -126,11 +122,11 @@ impl std::error::Error for InfisicalError {
 ///
 /// The type parameter `H` is the HTTP transport; in production `H = reqwest::Client`.
 pub struct InfisicalVaultStore<H: HttpClient = reqwest::Client> {
-    client:      H,
-    base_url:    String,
-    project_id:  String,
+    client: H,
+    base_url: String,
+    project_id: String,
     secret_path: String,
-    token:       String,
+    token: String,
 }
 
 impl InfisicalVaultStore<reqwest::Client> {
@@ -170,12 +166,7 @@ impl<H: HttpClient> InfisicalVaultStore<H> {
         format!("Bearer {}", self.token)
     }
 
-    async fn patch_secret(
-        &self,
-        name: &str,
-        environment: &str,
-        plaintext: &str,
-    ) -> Result<(), InfisicalError> {
+    async fn patch_secret(&self, name: &str, environment: &str, plaintext: &str) -> Result<(), InfisicalError> {
         let resp = self
             .client
             .patch_json(
@@ -195,7 +186,7 @@ impl<H: HttpClient> InfisicalVaultStore<H> {
             Ok(())
         } else {
             Err(InfisicalError::Api {
-                status:  resp.status,
+                status: resp.status,
                 message: parse_error(&resp.body),
             })
         }
@@ -209,7 +200,7 @@ impl<H: HttpClient> VaultStore for InfisicalVaultStore<H> {
 
     async fn store(&self, token: &ApiKeyToken, plaintext: &str) -> Result<(), Self::Error> {
         let name = self.secret_name(token);
-        let env  = token.env_str().to_string();
+        let env = token.env_str().to_string();
 
         let resp = self
             .client
@@ -241,12 +232,15 @@ impl<H: HttpClient> VaultStore for InfisicalVaultStore<H> {
             return self.patch_secret(&name, &env, plaintext).await;
         }
 
-        Err(InfisicalError::Api { status: resp.status, message })
+        Err(InfisicalError::Api {
+            status: resp.status,
+            message,
+        })
     }
 
     async fn resolve(&self, token: &ApiKeyToken) -> Result<Option<String>, Self::Error> {
         let name = self.secret_name(token);
-        let env  = token.env_str().to_string();
+        let env = token.env_str().to_string();
 
         let resp = self
             .client
@@ -267,29 +261,27 @@ impl<H: HttpClient> VaultStore for InfisicalVaultStore<H> {
         }
 
         if (200u16..300).contains(&resp.status) {
-            let json: Value = serde_json::from_str(&resp.body)
-                .map_err(|e| InfisicalError::Deserialize(e.to_string()))?;
+            let json: Value =
+                serde_json::from_str(&resp.body).map_err(|e| InfisicalError::Deserialize(e.to_string()))?;
             let value = json
                 .pointer("/secret/secretValue")
                 .and_then(|v| v.as_str())
                 .map(String::from)
                 .ok_or_else(|| {
-                    InfisicalError::Deserialize(
-                        "missing .secret.secretValue in Infisical response".to_string(),
-                    )
+                    InfisicalError::Deserialize("missing .secret.secretValue in Infisical response".to_string())
                 })?;
             return Ok(Some(value));
         }
 
         Err(InfisicalError::Api {
-            status:  resp.status,
+            status: resp.status,
             message: parse_error(&resp.body),
         })
     }
 
     async fn revoke(&self, token: &ApiKeyToken) -> Result<(), Self::Error> {
         let name = self.secret_name(token);
-        let env  = token.env_str().to_string();
+        let env = token.env_str().to_string();
 
         let resp = self
             .client
@@ -310,7 +302,7 @@ impl<H: HttpClient> VaultStore for InfisicalVaultStore<H> {
         }
 
         Err(InfisicalError::Api {
-            status:  resp.status,
+            status: resp.status,
             message: parse_error(&resp.body),
         })
     }
@@ -331,8 +323,8 @@ fn parse_error(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpmock::prelude::*;
     use httpmock::Method::PATCH;
+    use httpmock::prelude::*;
 
     fn tok(s: &str) -> ApiKeyToken {
         ApiKeyToken::new(s).unwrap()
@@ -388,7 +380,10 @@ mod tests {
         });
 
         let vault = store(&server);
-        vault.store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key").await.unwrap();
+        vault
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key")
+            .await
+            .unwrap();
         m.assert();
     }
 
@@ -404,12 +399,14 @@ mod tests {
             when.method(PATCH)
                 .path("/api/v3/secrets/raw/anthropic_a1b2c3")
                 .json_body_partial(r#"{"secretValue":"sk-ant-key"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         });
 
         let vault = store(&server);
-        vault.store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key").await.unwrap();
+        vault
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key")
+            .await
+            .unwrap();
         post_m.assert();
         patch_m.assert();
     }
@@ -426,8 +423,7 @@ mod tests {
             when.method(PATCH)
                 .path("/api/v3/secrets/raw/anthropic_a1b2c3")
                 .json_body_partial(r#"{"secretValue":"sk-ant-key"}"#);
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         });
 
         store(&server)
@@ -468,10 +464,7 @@ mod tests {
             }));
         });
 
-        let result = store(&server)
-            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
-            .await
-            .unwrap();
+        let result = store(&server).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
         assert_eq!(result, Some("sk-ant-real".to_string()));
         m.assert();
     }
@@ -485,10 +478,7 @@ mod tests {
                 .json_body(serde_json::json!({"message": "Secret not found"}));
         });
 
-        let result = store(&server)
-            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
-            .await
-            .unwrap();
+        let result = store(&server).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
         assert_eq!(result, None);
     }
 
@@ -497,8 +487,7 @@ mod tests {
         let server = MockServer::start();
         server.mock(|when, then| {
             when.method(GET).path("/api/v3/secrets/raw/anthropic_a1b2c3");
-            then.status(200)
-                .json_body(serde_json::json!({"secret": {}}));
+            then.status(200).json_body(serde_json::json!({"secret": {}}));
         });
 
         let err = store(&server)
@@ -537,10 +526,7 @@ mod tests {
             then.status(200).json_body(serde_json::json!({"secret": {}}));
         });
 
-        store(&server)
-            .revoke(&tok("tok_anthropic_prod_a1b2c3"))
-            .await
-            .unwrap();
+        store(&server).revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
         m.assert();
     }
 
@@ -553,9 +539,7 @@ mod tests {
                 .json_body(serde_json::json!({"message": "Secret not found"}));
         });
 
-        let result = store(&server)
-            .revoke(&tok("tok_anthropic_prod_a1b2c3"))
-            .await;
+        let result = store(&server).revoke(&tok("tok_anthropic_prod_a1b2c3")).await;
         assert!(result.is_ok(), "404 on revoke must be treated as success");
     }
 
@@ -656,7 +640,10 @@ mod tests {
             )
             .with_secret_path("/services/stripe"),
         );
-        vault.store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key").await.unwrap();
+        vault
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "sk-ant-key")
+            .await
+            .unwrap();
         m.assert();
     }
 
@@ -693,8 +680,8 @@ mod tests {
 
         static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-        const URL:   &str = "INFISICAL_URL";
-        const PID:   &str = "INFISICAL_PROJECT_ID";
+        const URL: &str = "INFISICAL_URL";
+        const PID: &str = "INFISICAL_PROJECT_ID";
         const TOKEN: &str = "INFISICAL_SERVICE_TOKEN";
 
         fn clear() {
@@ -710,14 +697,14 @@ mod tests {
             let _g = ENV_LOCK.lock().unwrap();
             clear();
             unsafe {
-                std::env::set_var(URL,   "https://app.infisical.com");
-                std::env::set_var(PID,   "proj-abc");
+                std::env::set_var(URL, "https://app.infisical.com");
+                std::env::set_var(PID, "proj-abc");
                 std::env::set_var(TOKEN, "st.tok");
             }
             let result = InfisicalConfig::from_env();
             clear();
             let cfg = result.expect("expected Ok");
-            assert_eq!(cfg.base_url,   "https://app.infisical.com");
+            assert_eq!(cfg.base_url, "https://app.infisical.com");
             assert_eq!(cfg.project_id, "proj-abc");
         }
 
@@ -726,7 +713,7 @@ mod tests {
             let _g = ENV_LOCK.lock().unwrap();
             clear();
             unsafe {
-                std::env::set_var(PID,   "proj-abc");
+                std::env::set_var(PID, "proj-abc");
                 std::env::set_var(TOKEN, "st.tok");
             }
             let err = InfisicalConfig::from_env().err().expect("expected Err");
@@ -740,8 +727,8 @@ mod tests {
             let _g = ENV_LOCK.lock().unwrap();
             clear();
             let err = InfisicalConfig::from_env().err().expect("expected Err");
-            assert!(err.contains(URL),   "expected {URL} in error: {err}");
-            assert!(err.contains(PID),   "expected {PID} in error: {err}");
+            assert!(err.contains(URL), "expected {URL} in error: {err}");
+            assert!(err.contains(PID), "expected {PID} in error: {err}");
             assert!(err.contains(TOKEN), "expected {TOKEN} in error: {err}");
         }
     }
@@ -779,7 +766,11 @@ mod tests {
 
     fn mock_store(http: MockHttpClient) -> InfisicalVaultStore<MockHttpClient> {
         InfisicalVaultStore::new_with(
-            InfisicalConfig::new("http://infisical", "proj-abc", InfisicalAuth::ServiceToken("st.tok".to_string())),
+            InfisicalConfig::new(
+                "http://infisical",
+                "proj-abc",
+                InfisicalAuth::ServiceToken("st.tok".to_string()),
+            ),
             http,
         )
     }
@@ -788,14 +779,20 @@ mod tests {
     async fn mock_store_returns_ok_on_201() {
         let http = MockHttpClient::new();
         http.enqueue(201, r#"{"secret":{"_id":"x","secretKey":"k","secretValue":"v"}}"#);
-        mock_store(http).store(&tok("tok_anthropic_prod_a1b2c3"), "sk-real").await.unwrap();
+        mock_store(http)
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "sk-real")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn mock_resolve_parses_secret_value() {
         let http = MockHttpClient::new();
         http.enqueue(200, r#"{"secret":{"secretValue":"sk-real-key"}}"#);
-        let val = mock_store(http).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        let val = mock_store(http)
+            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
         assert_eq!(val, Some("sk-real-key".to_string()));
     }
 
@@ -803,7 +800,10 @@ mod tests {
     async fn mock_resolve_returns_none_on_404() {
         let http = MockHttpClient::new();
         http.enqueue(404, r#"{"message":"not found"}"#);
-        let val = mock_store(http).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        let val = mock_store(http)
+            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
         assert!(val.is_none());
     }
 
@@ -811,7 +811,10 @@ mod tests {
     async fn mock_resolve_returns_api_error_on_5xx() {
         let http = MockHttpClient::new();
         http.enqueue(503, r#"{"message":"service unavailable"}"#);
-        let err = mock_store(http).resolve(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap_err();
+        let err = mock_store(http)
+            .resolve(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap_err();
         assert!(matches!(err, InfisicalError::Api { status: 503, .. }));
     }
 
@@ -819,14 +822,20 @@ mod tests {
     async fn mock_revoke_returns_ok_on_200() {
         let http = MockHttpClient::new();
         http.enqueue(200, r#"{"secret":{"_id":"x"}}"#);
-        mock_store(http).revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        mock_store(http)
+            .revoke(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn mock_revoke_is_idempotent_on_404() {
         let http = MockHttpClient::new();
         http.enqueue(404, r#"{"message":"not found"}"#);
-        mock_store(http).revoke(&tok("tok_anthropic_prod_a1b2c3")).await.unwrap();
+        mock_store(http)
+            .revoke(&tok("tok_anthropic_prod_a1b2c3"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -835,7 +844,10 @@ mod tests {
         // MockHttpClient panics on empty queue — use a real error via Http variant.
         let http = MockHttpClient::new();
         http.enqueue(500, r#"{"message":"internal"}"#);
-        let err = mock_store(http).store(&tok("tok_anthropic_prod_a1b2c3"), "val").await.unwrap_err();
+        let err = mock_store(http)
+            .store(&tok("tok_anthropic_prod_a1b2c3"), "val")
+            .await
+            .unwrap_err();
         assert!(matches!(err, InfisicalError::Api { status: 500, .. }));
     }
 }

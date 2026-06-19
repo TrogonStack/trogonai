@@ -4,10 +4,7 @@ use std::time::Duration;
 use crate::config::LinearConfig;
 use crate::signature;
 use async_nats::jetstream::stream;
-use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
-};
+use axum::{Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post};
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
 use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
@@ -44,10 +41,7 @@ pub async fn serve(
     serve_impl(config, NatsJetStreamClient::new(jetstream::new(nats))).await
 }
 
-async fn serve_impl<J>(
-    config: LinearConfig,
-    js: J,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+async fn serve_impl<J>(config: LinearConfig, js: J) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
     <J as JetStreamContext>::Error: 'static,
@@ -129,19 +123,13 @@ fn has_invalid_nats_chars(s: &str) -> bool {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook<J>(
-    State(state): State<AppState<J>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode
+async fn handle_webhook<J>(State(state): State<AppState<J>>, headers: HeaderMap, body: Bytes) -> StatusCode
 where
     J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
 {
     // Verify signature if a secret is configured.
     if let Some(secret) = &state.webhook_secret {
-        let sig = headers
-            .get("linear-signature")
-            .and_then(|v| v.to_str().ok());
+        let sig = headers.get("linear-signature").and_then(|v| v.to_str().ok());
 
         match sig {
             Some(sig) if signature::verify(secret, &body, sig) => {}
@@ -185,11 +173,7 @@ where
         }
     }
 
-    let Some(event_type) = parsed
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-    else {
+    let Some(event_type) = parsed.get("type").and_then(|v| v.as_str()).map(str::to_owned) else {
         warn!("Missing 'type' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     };
@@ -202,11 +186,7 @@ where
         return StatusCode::BAD_REQUEST;
     }
 
-    let Some(action) = parsed
-        .get("action")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-    else {
+    let Some(action) = parsed.get("action").and_then(|v| v.as_str()).map(str::to_owned) else {
         warn!("Missing 'action' field in Linear webhook payload");
         return StatusCode::BAD_REQUEST;
     };
@@ -278,19 +258,11 @@ where
                     retry_headers.insert("X-Linear-Type", event_type.as_str());
                     retry_headers.insert("X-Linear-Action", action.as_str());
                     retry_headers.insert("X-Linear-Webhook-Id", webhook_id.as_str());
-                    match state
-                        .js
-                        .publish_with_headers(subject, retry_headers, body)
-                        .await
-                    {
+                    match state.js.publish_with_headers(subject, retry_headers, body).await {
                         Ok(ack_future) => {
-                            match tokio::time::timeout(state.ack_timeout, ack_future.into_future())
-                                .await
-                            {
+                            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
                                 Ok(Ok(_)) => {
-                                    info!(
-                                        "Published Linear event to NATS after stream re-creation"
-                                    );
+                                    info!("Published Linear event to NATS after stream re-creation");
                                     StatusCode::OK
                                 }
                                 Ok(Err(e)) => {
@@ -310,10 +282,7 @@ where
                     }
                 }
                 Err(_) => {
-                    warn!(
-                        ack_timeout_ms = state.ack_timeout.as_millis(),
-                        "NATS ack timed out"
-                    );
+                    warn!(ack_timeout_ms = state.ack_timeout.as_millis(), "NATS ack timed out");
                     StatusCode::INTERNAL_SERVER_ERROR
                 }
             }
@@ -328,9 +297,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_nats::jetstream::context::{
-        CreateStreamError, CreateStreamErrorKind, PublishError, PublishErrorKind,
-    };
+    use async_nats::jetstream::context::{CreateStreamError, CreateStreamErrorKind, PublishError, PublishErrorKind};
     use async_nats::jetstream::publish::PublishAck;
     use async_nats::subject::ToSubject;
     use axum::{body::Bytes, extract::State, http::HeaderMap, http::StatusCode};
@@ -344,9 +311,7 @@ mod tests {
     // ── Test JetStream client ─────────────────────────────────────────────────
 
     type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
-    type PublishCallFn = Arc<
-        dyn Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError> + Send + Sync,
-    >;
+    type PublishCallFn = Arc<dyn Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError> + Send + Sync>;
     type EnsureCallFn = Arc<dyn Fn() -> BoxFut<Result<(), CreateStreamError>> + Send + Sync>;
 
     /// Newtype wrapper so we can name `AckFuture` concretely as an associated type.
@@ -393,10 +358,7 @@ mod tests {
     }
 
     fn make_js(
-        publish: impl Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError>
-        + Send
-        + Sync
-        + 'static,
+        publish: impl Fn() -> Result<BoxFut<Result<PublishAck, PublishError>>, PublishError> + Send + Sync + 'static,
         ensure: impl Fn() -> BoxFut<Result<(), CreateStreamError>> + Send + Sync + 'static,
     ) -> TestJs {
         TestJs {
@@ -446,19 +408,14 @@ mod tests {
     }
 
     fn error_ensure() -> BoxFut<Result<(), CreateStreamError>> {
-        Box::pin(async move {
-            Err(CreateStreamError::new(
-                CreateStreamErrorKind::JetStreamUnavailable,
-            ))
-        })
+        Box::pin(async move { Err(CreateStreamError::new(CreateStreamErrorKind::JetStreamUnavailable)) })
     }
 
     fn hanging_ensure() -> BoxFut<Result<(), CreateStreamError>> {
         Box::pin(std::future::pending())
     }
 
-    const VALID_BODY: &[u8] =
-        br#"{"type":"Issue","action":"create","data":{},"webhookId":"wh-test"}"#;
+    const VALID_BODY: &[u8] = br#"{"type":"Issue","action":"create","data":{},"webhookId":"wh-test"}"#;
 
     // ── has_invalid_nats_chars ────────────────────────────────────────────────
 
@@ -554,12 +511,7 @@ mod tests {
         let js = make_js(|| Ok(hanging_ack()), || ok_ensure());
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,
@@ -575,12 +527,7 @@ mod tests {
         let js = make_js(|| Ok(error_ack()), || hanging_ensure());
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,
@@ -596,12 +543,7 @@ mod tests {
         let js = make_js(|| Ok(error_ack()), || error_ensure());
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,
@@ -616,12 +558,7 @@ mod tests {
         let js = make_js(|| Ok(ok_ack()), || ok_ensure());
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(status, StatusCode::OK, "expected 200 on happy path");
     }
@@ -629,18 +566,10 @@ mod tests {
     /// When the `publish_with_headers` call itself returns `Err`, the handler returns 500.
     #[tokio::test]
     async fn first_publish_fails_returns_500() {
-        let js = make_js(
-            || Err(PublishError::new(PublishErrorKind::BrokenPipe)),
-            || ok_ensure(),
-        );
+        let js = make_js(|| Err(PublishError::new(PublishErrorKind::BrokenPipe)), || ok_ensure());
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,
@@ -667,12 +596,7 @@ mod tests {
         );
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,
@@ -688,12 +612,7 @@ mod tests {
         let js = make_js(|| Ok(error_ack()), || ok_ensure());
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,
@@ -710,22 +629,13 @@ mod tests {
         let js = make_js(
             move || {
                 let n = calls.fetch_add(1, AOrdering::SeqCst);
-                if n == 0 {
-                    Ok(error_ack())
-                } else {
-                    Ok(hanging_ack())
-                }
+                if n == 0 { Ok(error_ack()) } else { Ok(hanging_ack()) }
             },
             || ok_ensure(),
         );
         let state = make_state(js);
 
-        let status = handle_webhook::<TestJs>(
-            State(state),
-            HeaderMap::new(),
-            Bytes::from_static(VALID_BODY),
-        )
-        .await;
+        let status = handle_webhook::<TestJs>(State(state), HeaderMap::new(), Bytes::from_static(VALID_BODY)).await;
 
         assert_eq!(
             status,

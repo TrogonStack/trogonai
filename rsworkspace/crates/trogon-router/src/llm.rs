@@ -17,10 +17,7 @@ pub const LLM_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// (`OpenAiCompatClient`). In tests the `MockLlmClient` returns canned
 /// `LlmRoutingResponse` values without any network I/O.
 pub trait LlmClient: Send + Sync + Clone + 'static {
-    fn complete(
-        &self,
-        prompt: String,
-    ) -> impl Future<Output = Result<LlmRoutingResponse, RouterError>> + Send;
+    fn complete(&self, prompt: String) -> impl Future<Output = Result<LlmRoutingResponse, RouterError>> + Send;
 }
 
 // ── Configuration ─────────────────────────────────────────────────────────────
@@ -82,18 +79,13 @@ impl LlmClient for OpenAiCompatClient {
             return Err(RouterError::LlmRequest(format!("HTTP {status}: {text}")));
         }
 
-        let json: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| RouterError::LlmParse(e.to_string()))?;
+        let json: serde_json::Value = resp.json().await.map_err(|e| RouterError::LlmParse(e.to_string()))?;
 
         // Extract the first choice's message content.
         let content = json
             .pointer("/choices/0/message/content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                RouterError::LlmParse(format!("missing choices[0].message.content in: {json}"))
-            })?;
+            .ok_or_else(|| RouterError::LlmParse(format!("missing choices[0].message.content in: {json}")))?;
 
         serde_json::from_str::<LlmRoutingResponse>(content)
             .map_err(|e| RouterError::LlmParse(format!("{e}: {content}")))
@@ -169,11 +161,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn complete_returns_llm_request_error_on_non_2xx() {
-        let addr = spawn_mock_llm(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            r#"{"error":"oops"}"#.to_string(),
-        )
-        .await;
+        let addr = spawn_mock_llm(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"oops"}"#.to_string()).await;
         let err = client(addr).complete("test".into()).await.unwrap_err();
         assert!(matches!(err, RouterError::LlmRequest(_)));
     }
@@ -187,8 +175,7 @@ mod client_tests {
 
     #[tokio::test]
     async fn complete_returns_llm_parse_error_when_content_not_json() {
-        let body_start =
-            r#"{"choices": [{"message": {"content": "this is plain text, not json"}}]}"#;
+        let body_start = r#"{"choices": [{"message": {"content": "this is plain text, not json"}}]}"#;
         let addr = spawn_mock_llm(StatusCode::OK, body_start.to_string()).await;
         let err = client(addr).complete("test".into()).await.unwrap_err();
         assert!(matches!(err, RouterError::LlmParse(_)));

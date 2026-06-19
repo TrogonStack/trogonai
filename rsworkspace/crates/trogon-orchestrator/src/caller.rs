@@ -33,7 +33,10 @@ pub struct NatsAgentCaller {
 
 impl NatsAgentCaller {
     pub fn new(nats: async_nats::Client) -> Self {
-        Self { nats, timeout: DEFAULT_TIMEOUT }
+        Self {
+            nats,
+            timeout: DEFAULT_TIMEOUT,
+        }
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -43,26 +46,21 @@ impl NatsAgentCaller {
 }
 
 impl AgentCaller for NatsAgentCaller {
-    async fn call(
-        &self,
-        capability: &AgentCapability,
-        payload: Bytes,
-    ) -> Result<Bytes, OrchestratorError> {
+    async fn call(&self, capability: &AgentCapability, payload: Bytes) -> Result<Bytes, OrchestratorError> {
         // Replace wildcard suffix with concrete "dispatch" subject.
         let subject = capability.nats_subject.trim_end_matches('>').trim_end_matches('.');
         let subject = format!("{subject}.dispatch");
 
-        let reply = tokio::time::timeout(
-            self.timeout,
-            self.nats.request(subject, payload),
-        )
-        .await
-        .map_err(|_| OrchestratorError::NoAgent(format!(
-            "timeout calling agent '{}' for capability '{}'",
-            capability.agent_type,
-            capability.capabilities.join(",")
-        )))?
-        .map_err(|e| OrchestratorError::NoAgent(e.to_string()))?;
+        let reply = tokio::time::timeout(self.timeout, self.nats.request(subject, payload))
+            .await
+            .map_err(|_| {
+                OrchestratorError::NoAgent(format!(
+                    "timeout calling agent '{}' for capability '{}'",
+                    capability.agent_type,
+                    capability.capabilities.join(",")
+                ))
+            })?
+            .map_err(|e| OrchestratorError::NoAgent(e.to_string()))?;
 
         Ok(reply.payload)
     }
@@ -83,20 +81,20 @@ pub mod mock {
 
     impl MockAgentCaller {
         pub fn returning(response: impl Into<Vec<u8>>) -> Self {
-            Self { response: Arc::new(Mutex::new(Ok(response.into()))) }
+            Self {
+                response: Arc::new(Mutex::new(Ok(response.into()))),
+            }
         }
 
         pub fn failing(error: impl Into<String>) -> Self {
-            Self { response: Arc::new(Mutex::new(Err(error.into()))) }
+            Self {
+                response: Arc::new(Mutex::new(Err(error.into()))),
+            }
         }
     }
 
     impl AgentCaller for MockAgentCaller {
-        async fn call(
-            &self,
-            _capability: &AgentCapability,
-            _payload: Bytes,
-        ) -> Result<Bytes, OrchestratorError> {
+        async fn call(&self, _capability: &AgentCapability, _payload: Bytes) -> Result<Bytes, OrchestratorError> {
             self.response
                 .lock()
                 .unwrap()
@@ -111,8 +109,8 @@ pub mod mock {
 
 #[cfg(test)]
 mod tests {
-    use super::mock::MockAgentCaller;
     use super::AgentCaller;
+    use super::mock::MockAgentCaller;
     use bytes::Bytes;
     use trogon_registry::AgentCapability;
 

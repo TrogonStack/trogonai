@@ -34,10 +34,7 @@ mod tests {
         let mut dirs = FixedDirs::new();
         dirs.set(DirKind::Home, "/home/user");
 
-        assert_eq!(
-            dotfile(&dirs, ".bashrc"),
-            Some(PathBuf::from("/home/user/.bashrc"))
-        );
+        assert_eq!(dotfile(&dirs, ".bashrc"), Some(PathBuf::from("/home/user/.bashrc")));
         assert_eq!(dotfile(&FixedDirs::new(), ".bashrc"), None);
     }
 }

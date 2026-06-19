@@ -1,7 +1,6 @@
 use agent_client_protocol::{
-    CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
-    RequestPermissionRequest, SessionId, TerminalId, TerminalOutputRequest,
-    WaitForTerminalExitRequest, WriteTextFileRequest,
+    CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionRequest,
+    SessionId, TerminalId, TerminalOutputRequest, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use futures::StreamExt as _;
 use std::path::{Path, PathBuf};
@@ -47,11 +46,7 @@ async fn write_and_read_file_round_trip() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let write_req = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/hello.txt"),
-        "Hello, sandbox!",
-    );
+    let write_req = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/hello.txt"), "Hello, sandbox!");
     runtime
         .handle_write_text_file(session_id(), write_req)
         .await
@@ -71,11 +66,7 @@ async fn write_creates_nested_directories() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/a/b/c/file.txt"),
-        "nested",
-    );
+    let req = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/a/b/c/file.txt"), "nested");
     runtime
         .handle_write_text_file(session_id(), req)
         .await
@@ -87,11 +78,7 @@ async fn path_traversal_rejected_on_write() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/../../etc/passwd"),
-        "pwned",
-    );
+    let req = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/../../etc/passwd"), "pwned");
     let err = runtime
         .handle_write_text_file(session_id(), req)
         .await
@@ -105,8 +92,7 @@ async fn path_traversal_rejected_on_read() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req =
-        ReadTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/../../../etc/passwd"));
+    let req = ReadTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/../../../etc/passwd"));
     let err = runtime
         .handle_read_text_file(session_id(), req)
         .await
@@ -122,8 +108,7 @@ async fn create_terminal_echo_and_wait() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo")
-        .args(vec!["hello from sandbox".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hello from sandbox".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -163,12 +148,8 @@ async fn release_terminal_removes_it() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["bye".to_string()]);
-    let resp = runtime
-        .handle_create_terminal(session_id(), req)
-        .await
-        .unwrap();
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["bye".to_string()]);
+    let resp = runtime.handle_create_terminal(session_id(), req).await.unwrap();
     let tid = resp.terminal_id;
 
     let rel = ReleaseTerminalRequest::new(SessionId::from("s1"), tid.clone());
@@ -192,8 +173,7 @@ async fn kill_terminal_stops_process() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["30".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["30".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -207,10 +187,7 @@ async fn kill_terminal_stops_process() {
         .expect("kill should succeed");
 
     let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
-    let exit = runtime
-        .handle_wait_for_terminal_exit(wait_req)
-        .await
-        .unwrap();
+    let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
     // Killed process exits with a signal, not code 0.
     assert_ne!(exit.exit_status.exit_code, Some(0));
 }
@@ -227,17 +204,11 @@ async fn output_byte_limit_truncates() {
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
     let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["A".repeat(200)]);
-    let resp = runtime
-        .handle_create_terminal(session_id(), req)
-        .await
-        .unwrap();
+    let resp = runtime.handle_create_terminal(session_id(), req).await.unwrap();
     let tid = resp.terminal_id;
 
     let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-    runtime
-        .handle_wait_for_terminal_exit(wait_req)
-        .await
-        .unwrap();
+    runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
     let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
     let out = runtime.handle_terminal_output(out_req).await.unwrap();
@@ -278,8 +249,7 @@ async fn wasm_module_writes_to_stdout() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -287,18 +257,12 @@ async fn wasm_module_writes_to_stdout() {
             let tid = resp.terminal_id;
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(exit.exit_status.exit_code, Some(0));
 
             let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
             let out = runtime.handle_terminal_output(out_req).await.unwrap();
-            assert!(
-                out.output.contains("hello from wasm"),
-                "stdout should be captured"
-            );
+            assert!(out.output.contains("hello from wasm"), "stdout should be captured");
         })
         .await;
 }
@@ -329,19 +293,12 @@ async fn wasm_module_exit_code() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
-            let resp = runtime
-                .handle_create_terminal(session_id(), req)
-                .await
-                .unwrap();
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime.handle_create_terminal(session_id(), req).await.unwrap();
             let tid = resp.terminal_id;
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(exit.exit_status.exit_code, Some(42));
         })
         .await;
@@ -375,26 +332,16 @@ async fn wasm_module_stderr_captured() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
-            let resp = runtime
-                .handle_create_terminal(session_id(), req)
-                .await
-                .unwrap();
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let resp = runtime.handle_create_terminal(session_id(), req).await.unwrap();
             let tid = resp.terminal_id;
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-            runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             let out_req = TerminalOutputRequest::new(SessionId::from("s1"), tid);
             let out = runtime.handle_terminal_output(out_req).await.unwrap();
-            assert!(
-                out.output.contains("error output"),
-                "stderr should be captured"
-            );
+            assert!(out.output.contains("error output"), "stderr should be captured");
         })
         .await;
 }
@@ -404,8 +351,8 @@ async fn wasm_module_stderr_captured() {
 #[tokio::test]
 async fn auto_allow_selects_first_option() {
     use agent_client_protocol::{
-        PermissionOption, PermissionOptionId, PermissionOptionKind, RequestPermissionOutcome,
-        ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
+        PermissionOption, PermissionOptionId, PermissionOptionKind, RequestPermissionOutcome, ToolCallId,
+        ToolCallUpdate, ToolCallUpdateFields,
     };
 
     let tmp = TempDir::new().unwrap();
@@ -442,9 +389,7 @@ async fn auto_allow_selects_first_option() {
 
 #[tokio::test]
 async fn auto_deny_when_no_options() {
-    use agent_client_protocol::{
-        RequestPermissionOutcome, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
-    };
+    use agent_client_protocol::{RequestPermissionOutcome, ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
 
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
@@ -493,8 +438,7 @@ async fn wasm_module_cache_reuses_compiled_module() {
             );
 
             // First invocation — compiles and caches the module.
-            let req1 =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req1 = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp1 = runtime
                 .handle_create_terminal("cache-session-1", req1)
                 .await
@@ -505,8 +449,7 @@ async fn wasm_module_cache_reuses_compiled_module() {
             assert_eq!(exit1.exit_status.exit_code, Some(0), "first run: exit 0");
 
             // Second invocation — should hit the cache (same path, no recompile).
-            let req2 =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req2 = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp2 = runtime
                 .handle_create_terminal("cache-session-2", req2)
                 .await
@@ -556,31 +499,19 @@ async fn wasm_module_runs_with_timeout_set() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("wasm module should run within timeout");
 
-            let wait_req =
-                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id.clone());
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
-            assert_eq!(
-                exit.exit_status.exit_code,
-                Some(0),
-                "module should exit cleanly"
-            );
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id.clone());
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
+            assert_eq!(exit.exit_status.exit_code, Some(0), "module should exit cleanly");
 
             let out_req = TerminalOutputRequest::new(SessionId::from("s1"), resp.terminal_id);
             let out = runtime.handle_terminal_output(out_req).await.unwrap();
-            assert!(
-                out.output.contains("timeout ok"),
-                "output should be captured"
-            );
+            assert!(out.output.contains("timeout ok"), "output should be captured");
         })
         .await;
 }
@@ -597,8 +528,7 @@ async fn session_cleanup_removes_sandbox() {
         .run_until(async {
             let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-            let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo")
-                .args(vec!["cleanup test".to_string()]);
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["cleanup test".to_string()]);
             let resp = runtime
                 .handle_create_terminal("cleanup-session", req)
                 .await
@@ -607,10 +537,7 @@ async fn session_cleanup_removes_sandbox() {
 
             // Let the process finish.
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-            runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             // Verify the sandbox directory exists before release.
             let sandbox = tmp.path().join("cleanup-session");
@@ -664,8 +591,7 @@ async fn wasm_module_background_execution() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             // Feature 4: create_terminal returns immediately.
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
@@ -680,10 +606,7 @@ async fn wasm_module_background_execution() {
 
             // Wait for exit — should complete with exit_code 0.
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid.clone());
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -713,8 +636,7 @@ async fn wasm_only_rejects_native_commands() {
     })
     .unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hello".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hello".to_string()]);
     let err = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -750,17 +672,13 @@ async fn wasm_only_allows_wasm_commands() {
 
     tokio::task::LocalSet::new()
         .run_until(async {
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect(".wasm should be allowed in wasm_only mode");
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(exit.exit_status.exit_code, Some(0));
         })
         .await;
@@ -802,18 +720,14 @@ async fn wasm_module_memory_limit_allows_small_module() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module with generous memory limit should run");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -854,18 +768,14 @@ async fn wasm_module_trogon_log_host_function() {
             "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module with trogon.log import should run");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -910,18 +820,13 @@ async fn module_cache_persists_across_runtimes() {
                     ..test_config(tmp.path().join("sessions_a"))
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
-                let req =
-                    CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+                let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal("session-a", req)
                     .await
                     .expect("runtime A should compile and run module");
-                let wait_req =
-                    WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-                let exit = runtime
-                    .handle_wait_for_terminal_exit(wait_req)
-                    .await
-                    .unwrap();
+                let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+                let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
                 assert_eq!(exit.exit_status.exit_code, Some(0), "runtime A: exit 0");
             })
             .await;
@@ -948,18 +853,13 @@ async fn module_cache_persists_across_runtimes() {
                     ..test_config(tmp.path().join("sessions_b"))
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
-                let req =
-                    CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+                let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal("session-b", req)
                     .await
                     .expect("runtime B should load from disk cache and run module");
-                let wait_req =
-                    WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-                let exit = runtime
-                    .handle_wait_for_terminal_exit(wait_req)
-                    .await
-                    .unwrap();
+                let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+                let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
                 assert_eq!(exit.exit_status.exit_code, Some(0), "runtime B: exit 0");
             })
             .await;
@@ -1013,17 +913,13 @@ async fn module_cache_invalidates_on_mtime_change() {
 
             // Write and run v1 (exit code 7).
             let wasm_path = make_wasm(tmp.path(), "invalidate_test.wasm", wat_v1);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal("session-v1", req)
                 .await
                 .expect("v1 module should run");
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(exit.exit_status.exit_code, Some(7), "v1 should exit 7");
 
             // Overwrite the file with v2 bytes and ensure mtime advances.
@@ -1039,18 +935,13 @@ async fn module_cache_invalidates_on_mtime_change() {
             let _ = new_mtime; // we just rely on the write changing mtime
 
             // Run again — should pick up v2 (exit code 42).
-            let req2 =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req2 = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp2 = runtime
                 .handle_create_terminal("session-v2", req2)
                 .await
                 .expect("v2 module should run after invalidation");
-            let wait_req2 =
-                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp2.terminal_id);
-            let exit2 = runtime
-                .handle_wait_for_terminal_exit(wait_req2)
-                .await
-                .unwrap();
+            let wait_req2 = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp2.terminal_id);
+            let exit2 = runtime.handle_wait_for_terminal_exit(wait_req2).await.unwrap();
             assert_eq!(
                 exit2.exit_status.exit_code,
                 Some(42),
@@ -1115,18 +1006,14 @@ async fn wasm_module_trogon_nats_request_no_nats() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module with nats_request should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -1190,18 +1077,14 @@ async fn wasm_module_request_permission_auto_allow() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module with request_permission should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -1244,18 +1127,14 @@ async fn wasm_module_network_enabled_flag_wires_through() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module should run with network enabled");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -1301,18 +1180,14 @@ async fn wasm_module_custom_fuel_limit() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             // Fuel exhaustion is a trap — should NOT be exit code 0.
             assert_ne!(
@@ -1374,18 +1249,14 @@ async fn wasm_module_host_call_budget_exhausted() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             assert_eq!(
                 exit.exit_status.exit_code,
@@ -1440,18 +1311,14 @@ async fn wasm_module_nats_subscribe_no_nats() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module with subscribe should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -1511,18 +1378,14 @@ async fn wasm_module_request_permission_no_nats_denied() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -1555,18 +1418,11 @@ async fn wasm_module_request_permission_via_nats_acp_schema() {
     let responder_nats = nats.clone();
     let subject = format!("{acp_prefix}.session.{session}.wasm.request_permission");
     let responder = tokio::spawn(async move {
-        let mut sub = responder_nats
-            .subscribe(subject)
-            .await
-            .expect("responder subscribe");
+        let mut sub = responder_nats.subscribe(subject).await.expect("responder subscribe");
         if let Some(msg) = sub.next().await {
             // Validate request uses ACP schema.
-            let req: serde_json::Value =
-                serde_json::from_slice(&msg.payload).expect("valid JSON request");
-            assert!(
-                req.get("sessionId").is_some(),
-                "request must have sessionId"
-            );
+            let req: serde_json::Value = serde_json::from_slice(&msg.payload).expect("valid JSON request");
+            assert!(req.get("sessionId").is_some(), "request must have sessionId");
             assert!(req.get("toolCall").is_some(), "request must have toolCall");
             let opts = req["options"].as_array().expect("options must be array");
             assert_eq!(opts.len(), 2);
@@ -1577,10 +1433,7 @@ async fn wasm_module_request_permission_via_nats_acp_schema() {
 
             if let Some(reply) = msg.reply {
                 let _ = responder_nats
-                    .publish(
-                        reply,
-                        bytes::Bytes::from(r#"{"outcome":"selected","optionId":"1"}"#),
-                    )
+                    .publish(reply, bytes::Bytes::from(r#"{"outcome":"selected","optionId":"1"}"#))
                     .await;
             }
         }
@@ -1634,18 +1487,14 @@ async fn wasm_module_request_permission_via_nats_acp_schema() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session, req)
                 .await
                 .expect("module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             // Responder selected optionId "1" → index 1 → proc_exit(1).
             assert_eq!(
@@ -1698,17 +1547,9 @@ async fn wasm_backpressure_limits_concurrent_tasks() {
             // Launch 4 tasks — only 2 run concurrently due to semaphore.
             let mut terminal_ids = Vec::new();
             let session_ids = ["s0", "s1", "s2", "s3"];
-            let session_names = [
-                "bp-session-0",
-                "bp-session-1",
-                "bp-session-2",
-                "bp-session-3",
-            ];
+            let session_names = ["bp-session-0", "bp-session-1", "bp-session-2", "bp-session-3"];
             for i in 0..4usize {
-                let req = CreateTerminalRequest::new(
-                    SessionId::from(session_ids[i]),
-                    wasm_path.to_str().unwrap(),
-                );
+                let req = CreateTerminalRequest::new(SessionId::from(session_ids[i]), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal(session_names[i], req)
                     .await
@@ -1719,10 +1560,7 @@ async fn wasm_backpressure_limits_concurrent_tasks() {
             // Wait for all 4 to complete successfully.
             for tid in terminal_ids {
                 let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
-                let exit = runtime
-                    .handle_wait_for_terminal_exit(wait_req)
-                    .await
-                    .unwrap();
+                let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
                 assert_eq!(
                     exit.exit_status.exit_code,
                     Some(0),
@@ -1766,18 +1604,14 @@ async fn wasm_module_fuel_exhausted_returns_distinct_signal() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             assert_eq!(
                 exit.exit_status.signal.as_deref(),
@@ -1824,8 +1658,7 @@ async fn wasm_module_too_large_rejected() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let err = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -1877,21 +1710,14 @@ async fn wasm_nats_request_negative_timeout_handled() {
                 "#,
             );
 
-            let req = CreateTerminalRequest::new(
-                SessionId::from("s1"),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module with negative timeout_ms should be created");
 
-            let wait_req =
-                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -1916,8 +1742,7 @@ async fn wait_for_terminal_exit_timeout_kills_hung_process() {
     let runtime = WasmRuntime::new(&cfg).unwrap();
 
     // Spawn a process that sleeps forever.
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["9999".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["9999".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -2046,19 +1871,14 @@ async fn wasm_module_nats_publish_with_nats() {
     };
 
     let nats = async_nats::connect(&nats_url).await.expect("NATS connect");
-    let mut sub = nats
-        .subscribe("test.wasm.publish")
-        .await
-        .expect("subscribe");
+    let mut sub = nats.subscribe("test.wasm.publish").await.expect("subscribe");
 
     let tmp = TempDir::new().unwrap();
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let runtime =
-                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
-                    .unwrap();
+            let runtime = WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap();
 
             // WAT module: calls trogon.nats_publish("test.wasm.publish", "hello")
             // subject at offset 0 (17 bytes), payload "hello" at offset 32 (5 bytes).
@@ -2075,18 +1895,14 @@ async fn wasm_module_nats_publish_with_nats() {
             "#;
 
             let wasm_path = make_wasm(tmp.path(), "nats_publish.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal("nats-pub-session", req)
                 .await
                 .expect("wasm publish module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
         })
         .await;
 
@@ -2130,9 +1946,7 @@ async fn wasm_module_nats_request_with_nats() {
             .expect("responder subscribe");
         if let Some(msg) = sub.next().await {
             if let Some(reply) = msg.reply {
-                let _ = responder_nats
-                    .publish(reply, bytes::Bytes::from_static(b"world"))
-                    .await;
+                let _ = responder_nats.publish(reply, bytes::Bytes::from_static(b"world")).await;
             }
         }
     });
@@ -2145,9 +1959,7 @@ async fn wasm_module_nats_request_with_nats() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let runtime =
-                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
-                    .unwrap();
+            let runtime = WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap();
 
             // WAT module: calls nats_request("test.wasm.request", "ping", 2000ms, out@512, 64)
             // then exits with the number of bytes received as the exit code.
@@ -2173,19 +1985,14 @@ async fn wasm_module_nats_request_with_nats() {
             "#;
 
             let wasm_path = make_wasm(tmp.path(), "nats_request.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal("nats-req-session", req)
                 .await
                 .expect("wasm request module should be created");
 
-            let wait_req =
-                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
             // "world" is 5 bytes → proc_exit(5) → exit_code = Some(5).
             assert_eq!(
@@ -2209,11 +2016,7 @@ async fn list_sessions_returns_active_sessions() {
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
     // Write a file to session "s1" — this lazily creates the session.
-    let write_req = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/hello.txt"),
-        "content",
-    );
+    let write_req = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/hello.txt"), "content");
     runtime
         .handle_write_text_file("s1", write_req)
         .await
@@ -2234,8 +2037,7 @@ async fn list_terminals_returns_active_terminals() {
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
     // Spawn a long-running native process so the terminal remains live.
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["10".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["10".to_string()]);
     let resp = runtime
         .handle_create_terminal("s1", req)
         .await
@@ -2270,22 +2072,14 @@ async fn write_text_file_is_atomic() {
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
     // First write.
-    let req1 = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/file.txt"),
-        "content_v1",
-    );
+    let req1 = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/file.txt"), "content_v1");
     runtime
         .handle_write_text_file("s1", req1)
         .await
         .expect("first write should succeed");
 
     // Second write — overwrites via atomic rename.
-    let req2 = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/file.txt"),
-        "content_v2",
-    );
+    let req2 = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/file.txt"), "content_v2");
     runtime
         .handle_write_text_file("s1", req2)
         .await
@@ -2373,8 +2167,7 @@ async fn wasm_module_memory_limit_denial() {
               )
             )"#;
             let wasm_path = make_wasm(tmp.path(), "mem_denial.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -2449,8 +2242,7 @@ async fn wasm_module_recv_message_abi() {
             )"#;
 
             let wasm_path = make_wasm(tmp.path(), "recv_abi.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -2521,8 +2313,7 @@ async fn wasm_module_timeout_fires_returns_signal_and_partial_output() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -2617,18 +2408,14 @@ async fn wasm_module_trogon_nats_publish_no_nats() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("nats_publish module should be created");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -2676,8 +2463,7 @@ async fn module_cache_version_mismatch_forces_recompile() {
                     ..test_config(tmp.path().join("sessions_a"))
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
-                let req =
-                    CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+                let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal("session-a", req)
                     .await
@@ -2709,8 +2495,7 @@ async fn module_cache_version_mismatch_forces_recompile() {
                     ..test_config(tmp.path().join("sessions_b"))
                 };
                 let runtime = WasmRuntime::new(&cfg).unwrap();
-                let req =
-                    CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+                let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal("session-b", req)
                     .await
@@ -2767,15 +2552,8 @@ async fn cleanup_idle_sessions_removes_expired_sessions() {
             .run_until(async {
                 let runtime = WasmRuntime::new(&cfg).unwrap();
 
-                let write_req = WriteTextFileRequest::new(
-                    SessionId::from("idle-s1"),
-                    PathBuf::from("/touch.txt"),
-                    "x",
-                );
-                runtime
-                    .handle_write_text_file("idle-s1", write_req)
-                    .await
-                    .unwrap();
+                let write_req = WriteTextFileRequest::new(SessionId::from("idle-s1"), PathBuf::from("/touch.txt"), "x");
+                runtime.handle_write_text_file("idle-s1", write_req).await.unwrap();
 
                 runtime.cleanup_idle_sessions();
 
@@ -2798,15 +2576,8 @@ async fn cleanup_idle_sessions_removes_expired_sessions() {
             .run_until(async {
                 let runtime = WasmRuntime::new(&cfg).unwrap();
 
-                let write_req = WriteTextFileRequest::new(
-                    SessionId::from("idle-s2"),
-                    PathBuf::from("/touch.txt"),
-                    "x",
-                );
-                runtime
-                    .handle_write_text_file("idle-s2", write_req)
-                    .await
-                    .unwrap();
+                let write_req = WriteTextFileRequest::new(SessionId::from("idle-s2"), PathBuf::from("/touch.txt"), "x");
+                runtime.handle_write_text_file("idle-s2", write_req).await.unwrap();
                 let sandbox = tmp.path().join("root_enabled").join("idle-s2");
 
                 assert!(
@@ -2868,8 +2639,7 @@ async fn kill_wasm_terminal_sets_killed_signal() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -2948,13 +2718,10 @@ async fn wasm_module_env_vars_passed_via_wasi() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap()).env(
-                    vec![
-                        agent_client_protocol::EnvVariable::new("FOO", "bar"),
-                        agent_client_protocol::EnvVariable::new("BAZ", "qux"),
-                    ],
-                );
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap()).env(vec![
+                agent_client_protocol::EnvVariable::new("FOO", "bar"),
+                agent_client_protocol::EnvVariable::new("BAZ", "qux"),
+            ]);
 
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
@@ -3006,8 +2773,7 @@ async fn wasm_terminal_snapshot_shows_exit_before_explicit_wait() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3070,10 +2836,7 @@ async fn wasm_tasks_started_metric_increments() {
                 "#,
             );
 
-            let req = CreateTerminalRequest::new(
-                SessionId::from("s1"),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3139,11 +2902,8 @@ async fn session_notification_ticks_last_activity() {
             let runtime = WasmRuntime::new(&cfg).unwrap();
 
             // Touch the session by writing a file (creates the session entry).
-            let write_req = WriteTextFileRequest::new(
-                SessionId::from("notif-session"),
-                PathBuf::from("/touch.txt"),
-                "touch",
-            );
+            let write_req =
+                WriteTextFileRequest::new(SessionId::from("notif-session"), PathBuf::from("/touch.txt"), "touch");
             runtime
                 .handle_write_text_file("notif-session", write_req)
                 .await
@@ -3212,11 +2972,7 @@ async fn cleanup_all_sessions_removes_all_sandboxes() {
 
             // Create two sessions by writing a file into each.
             for sid in ["session-all-1", "session-all-2"] {
-                let write_req = WriteTextFileRequest::new(
-                    SessionId::from(sid),
-                    PathBuf::from("/file.txt"),
-                    "data",
-                );
+                let write_req = WriteTextFileRequest::new(SessionId::from(sid), PathBuf::from("/file.txt"), "data");
                 runtime
                     .handle_write_text_file(sid, write_req)
                     .await
@@ -3244,14 +3000,8 @@ async fn cleanup_all_sessions_removes_all_sandboxes() {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             // Sandbox directories must have been removed.
-            assert!(
-                !dir1.exists(),
-                "sandbox dir 1 should be deleted after cleanup"
-            );
-            assert!(
-                !dir2.exists(),
-                "sandbox dir 2 should be deleted after cleanup"
-            );
+            assert!(!dir1.exists(), "sandbox dir 1 should be deleted after cleanup");
+            assert!(!dir2.exists(), "sandbox dir 2 should be deleted after cleanup");
         })
         .await;
 }
@@ -3306,8 +3056,7 @@ async fn wait_for_exit_returns_cached_status_on_second_call() {
     })
     .unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hello".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hello".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -3363,8 +3112,7 @@ async fn concurrent_wasm_waits_both_return_same_exit_status() {
 )"#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3414,19 +3162,14 @@ async fn create_terminal_with_explicit_cwd() {
 
     // Write a file into /subdir to ensure the directory gets created inside the
     // session sandbox.
-    let write_req = WriteTextFileRequest::new(
-        SessionId::from("s1"),
-        PathBuf::from("/subdir/test.txt"),
-        "marker",
-    );
+    let write_req = WriteTextFileRequest::new(SessionId::from("s1"), PathBuf::from("/subdir/test.txt"), "marker");
     runtime
         .handle_write_text_file(session_id(), write_req)
         .await
         .expect("write should succeed");
 
     // Run `pwd` with cwd set to `/subdir` (sandbox-relative).
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "pwd").cwd(PathBuf::from("/subdir"));
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "pwd").cwd(PathBuf::from("/subdir"));
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -3479,8 +3222,7 @@ async fn wasm_relative_path_resolves_inside_sandbox() {
             // the relative command "module.wasm" resolves correctly.
             let session_sandbox = tmp.path().join(session_id());
             std::fs::create_dir_all(&session_sandbox).expect("mkdir session sandbox");
-            std::fs::write(session_sandbox.join("module.wasm"), &wasm_bytes)
-                .expect("write wasm file");
+            std::fs::write(session_sandbox.join("module.wasm"), &wasm_bytes).expect("write wasm file");
 
             // Pass a relative path — this exercises the `else` branch in
             // `run_wasm_terminal` that calls `session.resolve_path`.
@@ -3496,11 +3238,7 @@ async fn wasm_relative_path_resolves_inside_sandbox() {
                 .handle_wait_for_terminal_exit(wait_req)
                 .await
                 .expect("wait should succeed");
-            assert_eq!(
-                exit.exit_status.exit_code,
-                Some(0),
-                "wasm module should exit 0"
-            );
+            assert_eq!(exit.exit_status.exit_code, Some(0), "wasm module should exit 0");
         })
         .await;
 }
@@ -3526,8 +3264,7 @@ async fn wasm_relative_path_escapes_sandbox_rejected() {
 )"#,
             )
             .expect("WAT compile failed");
-            std::fs::write(tmp.path().join("escape.wasm"), &wasm_bytes)
-                .expect("write wasm outside sandbox");
+            std::fs::write(tmp.path().join("escape.wasm"), &wasm_bytes).expect("write wasm outside sandbox");
 
             // `../escape.wasm` is relative and resolves outside the sandbox.
             let req = CreateTerminalRequest::new(SessionId::from("s1"), "../escape.wasm");
@@ -3570,8 +3307,7 @@ async fn release_running_wasm_terminal_kills_background_task() {
 )"#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3617,8 +3353,7 @@ async fn write_to_wasm_terminal_returns_error() {
 )"#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3672,18 +3407,14 @@ async fn module_cache_lru_evicts_oldest_on_overflow() {
                 );
                 let wasm_path = make_wasm(tmp.path(), &name, &wat);
 
-                let req = CreateTerminalRequest::new(
-                    SessionId::from("lru-session"),
-                    wasm_path.to_str().unwrap(),
-                );
+                let req = CreateTerminalRequest::new(SessionId::from("lru-session"), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal(session_id(), req)
                     .await
                     .unwrap_or_else(|e| panic!("module {} create failed: {}", n, e.message));
                 let tid = resp.terminal_id;
 
-                let wait_req =
-                    WaitForTerminalExitRequest::new(SessionId::from("lru-session"), tid.clone());
+                let wait_req = WaitForTerminalExitRequest::new(SessionId::from("lru-session"), tid.clone());
                 let exit = runtime
                     .handle_wait_for_terminal_exit(wait_req)
                     .await
@@ -3714,8 +3445,7 @@ async fn create_terminal_nonexistent_wasm_returns_error() {
         .run_until(async {
             let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), "/nonexistent/path/missing.wasm");
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), "/nonexistent/path/missing.wasm");
             let err = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3769,10 +3499,7 @@ fn config_validate_creates_missing_session_root() {
     let tmp = TempDir::new().unwrap();
     let new_dir = tmp.path().join("new_dir/nested");
 
-    assert!(
-        !new_dir.exists(),
-        "directory should not exist before validate"
-    );
+    assert!(!new_dir.exists(), "directory should not exist before validate");
 
     let mut cfg = test_config(tmp.path().to_path_buf());
     cfg.session_root = new_dir.clone();
@@ -3831,8 +3558,7 @@ async fn recv_message_unknown_sub_id_returns_minus_one() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3884,8 +3610,7 @@ async fn unsubscribe_unknown_sub_id_returns_minus_one() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3929,8 +3654,7 @@ async fn generic_wasm_trap_returns_trap_signal() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -3982,8 +3706,7 @@ async fn wasm_module_no_start_export_exits_with_error() {
                 "#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             // create_terminal should succeed — terminal is created.
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
@@ -4015,10 +3738,7 @@ fn config_validate_creates_missing_module_cache_dir() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = tmp.path().join("cache/subdir");
 
-    assert!(
-        !cache_dir.exists(),
-        "cache directory should not exist before validate"
-    );
+    assert!(!cache_dir.exists(), "cache directory should not exist before validate");
 
     let mut cfg = test_config(tmp.path().to_path_buf());
     cfg.module_cache_dir = Some(cache_dir.clone());
@@ -4130,8 +3850,7 @@ async fn double_kill_native_terminal_is_idempotent() {
     })
     .unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["10".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["10".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -4190,9 +3909,7 @@ async fn session_idle_timeout_zero_disables_cleanup() {
                 .expect("write should succeed");
 
             assert!(
-                runtime
-                    .list_sessions()
-                    .contains(&"zero-timeout-session".to_string()),
+                runtime.list_sessions().contains(&"zero-timeout-session".to_string()),
                 "session should exist before cleanup"
             );
 
@@ -4203,9 +3920,7 @@ async fn session_idle_timeout_zero_disables_cleanup() {
             runtime.cleanup_idle_sessions();
 
             assert!(
-                runtime
-                    .list_sessions()
-                    .contains(&"zero-timeout-session".to_string()),
+                runtime.list_sessions().contains(&"zero-timeout-session".to_string()),
                 "session must still exist after cleanup_idle_sessions when timeout=0"
             );
         })
@@ -4238,8 +3953,7 @@ async fn concurrent_release_same_terminal_race() {
 )"#,
             );
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -4256,10 +3970,7 @@ async fn concurrent_release_same_terminal_race() {
             );
 
             // At least one of the two must have succeeded.
-            let ok_count = [res_a.is_ok(), res_b.is_ok()]
-                .iter()
-                .filter(|&&v| v)
-                .count();
+            let ok_count = [res_a.is_ok(), res_b.is_ok()].iter().filter(|&&v| v).count();
             assert!(
                 ok_count >= 1,
                 "at least one concurrent release should return Ok; got: a={:?}, b={:?}",
@@ -4310,9 +4021,7 @@ async fn wasm_absolute_path_runs_successfully() {
             );
 
             // Ensure we hand an absolute path string to CreateTerminalRequest.
-            let abs_path = wasm_path
-                .canonicalize()
-                .expect("canonicalize should succeed");
+            let abs_path = wasm_path.canonicalize().expect("canonicalize should succeed");
             assert!(abs_path.is_absolute(), "path must be absolute");
 
             let req = CreateTerminalRequest::new(SessionId::from("s1"), abs_path.to_str().unwrap());
@@ -4322,10 +4031,7 @@ async fn wasm_absolute_path_runs_successfully() {
                 .expect("wasm module with absolute path should run");
 
             let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -4460,11 +4166,7 @@ async fn wait_for_exit_no_timeout_native_completes() {
         .await
         .expect("wait should succeed with timeout=0");
 
-    assert_eq!(
-        exit.exit_status.exit_code,
-        Some(0),
-        "`true` should exit with code 0"
-    );
+    assert_eq!(exit.exit_status.exit_code, Some(0), "`true` should exit with code 0");
     assert!(
         exit.exit_status.signal.is_none(),
         "`true` should exit cleanly with no signal"
@@ -4520,17 +4222,13 @@ async fn request_permission_invalid_json_returns_minus_one() {
                 "#,
             );
 
-            let req = CreateTerminalRequest::new(
-                SessionId::from("s1"),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("invalid-json request_permission module should be created");
 
-            let wait_req =
-                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
             let exit = runtime
                 .handle_wait_for_terminal_exit(wait_req)
                 .await
@@ -4578,8 +4276,7 @@ async fn concurrent_native_wait_second_caller_gets_empty_status() {
             // Use `sleep 0.1` so the process is still running when both wait
             // futures are first polled, giving the cooperative scheduler a
             // chance to interleave them.
-            let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep")
-                .args(vec!["0.1".to_string()]);
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["0.1".to_string()]);
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -4601,8 +4298,7 @@ async fn concurrent_native_wait_second_caller_gets_empty_status() {
             let exit_b = res_b.expect("second concurrent native wait should return Ok");
 
             // At least one caller must have observed exit_code = Some(0).
-            let one_got_zero =
-                exit_a.exit_status.exit_code == Some(0) || exit_b.exit_status.exit_code == Some(0);
+            let one_got_zero = exit_a.exit_status.exit_code == Some(0) || exit_b.exit_status.exit_code == Some(0);
             assert!(
                 one_got_zero,
                 "at least one concurrent native wait should return exit_code=Some(0); \
@@ -4690,21 +4386,14 @@ async fn request_permission_out_ptr_past_memory_still_returns_success() {
                 "#,
             );
 
-            let req = CreateTerminalRequest::new(
-                SessionId::from("s1"),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("module should be created");
 
-            let wait_req =
-                WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
-            let exit = runtime
-                .handle_wait_for_terminal_exit(wait_req)
-                .await
-                .unwrap();
+            let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id);
+            let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
             assert_eq!(
                 exit.exit_status.exit_code,
                 Some(0),
@@ -4724,8 +4413,7 @@ async fn kill_terminal_exit_status_has_sigkill_signal() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["30".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "sleep").args(vec!["30".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -4739,10 +4427,7 @@ async fn kill_terminal_exit_status_has_sigkill_signal() {
         .expect("kill should succeed");
 
     let wait_req = WaitForTerminalExitRequest::new(SessionId::from("s1"), tid);
-    let exit = runtime
-        .handle_wait_for_terminal_exit(wait_req)
-        .await
-        .unwrap();
+    let exit = runtime.handle_wait_for_terminal_exit(wait_req).await.unwrap();
 
     assert_eq!(
         exit.exit_status.signal.as_deref(),
@@ -4791,8 +4476,7 @@ async fn cross_session_file_isolation() {
         .expect("session A write should succeed");
 
     // Session B tries to read that same path — must fail (different sandbox).
-    let read_req =
-        ReadTextFileRequest::new(SessionId::from("sess-b"), PathBuf::from("/secret.txt"));
+    let read_req = ReadTextFileRequest::new(SessionId::from("sess-b"), PathBuf::from("/secret.txt"));
     let err = runtime
         .handle_read_text_file("session-b", read_req)
         .await
@@ -4808,8 +4492,7 @@ async fn release_terminal_twice_returns_error_on_second() {
     let tmp = TempDir::new().unwrap();
     let runtime = WasmRuntime::new(&test_config(tmp.path().to_path_buf())).unwrap();
 
-    let req =
-        CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hi".to_string()]);
+    let req = CreateTerminalRequest::new(SessionId::from("s1"), "echo").args(vec!["hi".to_string()]);
     let resp = runtime
         .handle_create_terminal(session_id(), req)
         .await
@@ -4845,9 +4528,7 @@ async fn wasm_module_subscribe_recv_unsubscribe_with_nats() {
     let nats_url = match nats_test_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping wasm_module_subscribe_recv_unsubscribe_with_nats"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping wasm_module_subscribe_recv_unsubscribe_with_nats");
             return;
         }
     };
@@ -4858,9 +4539,7 @@ async fn wasm_module_subscribe_recv_unsubscribe_with_nats() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let runtime =
-                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
-                    .unwrap();
+            let runtime = WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap();
 
             // Module layout:
             //   offset 0:   "wasm.recv.test" (14 bytes) — subscribe subject
@@ -4913,8 +4592,7 @@ async fn wasm_module_subscribe_recv_unsubscribe_with_nats() {
             )"#;
 
             let wasm_path = make_wasm(tmp.path(), "sub_recv.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -4965,9 +4643,7 @@ async fn recv_message_timeout_zero_is_nonblocking() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let runtime =
-                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
-                    .unwrap();
+            let runtime = WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap();
 
             // Module subscribes to a unique subject, then immediately calls
             // recv_message with timeout_ms=0. No message has been published,
@@ -5001,8 +4677,7 @@ async fn recv_message_timeout_zero_is_nonblocking() {
             )"#;
 
             let wasm_path = make_wasm(tmp.path(), "recv_nonblock.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -5044,9 +4719,7 @@ async fn wasm_max_subscriptions_per_module_limit() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let runtime =
-                WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone()))
-                    .unwrap();
+            let runtime = WasmRuntime::with_nats(&test_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap();
 
             // Module loops 65 times calling subscribe("test.sub.cap").
             // It counts how many calls return -1 (should be exactly 1 — the 65th).
@@ -5077,8 +4750,7 @@ async fn wasm_max_subscriptions_per_module_limit() {
             )"#;
 
             let wasm_path = make_wasm(tmp.path(), "sub_cap.wasm", wat);
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = runtime
                 .handle_create_terminal(session_id(), req)
                 .await
@@ -5138,17 +4810,13 @@ async fn wasm_fuel_limit_zero_means_unlimited() {
 
             let wasm_path = make_wasm(tmp.path(), "fuel_loop.wasm", wat);
 
-            let req =
-                CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
+            let req = CreateTerminalRequest::new(SessionId::from("s1"), wasm_path.to_str().unwrap());
             let resp = rt_limited
                 .handle_create_terminal(session_id(), req)
                 .await
                 .expect("create should succeed");
             let exit = rt_limited
-                .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(
-                    SessionId::from("s1"),
-                    resp.terminal_id,
-                ))
+                .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(SessionId::from("s1"), resp.terminal_id))
                 .await
                 .unwrap();
             // fuel budget=10 → killed by fuel exhaustion
@@ -5165,8 +4833,7 @@ async fn wasm_fuel_limit_zero_means_unlimited() {
             })
             .unwrap();
 
-            let req2 =
-                CreateTerminalRequest::new(SessionId::from("s2"), wasm_path.to_str().unwrap());
+            let req2 = CreateTerminalRequest::new(SessionId::from("s2"), wasm_path.to_str().unwrap());
             let resp2 = rt_unlimited
                 .handle_create_terminal("session-fuel-unlimited", req2)
                 .await
@@ -5220,10 +4887,7 @@ async fn wasm_max_concurrent_tasks_zero_means_unlimited() {
             let mut terminal_ids = Vec::new();
             for i in 0..64u32 {
                 let sid = format!("s{i}");
-                let req = CreateTerminalRequest::new(
-                    SessionId::from(sid.clone()),
-                    wasm_path.to_str().unwrap(),
-                );
+                let req = CreateTerminalRequest::new(SessionId::from(sid.clone()), wasm_path.to_str().unwrap());
                 let resp = runtime
                     .handle_create_terminal(&format!("sess-unlimited-{i}"), req)
                     .await
@@ -5236,10 +4900,7 @@ async fn wasm_max_concurrent_tasks_zero_means_unlimited() {
             for (i, tid) in terminal_ids.into_iter().enumerate() {
                 let sid = format!("s{i}");
                 let exit = runtime
-                    .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(
-                        SessionId::from(sid),
-                        tid,
-                    ))
+                    .handle_wait_for_terminal_exit(WaitForTerminalExitRequest::new(SessionId::from(sid), tid))
                     .await
                     .expect("wait should succeed");
                 if exit.exit_status.exit_code != Some(0) {

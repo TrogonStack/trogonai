@@ -122,9 +122,8 @@ type McpInitResult = (
     Vec<ToolDef>,
     Vec<(String, String, std::sync::Arc<dyn trogon_mcp::McpCallTool>)>,
 );
-type McpFactory = dyn Fn(Vec<crate::config::McpServerConfig>) -> Pin<Box<dyn Future<Output = McpInitResult> + Send>>
-    + Send
-    + Sync;
+type McpFactory =
+    dyn Fn(Vec<crate::config::McpServerConfig>) -> Pin<Box<dyn Future<Output = McpInitResult> + Send>> + Send + Sync;
 
 /// Trait for dispatching a named tool call.
 pub trait ToolDispatcher: Send + Sync + 'static {
@@ -287,13 +286,8 @@ pub mod mock {
         fn init_mcp_clients<'a>(
             &'a self,
             _servers: &'a [crate::config::McpServerConfig],
-        ) -> Pin<
-            Box<
-                dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>>
+        {
             Box::pin(async move { (vec![], vec![]) })
         }
     }
@@ -472,13 +466,7 @@ pub trait AgentConfig: Send + Sync + 'static {
     fn init_mcp_clients<'a>(
         &'a self,
         servers: &'a [crate::config::McpServerConfig],
-    ) -> Pin<
-        Box<
-            dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)>
-                + Send
-                + 'a,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = (Vec<ToolDef>, Vec<(String, String, Arc<dyn McpCallTool>)>)> + Send + 'a>>;
 }
 
 impl<H: HttpClient> AgentConfig for ToolContext<H> {
@@ -502,10 +490,7 @@ impl<H: HttpClient> AgentConfig for ToolContext<H> {
     ) -> Pin<Box<dyn Future<Output = Option<Value>> + Send + 'a>> {
         let headers = vec![
             ("Authorization".to_string(), format!("Bearer {token}")),
-            (
-                "Accept".to_string(),
-                "application/vnd.github.v3+json".to_string(),
-            ),
+            ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
         ];
         let fut = self.http_client.get(url, headers);
         Box::pin(async move {
@@ -540,11 +525,7 @@ pub fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
 /// Dispatch a tool call by name and return the string output to feed back to
 /// the model.  Unknown tool names return an error string instead of panicking
 /// so the agent can recover gracefully.
-pub async fn dispatch_tool<H: HttpClient>(
-    ctx: &ToolContext<H>,
-    name: &str,
-    input: &Value,
-) -> String {
+pub async fn dispatch_tool<H: HttpClient>(ctx: &ToolContext<H>, name: &str, input: &Value) -> String {
     let result = match name {
         "get_pr_diff" => github::get_pr_diff(ctx, input).await,
         "get_file_contents" => github::get_file_contents(ctx, input).await,
@@ -561,14 +542,16 @@ pub async fn dispatch_tool<H: HttpClient>(
         "get_linear_comments" => linear::get_comments(ctx, input).await,
         "send_slack_message" => slack::send_message(ctx, input).await,
         "read_slack_channel" => slack::read_channel(ctx, input).await,
-        "read_file" | "git_status" | "write_file" | "list_dir" | "glob" | "str_replace"
-        | "git_diff" | "git_log" | "fetch_url" | "search_files" => {
+        "read_file" | "git_status" | "write_file" | "list_dir" | "glob" | "str_replace" | "git_diff" | "git_log"
+        | "fetch_url" | "search_files" => {
             let tools_ctx = trogon_agent_core::tools::ToolContext::new(
                 ctx.proxy_url.clone(),
                 ctx.cwd.clone(),
                 reqwest::Client::new(),
             );
-            Ok(trogon_agent_core::tools::dispatch_tool(&tools_ctx, name, input).await.display_text())
+            Ok(trogon_agent_core::tools::dispatch_tool(&tools_ctx, name, input)
+                .await
+                .display_text())
         }
         "spawn_agent" => Err("spawn_agent requires a NATS client — dispatch via trogon-acp-runner".to_string()),
         unknown => Err(format!("Unknown tool: {unknown}")),
@@ -583,11 +566,7 @@ mod tests {
 
     #[test]
     fn tool_def_stores_fields() {
-        let t = tool_def(
-            "my_tool",
-            "Does something",
-            json!({"type": "object", "properties": {}}),
-        );
+        let t = tool_def("my_tool", "Does something", json!({"type": "object", "properties": {}}));
         assert_eq!(t.name, "my_tool");
         assert_eq!(t.description, "Does something");
     }
@@ -759,14 +738,20 @@ mod tests {
     async fn dispatch_read_file_delegates_to_agent_core() {
         let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
         let result = dispatch_tool(&ctx, "read_file", &json!({})).await;
-        assert!(!result.contains("Unknown tool"), "read_file should delegate to agent-core, got: {result}");
+        assert!(
+            !result.contains("Unknown tool"),
+            "read_file should delegate to agent-core, got: {result}"
+        );
     }
 
     #[tokio::test]
     async fn dispatch_git_status_delegates_to_agent_core() {
         let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
         let result = dispatch_tool(&ctx, "git_status", &json!({})).await;
-        assert!(!result.contains("Unknown tool"), "git_status should delegate to agent-core, got: {result}");
+        assert!(
+            !result.contains("Unknown tool"),
+            "git_status should delegate to agent-core, got: {result}"
+        );
     }
 
     #[tokio::test]

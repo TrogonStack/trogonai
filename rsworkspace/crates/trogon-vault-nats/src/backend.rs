@@ -28,11 +28,11 @@ use crate::slot::RotationSlot;
 /// Attach an [`AuditPublisher`] via [`with_audit`](NatsKvVault::with_audit) to
 /// emit fire-and-forget audit events for every vault operation.
 pub struct NatsKvVault<K: KvOps = kv::Store> {
-    cache:    Arc<DashMap<String, RotationSlot>>,
-    kv:       Arc<K>,
-    ready:    watch::Receiver<bool>,
-    crypto:   Arc<CryptoCtx>,
-    audit:    Option<Arc<dyn Audit>>,
+    cache: Arc<DashMap<String, RotationSlot>>,
+    kv: Arc<K>,
+    ready: watch::Receiver<bool>,
+    crypto: Arc<CryptoCtx>,
+    audit: Option<Arc<dyn Audit>>,
     _watcher: JoinHandle<()>,
 }
 
@@ -42,11 +42,7 @@ impl NatsKvVault {
     /// 1. Loads all existing keys from NATS KV into the in-process cache.
     /// 2. Signals ready (resolve() is now usable).
     /// 3. Starts a background watcher that keeps the cache up to date.
-    pub async fn new(
-        kv: kv::Store,
-        crypto: Arc<CryptoCtx>,
-        grace_period: Duration,
-    ) -> Result<Self, NatsKvVaultError> {
+    pub async fn new(kv: kv::Store, crypto: Arc<CryptoCtx>, grace_period: Duration) -> Result<Self, NatsKvVaultError> {
         let cache = Arc::new(DashMap::new());
         let (ready_tx, ready_rx) = watch::channel(false);
 
@@ -58,7 +54,9 @@ impl NatsKvVault {
                 if let Some(bytes) = kv.get(&key).await.nats_err()? {
                     match crypto.decrypt(&bytes) {
                         Ok(plaintext) => match String::from_utf8(plaintext) {
-                            Ok(s) => { cache.insert(key, RotationSlot::new(s)); }
+                            Ok(s) => {
+                                cache.insert(key, RotationSlot::new(s));
+                            }
                             Err(e) => tracing::warn!(key, error = %e, "vault: invalid UTF-8, skipping"),
                         },
                         Err(e) => tracing::warn!(key, error = %e, "vault: decrypt failed on startup, skipping"),
@@ -72,14 +70,17 @@ impl NatsKvVault {
 
         // Phase 2: background watcher for ongoing changes
         // Uses watch_with_history to also catch any writes that raced the initial load
-        let cache_clone  = Arc::clone(&cache);
+        let cache_clone = Arc::clone(&cache);
         let crypto_clone = Arc::clone(&crypto);
-        let kv_for_watcher = kv.clone();  // kv::Store is cheap to clone (Arc-backed)
+        let kv_for_watcher = kv.clone(); // kv::Store is cheap to clone (Arc-backed)
 
         let watcher = tokio::spawn(async move {
             let mut watcher = match kv_for_watcher.watch_with_history(">").await {
-                Ok(w)  => w,
-                Err(e) => { tracing::error!(error = %e, "vault: watcher failed to start"); return; }
+                Ok(w) => w,
+                Err(e) => {
+                    tracing::error!(error = %e, "vault: watcher failed to start");
+                    return;
+                }
             };
 
             while let Some(entry) = watcher.next().await {
@@ -92,14 +93,13 @@ impl NatsKvVault {
 
         Ok(Self {
             cache,
-            kv:    Arc::new(kv),
+            kv: Arc::new(kv),
             ready: ready_rx,
             crypto,
             audit: None,
             _watcher: watcher,
         })
     }
-
 }
 
 impl<K: KvOps> NatsKvVault<K> {
@@ -111,9 +111,9 @@ impl<K: KvOps> NatsKvVault<K> {
 
     /// Return `(current, previous)` for a token.
     pub fn slot(&self, token: &ApiKeyToken) -> Option<(String, Option<String>)> {
-        self.cache.get(token.as_str()).map(|s| {
-            (s.current.clone(), s.valid_previous().map(String::from))
-        })
+        self.cache
+            .get(token.as_str())
+            .map(|s| (s.current.clone(), s.valid_previous().map(String::from)))
     }
 }
 
@@ -172,12 +172,7 @@ impl<K: KvOps> VaultStore for NatsKvVault<K> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn apply_entry(
-    cache:        &DashMap<String, RotationSlot>,
-    crypto:       &CryptoCtx,
-    entry:        kv::Entry,
-    grace_period: Duration,
-) {
+fn apply_entry(cache: &DashMap<String, RotationSlot>, crypto: &CryptoCtx, entry: kv::Entry, grace_period: Duration) {
     match entry.operation {
         kv::Operation::Put => {
             match crypto.decrypt(&entry.value) {
@@ -210,9 +205,7 @@ async fn wait_ready(rx: &watch::Receiver<bool>) -> Result<(), NatsKvVaultError> 
         return Ok(());
     }
     let mut rx = rx.clone();
-    rx.changed()
-        .await
-        .map_err(|_| NatsKvVaultError::Shutdown)
+    rx.changed().await.map_err(|_| NatsKvVaultError::Shutdown)
 }
 
 // ── Test constructor ──────────────────────────────────────────────────────────
@@ -224,8 +217,8 @@ impl NatsKvVault<crate::kv_ops::InMemoryKv> {
     /// The `ready` signal is immediately true; no background watcher is spawned.
     /// Use this to unit-test [`VaultStore`] methods without a real NATS server.
     pub(crate) fn new_for_test(
-        kv:           crate::kv_ops::InMemoryKv,
-        crypto:       CryptoCtx,
+        kv: crate::kv_ops::InMemoryKv,
+        crypto: CryptoCtx,
         initial_slots: Vec<(&str, crate::slot::RotationSlot)>,
     ) -> Self {
         let cache = Arc::new(DashMap::new());
@@ -237,10 +230,10 @@ impl NatsKvVault<crate::kv_ops::InMemoryKv> {
         let dummy = tokio::spawn(async {});
         Self {
             cache,
-            kv:       Arc::new(kv),
-            ready:    ready_rx,
-            crypto:   Arc::new(crypto),
-            audit:    None,
+            kv: Arc::new(kv),
+            ready: ready_rx,
+            crypto: Arc::new(crypto),
+            audit: None,
             _watcher: dummy,
         }
     }
@@ -261,26 +254,26 @@ mod tests {
 
     fn put_entry(key: &str, value: Bytes) -> kv::Entry {
         kv::Entry {
-            bucket:       "vault_test".into(),
-            key:          key.into(),
+            bucket: "vault_test".into(),
+            key: key.into(),
             value,
-            revision:     1,
-            delta:        0,
-            created:      time::OffsetDateTime::UNIX_EPOCH,
-            operation:    kv::Operation::Put,
+            revision: 1,
+            delta: 0,
+            created: time::OffsetDateTime::UNIX_EPOCH,
+            operation: kv::Operation::Put,
             seen_current: false,
         }
     }
 
     fn delete_entry(key: &str, op: kv::Operation) -> kv::Entry {
         kv::Entry {
-            bucket:       "vault_test".into(),
-            key:          key.into(),
-            value:        Bytes::new(),
-            revision:     2,
-            delta:        0,
-            created:      time::OffsetDateTime::UNIX_EPOCH,
-            operation:    op,
+            bucket: "vault_test".into(),
+            key: key.into(),
+            value: Bytes::new(),
+            revision: 2,
+            delta: 0,
+            created: time::OffsetDateTime::UNIX_EPOCH,
+            operation: op,
             seen_current: false,
         }
     }
@@ -289,11 +282,16 @@ mod tests {
 
     #[test]
     fn put_inserts_new_slot() {
-        let cache  = DashMap::new();
+        let cache = DashMap::new();
         let crypto = crypto();
-        let ct     = crypto.encrypt(b"sk_live_abc").unwrap();
+        let ct = crypto.encrypt(b"sk_live_abc").unwrap();
 
-        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", ct.into()), Duration::from_secs(30));
+        apply_entry(
+            &cache,
+            &crypto,
+            put_entry("tok_stripe_prod_abc", ct.into()),
+            Duration::from_secs(30),
+        );
 
         let slot = cache.get("tok_stripe_prod_abc").unwrap();
         assert_eq!(slot.current, "sk_live_abc");
@@ -302,12 +300,20 @@ mod tests {
 
     #[test]
     fn put_different_value_rotates_slot() {
-        let cache  = DashMap::new();
+        let cache = DashMap::new();
         let crypto = crypto();
-        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("old_key".to_string()));
+        cache.insert(
+            "tok_stripe_prod_abc".to_string(),
+            RotationSlot::new("old_key".to_string()),
+        );
 
         let ct = crypto.encrypt(b"new_key").unwrap();
-        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", ct.into()), Duration::from_secs(30));
+        apply_entry(
+            &cache,
+            &crypto,
+            put_entry("tok_stripe_prod_abc", ct.into()),
+            Duration::from_secs(30),
+        );
 
         let slot = cache.get("tok_stripe_prod_abc").unwrap();
         assert_eq!(slot.current, "new_key");
@@ -317,12 +323,20 @@ mod tests {
 
     #[test]
     fn put_same_value_does_not_rotate() {
-        let cache  = DashMap::new();
+        let cache = DashMap::new();
         let crypto = crypto();
-        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("same_key".to_string()));
+        cache.insert(
+            "tok_stripe_prod_abc".to_string(),
+            RotationSlot::new("same_key".to_string()),
+        );
 
         let ct = crypto.encrypt(b"same_key").unwrap();
-        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", ct.into()), Duration::from_secs(30));
+        apply_entry(
+            &cache,
+            &crypto,
+            put_entry("tok_stripe_prod_abc", ct.into()),
+            Duration::from_secs(30),
+        );
 
         let slot = cache.get("tok_stripe_prod_abc").unwrap();
         assert_eq!(slot.current, "same_key");
@@ -331,34 +345,58 @@ mod tests {
 
     #[test]
     fn delete_removes_entry_from_cache() {
-        let cache  = DashMap::new();
+        let cache = DashMap::new();
         let crypto = crypto();
-        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("some_key".to_string()));
+        cache.insert(
+            "tok_stripe_prod_abc".to_string(),
+            RotationSlot::new("some_key".to_string()),
+        );
 
-        apply_entry(&cache, &crypto, delete_entry("tok_stripe_prod_abc", kv::Operation::Delete), Duration::from_secs(30));
+        apply_entry(
+            &cache,
+            &crypto,
+            delete_entry("tok_stripe_prod_abc", kv::Operation::Delete),
+            Duration::from_secs(30),
+        );
 
         assert!(cache.get("tok_stripe_prod_abc").is_none());
     }
 
     #[test]
     fn purge_removes_entry_from_cache() {
-        let cache  = DashMap::new();
+        let cache = DashMap::new();
         let crypto = crypto();
-        cache.insert("tok_stripe_prod_abc".to_string(), RotationSlot::new("some_key".to_string()));
+        cache.insert(
+            "tok_stripe_prod_abc".to_string(),
+            RotationSlot::new("some_key".to_string()),
+        );
 
-        apply_entry(&cache, &crypto, delete_entry("tok_stripe_prod_abc", kv::Operation::Purge), Duration::from_secs(30));
+        apply_entry(
+            &cache,
+            &crypto,
+            delete_entry("tok_stripe_prod_abc", kv::Operation::Purge),
+            Duration::from_secs(30),
+        );
 
         assert!(cache.get("tok_stripe_prod_abc").is_none());
     }
 
     #[test]
     fn invalid_ciphertext_skips_without_crash() {
-        let cache  = DashMap::new();
+        let cache = DashMap::new();
         let crypto = crypto();
 
-        apply_entry(&cache, &crypto, put_entry("tok_stripe_prod_abc", Bytes::from_static(b"not_valid_ciphertext")), Duration::from_secs(30));
+        apply_entry(
+            &cache,
+            &crypto,
+            put_entry("tok_stripe_prod_abc", Bytes::from_static(b"not_valid_ciphertext")),
+            Duration::from_secs(30),
+        );
 
-        assert!(cache.get("tok_stripe_prod_abc").is_none(), "decrypt failure must not insert entry");
+        assert!(
+            cache.get("tok_stripe_prod_abc").is_none(),
+            "decrypt failure must not insert entry"
+        );
     }
 
     // ── wait_ready ────────────────────────────────────────────────────────────
@@ -409,7 +447,10 @@ mod tests {
     #[tokio::test]
     async fn store_writes_encrypted_value_to_kv() {
         let (vault, kv) = empty_vault();
-        vault.store(&tok("tok_stripe_prod_abc1"), "sk_live_secret").await.unwrap();
+        vault
+            .store(&tok("tok_stripe_prod_abc1"), "sk_live_secret")
+            .await
+            .unwrap();
 
         let raw = kv.get("tok_stripe_prod_abc1").expect("kv must have entry after store");
         // Must be ciphertext, not plaintext
@@ -442,7 +483,10 @@ mod tests {
         let vault = NatsKvVault::new_for_test(kv.clone(), crypto(), vec![]);
         vault.revoke(&tok("tok_stripe_prod_abc1")).await.unwrap();
 
-        assert!(!kv.contains("tok_stripe_prod_abc1"), "kv entry must be removed after revoke");
+        assert!(
+            !kv.contains("tok_stripe_prod_abc1"),
+            "kv entry must be removed after revoke"
+        );
     }
 
     #[tokio::test]
@@ -474,14 +518,17 @@ mod tests {
         // Call crypto() BEFORE capturing Instant::now(): argon2id is slow and
         // CPU-contended in parallel test runs, so the expiry must be set after
         // any expensive setup to avoid a race with the grace period.
-        let kv     = InMemoryKv::new();
+        let kv = InMemoryKv::new();
         let crypto = crypto();
         let mut slot = RotationSlot::new("new_key".to_string());
-        slot.previous = Some(("old_key".to_string(), std::time::Instant::now() + Duration::from_secs(300)));
+        slot.previous = Some((
+            "old_key".to_string(),
+            std::time::Instant::now() + Duration::from_secs(300),
+        ));
         let vault = NatsKvVault::new_for_test(kv, crypto, vec![("tok_stripe_prod_abc1", slot)]);
 
         let (current, previous) = vault.resolve_with_previous(&tok("tok_stripe_prod_abc1")).await.unwrap();
-        assert_eq!(current.as_deref(),  Some("new_key"));
+        assert_eq!(current.as_deref(), Some("new_key"));
         assert_eq!(previous.as_deref(), Some("old_key"));
     }
 

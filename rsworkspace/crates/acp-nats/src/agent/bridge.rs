@@ -192,7 +192,6 @@ where
         logout::handle(self, args).await
     }
 
-
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
         new_session::handle(self, args).await
     }
@@ -203,10 +202,7 @@ where
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn set_session_mode(
-        &self,
-        args: SetSessionModeRequest,
-    ) -> Result<SetSessionModeResponse> {
+    async fn set_session_mode(&self, args: SetSessionModeRequest) -> Result<SetSessionModeResponse> {
         set_session_mode::handle(self, args).await
     }
 
@@ -234,10 +230,7 @@ where
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn set_session_model(
-        &self,
-        args: SetSessionModelRequest,
-    ) -> Result<SetSessionModelResponse> {
+    async fn set_session_model(&self, args: SetSessionModelRequest) -> Result<SetSessionModelResponse> {
         set_session_model::handle(self, args).await
     }
 
@@ -281,22 +274,14 @@ where
     /// Route a prompt to `target_session_id` (the runner's session id), bypassing
     /// `args.session_id`. Mutates `args.session_id` so both the NATS subject and the
     /// serialized payload carry the runner's id, then delegates to the existing `prompt`.
-    pub async fn prompt_to(
-        &self,
-        mut args: PromptRequest,
-        target_session_id: &str,
-    ) -> Result<PromptResponse> {
+    pub async fn prompt_to(&self, mut args: PromptRequest, target_session_id: &str) -> Result<PromptResponse> {
         args.session_id = SessionId::new(target_session_id);
         agent_client_protocol::Agent::prompt(self, args).await
     }
 
     /// Route a cancel to `target_session_id` (the runner's session id), bypassing
     /// `args.session_id`.
-    pub async fn cancel_to(
-        &self,
-        mut args: CancelNotification,
-        target_session_id: &str,
-    ) -> Result<()> {
+    pub async fn cancel_to(&self, mut args: CancelNotification, target_session_id: &str) -> Result<()> {
         args.session_id = SessionId::new(target_session_id);
         agent_client_protocol::Agent::cancel(self, args).await
     }

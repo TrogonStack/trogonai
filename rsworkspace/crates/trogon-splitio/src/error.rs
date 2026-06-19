@@ -34,10 +34,7 @@ mod tests {
     #[test]
     fn unexpected_response_display_includes_detail() {
         let e = SplitError::UnexpectedResponse("missing field 'treatment'".to_string());
-        assert_eq!(
-            e.to_string(),
-            "Unexpected response shape: missing field 'treatment'"
-        );
+        assert_eq!(e.to_string(), "Unexpected response shape: missing field 'treatment'");
     }
 
     #[test]

@@ -61,7 +61,11 @@ pub async fn create_worktree(parent_cwd: &str) -> Option<TempWorktree> {
         .success();
 
     if ok {
-        Some(TempWorktree { path, parent_cwd: parent_cwd.to_string(), cleaned: false })
+        Some(TempWorktree {
+            path,
+            parent_cwd: parent_cwd.to_string(),
+            cleaned: false,
+        })
     } else {
         None
     }

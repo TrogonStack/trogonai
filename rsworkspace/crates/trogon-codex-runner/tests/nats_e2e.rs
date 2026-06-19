@@ -59,7 +59,9 @@ async fn start_agent(nats: async_nats::Client) {
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats_for_thread, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
     // Give the agent time to subscribe before the test sends requests.
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -149,7 +151,9 @@ async fn e2e_ext_session_get_state_returns_cwd() {
     .expect("timed out waiting for session/new")
     .expect("NATS request failed");
     let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
-    let session_id = new_resp["sessionId"].as_str().expect("session/new must return sessionId");
+    let session_id = new_resp["sessionId"]
+        .as_str()
+        .expect("session/new must return sessionId");
 
     let ext_payload = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap();
     let ext_msg = tokio::time::timeout(
@@ -267,7 +271,9 @@ async fn codex_runner_registers_with_code_edit_capability_and_model_ids() {
         entry.capabilities
     );
 
-    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let models = entry.metadata["models"]
+        .as_array()
+        .expect("metadata.models must be array");
     let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         model_strings.contains(&"o4-mini"),
@@ -369,7 +375,10 @@ async fn clear_creates_distinct_session_id_in_codex_runner() {
 
     let resp1: Value = serde_json::from_slice(&msg1.payload).unwrap();
     let session_id_1 = resp1["sessionId"].as_str().unwrap_or("").to_string();
-    assert!(!session_id_1.is_empty(), "first session/new must return a non-empty sessionId");
+    assert!(
+        !session_id_1.is_empty(),
+        "first session/new must return a non-empty sessionId"
+    );
 
     let msg2 = tokio::time::timeout(
         Duration::from_secs(10),
@@ -381,7 +390,10 @@ async fn clear_creates_distinct_session_id_in_codex_runner() {
 
     let resp2: Value = serde_json::from_slice(&msg2.payload).unwrap();
     let session_id_2 = resp2["sessionId"].as_str().unwrap_or("").to_string();
-    assert!(!session_id_2.is_empty(), "second session/new must return a non-empty sessionId");
+    assert!(
+        !session_id_2.is_empty(),
+        "second session/new must return a non-empty sessionId"
+    );
 
     assert_ne!(
         session_id_1, session_id_2,

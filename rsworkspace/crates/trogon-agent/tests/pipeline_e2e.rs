@@ -34,9 +34,7 @@ use trogon_secret_proxy::{
     proxy::{ProxyState, router},
     stream, subjects, worker,
 };
-use trogon_vault::{
-    ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, MemoryVault, VaultAuth, VaultStore,
-};
+use trogon_vault::{ApiKeyToken, HashicorpVaultConfig, HashicorpVaultStore, MemoryVault, VaultAuth, VaultStore};
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -113,10 +111,7 @@ async fn wait_for_vault(addr: &str) {
         if ready {
             return;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "Vault not ready within 30s"
-        );
+        assert!(tokio::time::Instant::now() < deadline, "Vault not ready within 30s");
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
@@ -172,9 +167,9 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
         .expect("Failed to ensure PROXY_REQUESTS stream");
 
     // ── 6. Create GITHUB + LINEAR streams (used by agent runner) ───────────
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     // ── 7. Start proxy HTTP server on a random port ────────────────────────
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -225,10 +220,7 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
 
     // ── 9. Start trogon-agent runner ───────────────────────────────────────
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: proxy_url.clone(),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -260,8 +252,7 @@ async fn pipeline_pr_event_reaches_anthropic_with_real_key() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── 10. Publish a GitHub PR opened event ───────────────────────────────
-    js
-        .publish("github.pull_request", pr_opened_payload())
+    js.publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -308,9 +299,7 @@ async fn pipeline_tool_use_github_api_detokenized() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
         })
         .await;
 
@@ -322,10 +311,8 @@ async fn pipeline_tool_use_github_api_detokenized() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -334,7 +321,7 @@ async fn pipeline_tool_use_github_api_detokenized() {
                         "input": {"owner":"acme","repo":"trogon","pr_number":42}
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -360,10 +347,7 @@ async fn pipeline_tool_use_github_api_detokenized() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
@@ -371,12 +355,10 @@ async fn pipeline_tool_use_github_api_detokenized() {
     let js = Arc::new(js);
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -417,10 +399,7 @@ async fn pipeline_tool_use_github_api_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -449,8 +428,7 @@ async fn pipeline_tool_use_github_api_detokenized() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
+    js.publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -482,9 +460,7 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
         })
         .await;
 
@@ -496,13 +472,11 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
     let js = Arc::new(js);
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
 
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -543,10 +517,7 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -587,13 +558,12 @@ async fn pipeline_linear_issue_event_reaches_anthropic_with_real_key() {
             "team": { "name": "Backend" }
         }
     });
-    js
-        .publish(
-            "linear.Issue.create",
-            bytes::Bytes::from(serde_json::to_vec(&payload).unwrap()),
-        )
-        .await
-        .expect("Failed to publish Linear issue event");
+    js.publish(
+        "linear.Issue.create",
+        bytes::Bytes::from(serde_json::to_vec(&payload).unwrap()),
+    )
+    .await
+    .expect("Failed to publish Linear issue event");
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
     assert!(
@@ -640,10 +610,8 @@ async fn pipeline_tool_use_linear_api_detokenized() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -652,7 +620,7 @@ async fn pipeline_tool_use_linear_api_detokenized() {
                         "input": {"issue_id": "issue-linear-123", "priority": 2}
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -690,12 +658,10 @@ async fn pipeline_tool_use_linear_api_detokenized() {
     let js = Arc::new(js);
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -736,10 +702,7 @@ async fn pipeline_tool_use_linear_api_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -769,25 +732,24 @@ async fn pipeline_tool_use_linear_api_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Publish a Linear Issue create event to trigger the issue_triage handler.
-    js
-        .publish(
-            "linear.Issue.create",
-            bytes::Bytes::from(
-                serde_json::to_vec(&json!({
-                    "action": "create",
-                    "type": "Issue",
-                    "data": {
-                        "id": "issue-linear-123",
-                        "title": "Performance degradation in prod",
-                        "priority": 1,
-                        "team": { "name": "Platform" }
-                    }
-                }))
-                .unwrap(),
-            ),
-        )
-        .await
-        .expect("Failed to publish Linear Issue event");
+    js.publish(
+        "linear.Issue.create",
+        bytes::Bytes::from(
+            serde_json::to_vec(&json!({
+                "action": "create",
+                "type": "Issue",
+                "data": {
+                    "id": "issue-linear-123",
+                    "title": "Performance degradation in prod",
+                    "priority": 1,
+                    "team": { "name": "Platform" }
+                }
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .expect("Failed to publish Linear Issue event");
 
     // Wait for the full agentic loop to complete (end_turn received).
     let end_turn_hit = wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await;
@@ -836,10 +798,8 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -848,7 +808,7 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
                         "input": {"owner":"acme","repo":"trogon","pr_number":99}
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -875,10 +835,7 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
@@ -886,12 +843,10 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
     let js = Arc::new(js);
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -932,10 +887,7 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -964,8 +916,7 @@ async fn pipeline_tool_failure_sends_error_as_tool_result_then_end_turn() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
+    js.publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -1001,10 +952,8 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -1013,7 +962,7 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
                         "input": {"owner":"acme","repo":"trogon","pr_number":1}
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -1038,10 +987,7 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
@@ -1049,12 +995,10 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
     let js = Arc::new(js);
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1097,10 +1041,7 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
     // max_iterations: 2 → the loop runs iterations 0 and 1, calling Anthropic
     // twice and executing the tool twice before returning MaxIterationsReached.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1129,8 +1070,7 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
+    js.publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish PR event");
 
@@ -1144,10 +1084,7 @@ async fn pipeline_max_iterations_terminates_loop_at_cap() {
         }
     })
     .await;
-    assert!(
-        reached.is_ok(),
-        "Anthropic was not called 2 times within 20 s"
-    );
+    assert!(reached.is_ok(), "Anthropic was not called 2 times within 20 s");
 
     // Wait a moment to confirm no 3rd call arrives (loop capped at 2).
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1207,12 +1144,10 @@ async fn pipeline_concurrent_events_processed_independently() {
     let js = Arc::new(js);
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1253,10 +1188,7 @@ async fn pipeline_concurrent_events_processed_independently() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1287,12 +1219,10 @@ async fn pipeline_concurrent_events_processed_independently() {
 
     // Publish two PR events back-to-back (minimal delay — runner processes them
     // concurrently via tokio::spawn).
-    js
-        .publish("github.pull_request", pr_opened_payload())
+    js.publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish first PR event");
-    js
-        .publish("github.pull_request", pr_opened_payload())
+    js.publish("github.pull_request", pr_opened_payload())
         .await
         .expect("Failed to publish second PR event");
 
@@ -1393,9 +1323,9 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
             when.method(httpmock::Method::GET)
                 .path("/repos/test-org/test-repo/pulls/42")
                 .header("authorization", "Bearer sk-gh-realkey");
-            then.status(200).header("content-type", "text/plain").body(
-                "diff --git a/src/main.rs b/src/main.rs\n+++ b/src/main.rs\n+fn helper() {}\n",
-            );
+            then.status(200)
+                .header("content-type", "text/plain")
+                .body("diff --git a/src/main.rs b/src/main.rs\n+++ b/src/main.rs\n+fn helper() {}\n");
         })
         .await;
 
@@ -1408,22 +1338,17 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1462,10 +1387,7 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1493,10 +1415,7 @@ async fn pipeline_get_pr_diff_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -1523,9 +1442,7 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#);
         })
         .await;
 
@@ -1564,22 +1481,17 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1618,10 +1530,7 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1649,10 +1558,7 @@ async fn pipeline_get_file_contents_tool_base64_decode() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -1715,22 +1621,17 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1769,10 +1670,7 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1800,10 +1698,7 @@ async fn pipeline_post_pr_comment_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -1833,9 +1728,7 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewing."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewing."}]}"#);
         })
         .await;
 
@@ -1851,12 +1744,10 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -1895,10 +1786,7 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -1927,14 +1815,10 @@ async fn pipeline_synchronize_and_reopened_actions_trigger_review() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Both actions are in REVIEW_ACTIONS — each should trigger one agent run.
-    js
-        .publish("github.pull_request", pr_payload("synchronize"))
+    js.publish("github.pull_request", pr_payload("synchronize"))
         .await
         .unwrap();
-    js
-        .publish("github.pull_request", pr_payload("reopened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("reopened")).await.unwrap();
 
     let both_hit = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -2021,12 +1905,10 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2065,10 +1947,7 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -2096,10 +1975,7 @@ async fn pipeline_get_linear_issue_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -2186,12 +2062,10 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2230,10 +2104,7 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -2261,10 +2132,7 @@ async fn pipeline_post_linear_comment_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -2357,12 +2225,10 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2401,10 +2267,7 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -2432,10 +2295,7 @@ async fn pipeline_graphql_failure_wrapped_as_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -2482,12 +2342,10 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2526,10 +2384,7 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -2558,14 +2413,8 @@ async fn pipeline_unexpected_stop_reason_runner_acks_and_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Two events — each triggers one Anthropic call before UnexpectedStopReason.
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     let both_hit = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -2618,10 +2467,8 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason":"tool_use",
                     "content":[
                         {"type":"tool_use","id":"tu_multi_01","name":"list_pr_files",
@@ -2630,7 +2477,7 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
                          "input":{"owner":"test-org","repo":"test-repo","pr_number":42}}
                     ]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -2667,22 +2514,17 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2721,10 +2563,7 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -2752,10 +2591,7 @@ async fn pipeline_multiple_tool_use_blocks_all_executed() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -2786,9 +2622,7 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
         })
         .await;
 
@@ -2804,12 +2638,10 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2848,10 +2680,7 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -2880,10 +2709,7 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // "closed" is not in REVIEW_ACTIONS — handler returns None, no agent run.
-    js
-        .publish("github.pull_request", pr_payload("closed"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("closed")).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -2893,10 +2719,7 @@ async fn pipeline_ignored_pr_action_acked_without_agent_run() {
     );
 
     // Runner must still be alive — valid event should reach Anthropic.
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
         "Runner must still process events after silently acking a 'closed' event"
@@ -2919,9 +2742,7 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
         })
         .await;
 
@@ -2937,12 +2758,10 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -2981,10 +2800,7 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3021,10 +2837,7 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
         }))
         .unwrap(),
     );
-    js
-        .publish("linear.Issue.update", ignored_payload)
-        .await
-        .unwrap();
+    js.publish("linear.Issue.update", ignored_payload).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -3034,10 +2847,7 @@ async fn pipeline_ignored_linear_event_acked_without_agent_run() {
     );
 
     // Runner still alive — valid create event must be processed.
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
         "Runner must still process events after silently acking a Linear 'update' event"
@@ -3060,9 +2870,7 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
         })
         .await;
 
@@ -3078,12 +2886,10 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3122,10 +2928,7 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3154,11 +2957,7 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Publish garbage bytes — serde_json::from_slice will fail.
-    js
-        .publish(
-            "github.pull_request",
-            bytes::Bytes::from("not json at all }{"),
-        )
+    js.publish("github.pull_request", bytes::Bytes::from("not json at all }{"))
         .await
         .unwrap();
 
@@ -3170,10 +2969,7 @@ async fn pipeline_invalid_json_payload_acked_without_crash() {
     );
 
     // Runner must still be alive — valid event must be processed.
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
         "Runner must continue processing after receiving an invalid JSON payload"
@@ -3245,12 +3041,10 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3289,10 +3083,7 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3320,10 +3111,7 @@ async fn pipeline_update_linear_issue_failure_wrapped_as_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -3350,9 +3138,7 @@ async fn pipeline_custom_stream_names_route_correctly() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
         })
         .await;
 
@@ -3368,15 +3154,13 @@ async fn pipeline_custom_stream_names_route_correctly() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
 
     // Use custom stream names — do NOT create the default "GITHUB"/"LINEAR".
-    create_stream(&js,"MY_GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"MY_LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "MY_GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "MY_LINEAR", &["linear.Issue.>"]).await;
     // CRON_TICKS must always exist (runner binds it unconditionally).
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3416,10 +3200,7 @@ async fn pipeline_custom_stream_names_route_correctly() {
 
     // Agent configured with custom stream names.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3447,10 +3228,7 @@ async fn pipeline_custom_stream_names_route_correctly() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -3513,22 +3291,17 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3567,10 +3340,7 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3598,10 +3368,7 @@ async fn pipeline_get_file_contents_missing_content_field_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -3652,9 +3419,7 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
                 .header("authorization", "Bearer sk-gh-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"name":"lib.rs","content":"!!!not-valid-base64!!!","encoding":"base64"}"#,
-                );
+                .body(r#"{"name":"lib.rs","content":"!!!not-valid-base64!!!","encoding":"base64"}"#);
         })
         .await;
 
@@ -3667,22 +3432,17 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3721,10 +3481,7 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3752,10 +3509,7 @@ async fn pipeline_get_file_contents_invalid_base64_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -3823,22 +3577,17 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -3877,10 +3626,7 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -3908,10 +3654,7 @@ async fn pipeline_get_file_contents_non_utf8_bytes_tool_error() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -3974,22 +3717,17 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4028,10 +3766,7 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4059,10 +3794,7 @@ async fn pipeline_post_pr_comment_no_url_fallback() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -4149,12 +3881,10 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4193,10 +3923,7 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4224,10 +3951,7 @@ async fn pipeline_post_linear_comment_no_url_fallback() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -4255,9 +3979,7 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
         })
         .await;
 
@@ -4273,12 +3995,10 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4317,10 +4037,7 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4356,10 +4073,7 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
         }))
         .unwrap(),
     );
-    js
-        .publish("github.pull_request", no_number)
-        .await
-        .unwrap();
+    js.publish("github.pull_request", no_number).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -4369,10 +4083,7 @@ async fn pipeline_pr_payload_missing_number_acked_silently() {
     );
 
     // Runner must still be alive.
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
         "Runner must still process events after silently acking a payload missing 'number'"
@@ -4396,9 +4107,7 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
         })
         .await;
 
@@ -4414,12 +4123,10 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4458,10 +4165,7 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4498,10 +4202,7 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
         }))
         .unwrap(),
     );
-    js
-        .publish("linear.Issue.create", no_id)
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", no_id).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(
@@ -4511,10 +4212,7 @@ async fn pipeline_linear_payload_missing_id_acked_silently() {
     );
 
     // Runner must still be alive.
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(15)).await,
         "Runner must still process events after silently acking a payload missing 'data.id'"
@@ -4567,12 +4265,10 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4611,10 +4307,7 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4642,10 +4335,7 @@ async fn pipeline_unknown_tool_name_returns_error_as_tool_result() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -4687,12 +4377,10 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4731,10 +4419,7 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4763,14 +4448,8 @@ async fn pipeline_anthropic_http_error_runner_acks_and_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Two events — both trigger AgentError::Http but must be acked (not redelivered).
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     let both_hit = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -4842,9 +4521,7 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Updated."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Updated."}]}"#);
         })
         .await;
 
@@ -4891,12 +4568,10 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -4935,10 +4610,7 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -4966,10 +4638,7 @@ async fn pipeline_update_linear_issue_with_state_and_assignee() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_issue_payload())
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_issue_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -4996,9 +4665,7 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"File read."}]}"#);
         })
         .await;
 
@@ -5037,22 +4704,17 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5091,10 +4753,7 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -5122,10 +4781,7 @@ async fn pipeline_get_file_contents_with_explicit_ref() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -5152,9 +4808,7 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
         })
         .await;
 
@@ -5170,12 +4824,10 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5214,10 +4866,7 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -5254,10 +4903,7 @@ async fn pipeline_issue_triage_missing_title_uses_fallback() {
         }))
         .unwrap(),
     );
-    js
-        .publish("linear.Issue.create", no_title)
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", no_title).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -5312,10 +4958,7 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         subject_prefix: "github".to_string(),
         stream_name: "GITHUB".to_string(),
         stream_max_age: Duration::from_secs(3600),
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
     };
     tokio::spawn(async move {
         trogon_github::serve(github_cfg, github_nats).await.ok();
@@ -5324,12 +4967,10 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
 
     // ── 2. Start proxy + worker.
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
     // trogon-github created GITHUB stream; agent needs LINEAR too.
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5369,10 +5010,7 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
 
     // ── 3. Start agent.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -5418,11 +5056,7 @@ async fn pipeline_github_webhook_to_agent_cross_crate_e2e() {
         .send()
         .await
         .expect("Failed to POST to trogon-github");
-    assert_eq!(
-        resp.status().as_u16(),
-        200,
-        "trogon-github should return 200"
-    );
+    assert_eq!(resp.status().as_u16(), 200, "trogon-github should return 200");
 
     // ── 5. Verify the full pipeline fired.
     assert!(
@@ -5446,9 +5080,7 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Triaged."}]}"#);
         })
         .await;
 
@@ -5479,10 +5111,7 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
         timestamp_tolerance: None, // disabled — no timestamp field required in payload
         nats_ack_timeout: Duration::from_secs(10),
         nats_stream_op_timeout: Duration::from_secs(10),
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
     };
     tokio::spawn(async move {
         trogon_linear::serve(linear_cfg, linear_nats).await.ok();
@@ -5491,12 +5120,10 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
 
     // ── 2. Start proxy + worker.
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
     // trogon-linear created LINEAR stream; agent needs GITHUB too.
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
     let proxy_state = ProxyState {
@@ -5535,10 +5162,7 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
 
     // ── 3. Start agent.
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -5587,11 +5211,7 @@ async fn pipeline_linear_webhook_to_agent_cross_crate_e2e() {
         .send()
         .await
         .expect("Failed to POST to trogon-linear");
-    assert_eq!(
-        resp.status().as_u16(),
-        200,
-        "trogon-linear should return 200"
-    );
+    assert_eq!(resp.status().as_u16(), 200, "trogon-linear should return 200");
 
     // ── 5. Verify the full pipeline fired.
     assert!(
@@ -5687,12 +5307,10 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -5731,10 +5349,7 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -5762,10 +5377,7 @@ async fn pipeline_tool_missing_required_input_returns_error_as_tool_result() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -5800,9 +5412,7 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Reviewed."}]}"#);
         })
         .await;
 
@@ -5818,12 +5428,10 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     // Proxy with a very short worker_timeout — NO worker started yet.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -5843,10 +5451,7 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -5875,10 +5480,7 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // ── Event 1: no worker → proxy times out → AgentError::Http → acked.
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     // Wait for the proxy timeout + processing to complete.
     tokio::time::sleep(Duration::from_millis(700)).await;
@@ -5911,10 +5513,7 @@ async fn pipeline_proxy_worker_timeout_acks_and_runner_continues() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // ── Event 2: worker now running → reaches Anthropic.
-    js
-        .publish("github.pull_request", pr_payload("opened"))
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_payload("opened")).await.unwrap();
 
     // The proxy publishes the outbound NATS request before timing out, so the
     // stale outbound message from event 1 may also be consumed by the worker
@@ -5970,12 +5569,10 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6014,10 +5611,7 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -6045,10 +5639,7 @@ async fn pipeline_hashicorp_vault_token_resolution() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(25)).await,
@@ -6086,10 +5677,8 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -6098,7 +5687,7 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
                         "input": {"owner":"acme","repo":"trogon","pr_number":42}
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -6123,22 +5712,17 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6184,10 +5768,7 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(
-                vec![format!("nats://127.0.0.1:{nats_port}")],
-                NatsAuth::None,
-            ),
+            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
@@ -6215,10 +5796,7 @@ async fn pipeline_get_pr_comments_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -6253,10 +5831,8 @@ async fn pipeline_update_file_tool_detokenized() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -6271,7 +5847,7 @@ async fn pipeline_update_file_tool_detokenized() {
                         }
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -6296,22 +5872,17 @@ async fn pipeline_update_file_tool_detokenized() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6357,10 +5928,7 @@ async fn pipeline_update_file_tool_detokenized() {
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(
-                vec![format!("nats://127.0.0.1:{nats_port}")],
-                NatsAuth::None,
-            ),
+            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
@@ -6388,10 +5956,7 @@ async fn pipeline_update_file_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -6417,9 +5982,7 @@ async fn pipeline_create_pull_request_tool_detokenized() {
                 .body_contains("tool_result");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"PR opened."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"PR opened."}]}"#);
         })
         .await;
 
@@ -6428,10 +5991,8 @@ async fn pipeline_create_pull_request_tool_detokenized() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -6446,7 +6007,7 @@ async fn pipeline_create_pull_request_tool_detokenized() {
                         }
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -6471,22 +6032,17 @@ async fn pipeline_create_pull_request_tool_detokenized() {
         .await
         .unwrap();
     vault
-        .store(
-            &ApiKeyToken::new("tok_github_prod_test01").unwrap(),
-            "sk-gh-realkey",
-        )
+        .store(&ApiKeyToken::new("tok_github_prod_test01").unwrap(), "sk-gh-realkey")
         .await
         .unwrap();
 
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6532,10 +6088,7 @@ async fn pipeline_create_pull_request_tool_detokenized() {
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(
-                vec![format!("nats://127.0.0.1:{nats_port}")],
-                NatsAuth::None,
-            ),
+            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
@@ -6563,10 +6116,7 @@ async fn pipeline_create_pull_request_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("github.pull_request", pr_opened_payload())
-        .await
-        .unwrap();
+    js.publish("github.pull_request", pr_opened_payload()).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -6602,10 +6152,8 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
             when.method(httpmock::Method::POST)
                 .path("/v1/messages")
                 .header("authorization", "Bearer sk-ant-realkey");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(
-                    r#"{
+            then.status(200).header("content-type", "application/json").body(
+                r#"{
                     "stop_reason": "tool_use",
                     "content": [{
                         "type": "tool_use",
@@ -6614,7 +6162,7 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
                         "input": {"issue_id":"ISS-42"}
                     }]
                 }"#,
-                );
+            );
         })
         .await;
 
@@ -6650,12 +6198,10 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound)
-        .await
-        .unwrap();
-    create_stream(&js,"GITHUB", &["github.pull_request"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    stream::ensure_stream(&js, "trogon", &outbound).await.unwrap();
+    create_stream(&js, "GITHUB", &["github.pull_request"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6710,10 +6256,7 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
 
     tokio::spawn(async move {
         run(AgentConfig {
-            nats: NatsConfig::new(
-                vec![format!("nats://127.0.0.1:{nats_port}")],
-                NatsAuth::None,
-            ),
+            nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
             proxy_url: format!("http://127.0.0.1:{proxy_port}"),
             anthropic_token: "tok_anthropic_prod_test01".to_string(),
             github_token: "tok_github_prod_test01".to_string(),
@@ -6741,10 +6284,7 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    js
-        .publish("linear.Issue.create", linear_payload)
-        .await
-        .unwrap();
+    js.publish("linear.Issue.create", linear_payload).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_end_turn, Duration::from_secs(20)).await,
@@ -6758,10 +6298,7 @@ async fn pipeline_get_linear_comments_tool_detokenized() {
 // ── New event types ────────────────────────────────────────────────────────────
 
 /// Helper: spin up NATS + proxy + worker + agent with github.> stream.
-async fn setup_full_pipeline(
-    nats_port: u16,
-    mock_server: &MockServer,
-) -> (u16, Arc<async_nats::jetstream::Context>) {
+async fn setup_full_pipeline(nats_port: u16, mock_server: &MockServer) -> (u16, Arc<async_nats::jetstream::Context>) {
     let vault = Arc::new(MemoryVault::new());
     vault
         .store(
@@ -6774,13 +6311,11 @@ async fn setup_full_pipeline(
     let (nats, js) = js_client(nats_port).await;
     let js = Arc::new(js);
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
     // Use github.> so all GitHub consumers (PR, comment, push, check_run) can bind.
-    create_stream(&js,"GITHUB", &["github.>"]).await;
-    create_stream(&js,"LINEAR", &["linear.Issue.>"]).await;
-    create_stream(&js,"CRON_TICKS", &["cron.>"]).await;
+    create_stream(&js, "GITHUB", &["github.>"]).await;
+    create_stream(&js, "LINEAR", &["linear.Issue.>"]).await;
+    create_stream(&js, "CRON_TICKS", &["cron.>"]).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -6819,10 +6354,7 @@ async fn setup_full_pipeline(
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -6859,12 +6391,16 @@ async fn pipeline_pr_merged_event_reaches_anthropic() {
     let (_c, nats_port) = start_nats().await;
     let mock_server = MockServer::start_async().await;
 
-    let anthropic_mock = mock_server.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/v1/messages")
-            .header("authorization", "Bearer sk-ant-realkey");
-        then.status(200).header("content-type", "application/json")
-            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Merge noted."}]}"#);
-    }).await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Merge noted."}]}"#);
+        })
+        .await;
 
     let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
 
@@ -6873,9 +6409,9 @@ async fn pipeline_pr_merged_event_reaches_anthropic() {
         "number": 77,
         "pull_request": { "merged": true, "title": "Add feature", "merged_by": { "login": "alice" } },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
-    })).unwrap();
-    js
-        .publish("github.pull_request", bytes::Bytes::from(payload))
+    }))
+    .unwrap();
+    js.publish("github.pull_request", bytes::Bytes::from(payload))
         .await
         .unwrap();
 
@@ -6891,16 +6427,16 @@ async fn pipeline_issue_comment_event_reaches_anthropic() {
     let (_c, nats_port) = start_nats().await;
     let mock_server = MockServer::start_async().await;
 
-    let anthropic_mock =
-        mock_server
-            .mock_async(|when, then| {
-                when.method(httpmock::Method::POST)
-                    .path("/v1/messages")
-                    .header("authorization", "Bearer sk-ant-realkey");
-                then.status(200).header("content-type", "application/json")
-            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Replied."}]}"#);
-            })
-            .await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Replied."}]}"#);
+        })
+        .await;
 
     let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
 
@@ -6911,8 +6447,7 @@ async fn pipeline_issue_comment_event_reaches_anthropic() {
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
-    js
-        .publish("github.issue_comment", bytes::Bytes::from(payload))
+    js.publish("github.issue_comment", bytes::Bytes::from(payload))
         .await
         .unwrap();
 
@@ -6928,12 +6463,16 @@ async fn pipeline_push_to_branch_event_reaches_anthropic() {
     let (_c, nats_port) = start_nats().await;
     let mock_server = MockServer::start_async().await;
 
-    let anthropic_mock = mock_server.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/v1/messages")
-            .header("authorization", "Bearer sk-ant-realkey");
-        then.status(200).header("content-type", "application/json")
-            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Push looks safe."}]}"#);
-    }).await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Push looks safe."}]}"#);
+        })
+        .await;
 
     let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
 
@@ -6946,10 +6485,7 @@ async fn pipeline_push_to_branch_event_reaches_anthropic() {
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
-    js
-        .publish("github.push", bytes::Bytes::from(payload))
-        .await
-        .unwrap();
+    js.publish("github.push", bytes::Bytes::from(payload)).await.unwrap();
 
     assert!(
         wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await,
@@ -6963,12 +6499,16 @@ async fn pipeline_ci_failure_event_reaches_anthropic() {
     let (_c, nats_port) = start_nats().await;
     let mock_server = MockServer::start_async().await;
 
-    let anthropic_mock = mock_server.mock_async(|when, then| {
-        when.method(httpmock::Method::POST).path("/v1/messages")
-            .header("authorization", "Bearer sk-ant-realkey");
-        then.status(200).header("content-type", "application/json")
-            .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"CI failure diagnosed."}]}"#);
-    }).await;
+    let anthropic_mock = mock_server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/v1/messages")
+                .header("authorization", "Bearer sk-ant-realkey");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"CI failure diagnosed."}]}"#);
+        })
+        .await;
 
     let (_proxy_port, js) = setup_full_pipeline(nats_port, &mock_server).await;
 
@@ -6983,8 +6523,7 @@ async fn pipeline_ci_failure_event_reaches_anthropic() {
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
-    js
-        .publish("github.check_run", bytes::Bytes::from(payload))
+    js.publish("github.check_run", bytes::Bytes::from(payload))
         .await
         .unwrap();
 

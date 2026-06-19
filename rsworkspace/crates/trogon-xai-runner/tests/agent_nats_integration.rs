@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
-    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
+    Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest, NewSessionRequest,
+    PromptRequest, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -20,8 +20,7 @@ use testcontainers_modules::{
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_xai_runner::{
-    AgentLoader, InputItem, SessionNotifier, SkillLoader, XaiAgent,
-    XaiEvent, XaiHttpClient,
+    AgentLoader, InputItem, SessionNotifier, SkillLoader, XaiAgent, XaiEvent, XaiHttpClient,
     session_store::NatsSessionStore,
 };
 
@@ -107,17 +106,14 @@ impl XaiHttpClient for ReplyHttpClient {
         _previous_response_id: Option<&str>,
         _max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
-        Box::pin(stream::iter(vec![
-            XaiEvent::TextDelta {
-                text: "Hello back!".to_string(),
-            },
-        ]))
+        Box::pin(stream::iter(vec![XaiEvent::TextDelta {
+            text: "Hello back!".to_string(),
+        }]))
     }
 }
 
 fn make_agent(store: NatsSessionStore) -> XaiAgent<NoOpHttpClient, NoOpNotifier> {
-    XaiAgent::with_deps(NoOpNotifier, "grok-4", "", NoOpHttpClient)
-        .with_session_store(Arc::new(store))
+    XaiAgent::with_deps(NoOpNotifier, "grok-4", "", NoOpHttpClient).with_session_store(Arc::new(store))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -165,11 +161,7 @@ async fn agent_new_session_name_defaults_to_new_conversation() {
             let session_id = resp.session_id.to_string();
 
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .unwrap();
+            let bytes = kv.get(&format!("default.{session_id}")).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
             assert_eq!(v["name"], "New Conversation");
@@ -192,11 +184,7 @@ async fn agent_new_session_model_defaults_to_agent_default() {
             let session_id = resp.session_id.to_string();
 
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
-            let bytes = kv
-                .get(&format!("default.{session_id}"))
-                .await
-                .unwrap()
-                .unwrap();
+            let bytes = kv.get(&format!("default.{session_id}")).await.unwrap().unwrap();
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
             assert_eq!(v["model"], "grok-4");
@@ -219,10 +207,7 @@ async fn agent_fork_session_creates_separate_nats_entry() {
             let source_id = new_resp.session_id.clone();
 
             let fork_resp = agent
-                .fork_session(ForkSessionRequest::new(
-                    source_id.clone(),
-                    PathBuf::from("/tmp"),
-                ))
+                .fork_session(ForkSessionRequest::new(source_id.clone(), PathBuf::from("/tmp")))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -230,17 +215,10 @@ async fn agent_fork_session_creates_separate_nats_entry() {
             let kv = js.get_key_value("SESSIONS").await.expect("get KV");
 
             let source_key = format!("default.{}", source_id);
-            assert!(
-                kv.get(&source_key).await.unwrap().is_some(),
-                "source entry must exist"
-            );
+            assert!(kv.get(&source_key).await.unwrap().is_some(), "source entry must exist");
 
             let fork_key = format!("default.{fork_id}");
-            let bytes = kv
-                .get(&fork_key)
-                .await
-                .unwrap()
-                .expect("fork entry must exist");
+            let bytes = kv.get(&fork_key).await.unwrap().expect("fork entry must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(v["id"], fork_id.as_str());
             assert_ne!(fork_id, source_id.to_string(), "fork must have a distinct id");
@@ -285,8 +263,8 @@ async fn prompt_persists_user_message_to_nats() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
     // Requires a non-empty API key so prompt does not reject before calling the client.
-    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", NoOpHttpClient)
-        .with_session_store(Arc::new(store));
+    let agent =
+        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", NoOpHttpClient).with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -332,9 +310,7 @@ async fn kv_put(js: &jetstream::Context, bucket: &str, key: &str, json: &str) {
         })
         .await
         .expect("open KV bucket");
-    kv.put(key, bytes::Bytes::from(json.to_string()))
-        .await
-        .expect("KV put");
+    kv.put(key, bytes::Bytes::from(json.to_string())).await.expect("KV put");
 }
 
 #[tokio::test]
@@ -392,8 +368,7 @@ async fn tenant_id_env_var_sets_kv_key_prefix() {
     unsafe {
         std::env::set_var("TENANT_ID", "acme-corp");
     }
-    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "", NoOpHttpClient)
-        .with_session_store(Arc::new(store));
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "", NoOpHttpClient).with_session_store(Arc::new(store));
     unsafe {
         std::env::remove_var("TENANT_ID");
     }
@@ -446,10 +421,7 @@ async fn fork_session_persists_parent_session_id_to_nats() {
             let src_id = src_resp.session_id.clone();
 
             let fork_resp = agent
-                .fork_session(ForkSessionRequest::new(
-                    src_id.clone(),
-                    PathBuf::from("/fork"),
-                ))
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -490,9 +462,7 @@ async fn fork_with_branch_at_index_persists_branched_at_index_to_nats() {
             )
             .unwrap();
             let fork_resp = agent
-                .fork_session(
-                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
-                )
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta))
                 .await
                 .unwrap();
             let fork_id = fork_resp.session_id.to_string();
@@ -532,10 +502,7 @@ async fn set_session_model_reflected_in_sessions_kv_after_close() {
 
             // Change model then force a save via close_session.
             agent
-                .set_session_model(SetSessionModelRequest::new(
-                    session_id.clone(),
-                    "grok-3-mini",
-                ))
+                .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
                 .await
                 .unwrap();
             agent
@@ -564,8 +531,8 @@ async fn set_session_model_reflected_in_sessions_kv_after_close() {
 async fn session_name_derived_from_first_user_message_after_prompt() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient)
-        .with_session_store(Arc::new(store));
+    let agent =
+        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient).with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -640,8 +607,8 @@ async fn agent_id_written_to_sessions_kv_when_with_loaders() {
 async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient)
-        .with_session_store(Arc::new(store));
+    let agent =
+        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient).with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -735,8 +702,8 @@ async fn prompt_token_usage_persisted_to_sessions_kv() {
 async fn session_name_truncated_to_60_chars_in_sessions_kv() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient)
-        .with_session_store(Arc::new(store));
+    let agent =
+        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient).with_session_store(Arc::new(store));
 
     // 80-character message — well over the 60-char limit.
     let long_message = "A".repeat(80);
@@ -766,10 +733,7 @@ async fn session_name_truncated_to_60_chars_in_sessions_kv() {
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             let name = v["name"].as_str().expect("name must be a string");
 
-            assert!(
-                name.ends_with('…'),
-                "truncated name must end with '…'; got: {name:?}"
-            );
+            assert!(name.ends_with('…'), "truncated name must end with '…'; got: {name:?}");
             // 60 ASCII chars + the 3-byte UTF-8 ellipsis = 63 bytes, 61 chars.
             assert_eq!(
                 name.chars().count(),
@@ -804,16 +768,14 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
                 .unwrap();
             let session_id = resp.session_id.to_string();
 
-            let raw_params = serde_json::value::RawValue::from_string(
-                serde_json::json!({ "sessionId": session_id }).to_string(),
-            )
-            .unwrap();
+            let raw_params =
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": session_id }).to_string())
+                    .unwrap();
             let ext_resp = agent
                 .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
                 .await
                 .unwrap();
-            let state: serde_json::Value =
-                serde_json::from_str(ext_resp.0.get()).unwrap();
+            let state: serde_json::Value = serde_json::from_str(ext_resp.0.get()).unwrap();
             assert_eq!(
                 state["system_prompt"].as_str(),
                 Some("act like a pirate"),
@@ -858,8 +820,14 @@ async fn token_totals_persisted_to_sessions_kv() {
                 .expect("snapshot must exist");
             let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
-            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
-            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+            assert_eq!(
+                v["total_input_tokens"], 10,
+                "total_input_tokens must be 10 after prompt"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 5,
+                "total_output_tokens must be 5 after prompt"
+            );
         })
         .await;
 }
@@ -882,10 +850,7 @@ async fn fork_session_token_totals_absent_in_kv() {
             let src_id = src.session_id.to_string();
 
             agent
-                .prompt(PromptRequest::new(
-                    src.session_id,
-                    vec![ContentBlock::from("prompt")],
-                ))
+                .prompt(PromptRequest::new(src.session_id, vec![ContentBlock::from("prompt")]))
                 .await
                 .unwrap();
 
@@ -950,9 +915,8 @@ impl XaiHttpClient for CacheReadUsageHttpClient {
 async fn cache_read_tokens_persisted_to_sessions_kv() {
     let (js, _c) = make_js().await;
     let store = NatsSessionStore::open(&js, 0).await.expect("store");
-    let agent =
-        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", CacheReadUsageHttpClient)
-            .with_session_store(Arc::new(store));
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", CacheReadUsageHttpClient)
+        .with_session_store(Arc::new(store));
 
     tokio::task::LocalSet::new()
         .run_until(async move {
@@ -1065,10 +1029,7 @@ async fn cancel_prompt_token_totals_persisted_to_kv() {
             // cancel channel is registered. Sending cancel now will interrupt after
             // the Usage event has been processed.
             ready.notified().await;
-            agent
-                .cancel(CancelNotification::new(session_id.clone()))
-                .await
-                .unwrap();
+            agent.cancel(CancelNotification::new(session_id.clone())).await.unwrap();
 
             let result = prompt_handle.await.unwrap();
             assert_eq!(
@@ -1171,12 +1132,7 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
         }
     }
     agent
-        .test_insert_session_with_response_id(
-            "s-compact",
-            "/tmp",
-            None,
-            Some("resp-old".to_string()),
-        )
+        .test_insert_session_with_response_id("s-compact", "/tmp", None, Some("resp-old".to_string()))
         .await;
     agent.test_set_session_history("s-compact", history).await;
     assert_eq!(
@@ -1203,11 +1159,7 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
                 "history must be replaced by the compactor's compacted result"
             );
             assert!(
-                hist[0]
-                    .content
-                    .as_deref()
-                    .unwrap_or("")
-                    .contains("context-summary"),
+                hist[0].content.as_deref().unwrap_or("").contains("context-summary"),
                 "first message must be the summary checkpoint"
             );
             // Mandatory: last_response_id cleared so the next turn re-sends the
@@ -1320,14 +1272,15 @@ async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
     // Wire the production permission path: check_tool_permission → perm_tx →
     // handle_permission_request_nats → NATS, exactly as main.rs does. (The legacy
     // `with_permissions`/`ask_permission` path is no longer used by `prompt`.)
-    let (perm_tx, mut perm_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(32);
+    let (perm_tx, mut perm_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(32);
     let perm_store = trogon_runner_tools::AllowedToolsSessionStore::new();
     let agent = XaiAgent::with_deps(
         RecordingNotifier { notes: notes.clone() },
         "grok-4",
         "dummy-key",
-        ReadFileToolThenDone { calls: std::sync::atomic::AtomicUsize::new(0) },
+        ReadFileToolThenDone {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        },
     )
     .with_permission_gate(perm_tx, perm_store.clone());
 

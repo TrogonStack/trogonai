@@ -63,13 +63,9 @@ async fn dispatch_sends_capability_and_prompt_in_payload() {
 
     let nats_clone = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_clone
-            .subscribe(format!("{prefix}.agent.spawn"))
-            .await
-            .unwrap();
+        let mut sub = nats_clone.subscribe(format!("{prefix}.agent.spawn")).await.unwrap();
         if let Some(msg) = sub.next().await {
-            let body: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let echo = serde_json::to_string(&body).unwrap();
             if let Some(reply) = msg.reply {
                 nats_clone.publish(reply, echo.into()).await.unwrap();

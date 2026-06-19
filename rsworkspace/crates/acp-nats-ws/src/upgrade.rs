@@ -58,14 +58,20 @@ pub(crate) async fn config_for_agent<S: trogon_registry::RegistryStore>(
                 .get("acp_prefix")
                 .and_then(|v| v.as_str())
                 .unwrap_or_else(|| {
-                    warn!(agent_type, "registry entry missing acp_prefix metadata, using nats_subject");
+                    warn!(
+                        agent_type,
+                        "registry entry missing acp_prefix metadata, using nats_subject"
+                    );
                     cap.nats_subject.trim_end_matches(".agent.>")
                 });
             acp_nats::AcpPrefix::new(prefix_str)
                 .map(|prefix| base_config.for_prefix(prefix))
                 .map_err(|e| {
                     error!(agent_type, error = %e, "invalid acp_prefix in registry");
-                    (StatusCode::INTERNAL_SERVER_ERROR, "invalid agent prefix in registry".to_string())
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "invalid agent prefix in registry".to_string(),
+                    )
                 })
         }
         Ok(None) => Err((
@@ -74,7 +80,10 @@ pub(crate) async fn config_for_agent<S: trogon_registry::RegistryStore>(
         )),
         Err(e) => {
             error!(agent_type, error = %e, "registry lookup failed");
-            Err((StatusCode::SERVICE_UNAVAILABLE, "registry temporarily unavailable".to_string()))
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "registry temporarily unavailable".to_string(),
+            ))
         }
     }
 }
@@ -85,18 +94,13 @@ pub(crate) async fn config_for_agent<S: trogon_registry::RegistryStore>(
 pub async fn handle_with_agent_type<S: trogon_registry::RegistryStore + 'static>(
     Path(agent_type): Path<String>,
     State(state): State<UpgradeState>,
-    axum::extract::Extension(registry_ext): axum::extract::Extension<
-        std::sync::Arc<RegistryExtension<S>>,
-    >,
+    axum::extract::Extension(registry_ext): axum::extract::Extension<std::sync::Arc<RegistryExtension<S>>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let config_override =
-        match config_for_agent(&agent_type, &registry_ext.registry, &registry_ext.base_config)
-            .await
-        {
-            Ok(c) => c,
-            Err((status, msg)) => return (status, msg).into_response(),
-        };
+    let config_override = match config_for_agent(&agent_type, &registry_ext.registry, &registry_ext.base_config).await {
+        Ok(c) => c,
+        Err((status, msg)) => return (status, msg).into_response(),
+    };
 
     let shutdown_rx = state.shutdown_tx.subscribe();
     ws.on_upgrade(move |socket| async move {
@@ -151,12 +155,18 @@ mod tests {
         type GetError = StoreUnavailable;
         type DeleteError = StoreUnavailable;
         type KeysError = StoreUnavailable;
-        async fn put(&self, _: &str, _: bytes::Bytes) -> Result<u64, Self::PutError> { Ok(0) }
+        async fn put(&self, _: &str, _: bytes::Bytes) -> Result<u64, Self::PutError> {
+            Ok(0)
+        }
         async fn get(&self, _: &str) -> Result<Option<bytes::Bytes>, Self::GetError> {
             Err(StoreUnavailable)
         }
-        async fn delete(&self, _: &str) -> Result<(), Self::DeleteError> { Ok(()) }
-        async fn keys(&self) -> Result<Vec<String>, Self::KeysError> { Ok(vec![]) }
+        async fn delete(&self, _: &str) -> Result<(), Self::DeleteError> {
+            Ok(())
+        }
+        async fn keys(&self) -> Result<Vec<String>, Self::KeysError> {
+            Ok(vec![])
+        }
     }
 
     fn base_config() -> acp_nats::Config {
@@ -253,7 +263,10 @@ mod tests {
 
         let (shutdown_tx, _) = watch::channel(false);
         let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel::<ConnectionRequest>();
-        let state = UpgradeState { conn_tx, shutdown_tx: shutdown_tx.clone() };
+        let state = UpgradeState {
+            conn_tx,
+            shutdown_tx: shutdown_tx.clone(),
+        };
 
         let app = axum::Router::new()
             .route(
@@ -277,7 +290,9 @@ mod tests {
             .expect("timeout waiting for ConnectionRequest")
             .expect("channel closed");
 
-        let config = req.config_override.expect("ConnectionRequest must have config_override");
+        let config = req
+            .config_override
+            .expect("ConnectionRequest must have config_override");
         assert_eq!(config.acp_prefix(), "acp.claude");
     }
 

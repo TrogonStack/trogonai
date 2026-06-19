@@ -200,11 +200,8 @@ async fn dispatch_tool_routes_get_pr_diff() {
     let server = MockServer::start_async().await;
 
     let mock = server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/github/repos/o/r/pulls/1");
-        then.status(200)
-            .header("content-type", "text/plain")
-            .body("diff");
+        when.method(httpmock::Method::GET).path("/github/repos/o/r/pulls/1");
+        then.status(200).header("content-type", "text/plain").body("diff");
     });
 
     let ctx = make_ctx(&server.base_url());
@@ -295,7 +292,10 @@ async fn dispatch_tool_routes_post_pr_review() {
     )
     .await;
     mock.assert_hits_async(1).await;
-    assert!(!result.contains("Unknown tool"), "dispatch must route post_pr_review: {result}");
+    assert!(
+        !result.contains("Unknown tool"),
+        "dispatch must route post_pr_review: {result}"
+    );
 }
 
 /// `dispatch_tool` routes `get_linear_issue` to the Linear GraphQL path.
@@ -335,12 +335,7 @@ async fn dispatch_tool_routes_post_linear_comment() {
     });
 
     let ctx = make_ctx(&server.base_url());
-    dispatch_tool(
-        &ctx,
-        "post_linear_comment",
-        &json!({ "issue_id": "I1", "body": "hi" }),
-    )
-    .await;
+    dispatch_tool(&ctx, "post_linear_comment", &json!({ "issue_id": "I1", "body": "hi" })).await;
     mock.assert_hits_async(1).await;
 }
 

@@ -363,10 +363,7 @@ async fn vault_admin_store_rotate_revoke_lifecycle() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
     assert_eq!(v["ok"], true, "store: expected ok:true, got: {v}");
-    assert_eq!(
-        vault.resolve(&token).await.unwrap(),
-        Some("initial-key".to_string())
-    );
+    assert_eq!(vault.resolve(&token).await.unwrap(), Some("initial-key".to_string()));
 
     // 2. Rotate to a new key.
     let rotate_payload = serde_json::json!({
@@ -382,10 +379,7 @@ async fn vault_admin_store_rotate_revoke_lifecycle() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
     assert_eq!(v["ok"], true, "rotate: expected ok:true, got: {v}");
-    assert_eq!(
-        vault.resolve(&token).await.unwrap(),
-        Some("rotated-key".to_string())
-    );
+    assert_eq!(vault.resolve(&token).await.unwrap(), Some("rotated-key".to_string()));
 
     // 3. Revoke the token.
     let revoke_payload = serde_json::json!({ "token": "tok_gemini_prod_lifecycle1" });
@@ -443,10 +437,7 @@ async fn vault_admin_message_without_reply_subject_is_ignored_and_listener_conti
         .expect("NATS request failed — listener may have crashed");
 
     let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
-    assert_eq!(
-        v["ok"], true,
-        "expected ok:true after no-reply message, got: {v}"
-    );
+    assert_eq!(v["ok"], true, "expected ok:true after no-reply message, got: {v}");
 }
 
 // ── Gap: multiple tokens managed independently ────────────────────────────────
@@ -478,10 +469,7 @@ async fn vault_admin_multiple_tokens_managed_independently() {
             .await
             .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
-        assert_eq!(
-            v["ok"], true,
-            "store {token_str}: expected ok:true, got: {v}"
-        );
+        assert_eq!(v["ok"], true, "store {token_str}: expected ok:true, got: {v}");
     }
 
     // Rotate token A.
@@ -517,11 +505,7 @@ async fn vault_admin_multiple_tokens_managed_independently() {
         Some("key-a-v2".to_string()),
         "tok_a must have rotated value"
     );
-    assert_eq!(
-        vault.resolve(&tok_b).await.unwrap(),
-        None,
-        "tok_b must be revoked"
-    );
+    assert_eq!(vault.resolve(&tok_b).await.unwrap(), None, "tok_b must be revoked");
 }
 
 // ── Loop exit behaviour ───────────────────────────────────────────────────────

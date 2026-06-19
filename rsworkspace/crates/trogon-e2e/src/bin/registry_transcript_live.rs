@@ -43,12 +43,26 @@ async fn test_registry_register_and_get(js: &jetstream::Context) -> bool {
 
         let found = registry.get(&agent_type).await.map_err(|e| e.to_string())?;
         let found = found.ok_or_else(|| format!("agent {agent_type} not found after registration"))?;
-        if found.agent_type != agent_type { return Err(format!("agent_type mismatch: {} vs {agent_type}", found.agent_type)); }
-        if !found.has_capability("code_review") { return Err("expected code_review capability".into()); }
+        if found.agent_type != agent_type {
+            return Err(format!("agent_type mismatch: {} vs {agent_type}", found.agent_type));
+        }
+        if !found.has_capability("code_review") {
+            return Err("expected code_review capability".into());
+        }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_registry_list_all(js: &jetstream::Context) -> bool {
@@ -65,12 +79,25 @@ async fn test_registry_list_all(js: &jetstream::Context) -> bool {
 
         let all = registry.list_all().await.map_err(|e| e.to_string())?;
         if !all.iter().any(|a| a.agent_type == agent_type) {
-            return Err(format!("{agent_type} not found in list_all result (got {} entries)", all.len()));
+            return Err(format!(
+                "{agent_type} not found in list_all result (got {} entries)",
+                all.len()
+            ));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_registry_discover_by_capability(js: &jetstream::Context) -> bool {
@@ -91,9 +118,19 @@ async fn test_registry_discover_by_capability(js: &jetstream::Context) -> bool {
             return Err(format!("{agent_type} not returned by discover({cap_name})"));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_registry_unregister(js: &jetstream::Context) -> bool {
@@ -110,18 +147,32 @@ async fn test_registry_unregister(js: &jetstream::Context) -> bool {
 
         // Confirm registered
         let found = registry.get(&agent_type).await.map_err(|e| e.to_string())?;
-        if found.is_none() { return Err("not found after registration".into()); }
+        if found.is_none() {
+            return Err("not found after registration".into());
+        }
 
         // Unregister
         registry.unregister(&agent_type).await.map_err(|e| e.to_string())?;
 
         // Confirm removed
         let after = registry.get(&agent_type).await.map_err(|e| e.to_string())?;
-        if after.is_some() { return Err("agent still present after unregister".into()); }
+        if after.is_some() {
+            return Err("agent still present after unregister".into());
+        }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_registry_get_nonexistent(js: &jetstream::Context) -> bool {
@@ -130,12 +181,27 @@ async fn test_registry_get_nonexistent(js: &jetstream::Context) -> bool {
     let result: Result<(), String> = async {
         let store = provision(js).await.map_err(|e| e.to_string())?;
         let registry = Registry::new(store);
-        let found = registry.get("nonexistent-actor-xyzzy").await.map_err(|e| e.to_string())?;
-        if found.is_some() { return Err("expected None, got Some".into()); }
+        let found = registry
+            .get("nonexistent-actor-xyzzy")
+            .await
+            .map_err(|e| e.to_string())?;
+        if found.is_some() {
+            return Err("expected None, got Some".into());
+        }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_registry_refresh_keeps_alive(js: &jetstream::Context) -> bool {
@@ -154,12 +220,28 @@ async fn test_registry_refresh_keeps_alive(js: &jetstream::Context) -> bool {
         cap.current_load = 5;
         registry.refresh(&cap).await.map_err(|e| e.to_string())?;
 
-        let found = registry.get(&agent_type).await.map_err(|e| e.to_string())?.ok_or("not found")?;
-        if found.current_load != 5 { return Err(format!("expected load 5, got {}", found.current_load)); }
+        let found = registry
+            .get(&agent_type)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("not found")?;
+        if found.current_load != 5 {
+            return Err(format!("expected load 5, got {}", found.current_load));
+        }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_registry_find_by_model(js: &jetstream::Context) -> bool {
@@ -178,11 +260,23 @@ async fn test_registry_find_by_model(js: &jetstream::Context) -> bool {
 
         let found = registry.find_by_model(&model_id).await.map_err(|e| e.to_string())?;
         let found = found.ok_or_else(|| format!("agent with model_id={model_id} not found"))?;
-        if found.agent_type != agent_type { return Err(format!("agent_type mismatch: {}", found.agent_type)); }
+        if found.agent_type != agent_type {
+            return Err(format!("agent_type mismatch: {}", found.agent_type));
+        }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ── Transcript tests ───────────────────────────────────────────────────────────
@@ -199,8 +293,14 @@ async fn test_transcript_write_and_query(js: &jetstream::Context) -> bool {
         let publisher = NatsTranscriptPublisher::new(js.clone());
         let session = Session::new(publisher, "pr", &actor_key);
 
-        session.append_user_message("Review this PR.", None).await.map_err(|e| e.to_string())?;
-        session.append_assistant_message("LGTM, ship it.", Some(42)).await.map_err(|e| e.to_string())?;
+        session
+            .append_user_message("Review this PR.", None)
+            .await
+            .map_err(|e| e.to_string())?;
+        session
+            .append_assistant_message("LGTM, ship it.", Some(42))
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Wait briefly for JetStream to settle
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -211,18 +311,40 @@ async fn test_transcript_write_and_query(js: &jetstream::Context) -> bool {
         }
 
         let user_entry = &entries[0];
-        if !matches!(user_entry, trogon_transcript::TranscriptEntry::Message { role: Role::User, .. }) {
+        if !matches!(
+            user_entry,
+            trogon_transcript::TranscriptEntry::Message { role: Role::User, .. }
+        ) {
             return Err(format!("first entry should be User message, got: {user_entry:?}"));
         }
 
         let asst_entry = &entries[1];
-        if !matches!(asst_entry, trogon_transcript::TranscriptEntry::Message { role: Role::Assistant, tokens: Some(42), .. }) {
-            return Err(format!("second entry should be Assistant message with 42 tokens, got: {asst_entry:?}"));
+        if !matches!(
+            asst_entry,
+            trogon_transcript::TranscriptEntry::Message {
+                role: Role::Assistant,
+                tokens: Some(42),
+                ..
+            }
+        ) {
+            return Err(format!(
+                "second entry should be Assistant message with 42 tokens, got: {asst_entry:?}"
+            ));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_transcript_replay_single_session(js: &jetstream::Context) -> bool {
@@ -238,23 +360,38 @@ async fn test_transcript_replay_single_session(js: &jetstream::Context) -> bool 
 
         // Session A
         let session_a = Session::new(publisher.clone(), "incident", &actor_key);
-        session_a.append_user_message("session A message", None).await.map_err(|e| e.to_string())?;
+        session_a
+            .append_user_message("session A message", None)
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Session B (different session_id)
         let session_b = Session::new(publisher, "incident", &actor_key);
-        session_b.append_user_message("session B message", None).await.map_err(|e| e.to_string())?;
-        session_b.append_assistant_message("session B reply", None).await.map_err(|e| e.to_string())?;
+        session_b
+            .append_user_message("session B message", None)
+            .await
+            .map_err(|e| e.to_string())?;
+        session_b
+            .append_assistant_message("session B reply", None)
+            .await
+            .map_err(|e| e.to_string())?;
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Replay session B only
-        let entries = store.replay("incident", &actor_key, session_b.id()).await.map_err(|e| e.to_string())?;
+        let entries = store
+            .replay("incident", &actor_key, session_b.id())
+            .await
+            .map_err(|e| e.to_string())?;
         if entries.len() != 2 {
             return Err(format!("expected 2 entries for session B, got {}", entries.len()));
         }
 
         // Replay session A only
-        let entries_a = store.replay("incident", &actor_key, session_a.id()).await.map_err(|e| e.to_string())?;
+        let entries_a = store
+            .replay("incident", &actor_key, session_a.id())
+            .await
+            .map_err(|e| e.to_string())?;
         if entries_a.len() != 1 {
             return Err(format!("expected 1 entry for session A, got {}", entries_a.len()));
         }
@@ -262,12 +399,25 @@ async fn test_transcript_replay_single_session(js: &jetstream::Context) -> bool 
         // Full query should have 3 entries total
         let all = store.query("incident", &actor_key).await.map_err(|e| e.to_string())?;
         if all.len() != 3 {
-            return Err(format!("expected 3 total entries across both sessions, got {}", all.len()));
+            return Err(format!(
+                "expected 3 total entries across both sessions, got {}",
+                all.len()
+            ));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_transcript_tool_call_entry(js: &jetstream::Context) -> bool {
@@ -282,25 +432,40 @@ async fn test_transcript_tool_call_entry(js: &jetstream::Context) -> bool {
         let publisher = NatsTranscriptPublisher::new(js.clone());
         let session = Session::new(publisher, "tool_actor", &actor_key);
 
-        session.append_tool_call(
-            "bash",
-            serde_json::json!({"command": "ls"}),
-            serde_json::json!("file1.rs\nfile2.rs"),
-            12,
-        ).await.map_err(|e| e.to_string())?;
+        session
+            .append_tool_call(
+                "bash",
+                serde_json::json!({"command": "ls"}),
+                serde_json::json!("file1.rs\nfile2.rs"),
+                12,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let entries = store.query("tool_actor", &actor_key).await.map_err(|e| e.to_string())?;
-        if entries.len() != 1 { return Err(format!("expected 1 entry, got {}", entries.len())); }
+        if entries.len() != 1 {
+            return Err(format!("expected 1 entry, got {}", entries.len()));
+        }
 
         if !matches!(&entries[0], trogon_transcript::TranscriptEntry::ToolCall { name, .. } if name == "bash") {
             return Err(format!("expected ToolCall for 'bash', got {:?}", entries[0]));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_transcript_query_empty_entity(js: &jetstream::Context) -> bool {
@@ -310,14 +475,27 @@ async fn test_transcript_query_empty_entity(js: &jetstream::Context) -> bool {
         let store = TranscriptStore::new(js.clone());
         store.provision().await.map_err(|e| e.to_string())?;
 
-        let entries = store.query("ghost_actor", "nonexistent/entity/999").await.map_err(|e| e.to_string())?;
+        let entries = store
+            .query("ghost_actor", "nonexistent/entity/999")
+            .await
+            .map_err(|e| e.to_string())?;
         if !entries.is_empty() {
             return Err(format!("expected empty result, got {} entries", entries.len()));
         }
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

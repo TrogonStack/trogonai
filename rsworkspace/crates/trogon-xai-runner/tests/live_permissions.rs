@@ -13,8 +13,7 @@
 //! and drives it through the `Agent` trait without any NATS dependency.
 
 use agent_client_protocol::{
-    Agent as _, ContentBlock, NewSessionRequest, PromptRequest,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+    Agent as _, ContentBlock, NewSessionRequest, PromptRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 use trogon_runner_tools::session_store::AuditOutcome;
 use trogon_xai_runner::{MockSessionNotifier, XaiAgent, XaiClient};
@@ -27,12 +26,7 @@ use trogon_xai_runner::{MockSessionNotifier, XaiAgent, XaiClient};
 /// `FsTrogonMdLoader` are wired in. The resulting type is
 /// `XaiAgent<XaiClient, MockSessionNotifier>` with the default `FsTrogonMdLoader`.
 fn make_live_agent(api_key: &str) -> XaiAgent<XaiClient, MockSessionNotifier> {
-    XaiAgent::with_deps(
-        MockSessionNotifier::new(),
-        "grok-3",
-        api_key,
-        XaiClient::new(),
-    )
+    XaiAgent::with_deps(MockSessionNotifier::new(), "grok-3", api_key, XaiClient::new())
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -46,8 +40,8 @@ fn make_live_agent(api_key: &str) -> XaiAgent<XaiClient, MockSessionNotifier> {
 #[ignore = "requires XAI_API_KEY — see file header"]
 #[tokio::test]
 async fn live_deny_path_via_config_option_model_gets_blocked() {
-    let api_key = std::env::var("XAI_API_KEY")
-        .expect("XAI_API_KEY must be set to run live permission tests — see file header");
+    let api_key =
+        std::env::var("XAI_API_KEY").expect("XAI_API_KEY must be set to run live permission tests — see file header");
 
     let dir = tempfile::TempDir::new().unwrap();
 
@@ -98,9 +92,9 @@ async fn live_deny_path_via_config_option_model_gets_blocked() {
         "model did not call read_file tool — try running again (audit log is empty)"
     );
 
-    let denied = audit.iter().any(|e| {
-        e.tool == "read_file" && e.outcome == AuditOutcome::Denied
-    });
+    let denied = audit
+        .iter()
+        .any(|e| e.tool == "read_file" && e.outcome == AuditOutcome::Denied);
     assert!(
         denied,
         "expected a Denied audit entry for read_file on .env; got: {audit:?}"
@@ -117,8 +111,8 @@ async fn live_deny_path_via_config_option_model_gets_blocked() {
 #[ignore = "requires XAI_API_KEY — see file header"]
 #[tokio::test]
 async fn live_bypass_permissions_allows_denied_path() {
-    let api_key = std::env::var("XAI_API_KEY")
-        .expect("XAI_API_KEY must be set to run live permission tests — see file header");
+    let api_key =
+        std::env::var("XAI_API_KEY").expect("XAI_API_KEY must be set to run live permission tests — see file header");
 
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join(".env"), "TEST_VALUE=hello\n").unwrap();
@@ -126,11 +120,7 @@ async fn live_bypass_permissions_allows_denied_path() {
     // TROGON.md has deny_paths — this becomes the system prompt so the model
     // will likely see the restriction. bypassPermissions must override the runner
     // check regardless of what the model decides to do.
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let agent = make_live_agent(&api_key);
 
@@ -188,17 +178,13 @@ async fn live_bypass_permissions_allows_denied_path() {
 #[ignore = "requires XAI_API_KEY — see file header"]
 #[tokio::test]
 async fn live_set_session_mode_bypass_overrides_trogon_md_deny() {
-    let api_key = std::env::var("XAI_API_KEY")
-        .expect("XAI_API_KEY must be set to run live permission tests — see file header");
+    let api_key =
+        std::env::var("XAI_API_KEY").expect("XAI_API_KEY must be set to run live permission tests — see file header");
 
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join(".env"), "SECRET=abc\n").unwrap();
 
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let agent = make_live_agent(&api_key);
 
@@ -224,9 +210,7 @@ async fn live_set_session_mode_bypass_overrides_trogon_md_deny() {
     agent
         .prompt(PromptRequest::new(
             sid.clone(),
-            vec![ContentBlock::from(
-                "Read the file .env using read_file. Path is .env.",
-            )],
+            vec![ContentBlock::from("Read the file .env using read_file. Path is .env.")],
         ))
         .await
         .unwrap();
@@ -248,17 +232,13 @@ async fn live_set_session_mode_bypass_overrides_trogon_md_deny() {
 #[ignore = "requires XAI_API_KEY — see file header"]
 #[tokio::test]
 async fn live_deny_command_via_config_option_blocks_bash() {
-    let api_key = std::env::var("XAI_API_KEY")
-        .expect("XAI_API_KEY must be set to run live permission tests — see file header");
+    let api_key =
+        std::env::var("XAI_API_KEY").expect("XAI_API_KEY must be set to run live permission tests — see file header");
 
     let dir = tempfile::TempDir::new().unwrap();
 
     // TROGON.md with no Permissions section — model sees no restrictions.
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "# Project\nYou have bash access.\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "# Project\nYou have bash access.\n").unwrap();
 
     let agent = make_live_agent(&api_key);
 
@@ -326,18 +306,14 @@ async fn live_deny_command_via_config_option_blocks_bash() {
 #[ignore = "requires XAI_API_KEY — see file header"]
 #[tokio::test]
 async fn live_trogon_md_deny_path_rule_loaded_at_new_session() {
-    let api_key = std::env::var("XAI_API_KEY")
-        .expect("XAI_API_KEY must be set to run live permission tests — see file header");
+    let api_key =
+        std::env::var("XAI_API_KEY").expect("XAI_API_KEY must be set to run live permission tests — see file header");
 
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join(".env"), "SECRET=from-trogon-md\n").unwrap();
 
     // Deny rule is in TROGON.md — it will be part of the system prompt.
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\ndeny_paths: .env\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "## Permissions\ndeny_paths: .env\n").unwrap();
 
     let agent = make_live_agent(&api_key);
 
@@ -351,9 +327,7 @@ async fn live_trogon_md_deny_path_rule_loaded_at_new_session() {
     agent
         .prompt(PromptRequest::new(
             sid.clone(),
-            vec![ContentBlock::from(
-                "Read the file .env using read_file. Path is .env.",
-            )],
+            vec![ContentBlock::from("Read the file .env using read_file. Path is .env.")],
         ))
         .await
         .unwrap();

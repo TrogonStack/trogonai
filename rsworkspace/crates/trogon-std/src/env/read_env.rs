@@ -21,20 +21,14 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("DATABASE_URL", "postgres://localhost/test");
 
-        assert_eq!(
-            env.var("DATABASE_URL").unwrap(),
-            "postgres://localhost/test"
-        );
+        assert_eq!(env.var("DATABASE_URL").unwrap(), "postgres://localhost/test");
     }
 
     #[test]
     fn missing_var_returns_not_present() {
         let env = InMemoryEnv::new();
 
-        assert!(matches!(
-            env.var("NOT_SET"),
-            Err(std::env::VarError::NotPresent)
-        ));
+        assert!(matches!(env.var("NOT_SET"), Err(std::env::VarError::NotPresent)));
     }
 
     #[test]
@@ -52,10 +46,7 @@ mod tests {
         env.set("GONE", "value");
         env.remove("GONE");
 
-        assert!(matches!(
-            env.var("GONE"),
-            Err(std::env::VarError::NotPresent)
-        ));
+        assert!(matches!(env.var("GONE"), Err(std::env::VarError::NotPresent)));
     }
 
     #[test]

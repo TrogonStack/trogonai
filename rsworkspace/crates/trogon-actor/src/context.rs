@@ -15,12 +15,10 @@ use crate::error::ActorError;
 pub const MAX_SPAWN_DEPTH: u32 = 5;
 
 // Type aliases for the three injected operations.
-type AppendFn =
-    Arc<dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
+type AppendFn = Arc<dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 // SpawnFn carries the *next* depth (current + 1) so it can embed it in the
 // NATS request headers for the child actor to read.
-type SpawnFn =
-    Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
+type SpawnFn = Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
 // RecallFn fetches and formats the entity's past transcript for the current actor.
 pub(crate) type RecallFn = Arc<dyn Fn() -> BoxFuture<'static, Option<String>> + Send + Sync>;
 
@@ -89,11 +87,7 @@ impl ActorContext {
     }
 
     /// Record a user-role message in the transcript.
-    pub async fn append_user_message(
-        &self,
-        content: impl Into<String>,
-        tokens: Option<u32>,
-    ) -> Result<(), String> {
+    pub async fn append_user_message(&self, content: impl Into<String>, tokens: Option<u32>) -> Result<(), String> {
         self.append(TranscriptEntry::Message {
             role: Role::User,
             content: content.into(),
@@ -307,9 +301,7 @@ mod tests {
     #[tokio::test]
     async fn append_assistant_message_records_entry() {
         let (ctx, entries) = ContextBuilder::new("pr", "owner/repo/1").build();
-        ctx.append_assistant_message("LGTM", Some(12))
-            .await
-            .unwrap();
+        ctx.append_assistant_message("LGTM", Some(12)).await.unwrap();
         let snapshot = entries.lock().unwrap();
         assert_eq!(snapshot.len(), 1);
         assert!(matches!(

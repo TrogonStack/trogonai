@@ -186,11 +186,7 @@ async fn run_one(cmd: &HookCommand, stdin_json: &str) -> HookCmdResult {
 /// Run all matching hooks for an event. `tool_name` is `Some` for tool events.
 /// Returns the first `Block`, else `Continue` with concatenated non-blocking
 /// stdout as context.
-pub async fn run_event_hooks(
-    matchers: &[HookMatcher],
-    tool_name: Option<&str>,
-    payload: &Value,
-) -> HookOutcome {
+pub async fn run_event_hooks(matchers: &[HookMatcher], tool_name: Option<&str>, payload: &Value) -> HookOutcome {
     let stdin_json = serde_json::to_string(payload).unwrap_or_default();
     let mut context = String::new();
     for m in matchers {
@@ -347,7 +343,12 @@ mod tests {
             }],
         }];
         let out = run_event_hooks(&matchers, Some("Bash"), &json!({"tool_name": "Bash"})).await;
-        assert_eq!(out, HookOutcome::Block { reason: "denied".into() });
+        assert_eq!(
+            out,
+            HookOutcome::Block {
+                reason: "denied".into()
+            }
+        );
     }
 
     #[tokio::test]

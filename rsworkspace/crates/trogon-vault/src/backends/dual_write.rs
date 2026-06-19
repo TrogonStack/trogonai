@@ -29,7 +29,7 @@ use crate::vault::VaultStore;
 /// and reads from the cache first.
 pub struct DualWriteVault<P, C> {
     primary: P,
-    cache:   C,
+    cache: C,
 }
 
 impl<P, C> DualWriteVault<P, C> {
@@ -65,8 +65,10 @@ where
     async fn resolve(&self, token: &ApiKeyToken) -> Result<Option<String>, Self::Error> {
         match self.cache.resolve(token).await {
             Ok(Some(v)) => return Ok(Some(v)),
-            Ok(None)    => {}
-            Err(e)      => tracing::warn!(token = token.as_str(), error = %e, "dual-write: cache resolve failed, falling back to primary"),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(token = token.as_str(), error = %e, "dual-write: cache resolve failed, falling back to primary")
+            }
         }
         self.primary.resolve(token).await
     }
@@ -93,8 +95,10 @@ where
     ) -> Result<(Option<String>, Option<String>), Self::Error> {
         match self.cache.resolve_with_previous(token).await {
             Ok((Some(current), prev)) => return Ok((Some(current), prev)),
-            Ok((None, _))             => {}
-            Err(e) => tracing::warn!(token = token.as_str(), error = %e, "dual-write: cache resolve_with_previous failed, falling back to primary"),
+            Ok((None, _)) => {}
+            Err(e) => {
+                tracing::warn!(token = token.as_str(), error = %e, "dual-write: cache resolve_with_previous failed, falling back to primary")
+            }
         }
         Ok((self.primary.resolve(token).await?, None))
     }
@@ -122,7 +126,7 @@ mod tests {
         v.store(&t, "sk-key").await.unwrap();
 
         assert_eq!(v.primary.resolve(&t).await.unwrap(), Some("sk-key".into()));
-        assert_eq!(v.cache.resolve(&t).await.unwrap(),   Some("sk-key".into()));
+        assert_eq!(v.cache.resolve(&t).await.unwrap(), Some("sk-key".into()));
     }
 
     #[tokio::test]
@@ -158,7 +162,7 @@ mod tests {
         v.revoke(&t).await.unwrap();
 
         assert_eq!(v.primary.resolve(&t).await.unwrap(), None);
-        assert_eq!(v.cache.resolve(&t).await.unwrap(),   None);
+        assert_eq!(v.cache.resolve(&t).await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -170,7 +174,7 @@ mod tests {
         v.rotate(&t, "v2").await.unwrap();
 
         assert_eq!(v.primary.resolve(&t).await.unwrap(), Some("v2".into()));
-        assert_eq!(v.cache.resolve(&t).await.unwrap(),   Some("v2".into()));
+        assert_eq!(v.cache.resolve(&t).await.unwrap(), Some("v2".into()));
     }
 
     #[tokio::test]
@@ -197,9 +201,15 @@ mod tests {
 
     impl VaultStore for FailingVault {
         type Error = AlwaysErr;
-        async fn store(&self, _: &ApiKeyToken, _: &str) -> Result<(), AlwaysErr> { Err(AlwaysErr) }
-        async fn resolve(&self, _: &ApiKeyToken) -> Result<Option<String>, AlwaysErr> { Err(AlwaysErr) }
-        async fn revoke(&self, _: &ApiKeyToken) -> Result<(), AlwaysErr> { Err(AlwaysErr) }
+        async fn store(&self, _: &ApiKeyToken, _: &str) -> Result<(), AlwaysErr> {
+            Err(AlwaysErr)
+        }
+        async fn resolve(&self, _: &ApiKeyToken) -> Result<Option<String>, AlwaysErr> {
+            Err(AlwaysErr)
+        }
+        async fn revoke(&self, _: &ApiKeyToken) -> Result<(), AlwaysErr> {
+            Err(AlwaysErr)
+        }
     }
 
     // ── Primary-failure / cache-failure tests ─────────────────────────────────
@@ -262,6 +272,6 @@ mod tests {
         primary.store(&t, "pk").await.unwrap();
         cache.store(&t, "ck").await.unwrap();
         assert_eq!(primary.resolve(&t).await.unwrap(), Some("pk".into()));
-        assert_eq!(cache.resolve(&t).await.unwrap(),   Some("ck".into()));
+        assert_eq!(cache.resolve(&t).await.unwrap(), Some("ck".into()));
     }
 }

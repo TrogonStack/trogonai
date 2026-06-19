@@ -130,9 +130,6 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("INCIDENTIO_STREAM_MAX_AGE_SECS", "not-a-number");
         let config = IncidentioConfig::from_env(&env);
-        assert_eq!(
-            config.stream_max_age,
-            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
-        );
+        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
     }
 }

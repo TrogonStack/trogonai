@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
-use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
+use trogon_tools::ToolDef;
 
 use crate::session_store::{SessionStore, TodoItem};
 
@@ -28,9 +28,8 @@ impl<S: SessionStore> NatsTodoTool<S> {
     pub fn todo_write_def() -> ToolDef {
         ToolDef {
             name: "todo_write".to_string(),
-            description:
-                "Create or update a todo item. Status must be 'pending', 'in_progress', or 'completed'."
-                    .to_string(),
+            description: "Create or update a todo item. Status must be 'pending', 'in_progress', or 'completed'."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -47,8 +46,7 @@ impl<S: SessionStore> NatsTodoTool<S> {
     pub fn todo_read_def() -> ToolDef {
         ToolDef {
             name: "todo_read".to_string(),
-            description: "List all active (non-completed) todos for the current session."
-                .to_string(),
+            description: "List all active (non-completed) todos for the current session.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -109,13 +107,9 @@ impl<S: SessionStore> McpCallTool for NatsTodoTool<S> {
                     let mut last_err = String::new();
                     for attempt in 0..3u8 {
                         if attempt > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(
-                                20 * u64::from(attempt),
-                            ))
-                            .await;
+                            tokio::time::sleep(std::time::Duration::from_millis(20 * u64::from(attempt))).await;
                         }
-                        let mut state =
-                            store.load(&session_id).await.map_err(|e| e.to_string())?;
+                        let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
                         if let Some(t) = state.todos.iter_mut().find(|t| t.id == id) {
                             t.content = content.clone();
                             t.status = status.clone();
@@ -143,8 +137,7 @@ impl<S: SessionStore> McpCallTool for NatsTodoTool<S> {
                 }
                 "todo_read" => {
                     let state = store.load(&session_id).await.map_err(|e| e.to_string())?;
-                    let active: Vec<&TodoItem> =
-                        state.todos.iter().filter(|t| t.status != "completed").collect();
+                    let active: Vec<&TodoItem> = state.todos.iter().filter(|t| t.status != "completed").collect();
                     if active.is_empty() {
                         return Ok("No active todos.".to_string());
                     }
@@ -237,10 +230,7 @@ mod tests {
             )
             .await
             .unwrap();
-            let r = t
-                .call_tool("todo_read", &serde_json::json!({}))
-                .await
-                .unwrap();
+            let r = t.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
             assert!(r.contains("t1"), "got: {r}");
             assert!(!r.contains("done"), "completed should be hidden, got: {r}");
         }
@@ -248,10 +238,7 @@ mod tests {
         #[tokio::test]
         async fn todo_read_empty() {
             let t = tool("s1");
-            let r = t
-                .call_tool("todo_read", &serde_json::json!({}))
-                .await
-                .unwrap();
+            let r = t.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
             assert_eq!(r, "No active todos.");
         }
 
@@ -272,10 +259,7 @@ mod tests {
         async fn todo_write_missing_content_returns_error() {
             let t = tool("s1");
             let r = t
-                .call_tool(
-                    "todo_write",
-                    &serde_json::json!({"id":"t1","status":"pending"}),
-                )
+                .call_tool("todo_write", &serde_json::json!({"id":"t1","status":"pending"}))
                 .await;
             assert!(r.is_err());
             assert!(r.unwrap_err().contains("content"), "error must mention 'content'");
@@ -285,10 +269,7 @@ mod tests {
         async fn todo_write_missing_status_returns_error() {
             let t = tool("s1");
             let r = t
-                .call_tool(
-                    "todo_write",
-                    &serde_json::json!({"id":"t1","content":"do stuff"}),
-                )
+                .call_tool("todo_write", &serde_json::json!({"id":"t1","content":"do stuff"}))
                 .await;
             assert!(r.is_err());
             assert!(r.unwrap_err().contains("status"), "error must mention 'status'");
@@ -323,7 +304,10 @@ mod tests {
                 )
                 .await;
             let err = r.unwrap_err();
-            assert!(err.contains("invalid_state"), "error must include the bad value, got: {err}");
+            assert!(
+                err.contains("invalid_state"),
+                "error must include the bad value, got: {err}"
+            );
         }
 
         #[tokio::test]
@@ -349,9 +333,7 @@ mod tests {
     async fn call_tool_unknown_operation_returns_error() {
         use crate::session_store::mock::MemorySessionStore;
         let tool = NatsTodoTool::new("s1", MemorySessionStore::new());
-        let result = tool
-            .call_tool("unknown_op", &serde_json::json!({}))
-            .await;
+        let result = tool.call_tool("unknown_op", &serde_json::json!({})).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(

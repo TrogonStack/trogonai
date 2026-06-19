@@ -16,12 +16,12 @@ use serde_json::{Value, json};
 use trogon_console::{
     server::{AppState, build_router},
     store::{
-        agents::AgentStore, credentials::CredentialStore, environments::EnvironmentStore,
-        sessions::SessionReader, skills::SkillStore,
-        traits::{
-            AgentRepository, CredentialRepository, EnvironmentRepository, SessionRepository,
-            SkillRepository,
-        },
+        agents::AgentStore,
+        credentials::CredentialStore,
+        environments::EnvironmentStore,
+        sessions::SessionReader,
+        skills::SkillStore,
+        traits::{AgentRepository, CredentialRepository, EnvironmentRepository, SessionRepository, SkillRepository},
     },
 };
 use uuid::Uuid;
@@ -52,10 +52,8 @@ async fn start_server() -> (String, reqwest::Client) {
     let state = Arc::new(AppState {
         agents: Arc::new(AgentStore::open(&js).await.unwrap()) as Arc<dyn AgentRepository>,
         skills: Arc::new(SkillStore::open(&js).await.unwrap()) as Arc<dyn SkillRepository>,
-        environments: Arc::new(EnvironmentStore::open(&js).await.unwrap())
-            as Arc<dyn EnvironmentRepository>,
-        credentials: Arc::new(CredentialStore::open(&js).await.unwrap())
-            as Arc<dyn CredentialRepository>,
+        environments: Arc::new(EnvironmentStore::open(&js).await.unwrap()) as Arc<dyn EnvironmentRepository>,
+        credentials: Arc::new(CredentialStore::open(&js).await.unwrap()) as Arc<dyn CredentialRepository>,
         sessions: Arc::new(SessionReader::open(&js).await.unwrap()) as Arc<dyn SessionRepository>,
     });
 
@@ -73,9 +71,18 @@ async fn start_server() -> (String, reqwest::Client) {
 async fn test_health(base: &str, http: &Client) -> bool {
     const LABEL: &str = "Health — GET /-/health returns 200 ok";
     match http.get(format!("{base}/-/health")).send().await {
-        Ok(r) if r.status() == 200 => { ok(LABEL); true }
-        Ok(r) => { ko(LABEL, &format!("status {}", r.status())); false }
-        Err(e) => { ko(LABEL, &e.to_string()); false }
+        Ok(r) if r.status() == 200 => {
+            ok(LABEL);
+            true
+        }
+        Ok(r) => {
+            ko(LABEL, &format!("status {}", r.status()));
+            false
+        }
+        Err(e) => {
+            ko(LABEL, &e.to_string());
+            false
+        }
     }
 }
 
@@ -136,7 +143,16 @@ async fn test_agents_crud(base: &str, http: &Client) -> bool {
         Ok(())
     }.await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ── Skills ─────────────────────────────────────────────────────────────────────
@@ -147,20 +163,37 @@ async fn test_skills_crud(base: &str, http: &Client) -> bool {
 
     let result: Result<(), String> = async {
         // Create
-        let r = http.post(format!("{base}/skills"))
+        let r = http
+            .post(format!("{base}/skills"))
             .json(&json!({"name": format!("skill-{id}"), "description": "test skill", "content": "do stuff"}))
-            .send().await.map_err(|e| e.to_string())?;
-        if r.status() != 201 { return Err(format!("create: {}", r.status())); }
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 201 {
+            return Err(format!("create: {}", r.status()));
+        }
         let skill: Value = r.json().await.map_err(|e| e.to_string())?;
         let skill_id = skill["id"].as_str().ok_or("no id")?.to_string();
 
         // Get
-        let r = http.get(format!("{base}/skills/{skill_id}")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("get: {}", r.status())); }
+        let r = http
+            .get(format!("{base}/skills/{skill_id}"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("get: {}", r.status()));
+        }
 
         // List
-        let r = http.get(format!("{base}/skills")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("list: {}", r.status())); }
+        let r = http
+            .get(format!("{base}/skills"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("list: {}", r.status()));
+        }
         let list: Value = r.json().await.map_err(|e| e.to_string())?;
         let arr = list.as_array().ok_or("list not array")?;
         if !arr.iter().any(|s| s["id"].as_str() == Some(&skill_id)) {
@@ -168,23 +201,50 @@ async fn test_skills_crud(base: &str, http: &Client) -> bool {
         }
 
         // List versions
-        let r = http.get(format!("{base}/skills/{skill_id}/versions")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("list versions: {}", r.status())); }
+        let r = http
+            .get(format!("{base}/skills/{skill_id}/versions"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("list versions: {}", r.status()));
+        }
 
         // Create new version
-        let r = http.post(format!("{base}/skills/{skill_id}/versions"))
+        let r = http
+            .post(format!("{base}/skills/{skill_id}/versions"))
             .json(&json!({"content": "do stuff v2"}))
-            .send().await.map_err(|e| e.to_string())?;
-        if r.status() != 201 { return Err(format!("create version: {}", r.status())); }
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 201 {
+            return Err(format!("create version: {}", r.status()));
+        }
 
         // Delete
-        let r = http.delete(format!("{base}/skills/{skill_id}")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 204 { return Err(format!("delete: {}", r.status())); }
+        let r = http
+            .delete(format!("{base}/skills/{skill_id}"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 204 {
+            return Err(format!("delete: {}", r.status()));
+        }
 
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ── Environments ──────────────────────────────────────────────────────────────
@@ -195,50 +255,103 @@ async fn test_environments_crud(base: &str, http: &Client) -> bool {
 
     let result: Result<(), String> = async {
         // Create
-        let r = http.post(format!("{base}/environments"))
+        let r = http
+            .post(format!("{base}/environments"))
             .json(&json!({"name": format!("env-{id}"), "description": "test env"}))
-            .send().await.map_err(|e| e.to_string())?;
-        if r.status() != 201 { return Err(format!("create: {}", r.status())); }
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 201 {
+            return Err(format!("create: {}", r.status()));
+        }
         let env: Value = r.json().await.map_err(|e| e.to_string())?;
         let env_id = env["id"].as_str().ok_or("no id")?.to_string();
-        if env["archived"].as_bool() != Some(false) { return Err("should not be archived on create".into()); }
+        if env["archived"].as_bool() != Some(false) {
+            return Err("should not be archived on create".into());
+        }
 
         // Get
-        let r = http.get(format!("{base}/environments/{env_id}")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("get: {}", r.status())); }
+        let r = http
+            .get(format!("{base}/environments/{env_id}"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("get: {}", r.status()));
+        }
 
         // Update
-        let r = http.put(format!("{base}/environments/{env_id}"))
+        let r = http
+            .put(format!("{base}/environments/{env_id}"))
             .json(&json!({"name": format!("env-{id}-updated")}))
-            .send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("update: {}", r.status())); }
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("update: {}", r.status()));
+        }
         let updated: Value = r.json().await.map_err(|e| e.to_string())?;
         if !updated["name"].as_str().unwrap_or("").contains("updated") {
             return Err("name not updated".into());
         }
 
         // List
-        let r = http.get(format!("{base}/environments")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("list: {}", r.status())); }
+        let r = http
+            .get(format!("{base}/environments"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("list: {}", r.status()));
+        }
         let list: Value = r.json().await.map_err(|e| e.to_string())?;
-        if !list.as_array().ok_or("not array")?.iter().any(|e| e["id"].as_str() == Some(&env_id)) {
+        if !list
+            .as_array()
+            .ok_or("not array")?
+            .iter()
+            .any(|e| e["id"].as_str() == Some(&env_id))
+        {
             return Err("env not in list".into());
         }
 
         // Archive
-        let r = http.post(format!("{base}/environments/{env_id}/archive")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 200 { return Err(format!("archive: {}", r.status())); }
+        let r = http
+            .post(format!("{base}/environments/{env_id}/archive"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 200 {
+            return Err(format!("archive: {}", r.status()));
+        }
         let archived: Value = r.json().await.map_err(|e| e.to_string())?;
-        if archived["archived"].as_bool() != Some(true) { return Err("archived flag not set".into()); }
+        if archived["archived"].as_bool() != Some(true) {
+            return Err("archived flag not set".into());
+        }
 
         // Delete
-        let r = http.delete(format!("{base}/environments/{env_id}")).send().await.map_err(|e| e.to_string())?;
-        if r.status() != 204 { return Err(format!("delete: {}", r.status())); }
+        let r = http
+            .delete(format!("{base}/environments/{env_id}"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if r.status() != 204 {
+            return Err(format!("delete: {}", r.status()));
+        }
 
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ── Credentials ───────────────────────────────────────────────────────────────
@@ -293,7 +406,16 @@ async fn test_credentials_crud(base: &str, http: &Client) -> bool {
         Ok(())
     }.await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ── Sessions (read-only) ──────────────────────────────────────────────────────
@@ -301,9 +423,18 @@ async fn test_credentials_crud(base: &str, http: &Client) -> bool {
 async fn test_sessions_read(base: &str, http: &Client) -> bool {
     const LABEL: &str = "Sessions — GET /sessions returns 200 (read-only view)";
     match http.get(format!("{base}/sessions")).send().await {
-        Ok(r) if r.status() == 200 => { ok(LABEL); true }
-        Ok(r) => { ko(LABEL, &format!("status {}", r.status())); false }
-        Err(e) => { ko(LABEL, &e.to_string()); false }
+        Ok(r) if r.status() == 200 => {
+            ok(LABEL);
+            true
+        }
+        Ok(r) => {
+            ko(LABEL, &format!("status {}", r.status()));
+            false
+        }
+        Err(e) => {
+            ko(LABEL, &e.to_string());
+            false
+        }
     }
 }
 
@@ -312,9 +443,18 @@ async fn test_sessions_read(base: &str, http: &Client) -> bool {
 async fn test_mcp_registry(base: &str, http: &Client) -> bool {
     const LABEL: &str = "MCP registry — GET /mcp-registry returns 200";
     match http.get(format!("{base}/mcp-registry")).send().await {
-        Ok(r) if r.status() == 200 => { ok(LABEL); true }
-        Ok(r) => { ko(LABEL, &format!("status {}", r.status())); false }
-        Err(e) => { ko(LABEL, &e.to_string()); false }
+        Ok(r) if r.status() == 200 => {
+            ok(LABEL);
+            true
+        }
+        Ok(r) => {
+            ko(LABEL, &format!("status {}", r.status()));
+            false
+        }
+        Err(e) => {
+            ko(LABEL, &e.to_string());
+            false
+        }
     }
 }
 
@@ -323,9 +463,18 @@ async fn test_mcp_registry(base: &str, http: &Client) -> bool {
 async fn test_agent_not_found(base: &str, http: &Client) -> bool {
     const LABEL: &str = "Agents — GET /agents/nonexistent returns 404";
     match http.get(format!("{base}/agents/nonexistent-id")).send().await {
-        Ok(r) if r.status() == 404 => { ok(LABEL); true }
-        Ok(r) => { ko(LABEL, &format!("expected 404, got {}", r.status())); false }
-        Err(e) => { ko(LABEL, &e.to_string()); false }
+        Ok(r) if r.status() == 404 => {
+            ok(LABEL);
+            true
+        }
+        Ok(r) => {
+            ko(LABEL, &format!("expected 404, got {}", r.status()));
+            false
+        }
+        Err(e) => {
+            ko(LABEL, &e.to_string());
+            false
+        }
     }
 }
 

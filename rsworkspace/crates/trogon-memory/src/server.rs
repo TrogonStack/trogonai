@@ -30,14 +30,16 @@ pub async fn serve(
     serve_impl(port, store).await
 }
 
-async fn serve_impl<S: MemoryStore>(
-    port: u16,
-    store: S,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let state = AppState { client: MemoryClient::new(store) };
+async fn serve_impl<S: MemoryStore>(port: u16, store: S) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let state = AppState {
+        client: MemoryClient::new(store),
+    };
 
     let app = Router::new()
-        .route("/memory/{actor_type}/{*actor_key}", get(handle_get::<S>).delete(handle_delete::<S>))
+        .route(
+            "/memory/{actor_type}/{*actor_key}",
+            get(handle_get::<S>).delete(handle_delete::<S>),
+        )
         .route("/health", get(handle_health))
         .with_state(state);
 
@@ -95,15 +97,17 @@ async fn handle_delete<S: MemoryStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
     use crate::store::mock::MockMemoryStore;
     use crate::types::RawFact;
+    use axum::body::Body;
+    use axum::http::Request;
     use tower::util::ServiceExt as _;
 
     fn make_app() -> (Router, MockMemoryStore) {
         let store = MockMemoryStore::new();
-        let state = AppState { client: MemoryClient::new(store.clone()) };
+        let state = AppState {
+            client: MemoryClient::new(store.clone()),
+        };
         let app = Router::new()
             .route(
                 "/memory/{actor_type}/{*actor_key}",
@@ -118,7 +122,11 @@ mod tests {
         let client = MemoryClient::new(store.clone());
         let mut memory = EntityMemory::default();
         memory.merge(
-            vec![RawFact { category: "fact".into(), content: "uses Rust".into(), confidence: 0.9 }],
+            vec![RawFact {
+                category: "fact".into(),
+                content: "uses Rust".into(),
+                confidence: 0.9,
+            }],
             "sess-1",
         );
         client.put(actor_type, actor_key, &memory).await.unwrap();
@@ -193,7 +201,9 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_memory_so_get_returns_404() {
         let store = MockMemoryStore::new();
-        let state = AppState { client: MemoryClient::new(store.clone()) };
+        let state = AppState {
+            client: MemoryClient::new(store.clone()),
+        };
         let app = Router::new()
             .route(
                 "/memory/{actor_type}/{*actor_key}",
@@ -217,12 +227,7 @@ mod tests {
 
         // GET should now be 404
         let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/memory/pr/repo/1")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/memory/pr/repo/1").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);

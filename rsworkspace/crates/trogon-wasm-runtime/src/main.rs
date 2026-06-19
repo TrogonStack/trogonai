@@ -1,9 +1,9 @@
-use std::rc::Rc;
-use tracing::{info, warn};
-use trogon_wasm_runtime::{dispatcher, Config, WasmRuntime};
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::jetstream::provision::provision_streams;
+use std::rc::Rc;
+use tracing::{info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_wasm_runtime::{dispatcher, Config, WasmRuntime};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,10 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let acp_prefix =
-        std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp.wasm".to_string());
-    let agent_type =
-        std::env::var("AGENT_TYPE").unwrap_or_else(|_| "wasm".to_string());
+    let acp_prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp.wasm".to_string());
+    let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "wasm".to_string());
 
     info!(%nats_url, %acp_prefix, %agent_type, session_root = %cfg.session_root.display(), "WASM runtime starting");
 
@@ -40,17 +38,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             match async_nats::ConnectOptions::new()
                 .max_reconnects(None)
-                .reconnect_delay_callback(|n| {
-                    std::time::Duration::from_millis((100 * n as u64).min(5_000))
-                })
+                .reconnect_delay_callback(|n| std::time::Duration::from_millis((100 * n as u64).min(5_000)))
                 .connect(&nats_url)
                 .await
             {
                 Ok(c) => break c,
                 Err(e) => {
                     attempts += 1;
-                    let delay =
-                        std::time::Duration::from_millis((100 * attempts as u64).min(5_000));
+                    let delay = std::time::Duration::from_millis((100 * attempts as u64).min(5_000));
                     tracing::warn!(error = %e, attempt = attempts, delay_ms = delay.as_millis(), "NATS connect failed, retrying");
                     tokio::time::sleep(delay).await;
                 }
@@ -64,8 +59,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── JetStream streams + registry ─────────────────────────────────────────
 
     let js_ctx = async_nats::jetstream::new(nats.clone());
-    let acp_prefix_typed = AcpPrefix::new(&acp_prefix)
-        .map_err(|e| format!("invalid ACP_PREFIX '{acp_prefix}': {e}"))?;
+    let acp_prefix_typed =
+        AcpPrefix::new(&acp_prefix).map_err(|e| format!("invalid ACP_PREFIX '{acp_prefix}': {e}"))?;
     let js = NatsJetStreamClient::new(js_ctx.clone());
     provision_streams(&js, &acp_prefix_typed)
         .await
@@ -90,8 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn({
         let cap = cap.clone();
         async move {
-            let mut interval =
-                tokio::time::interval(trogon_registry::HEARTBEAT_INTERVAL);
+            let mut interval = tokio::time::interval(trogon_registry::HEARTBEAT_INTERVAL);
             loop {
                 interval.tick().await;
                 if let Err(e) = registry.refresh(&cap).await {
@@ -111,8 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // (e.g. acp.wasm.session.*.client.*) so tool calls from wasm sessions
             // are handled by this instance.
             let subject = format!("{acp_prefix}.session.*.client.>");
-            let mut dispatch_task =
-                tokio::task::spawn_local(dispatcher::run(nats, subject, runtime, shutdown_rx));
+            let mut dispatch_task = tokio::task::spawn_local(dispatcher::run(nats, subject, runtime, shutdown_rx));
             tokio::select! {
                 result = &mut dispatch_task => {
                     match result {

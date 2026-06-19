@@ -134,15 +134,9 @@ pub async fn create_branch(ctx: &ToolContext, input: &Value) -> String {
 
 /// Push the current branch (or a named branch) to a remote.
 pub async fn push(ctx: &ToolContext, input: &Value) -> String {
-    let remote = input
-        .get("remote")
-        .and_then(|v| v.as_str())
-        .unwrap_or("origin");
+    let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
     let branch = input.get("branch").and_then(|v| v.as_str());
-    let set_upstream = input
-        .get("set_upstream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let set_upstream = input.get("set_upstream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let mut args = vec!["push"];
     if set_upstream {
@@ -205,10 +199,7 @@ mod tests {
     fn ctx() -> ToolContext {
         ToolContext {
             proxy_url: String::new(),
-            cwd: std::env::current_dir()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
+            cwd: std::env::current_dir().unwrap().to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
             web_search_api_key: None,
             web_search_endpoint: None,
@@ -299,7 +290,10 @@ mod tests {
             web_search_endpoint: None,
         };
         let result = diff(&large_ctx, &json!({"args": "--staged"})).await;
-        assert!(result.contains("truncated at 4KB"), "expected truncation, got: {result}");
+        assert!(
+            result.contains("truncated at 4KB"),
+            "expected truncation, got: {result}"
+        );
     }
 
     #[tokio::test]
@@ -317,11 +311,7 @@ mod tests {
         init_repo(dir.path()).await;
         tokio::fs::write(dir.path().join("a.txt"), "hello").await.unwrap();
         let ctx = ctx_in(dir.path());
-        let result = commit(
-            &ctx,
-            &json!({"message": "add a", "paths": ["a.txt"]}),
-        )
-        .await;
+        let result = commit(&ctx, &json!({"message": "add a", "paths": ["a.txt"]})).await;
         assert!(!result.starts_with("Error"), "got: {result}");
         let log_out = log(&ctx, &json!({})).await;
         assert!(log_out.contains("add a"), "got: {log_out}");

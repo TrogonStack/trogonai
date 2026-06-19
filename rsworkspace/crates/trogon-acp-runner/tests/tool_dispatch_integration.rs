@@ -22,9 +22,7 @@ use httpmock::prelude::*;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::RwLock;
-use trogon_acp_runner::{
-    GatewayConfig, NatsSessionNotifier, NatsSessionStore, TrogonAgent,
-};
+use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 use trogon_tools;
@@ -57,11 +55,7 @@ fn make_agent(base_url: &str, cwd: &str) -> AgentLoop {
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
-        tool_context: Arc::new(ToolContext::new(
-            "http://127.0.0.1:1",
-            cwd,
-            reqwest::Client::new(),
-        )),
+        tool_context: Arc::new(ToolContext::new("http://127.0.0.1:1", cwd, reqwest::Client::new())),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
@@ -73,12 +67,7 @@ fn make_agent(base_url: &str, cwd: &str) -> AgentLoop {
     }
 }
 
-async fn start_agent(
-    nats: async_nats::Client,
-    js: &jetstream::Context,
-    prefix: &str,
-    agent: AgentLoop,
-) {
+async fn start_agent(nats: async_nats::Client, js: &jetstream::Context, prefix: &str, agent: AgentLoop) {
     let store = NatsSessionStore::open(js).await.unwrap();
     let notifier = NatsSessionNotifier::new(nats.clone());
     let ta = TrogonAgent::new(
@@ -110,10 +99,7 @@ async fn prompt_and_wait(
     let inbox = nats.new_inbox();
     let mut resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
 
-    let req = PromptRequest::new(
-        session_id.to_owned(),
-        vec![ContentBlock::Text(TextContent::new(text))],
-    );
+    let req = PromptRequest::new(session_id.to_owned(), vec![ContentBlock::Text(TextContent::new(text))]);
     nats.publish_with_reply(
         format!("{prefix}.session.{session_id}.agent.prompt"),
         inbox,
@@ -131,33 +117,51 @@ async fn prompt_and_wait(
 }
 
 fn sse_event(event_type: &str, data: serde_json::Value) -> String {
-    format!("event: {event_type}\ndata: {}\n\n", serde_json::to_string(&data).unwrap())
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    )
 }
 
 fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "tool_use", "id": tool_id, "name": tool_name}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {
-                "type": "input_json_delta",
-                "partial_json": serde_json::to_string(&input).unwrap()
-            }
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": tool_id, "name": tool_name}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": serde_json::to_string(&input).unwrap()
+                }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -165,25 +169,40 @@ fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value)
 
 fn sse_end_turn_stream(text: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 8}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 8}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -191,11 +210,27 @@ fn sse_end_turn_stream(text: &str) -> String {
 
 fn init_git_repo(dir: &std::path::Path) {
     Command::new("git").args(["init"]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["config", "user.name", "T"]).current_dir(dir).output().unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "t@t.com"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "T"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
     std::fs::write(dir.join("init.txt"), "init").unwrap();
-    Command::new("git").args(["add", "."]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["commit", "-m", "initial"]).current_dir(dir).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -255,7 +290,11 @@ async fn acp_list_dir_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "second mock (tool_result with alpha.txt) must be hit once");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "second mock (tool_result with alpha.txt) must be hit once"
+    );
 }
 
 /// `git_status` dispatched via ACP wire format — second API call body contains
@@ -273,9 +312,7 @@ async fn acp_git_status_tool_dispatched_via_wire_format() {
     let server = MockServer::start();
     // Second call: must include tool_result (git_status never returns "Unknown tool")
     let second_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("got status"));
@@ -304,7 +341,11 @@ async fn acp_git_status_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "second mock (tool_result) must be hit once for git_status");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "second mock (tool_result) must be hit once for git_status"
+    );
 }
 
 /// `git_diff` dispatched via ACP wire format — diff output appears in tool_result.
@@ -334,11 +375,7 @@ async fn acp_git_diff_tool_dispatched_via_wire_format() {
         when.method(POST).path("/messages");
         then.status(200)
             .header("Content-Type", "text/event-stream")
-            .body(sse_tool_use_stream(
-                "tu_gitdiff_001",
-                "git_diff",
-                serde_json::json!({}),
-            ));
+            .body(sse_tool_use_stream("tu_gitdiff_001", "git_diff", serde_json::json!({})));
     });
 
     let local = tokio::task::LocalSet::new();
@@ -354,7 +391,11 @@ async fn acp_git_diff_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "second mock (tool_result with init.txt) must be hit once for git_diff");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "second mock (tool_result with init.txt) must be hit once for git_diff"
+    );
 }
 
 /// `git_log` dispatched via ACP wire format — commit history appears in tool_result.
@@ -383,11 +424,7 @@ async fn acp_git_log_tool_dispatched_via_wire_format() {
         when.method(POST).path("/messages");
         then.status(200)
             .header("Content-Type", "text/event-stream")
-            .body(sse_tool_use_stream(
-                "tu_gitlog_001",
-                "git_log",
-                serde_json::json!({}),
-            ));
+            .body(sse_tool_use_stream("tu_gitlog_001", "git_log", serde_json::json!({})));
     });
 
     let local = tokio::task::LocalSet::new();
@@ -403,7 +440,11 @@ async fn acp_git_log_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "second mock (tool_result with 'initial') must be hit once for git_log");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "second mock (tool_result with 'initial') must be hit once for git_log"
+    );
 }
 
 /// `search_files` dispatched via ACP wire format — matched line appears in tool_result.
@@ -452,7 +493,11 @@ async fn acp_search_files_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "second mock (tool_result with marker_string_xyz) must be hit once");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "second mock (tool_result with marker_string_xyz) must be hit once"
+    );
 }
 
 // ── TROGON.md → ACP system prompt wire ───────────────────────────────────────
@@ -476,9 +521,7 @@ async fn acp_trogon_md_injected_into_system_prompt_in_wire_request() {
 
     // Specific mock: first call must contain TROGON.md content in request body
     let trogon_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("acp-project-rules");
+        when.method(POST).path("/messages").body_contains("acp-project-rules");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("done"));
@@ -509,13 +552,10 @@ async fn acp_trogon_md_injected_into_system_prompt_in_wire_request() {
                 )
                 .await
                 .unwrap();
-                let msg = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    resp_sub.next(),
-                )
-                .await
-                .expect("timed out waiting for new_session response")
-                .expect("no new_session response");
+                let msg = tokio::time::timeout(Duration::from_secs(5), resp_sub.next())
+                    .await
+                    .expect("timed out waiting for new_session response")
+                    .expect("no new_session response");
                 let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
@@ -556,11 +596,7 @@ async fn acp_notebook_edit_tool_dispatched_via_wire_format() {
             "execution_count": null
         }]
     });
-    std::fs::write(
-        dir.path().join("nb.ipynb"),
-        serde_json::to_string(&notebook).unwrap(),
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&notebook).unwrap()).unwrap();
 
     let (_c, nats, js) = start_nats().await;
     let prefix = "test-acp-nbedit";
@@ -570,9 +606,7 @@ async fn acp_notebook_edit_tool_dispatched_via_wire_format() {
     let server = MockServer::start();
 
     let second_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("notebook edited"));
@@ -605,7 +639,11 @@ async fn acp_notebook_edit_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "tool_result mock must be hit once for notebook_edit");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result mock must be hit once for notebook_edit"
+    );
 
     let raw = std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap();
     let nb: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -682,9 +720,7 @@ async fn acp_write_file_tool_dispatched_via_wire_format() {
 
     let server = MockServer::start();
     let second_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("file written"));
@@ -713,7 +749,11 @@ async fn acp_write_file_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "tool_result mock must be hit once for write_file");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result mock must be hit once for write_file"
+    );
     let on_disk = std::fs::read_to_string(dir.path().join("new.rs")).unwrap();
     assert_eq!(on_disk, "fn hello() {}\n", "write_file must persist content to disk");
 }
@@ -734,9 +774,7 @@ async fn acp_str_replace_tool_dispatched_via_wire_format() {
 
     let server = MockServer::start();
     let second_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("replaced"));
@@ -769,7 +807,11 @@ async fn acp_str_replace_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "tool_result mock must be hit once for str_replace");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result mock must be hit once for str_replace"
+    );
     let on_disk = std::fs::read_to_string(dir.path().join("code.rs")).unwrap();
     assert!(
         on_disk.contains("fn new_impl()"),
@@ -803,9 +845,7 @@ async fn acp_str_replace_replace_all_tool_def_and_dispatch() {
 
     let server = MockServer::start();
     let second_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("replaced all"));
@@ -866,9 +906,7 @@ async fn acp_multi_edit_tool_def_and_dispatch() {
 
     let server = MockServer::start();
     let second_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("multi edited"));
@@ -957,7 +995,11 @@ async fn acp_glob_tool_dispatched_via_wire_format() {
         })
         .await;
 
-    assert_eq!(second_mock.hits(), 1, "tool_result with match.rs must be hit once for glob");
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result with match.rs must be hit once for glob"
+    );
 }
 
 // ── fetch_url → ACP wire ──────────────────────────────────────────────────────
@@ -1104,32 +1146,26 @@ async fn acp_tool_use_cycle_exported_as_portable_blocks_via_wire() {
             .await
             .unwrap();
 
-            let export_msg = tokio::time::timeout(
-                Duration::from_secs(5),
-                resp_sub.next(),
-            )
-            .await
-            .expect("timed out waiting for session/export response")
-            .expect("no session/export response");
+            let export_msg = tokio::time::timeout(Duration::from_secs(5), resp_sub.next())
+                .await
+                .expect("timed out waiting for session/export response")
+                .expect("no session/export response");
 
             // The ext_method reply wraps the payload as {"result": <export>}. A
             // tool_use cycle has structured blocks, so the export is the versioned
             // V2 format (a `{version, messages}` object, not a flat array).
-            let envelope: serde_json::Value = serde_json::from_slice(&export_msg.payload)
-                .expect("response must be JSON");
-            let export: PortableExportV2 = serde_json::from_value(envelope["result"].clone())
-                .expect("result must be a V2 portable export object");
+            let envelope: serde_json::Value =
+                serde_json::from_slice(&export_msg.payload).expect("response must be JSON");
+            let export: PortableExportV2 =
+                serde_json::from_value(envelope["result"].clone()).expect("result must be a V2 portable export object");
             let messages = export.messages;
 
-            assert!(
-                !messages.is_empty(),
-                "exported messages must not be empty"
-            );
+            assert!(!messages.is_empty(), "exported messages must not be empty");
 
             let has_tool_call = messages.iter().any(|m| {
-                m.blocks.iter().any(|b| {
-                    matches!(b, PortableBlock::ToolUse { name, .. } if name == "read_file")
-                })
+                m.blocks
+                    .iter()
+                    .any(|b| matches!(b, PortableBlock::ToolUse { name, .. } if name == "read_file"))
             });
             assert!(
                 has_tool_call,
@@ -1221,13 +1257,10 @@ async fn new_session_cwd_overrides_agent_initial_cwd_for_file_tool_dispatch() {
                 )
                 .await
                 .unwrap();
-                let msg = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    resp_sub.next(),
-                )
-                .await
-                .expect("timed out waiting for new_session")
-                .expect("no new_session response");
+                let msg = tokio::time::timeout(Duration::from_secs(5), resp_sub.next())
+                    .await
+                    .expect("timed out waiting for new_session")
+                    .expect("no new_session response");
                 let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
                 v["sessionId"].as_str().unwrap().to_string()
             };
@@ -1280,9 +1313,7 @@ async fn acp_web_search_tool_def_present_and_dispatch_works() {
     }
 
     assert!(
-        trogon_tools::all_tool_defs()
-            .iter()
-            .any(|d| d.name == "web_search"),
+        trogon_tools::all_tool_defs().iter().any(|d| d.name == "web_search"),
         "web_search must be in all_tool_defs"
     );
 

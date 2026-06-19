@@ -2,10 +2,7 @@ use std::time::Duration;
 
 use async_nats::jetstream::{
     self, ErrorCode,
-    context::{
-        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-        KeyValueError,
-    },
+    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind, KeyValueError},
     kv, stream,
 };
 
@@ -27,10 +24,7 @@ pub const ENTRY_TTL: Duration = Duration::from_secs(30);
 pub async fn provision(js: &jetstream::Context) -> Result<kv::Store, RegistryError> {
     match js.create_key_value(bucket_config()).await {
         Ok(store) => Ok(store),
-        Err(e) if is_already_exists(&e) => js
-            .get_key_value(BUCKET_NAME)
-            .await
-            .map_err(format_get_error),
+        Err(e) if is_already_exists(&e) => js.get_key_value(BUCKET_NAME).await.map_err(format_get_error),
         Err(e) => Err(RegistryError::Provision(e.to_string())),
     }
 }

@@ -6,8 +6,8 @@
 use httpmock::prelude::*;
 use serde_json::json;
 use trogon_compactor::{
-    AuthStyle, CompactionSettings, CompactorConfig, CompactorError, ContentBlock, LlmConfig,
-    Message, compactor_with_client,
+    AuthStyle, CompactionSettings, CompactorConfig, CompactorError, ContentBlock, LlmConfig, Message,
+    compactor_with_client,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -50,10 +50,7 @@ fn tool_use_conversation(settings: &CompactionSettings) -> Vec<Message> {
                 content: format!("output {i}: {}", "r".repeat(chars)),
             }],
         });
-        msgs.push(Message::assistant(format!(
-            "done {i}: {}",
-            "a".repeat(chars)
-        )));
+        msgs.push(Message::assistant(format!("done {i}: {}", "a".repeat(chars))));
     }
     msgs
 }
@@ -136,10 +133,7 @@ async fn compact_if_needed_calls_llm_and_replaces_old_messages() {
     let ContentBlock::Text { text } = &result[0].content[0] else {
         panic!("expected text block in summary message");
     };
-    assert!(
-        text.contains(expected_summary),
-        "summary not embedded in first message"
-    );
+    assert!(text.contains(expected_summary), "summary not embedded in first message");
 }
 
 #[tokio::test]
@@ -179,9 +173,7 @@ async fn incremental_update_when_previous_summary_exists() {
 
     // Capture the request body to verify the update prompt is used
     let mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/v1/messages")
-            .body_contains("previous-summary");
+        when.method(POST).path("/v1/messages").body_contains("previous-summary");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(mock_anthropic_response(updated_summary));
@@ -207,12 +199,8 @@ async fn incremental_update_when_previous_summary_exists() {
     // Start with a conversation that already has a compaction summary
     let existing_summary = "## Goal\nFix the bug\n\n## Progress\n### In Progress\n- [ ] Step 1";
     let mut messages = vec![
-        Message::user(format!(
-            "<context-summary>\n{existing_summary}\n</context-summary>"
-        )),
-        Message::assistant(
-            "I've reviewed the conversation summary and will continue from this context.",
-        ),
+        Message::user(format!("<context-summary>\n{existing_summary}\n</context-summary>")),
+        Message::assistant("I've reviewed the conversation summary and will continue from this context."),
     ];
     // Add new messages to push it over the threshold
     for i in 0..4 {
@@ -273,9 +261,7 @@ async fn unexpected_stop_reason_returns_error() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor
-        .compact_if_needed(large_conversation(&settings))
-        .await;
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
     assert!(
         matches!(result, Err(CompactorError::UnexpectedStopReason(ref r)) if r == "max_tokens"),
@@ -317,9 +303,7 @@ async fn empty_response_content_returns_error() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor
-        .compact_if_needed(large_conversation(&settings))
-        .await;
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
     assert!(
         matches!(result, Err(CompactorError::EmptyResponse)),
@@ -351,9 +335,7 @@ async fn http_5xx_error_returns_http_error() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor
-        .compact_if_needed(large_conversation(&settings))
-        .await;
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
     assert!(
         matches!(result, Err(CompactorError::Http(_))),
@@ -395,14 +377,9 @@ async fn x_api_key_auth_sends_correct_header() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor
-        .compact_if_needed(large_conversation(&settings))
-        .await;
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
-    assert!(
-        result.is_ok(),
-        "expected success with x-api-key auth, got {result:?}"
-    );
+    assert!(result.is_ok(), "expected success with x-api-key auth, got {result:?}");
 }
 
 #[tokio::test]
@@ -436,14 +413,9 @@ async fn bearer_auth_sends_authorization_header() {
     };
 
     let compactor = compactor_with_client(config, reqwest::Client::new());
-    let result = compactor
-        .compact_if_needed(large_conversation(&settings))
-        .await;
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
-    assert!(
-        result.is_ok(),
-        "expected success with Bearer auth, got {result:?}"
-    );
+    assert!(result.is_ok(), "expected success with Bearer auth, got {result:?}");
 }
 
 #[tokio::test]
@@ -663,9 +635,7 @@ async fn chained_compaction_detects_xml_marker_and_uses_update_prompt() {
     // Second call must include "previous-summary" in the body; register that
     // mock first so httpmock gives it priority over the catch-all below.
     let update_mock = server.mock(|when, then| {
-        when.method(POST)
-            .path("/v1/messages")
-            .body_contains("previous-summary");
+        when.method(POST).path("/v1/messages").body_contains("previous-summary");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(mock_anthropic_response("## Goal\nSecond-pass summary"));
@@ -686,10 +656,7 @@ async fn chained_compaction_detects_xml_marker_and_uses_update_prompt() {
 
     // First compaction
     let c1 = compactor_with_client(make_config(&url, &settings), reqwest::Client::new());
-    let after_first = c1
-        .compact_if_needed(large_conversation(&settings))
-        .await
-        .unwrap();
+    let after_first = c1.compact_if_needed(large_conversation(&settings)).await.unwrap();
 
     // after_first[0] now holds <context-summary>\n…\n</context-summary>.
     // Extend with new large messages to push it over the threshold again.
@@ -773,9 +740,7 @@ async fn http_4xx_error_returns_http_error() {
     };
     let url = format!("{}/v1/messages", server.base_url());
     let compactor = compactor_with_client(make_config(&url, &settings), reqwest::Client::new());
-    let result = compactor
-        .compact_if_needed(large_conversation(&settings))
-        .await;
+    let result = compactor.compact_if_needed(large_conversation(&settings)).await;
 
     assert!(
         matches!(result, Err(CompactorError::Http(_))),

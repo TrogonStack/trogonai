@@ -15,15 +15,13 @@ use std::time::Duration;
 use acp_nats::prompt_event::PromptEvent;
 use acp_nats::{AGENT_UNAVAILABLE, AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ContentBlock, ErrorCode, ExtNotification, ExtRequest, ExtResponse,
-    ForkSessionRequest, ForkSessionResponse, ImageContent, Implementation, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
-    ToolCallContent, ToolCallStatus, ToolKind,
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+    ContentBlock, ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse,
+    ImageContent, Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
+    SetSessionModelResponse, StopReason, ToolCallContent, ToolCallStatus, ToolKind,
 };
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
@@ -63,7 +61,12 @@ fn make_js(nats: &async_nats::Client) -> trogon_nats::jetstream::NatsJetStreamCl
 async fn provision_session_streams(js: &trogon_nats::jetstream::NatsJetStreamClient, prefix: &AcpPrefix) {
     use acp_nats::nats::AcpStream;
     use trogon_nats::jetstream::JetStreamContext;
-    for stream in [AcpStream::Commands, AcpStream::Responses, AcpStream::ClientOps, AcpStream::Notifications] {
+    for stream in [
+        AcpStream::Commands,
+        AcpStream::Responses,
+        AcpStream::ClientOps,
+        AcpStream::Notifications,
+    ] {
         JetStreamContext::get_or_create_stream(js, stream.config(prefix))
             .await
             .expect("failed to provision session JetStream stream");
@@ -139,23 +142,16 @@ async fn initialize_returns_protocol_version_from_agent() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
         }
     });
 
-    let result = bridge
-        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
-        .await;
+    let result = bridge.initialize(InitializeRequest::new(ProtocolVersion::LATEST)).await;
 
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().protocol_version, ProtocolVersion::LATEST);
 }
 
@@ -193,10 +189,7 @@ async fn initialize_returns_error_on_invalid_json_response() {
             && let Some(reply) = msg.reply
         {
             // Send malformed JSON.
-            nats2
-                .publish(reply, b"{bad json}".as_ref().into())
-                .await
-                .unwrap();
+            nats2.publish(reply, b"{bad json}".as_ref().into()).await.unwrap();
         }
     });
 
@@ -237,14 +230,8 @@ async fn authenticate_succeeds() {
         }
     });
 
-    let result = bridge
-        .authenticate(AuthenticateRequest::new("password"))
-        .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    let result = bridge.authenticate(AuthenticateRequest::new("password")).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 #[tokio::test]
@@ -283,11 +270,7 @@ async fn new_session_returns_session_id() {
     });
 
     let result = bridge.new_session(NewSessionRequest::new(".")).await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().session_id, expected_id);
 }
 
@@ -310,10 +293,7 @@ async fn load_session_uses_session_scoped_subject() {
         }
     });
 
-    bridge
-        .load_session(LoadSessionRequest::new("s1", "."))
-        .await
-        .unwrap();
+    bridge.load_session(LoadSessionRequest::new("s1", ".")).await.unwrap();
 
     let subject = tokio::time::timeout(Duration::from_secs(1), rx)
         .await
@@ -357,10 +337,7 @@ async fn set_session_mode_succeeds() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats.clone(), "acp").await;
 
-    let mut agent_sub = nats
-        .subscribe("acp.session.s1.agent.set_mode")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.s1.agent.set_mode").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -368,14 +345,8 @@ async fn set_session_mode_succeeds() {
         }
     });
 
-    let result = bridge
-        .set_session_mode(SetSessionModeRequest::new("s1", "edit"))
-        .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    let result = bridge.set_session_mode(SetSessionModeRequest::new("s1", "edit")).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────────
@@ -448,8 +419,7 @@ async fn custom_prefix_used_in_all_subjects() {
         if let Some(msg) = agent_sub.next().await {
             let subject = msg.subject.to_string();
             let _ = tx.send(subject);
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -483,8 +453,7 @@ async fn initialize_with_client_info_forwarded_to_agent() {
             // Capture the raw payload to verify the client name is present.
             let payload_str = String::from_utf8_lossy(&msg.payload).to_string();
             let _ = tx.send(payload_str);
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -493,8 +462,7 @@ async fn initialize_with_client_info_forwarded_to_agent() {
 
     bridge
         .initialize(
-            InitializeRequest::new(ProtocolVersion::LATEST)
-                .client_info(Implementation::new("my-client", "1.0.0")),
+            InitializeRequest::new(ProtocolVersion::LATEST).client_info(Implementation::new("my-client", "1.0.0")),
         )
         .await
         .unwrap();
@@ -544,11 +512,7 @@ async fn concurrent_requests_dont_mix_replies() {
 
     let mut session_ids = HashSet::new();
     for result in [r0, r1, r2, r3, r4] {
-        assert!(
-            result.is_ok(),
-            "concurrent request failed: {:?}",
-            result.unwrap_err()
-        );
+        assert!(result.is_ok(), "concurrent request failed: {:?}", result.unwrap_err());
         let id = result.unwrap().session_id.to_string();
         assert!(!id.is_empty(), "session_id must not be empty");
         session_ids.insert(id);
@@ -615,12 +579,7 @@ fn parse_stop_reason(s: &str) -> StopReason {
 ///
 /// Returns only after the NATS subscription is confirmed, eliminating the race
 /// where the bridge publishes the prompt before the mock has subscribed.
-async fn mock_runner(
-    nats: async_nats::Client,
-    prefix: &str,
-    session_id: &str,
-    events: Vec<PromptEvent>,
-) {
+async fn mock_runner(nats: async_nats::Client, prefix: &str, session_id: &str, events: Vec<PromptEvent>) {
     let subject = format!("{}.session.{}.agent.prompt", prefix, session_id);
     let prefix = prefix.to_string();
     let session_id = session_id.to_string();
@@ -635,52 +594,37 @@ async fn mock_runner(
                 .map(|v| v.as_str().to_string())
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-            let update_subject =
-                format!("{}.session.{}.agent.update.{}", prefix, session_id, req_id);
-            let response_subject = format!(
-                "{}.session.{}.agent.prompt.response.{}",
-                prefix, session_id, req_id
-            );
+            let update_subject = format!("{}.session.{}.agent.update.{}", prefix, session_id, req_id);
+            let response_subject = format!("{}.session.{}.agent.prompt.response.{}", prefix, session_id, req_id);
 
             let js = async_nats::jetstream::new(nats.clone());
             let mut converter = PromptEventConverter::new(session_id.clone());
             for event in events {
                 let (notifications, outcome) = converter.convert(event);
                 for notif in &notifications {
-                    js.publish(
-                        update_subject.clone(),
-                        serde_json::to_vec(notif).unwrap().into(),
-                    )
-                    .await
-                    .unwrap()
-                    .await
-                    .unwrap();
+                    js.publish(update_subject.clone(), serde_json::to_vec(notif).unwrap().into())
+                        .await
+                        .unwrap()
+                        .await
+                        .unwrap();
                 }
                 if let Some(outcome) = outcome {
                     match outcome {
                         PromptOutcome::Done { stop_reason } => {
-                            let resp = agent_client_protocol::PromptResponse::new(
-                                parse_stop_reason(&stop_reason),
-                            );
-                            js.publish(
-                                response_subject,
-                                serde_json::to_vec(&resp).unwrap().into(),
-                            )
-                            .await
-                            .unwrap()
-                            .await
-                            .unwrap();
+                            let resp = agent_client_protocol::PromptResponse::new(parse_stop_reason(&stop_reason));
+                            js.publish(response_subject, serde_json::to_vec(&resp).unwrap().into())
+                                .await
+                                .unwrap()
+                                .await
+                                .unwrap();
                         }
                         PromptOutcome::Error { message } => {
                             let env = serde_json::json!({"error": message});
-                            js.publish(
-                                response_subject,
-                                serde_json::to_vec(&env).unwrap().into(),
-                            )
-                            .await
-                            .unwrap()
-                            .await
-                            .unwrap();
+                            js.publish(response_subject, serde_json::to_vec(&env).unwrap().into())
+                                .await
+                                .unwrap()
+                                .await
+                                .unwrap();
                         }
                     }
                     return;
@@ -802,17 +746,10 @@ async fn no_mode_notifications_when_runner_does_not_emit_mode_changed() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-no-mode", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-no-mode", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
-    assert!(
-        !updates
-            .iter()
-            .any(|u| matches!(u, SessionUpdate::CurrentModeUpdate(_)))
-    );
+    assert!(!updates.iter().any(|u| matches!(u, SessionUpdate::CurrentModeUpdate(_))));
     assert!(
         !updates
             .iter()
@@ -843,10 +780,7 @@ async fn text_delta_produces_agent_message_chunk_notification() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-text", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-text", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     let chunk = updates.iter().find_map(|u| {
@@ -856,10 +790,7 @@ async fn text_delta_produces_agent_message_chunk_notification() {
             None
         }
     });
-    assert!(
-        chunk.is_some(),
-        "expected AgentMessageChunk, got: {updates:?}"
-    );
+    assert!(chunk.is_some(), "expected AgentMessageChunk, got: {updates:?}");
 }
 
 #[tokio::test]
@@ -883,10 +814,7 @@ async fn thinking_delta_produces_agent_thought_chunk_notification() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-think", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-think", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     let chunk = updates.iter().find_map(|u| {
@@ -896,10 +824,7 @@ async fn thinking_delta_produces_agent_thought_chunk_notification() {
             None
         }
     });
-    assert!(
-        chunk.is_some(),
-        "expected AgentThoughtChunk, got: {updates:?}"
-    );
+    assert!(chunk.is_some(), "expected AgentThoughtChunk, got: {updates:?}");
 }
 
 #[tokio::test]
@@ -920,12 +845,7 @@ async fn error_event_returns_err_from_prompt() {
 
     let result = bridge.prompt(PromptRequest::new("sess-err", vec![])).await;
     assert!(result.is_err(), "expected Err from Error event");
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("something blew up")
-    );
+    assert!(result.unwrap_err().to_string().contains("something blew up"));
 }
 
 #[tokio::test]
@@ -953,16 +873,11 @@ async fn usage_update_produces_usage_notification() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-usage", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-usage", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     assert!(
-        updates
-            .iter()
-            .any(|u| matches!(u, SessionUpdate::UsageUpdate(_))),
+        updates.iter().any(|u| matches!(u, SessionUpdate::UsageUpdate(_))),
         "expected UsageUpdate notification, got: {updates:?}",
     );
 }
@@ -983,10 +898,7 @@ async fn done_stop_reason_end_turn_maps_correctly() {
     )
     .await;
 
-    let resp = bridge
-        .prompt(PromptRequest::new("sess-done-et", vec![]))
-        .await
-        .unwrap();
+    let resp = bridge.prompt(PromptRequest::new("sess-done-et", vec![])).await.unwrap();
     assert!(
         matches!(resp.stop_reason, StopReason::EndTurn),
         "got: {:?}",
@@ -1010,10 +922,7 @@ async fn done_stop_reason_max_tokens_maps_correctly() {
     )
     .await;
 
-    let resp = bridge
-        .prompt(PromptRequest::new("sess-done-mt", vec![]))
-        .await
-        .unwrap();
+    let resp = bridge.prompt(PromptRequest::new("sess-done-mt", vec![])).await.unwrap();
     assert!(
         matches!(resp.stop_reason, StopReason::MaxTokens),
         "got: {:?}",
@@ -1133,10 +1042,7 @@ async fn tool_call_started_produces_tool_call_in_progress_notification() {
             None
         }
     });
-    assert!(
-        tool_call.is_some(),
-        "expected ToolCall notification, got: {updates:?}"
-    );
+    assert!(tool_call.is_some(), "expected ToolCall notification, got: {updates:?}");
     let tc = tool_call.unwrap();
     assert!(matches!(tc.status, ToolCallStatus::InProgress));
 }
@@ -1171,10 +1077,7 @@ async fn tool_call_finished_success_produces_completed_update() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-tc-ok", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-tc-ok", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     let update = updates.iter().find_map(|u| {
@@ -1184,15 +1087,9 @@ async fn tool_call_finished_success_produces_completed_update() {
             None
         }
     });
-    assert!(
-        update.is_some(),
-        "expected ToolCallUpdate, got: {updates:?}"
-    );
+    assert!(update.is_some(), "expected ToolCallUpdate, got: {updates:?}");
     let status = update.unwrap().fields.status;
-    assert!(
-        matches!(status, Some(ToolCallStatus::Completed)),
-        "got: {status:?}"
-    );
+    assert!(matches!(status, Some(ToolCallStatus::Completed)), "got: {status:?}");
 }
 
 #[tokio::test]
@@ -1225,10 +1122,7 @@ async fn tool_call_finished_nonzero_exit_code_produces_failed_update() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-tc-fail", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-tc-fail", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     let update = updates.iter().find_map(|u| {
@@ -1279,10 +1173,7 @@ async fn tool_call_finished_with_signal_produces_failed_update() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-tc-sig", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-tc-sig", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     let update = updates.iter().find_map(|u| {
@@ -1292,10 +1183,7 @@ async fn tool_call_finished_with_signal_produces_failed_update() {
             None
         }
     });
-    assert!(
-        update.is_some(),
-        "expected ToolCallUpdate for signalled tool"
-    );
+    assert!(update.is_some(), "expected ToolCallUpdate for signalled tool");
     let status = update.unwrap().fields.status;
     assert!(
         matches!(status, Some(ToolCallStatus::Failed)),
@@ -1340,10 +1228,7 @@ async fn duplicate_tool_id_is_silently_ignored() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-tc-dup", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-tc-dup", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
     let tool_call_count = updates
@@ -1394,21 +1279,14 @@ async fn todo_write_produces_plan_notification_not_tool_call() {
     )
     .await;
 
-    bridge
-        .prompt(PromptRequest::new("sess-todo", vec![]))
-        .await
-        .unwrap();
+    bridge.prompt(PromptRequest::new("sess-todo", vec![])).await.unwrap();
 
     let updates = drain_updates(&mut rx);
 
     // Must have a Plan notification.
-    let plan = updates.iter().find_map(|u| {
-        if let SessionUpdate::Plan(p) = u {
-            Some(p)
-        } else {
-            None
-        }
-    });
+    let plan = updates
+        .iter()
+        .find_map(|u| if let SessionUpdate::Plan(p) = u { Some(p) } else { None });
     assert!(
         plan.is_some(),
         "expected Plan notification for TodoWrite, got: {updates:?}"
@@ -1416,15 +1294,11 @@ async fn todo_write_produces_plan_notification_not_tool_call() {
 
     // Must NOT have a ToolCall or ToolCallUpdate notification (TodoWrite is invisible).
     assert!(
-        !updates
-            .iter()
-            .any(|u| matches!(u, SessionUpdate::ToolCall(_))),
+        !updates.iter().any(|u| matches!(u, SessionUpdate::ToolCall(_))),
         "TodoWrite must NOT produce a ToolCall notification",
     );
     assert!(
-        !updates
-            .iter()
-            .any(|u| matches!(u, SessionUpdate::ToolCallUpdate(_))),
+        !updates.iter().any(|u| matches!(u, SessionUpdate::ToolCallUpdate(_))),
         "TodoWrite finish must NOT produce a ToolCallUpdate notification",
     );
 }
@@ -1449,17 +1323,11 @@ async fn cancel_while_prompt_running_returns_cancelled() {
     tokio::spawn(async move {
         if prompt_sub.next().await.is_some() {
             let cancelled_subject = format!("acp.session.{}.agent.cancelled", session_id);
-            nats2
-                .publish(cancelled_subject, b"".as_ref().into())
-                .await
-                .unwrap();
+            nats2.publish(cancelled_subject, b"".as_ref().into()).await.unwrap();
         }
     });
 
-    let resp = bridge
-        .prompt(PromptRequest::new(session_id, vec![]))
-        .await
-        .unwrap();
+    let resp = bridge.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
     assert!(
         matches!(resp.stop_reason, StopReason::Cancelled),
         "cancel signal must return Cancelled, got: {:?}",
@@ -1494,22 +1362,14 @@ async fn bridge_cancel_stops_running_prompt_end_to_end() {
     let bridge_prompt = make_bridge(nats.clone(), "acp").await;
     let bridge_cancel = make_bridge(nats.clone(), "acp").await;
 
-    let (prompt_result, cancel_result) = tokio::join!(
-        bridge_prompt.prompt(PromptRequest::new(session_id, vec![])),
-        async {
+    let (prompt_result, cancel_result) =
+        tokio::join!(bridge_prompt.prompt(PromptRequest::new(session_id, vec![])), async {
             // Wait until the prompt is in-flight before cancelling.
             tokio::time::sleep(Duration::from_millis(200)).await;
-            bridge_cancel
-                .cancel(CancelNotification::new(session_id))
-                .await
-        },
-    );
+            bridge_cancel.cancel(CancelNotification::new(session_id)).await
+        },);
 
-    assert!(
-        cancel_result.is_ok(),
-        "cancel must succeed: {:?}",
-        cancel_result
-    );
+    assert!(cancel_result.is_ok(), "cancel must succeed: {:?}", cancel_result);
     let resp = prompt_result.expect("prompt must complete (not time out)");
     assert!(
         matches!(resp.stop_reason, StopReason::Cancelled),
@@ -1707,10 +1567,7 @@ async fn prompt_with_image_only_blocks_produces_empty_user_message() {
     .await;
 
     // Only an Image block — no Text → user_message will be "" (else { None } path)
-    let blocks = vec![ContentBlock::Image(ImageContent::new(
-        "base64data==",
-        "image/png",
-    ))];
+    let blocks = vec![ContentBlock::Image(ImageContent::new("base64data==", "image/png"))];
     let resp = bridge
         .prompt(PromptRequest::new("sess-img-only", blocks))
         .await
@@ -1780,10 +1637,7 @@ async fn bash_without_terminal_output_cap_emits_standard_two_notifications() {
             }
         })
         .expect("expected ToolCall notification");
-    let has_terminal_info = tool_call
-        .meta
-        .as_ref()
-        .is_some_and(|m| m.contains_key("terminal_info"));
+    let has_terminal_info = tool_call.meta.as_ref().is_some_and(|m| m.contains_key("terminal_info"));
     assert!(
         !has_terminal_info,
         "without cap, ToolCall must NOT have terminal_info in meta"
@@ -1984,10 +1838,7 @@ async fn edit_tool_finished_emits_diff_content_with_old_and_new_text() {
         .content
         .as_ref()
         .expect("Edit tool update must carry content");
-    assert!(
-        !content.is_empty(),
-        "Edit tool must produce at least one content block"
-    );
+    assert!(!content.is_empty(), "Edit tool must produce at least one content block");
 
     let diff = content
         .iter()
@@ -2005,10 +1856,7 @@ async fn edit_tool_finished_emits_diff_content_with_old_and_new_text() {
         Some("/src/lib.rs"),
         "diff path must match file_path"
     );
-    assert_eq!(
-        diff.new_text, "new code",
-        "diff new_text must match new_string input"
-    );
+    assert_eq!(diff.new_text, "new code", "diff new_text must match new_string input");
     assert_eq!(
         diff.old_text.as_deref(),
         Some("old code"),
@@ -2076,15 +1924,8 @@ async fn read_tool_finished_wraps_output_in_fenced_code_block() {
         })
         .expect("expected ToolCallUpdate for Read");
 
-    let content = update
-        .fields
-        .content
-        .as_ref()
-        .expect("Read update must carry content");
-    assert!(
-        !content.is_empty(),
-        "Read must produce at least one content block"
-    );
+    let content = update.fields.content.as_ref().expect("Read update must carry content");
+    assert!(!content.is_empty(), "Read must produce at least one content block");
 
     // The content block must be a text Content (not a Diff)
     let text_content = content
@@ -2130,14 +1971,8 @@ async fn fork_session_returns_new_session_id() {
         }
     });
 
-    let result = bridge
-        .fork_session(ForkSessionRequest::new("s1", "."))
-        .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    let result = bridge.fork_session(ForkSessionRequest::new("s1", ".")).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert_eq!(result.unwrap().session_id, forked_id);
 }
 
@@ -2148,18 +1983,19 @@ async fn fork_session_uses_session_scoped_subject() {
     let bridge = make_bridge(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut agent_sub = nats
-        .subscribe("acp.session.orig-sess.agent.fork")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.orig-sess.agent.fork").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
             js_respond_session(
-                &nats2, &msg, "acp", "orig-sess",
+                &nats2,
+                &msg,
+                "acp",
+                "orig-sess",
                 &ForkSessionResponse::new(SessionId::from("f1")),
-            ).await;
+            )
+            .await;
         }
     });
 
@@ -2204,14 +2040,8 @@ async fn resume_session_succeeds() {
         }
     });
 
-    let result = bridge
-        .resume_session(ResumeSessionRequest::new("s2", "."))
-        .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    let result = bridge.resume_session(ResumeSessionRequest::new("s2", ".")).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 #[tokio::test]
@@ -2221,10 +2051,7 @@ async fn resume_session_uses_session_scoped_subject() {
     let bridge = make_bridge(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut agent_sub = nats
-        .subscribe("acp.session.my-sess.agent.resume")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.my-sess.agent.resume").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -2278,11 +2105,7 @@ async fn list_sessions_returns_session_list() {
     });
 
     let result = bridge.list_sessions(ListSessionsRequest::new()).await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     assert!(result.unwrap().sessions.is_empty());
 }
 
@@ -2305,10 +2128,7 @@ async fn list_sessions_uses_global_subject_not_session_scoped() {
         }
     });
 
-    bridge
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap();
+    bridge.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
     let subject = tokio::time::timeout(Duration::from_secs(1), rx)
         .await
@@ -2324,10 +2144,7 @@ async fn list_sessions_timeout_returns_agent_unavailable() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats, "acp").await;
 
-    let err = bridge
-        .list_sessions(ListSessionsRequest::new())
-        .await
-        .unwrap_err();
+    let err = bridge.list_sessions(ListSessionsRequest::new()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
 }
 
@@ -2339,10 +2156,7 @@ async fn set_session_model_succeeds() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats.clone(), "acp").await;
 
-    let mut agent_sub = nats
-        .subscribe("acp.session.s3.agent.set_model")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.s3.agent.set_model").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -2353,11 +2167,7 @@ async fn set_session_model_succeeds() {
     let result = bridge
         .set_session_model(SetSessionModelRequest::new("s3", "claude-sonnet-4-6"))
         .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 #[tokio::test]
@@ -2367,10 +2177,7 @@ async fn set_session_model_uses_session_scoped_subject() {
     let bridge = make_bridge(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut agent_sub = nats
-        .subscribe("acp.session.sess-m.agent.set_model")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.sess-m.agent.set_model").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
@@ -2412,28 +2219,18 @@ async fn set_session_config_option_succeeds() {
     let nats = nats_client(port).await;
     let bridge = make_bridge(nats.clone(), "acp").await;
 
-    let mut agent_sub = nats
-        .subscribe("acp.session.s4.agent.set_config_option")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.s4.agent.set_config_option").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            js_respond_session(
-                &nats2, &msg, "acp", "s4",
-                &SetSessionConfigOptionResponse::new(vec![]),
-            ).await;
+            js_respond_session(&nats2, &msg, "acp", "s4", &SetSessionConfigOptionResponse::new(vec![])).await;
         }
     });
 
     let result = bridge
         .set_session_config_option(SetSessionConfigOptionRequest::new("s4", "mode", "plan"))
         .await;
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
 }
 
 #[tokio::test]
@@ -2452,16 +2249,18 @@ async fn set_session_config_option_uses_session_scoped_subject() {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
             js_respond_session(
-                &nats2, &msg, "acp", "sess-cfg",
+                &nats2,
+                &msg,
+                "acp",
+                "sess-cfg",
                 &SetSessionConfigOptionResponse::new(vec![]),
-            ).await;
+            )
+            .await;
         }
     });
 
     bridge
-        .set_session_config_option(SetSessionConfigOptionRequest::new(
-            "sess-cfg", "mode", "plan",
-        ))
+        .set_session_config_option(SetSessionConfigOptionRequest::new("sess-cfg", "mode", "plan"))
         .await
         .unwrap();
 
@@ -2673,10 +2472,7 @@ async fn tool_call_started_with_parent_id_injects_meta() {
     });
     let tool_call = tool_call.expect("expected at least one ToolCall notification");
 
-    let meta = tool_call
-        .meta
-        .as_ref()
-        .expect("tool_call.meta must be Some");
+    let meta = tool_call.meta.as_ref().expect("tool_call.meta must be Some");
     let parent_id = meta
         .get("claudeCode")
         .and_then(|cc| cc.get("parentToolUseId"))
@@ -2790,24 +2586,16 @@ async fn fork_session_integration_returns_new_session_id() {
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
     let forked_id = SessionId::from("forked-integ-1");
-    let mut agent_sub = nats
-        .subscribe("acp.session.src-sess-1.agent.fork")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.src-sess-1.agent.fork").await.unwrap();
     let nats2 = nats.clone();
     let resp_id = forked_id.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            js_respond_session(
-                &nats2, &msg, "acp", "src-sess-1",
-                &ForkSessionResponse::new(resp_id),
-            ).await;
+            js_respond_session(&nats2, &msg, "acp", "src-sess-1", &ForkSessionResponse::new(resp_id)).await;
         }
     });
 
-    let result = bridge
-        .fork_session(ForkSessionRequest::new("src-sess-1", "."))
-        .await;
+    let result = bridge.fork_session(ForkSessionRequest::new("src-sess-1", ".")).await;
     assert!(
         result.is_ok(),
         "fork_session must succeed, got: {:?}",
@@ -2833,18 +2621,19 @@ async fn fork_session_integration_uses_session_scoped_nats_subject() {
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut agent_sub = nats
-        .subscribe("acp.session.fork-src-2.agent.fork")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.fork-src-2.agent.fork").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
             js_respond_session(
-                &nats2, &msg, "acp", "fork-src-2",
+                &nats2,
+                &msg,
+                "acp",
+                "fork-src-2",
                 &ForkSessionResponse::new(SessionId::from("fork-dst-2")),
-            ).await;
+            )
+            .await;
         }
     });
 
@@ -2873,17 +2662,11 @@ async fn resume_session_integration_succeeds() {
     let nats = nats_client(port).await;
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
-    let mut agent_sub = nats
-        .subscribe("acp.session.resume-sess-1.agent.resume")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.resume-sess-1.agent.resume").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            js_respond_session(
-                &nats2, &msg, "acp", "resume-sess-1",
-                &ResumeSessionResponse::new(),
-            ).await;
+            js_respond_session(&nats2, &msg, "acp", "resume-sess-1", &ResumeSessionResponse::new()).await;
         }
     });
 
@@ -2905,18 +2688,12 @@ async fn resume_session_integration_uses_session_scoped_subject() {
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut agent_sub = nats
-        .subscribe("acp.session.resume-sess-2.agent.resume")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.resume-sess-2.agent.resume").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            js_respond_session(
-                &nats2, &msg, "acp", "resume-sess-2",
-                &ResumeSessionResponse::new(),
-            ).await;
+            js_respond_session(&nats2, &msg, "acp", "resume-sess-2", &ResumeSessionResponse::new()).await;
         }
     });
 
@@ -2959,8 +2736,7 @@ async fn prompt_with_https_image_uri_block_completes_successfully() {
 
     // ContentBlock::Image with an HTTPS URI and empty data → converted to UserContentBlock::ImageUrl
     let blocks = vec![ContentBlock::Image(
-        agent_client_protocol::ImageContent::new("", "image/jpeg")
-            .uri("https://example.com/photo.jpg".to_string()),
+        agent_client_protocol::ImageContent::new("", "image/jpeg").uri("https://example.com/photo.jpg".to_string()),
     )];
     let resp = bridge
         .prompt(PromptRequest::new("sess-img-url", blocks))
@@ -2987,9 +2763,7 @@ async fn ext_method_integration_forwards_request_and_returns_response() {
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let raw =
-                serde_json::value::RawValue::from_string(r#"{"status":"closed"}"#.to_string())
-                    .unwrap();
+            let raw = serde_json::value::RawValue::from_string(r#"{"status":"closed"}"#.to_string()).unwrap();
             let resp = ExtResponse::new(raw.into());
             let resp_bytes = serde_json::to_vec(&resp).unwrap();
             if let Some(reply) = msg.reply {
@@ -2998,12 +2772,8 @@ async fn ext_method_integration_forwards_request_and_returns_response() {
         }
     });
 
-    let params =
-        serde_json::value::RawValue::from_string(r#"{"sessionId":"sess-ext-1"}"#.to_string())
-            .unwrap();
-    let result = bridge
-        .ext_method(ExtRequest::new("session_close", params.into()))
-        .await;
+    let params = serde_json::value::RawValue::from_string(r#"{"sessionId":"sess-ext-1"}"#.to_string()).unwrap();
+    let result = bridge.ext_method(ExtRequest::new("session_close", params.into())).await;
 
     assert!(
         result.is_ok(),
@@ -3049,8 +2819,7 @@ async fn ext_notification_integration_publishes_to_agent_subject() {
         }
     });
 
-    let params =
-        serde_json::value::RawValue::from_string(r#"{"event":"ping"}"#.to_string()).unwrap();
+    let params = serde_json::value::RawValue::from_string(r#"{"event":"ping"}"#.to_string()).unwrap();
     let result = bridge
         .ext_notification(ExtNotification::new("my_notify", params.into()))
         .await;
@@ -3074,10 +2843,7 @@ async fn ext_notification_integration_always_ok_with_no_subscriber() {
     let result = bridge
         .ext_notification(ExtNotification::new("my_notify", params.into()))
         .await;
-    assert!(
-        result.is_ok(),
-        "fire-and-forget: must be Ok even with no subscriber"
-    );
+    assert!(result.is_ok(), "fire-and-forget: must be Ok even with no subscriber");
 }
 
 // ── close_session integration ─────────────────────────────────────────────────
@@ -3089,10 +2855,7 @@ async fn close_session_integration_forwards_request_and_returns_response() {
     let nats = nats_client(port).await;
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
-    let mut sub = nats
-        .subscribe("acp.session.sess-close-1.agent.close")
-        .await
-        .unwrap();
+    let mut sub = nats.subscribe("acp.session.sess-close-1.agent.close").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
@@ -3100,9 +2863,7 @@ async fn close_session_integration_forwards_request_and_returns_response() {
         }
     });
 
-    let result = bridge
-        .close_session(CloseSessionRequest::new("sess-close-1"))
-        .await;
+    let result = bridge.close_session(CloseSessionRequest::new("sess-close-1")).await;
     assert!(
         result.is_ok(),
         "close_session must succeed with real responder, got: {:?}",
@@ -3139,26 +2900,25 @@ async fn fork_session_with_branch_at_index_forwards_meta() {
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<bytes::Bytes>();
-    let mut agent_sub = nats
-        .subscribe("acp.session.branch-src-1.agent.fork")
-        .await
-        .unwrap();
+    let mut agent_sub = nats.subscribe("acp.session.branch-src-1.agent.fork").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
             let _ = tx.send(msg.payload.clone());
             js_respond_session(
-                &nats2, &msg, "acp", "branch-src-1",
+                &nats2,
+                &msg,
+                "acp",
+                "branch-src-1",
                 &ForkSessionResponse::new(SessionId::from("branch-dst-1")),
             )
             .await;
         }
     });
 
-    let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
-        serde_json::json!({ "branchAtIndex": 2 }),
-    )
-    .unwrap();
+    let meta =
+        serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(serde_json::json!({ "branchAtIndex": 2 }))
+            .unwrap();
     bridge
         .fork_session(ForkSessionRequest::new("branch-src-1", ".").meta(meta))
         .await
@@ -3184,17 +2944,12 @@ async fn ext_list_children_integration_routes_to_ext_subject() {
     let (bridge, _rx) = make_bridge_with_rx(nats.clone(), "acp").await;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let mut ext_sub = nats
-        .subscribe("acp.agent.ext.session/list_children")
-        .await
-        .unwrap();
+    let mut ext_sub = nats.subscribe("acp.agent.ext.session/list_children").await.unwrap();
     let nats2 = nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = ext_sub.next().await {
             let _ = tx.send(msg.subject.to_string());
-            let raw =
-                serde_json::value::RawValue::from_string(r#"{"children":[]}"#.to_string())
-                    .unwrap();
+            let raw = serde_json::value::RawValue::from_string(r#"{"children":[]}"#.to_string()).unwrap();
             let resp = ExtResponse::new(raw.into());
             if let Some(reply) = &msg.reply {
                 let _ = nats2
@@ -3204,10 +2959,7 @@ async fn ext_list_children_integration_routes_to_ext_subject() {
         }
     });
 
-    let params = serde_json::value::RawValue::from_string(
-        r#"{"sessionId":"some-session"}"#.to_string(),
-    )
-    .unwrap();
+    let params = serde_json::value::RawValue::from_string(r#"{"sessionId":"some-session"}"#.to_string()).unwrap();
     bridge
         .ext_method(ExtRequest::new("session/list_children", params.into()))
         .await

@@ -24,8 +24,7 @@ use tokio::sync::{RwLock, mpsc, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionNotifier, NatsSessionStore,
-    TrogonAgent, agent_runner::mock::MockAgentRunner,
+    GatewayConfig, NatsSessionNotifier, NatsSessionStore, TrogonAgent, agent_runner::mock::MockAgentRunner,
 };
 use trogon_nats::jetstream::NatsJetStreamClient;
 use uuid::Uuid;
@@ -47,9 +46,7 @@ fn uid() -> String {
 
 // ── Type alias ─────────────────────────────────────────────────────────────────
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 // ── WS message helpers ─────────────────────────────────────────────────────────
 
@@ -129,7 +126,9 @@ fn start_mock_agent(nats: async_nats::Client) {
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
 }
 
@@ -184,8 +183,7 @@ async fn test_ws_initialize(ws_url: &str) -> bool {
             .await
             .map_err(|_| "timed out waiting for initialize response".to_string())?;
 
-        let val: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| format!("invalid JSON: {e}"))?;
+        let val: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("invalid JSON: {e}"))?;
 
         if val["id"].as_i64() != Some(1) {
             return Err(format!("expected id=1, got: {}", val["id"]));
@@ -195,9 +193,19 @@ async fn test_ws_initialize(ws_url: &str) -> bool {
         }
         ws.close(None).await.ok();
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_ws_new_session(ws_url: &str) -> bool {
@@ -218,7 +226,9 @@ async fn test_ws_new_session(ws_url: &str) -> bool {
             "method": "session/new",
             "params": { "cwd": cwd, "mcpServers": [] }
         });
-        ws.send(Message::Text(req.to_string().into())).await.map_err(|e| e.to_string())?;
+        ws.send(Message::Text(req.to_string().into()))
+            .await
+            .map_err(|e| e.to_string())?;
 
         let resp = next_with_id(&mut ws, 2).await;
         let sid = resp["result"]["sessionId"]
@@ -231,9 +241,19 @@ async fn test_ws_new_session(ws_url: &str) -> bool {
         }
         ws.close(None).await.ok();
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_ws_multiple_connections(ws_url: &str) -> bool {
@@ -265,9 +285,19 @@ async fn test_ws_multiple_connections(ws_url: &str) -> bool {
         ws1.close(None).await.ok();
         ws2.close(None).await.ok();
         Ok(())
-    }.await;
+    }
+    .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

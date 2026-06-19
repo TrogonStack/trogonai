@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
-use wasmtime::{
-    Caller, Engine, Extern, InstancePre, Linker, Module, ResourceLimiter, Store, ValType,
-};
+use wasmtime::{Caller, Engine, Extern, InstancePre, Linker, Module, ResourceLimiter, Store, ValType};
 use wasmtime_wasi::pipe::AsyncWriteStream;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::{AsyncStdoutStream, DirPerms, FilePerms, WasiCtxBuilder};
@@ -84,12 +82,7 @@ pub(crate) struct StoreLimitsData {
 }
 
 impl<N: NatsBroker + Send + Sync> ResourceLimiter for WasmStoreData<N> {
-    fn memory_growing(
-        &mut self,
-        _current: usize,
-        desired: usize,
-        _maximum: Option<usize>,
-    ) -> anyhow::Result<bool> {
+    fn memory_growing(&mut self, _current: usize, desired: usize, _maximum: Option<usize>) -> anyhow::Result<bool> {
         if let Some(limit) = self.limits.memory_limit {
             if desired > limit {
                 return Ok(false);
@@ -98,12 +91,7 @@ impl<N: NatsBroker + Send + Sync> ResourceLimiter for WasmStoreData<N> {
         Ok(true)
     }
 
-    fn table_growing(
-        &mut self,
-        _current: usize,
-        _desired: usize,
-        _maximum: Option<usize>,
-    ) -> anyhow::Result<bool> {
+    fn table_growing(&mut self, _current: usize, _desired: usize, _maximum: Option<usize>) -> anyhow::Result<bool> {
         Ok(true)
     }
 }
@@ -191,11 +179,7 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
     linker.func_new_async(
         "trogon_v1",
         "log",
-        wasmtime::FuncType::new(
-            engine,
-            [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-            [],
-        ),
+        wasmtime::FuncType::new(engine, [ValType::I32, ValType::I32, ValType::I32, ValType::I32], []),
         |mut caller: Caller<'_, WasmStoreData<N>>, params, _results| {
             let level_ptr = params[0].unwrap_i32() as usize;
             let level_len = params[1].unwrap_i32() as usize;
@@ -211,23 +195,22 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                     .host_calls_total
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e {
-                        Some(m)
-                    } else {
-                        None
-                    }
-                }) {
-                    Some(m) => m,
-                    None => return Ok(()),
-                };
+                let mem =
+                    match caller.get_export("memory").and_then(
+                        |e| {
+                            if let Extern::Memory(m) = e {
+                                Some(m)
+                            } else {
+                                None
+                            }
+                        },
+                    ) {
+                        Some(m) => m,
+                        None => return Ok(()),
+                    };
                 let data = mem.data(&caller);
-                let level = read_str(data, level_ptr, level_len)
-                    .unwrap_or("info")
-                    .to_owned();
-                let msg = read_str(data, msg_ptr, msg_len)
-                    .unwrap_or("(invalid utf8)")
-                    .to_owned();
+                let level = read_str(data, level_ptr, level_len).unwrap_or("info").to_owned();
+                let msg = read_str(data, msg_ptr, msg_len).unwrap_or("(invalid utf8)").to_owned();
                 let session_id = caller.data().session_id.clone();
                 let _ = data; // release borrow before logging
                 tracing::info!(
@@ -266,19 +249,22 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                     .host_calls_total
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e {
-                        Some(m)
-                    } else {
-                        None
-                    }
-                }) {
-                    Some(m) => m,
-                    None => {
-                        results[0] = wasmtime::Val::I32(-1);
-                        return Ok(());
-                    }
-                };
+                let mem =
+                    match caller.get_export("memory").and_then(
+                        |e| {
+                            if let Extern::Memory(m) = e {
+                                Some(m)
+                            } else {
+                                None
+                            }
+                        },
+                    ) {
+                        Some(m) => m,
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
+                    };
                 let data = mem.data(&caller);
                 let subject = match read_str(data, subj_ptr, subj_len) {
                     Some(s) => s.to_owned(),
@@ -300,8 +286,7 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                     None => {
                         results[0] = wasmtime::Val::I32(-1);
                     }
-                    Some(nc) => match NatsBroker::publish(&nc, subject.into(), payload_bytes).await
-                    {
+                    Some(nc) => match NatsBroker::publish(&nc, subject.into(), payload_bytes).await {
                         Ok(_) => {
                             results[0] = wasmtime::Val::I32(0);
                         }
@@ -354,19 +339,22 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                     .host_calls_total
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e {
-                        Some(m)
-                    } else {
-                        None
-                    }
-                }) {
-                    Some(m) => m,
-                    None => {
-                        results[0] = wasmtime::Val::I32(-1);
-                        return Ok(());
-                    }
-                };
+                let mem =
+                    match caller.get_export("memory").and_then(
+                        |e| {
+                            if let Extern::Memory(m) = e {
+                                Some(m)
+                            } else {
+                                None
+                            }
+                        },
+                    ) {
+                        Some(m) => m,
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
+                    };
 
                 // Read subject and payload BEFORE any await.
                 let (subject, payload) = {
@@ -401,12 +389,7 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                 } else {
                     std::time::Duration::from_millis(timeout_ms as u64)
                 };
-                let response = match tokio::time::timeout(
-                    timeout,
-                    NatsBroker::request(&nats, subject, payload),
-                )
-                .await
-                {
+                let response = match tokio::time::timeout(timeout, NatsBroker::request(&nats, subject, payload)).await {
                     Ok(Ok(msg)) => msg.payload,
                     _ => {
                         results[0] = wasmtime::Val::I32(-1);
@@ -459,19 +442,22 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                     return Ok(());
                 }
 
-                let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e {
-                        Some(m)
-                    } else {
-                        None
-                    }
-                }) {
-                    Some(m) => m,
-                    None => {
-                        results[0] = wasmtime::Val::I32(-1);
-                        return Ok(());
-                    }
-                };
+                let mem =
+                    match caller.get_export("memory").and_then(
+                        |e| {
+                            if let Extern::Memory(m) = e {
+                                Some(m)
+                            } else {
+                                None
+                            }
+                        },
+                    ) {
+                        Some(m) => m,
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
+                    };
 
                 let subject = {
                     let data = mem.data(&caller);
@@ -591,19 +577,22 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                 let subj_bytes = msg.subject.as_str().as_bytes().to_vec();
                 let payload_bytes = msg.payload.clone();
 
-                let mem = match caller.get_export("memory").and_then(|e| {
-                    if let Extern::Memory(m) = e {
-                        Some(m)
-                    } else {
-                        None
-                    }
-                }) {
-                    Some(m) => m,
-                    None => {
-                        results[0] = wasmtime::Val::I32(-1);
-                        return Ok(());
-                    }
-                };
+                let mem =
+                    match caller.get_export("memory").and_then(
+                        |e| {
+                            if let Extern::Memory(m) = e {
+                                Some(m)
+                            } else {
+                                None
+                            }
+                        },
+                    ) {
+                        Some(m) => m,
+                        None => {
+                            results[0] = wasmtime::Val::I32(-1);
+                            return Ok(());
+                        }
+                    };
 
                 let subj_to_write = subj_bytes.len().min(out_subj_max);
                 let payload_to_write = payload_bytes.len().min(out_payload_max);
@@ -625,10 +614,8 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                 }
 
                 mem_data[out_subj_ptr..subj_end].copy_from_slice(&subj_bytes[..subj_to_write]);
-                mem_data[out_payload_ptr..payload_end]
-                    .copy_from_slice(&payload_bytes[..payload_to_write]);
-                mem_data[out_subj_len_ptr..subj_len_end]
-                    .copy_from_slice(&(subj_to_write as i32).to_le_bytes());
+                mem_data[out_payload_ptr..payload_end].copy_from_slice(&payload_bytes[..payload_to_write]);
+                mem_data[out_subj_len_ptr..subj_len_end].copy_from_slice(&(subj_to_write as i32).to_le_bytes());
                 mem_data[out_payload_len_ptr..payload_len_end]
                     .copy_from_slice(&(payload_to_write as i32).to_le_bytes());
 
@@ -825,11 +812,7 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
 /// Cache fingerprint combining crate version and wasmtime version.
 /// The wasmtime version is injected at build time from Cargo.lock by build.rs,
 /// so it updates automatically when the dependency is bumped.
-pub(crate) const CACHE_FINGERPRINT: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    "+wasmtime-",
-    env!("WASMTIME_VERSION")
-);
+pub(crate) const CACHE_FINGERPRINT: &str = concat!(env!("CARGO_PKG_VERSION"), "+wasmtime-", env!("WASMTIME_VERSION"));
 
 /// Maximum number of compiled modules kept in the per-process in-memory cache.
 const MAX_CACHED_MODULES: usize = 64;
@@ -850,11 +833,7 @@ pub(crate) fn cache_key(path: &std::path::Path) -> String {
 }
 
 /// Tuple stored in the in-memory module cache: `(instance_pre, source_mtime, last_accessed)`.
-pub(crate) type CachedModuleEntry<N> = (
-    InstancePre<WasmStoreData<N>>,
-    std::time::SystemTime,
-    std::time::Instant,
-);
+pub(crate) type CachedModuleEntry<N> = (InstancePre<WasmStoreData<N>>, std::time::SystemTime, std::time::Instant);
 
 /// Production `WasmExecutor` implementation backed by a real `wasmtime::Engine`.
 ///
@@ -924,9 +903,7 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecu
         &self,
         wasm_path: &std::path::Path,
     ) -> Result<InstancePre<WasmStoreData<N>>, anyhow::Error> {
-        let abs_path = wasm_path
-            .canonicalize()
-            .unwrap_or_else(|_| wasm_path.to_path_buf());
+        let abs_path = wasm_path.canonicalize().unwrap_or_else(|_| wasm_path.to_path_buf());
 
         // Check file size limit and mtime via blocking I/O.
         let max_size = self.wasm_max_module_size_bytes;
@@ -952,9 +929,7 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecu
             if let Some((pre, mtime, last_accessed)) = cached.get_mut(&abs_path) {
                 if *mtime == current_mtime {
                     *last_accessed = self.clock.now();
-                    METRICS
-                        .cache_hits
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    METRICS.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Ok(pre.clone());
                 }
             }
@@ -986,13 +961,10 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecu
                             if stored_nanos != 0 && stored_nanos == current_nanos {
                                 // SAFETY: the engine config is always identical for cached
                                 // modules — same wasmtime::Config, same Cranelift settings.
-                                let cached_module =
-                                    unsafe { Module::deserialize_file(&engine, &cwasm_path) };
+                                let cached_module = unsafe { Module::deserialize_file(&engine, &cwasm_path) };
                                 match cached_module {
                                     Ok(m) => {
-                                        METRICS
-                                            .cache_hits
-                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        METRICS.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                         return Ok(m);
                                     }
                                     Err(e) => {
@@ -1017,9 +989,7 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecu
             }
 
             // Compile fresh from source (cache miss).
-            METRICS
-                .cache_misses
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            METRICS.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let m = Module::from_file(&engine, &abs_path_b)?;
 
             // Write on-disk cache if configured (fire-and-forget; errors are non-fatal).
@@ -1067,9 +1037,7 @@ impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> RealWasmExecu
     }
 }
 
-impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> WasmExecutor<N>
-    for RealWasmExecutor<N, CL, SF>
-{
+impl<N: NatsBroker + Send + Sync + 'static, CL: Clock, SF: SyncFs> WasmExecutor<N> for RealWasmExecutor<N, CL, SF> {
     fn validate(&self, wasm_path: &std::path::Path) -> Result<(), anyhow::Error> {
         let meta = self
             .sync_fs
@@ -1207,11 +1175,7 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
 
     // Enable fuel consumption. 0 means unlimited (use u64::MAX); otherwise use the
     // configured limit. The engine has consume_fuel(true) enabled via Config.
-    let effective_fuel = if fuel_limit == 0 {
-        u64::MAX
-    } else {
-        fuel_limit
-    };
+    let effective_fuel = if fuel_limit == 0 { u64::MAX } else { fuel_limit };
     store.set_fuel(effective_fuel)?;
     // Yield to the async executor every 10 000 fuel units so that wall-clock
     // timeouts (tokio::time::timeout wrapping call_async) can fire even for
@@ -1227,9 +1191,7 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
         loop {
             match stdout_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    crate::terminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n])
-                }
+                Ok(n) => crate::terminal::append_output(&buf_out, &trunc_out, limit_out, &chunk[..n]),
             }
         }
     });
@@ -1241,9 +1203,7 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
         loop {
             match stderr_reader.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    crate::terminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n])
-                }
+                Ok(n) => crate::terminal::append_output(&buf_err, &trunc_err, limit_out, &chunk[..n]),
             }
         }
     });
@@ -1252,12 +1212,7 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
     let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
 
     let call_result = if let Some(secs) = timeout_secs {
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(secs),
-            start.call_async(&mut store, ()),
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(secs), start.call_async(&mut store, ())).await {
             Ok(r) => r,
             Err(_elapsed) => {
                 // Timeout — drop store to flush writers, then drain reader tasks.
@@ -1282,9 +1237,7 @@ pub(crate) async fn run_module_compiled<N: NatsBroker + Send + Sync + 'static>(
             // proc_exit raises I32Exit. The top-level anyhow::Error wraps it
             // (possibly with a WasmBacktrace context), so downcast_ref on the
             // anyhow::Error directly peels through context layers correctly.
-            let exit_code = e
-                .downcast_ref::<wasmtime_wasi::I32Exit>()
-                .map(|x| x.0 as u32);
+            let exit_code = e.downcast_ref::<wasmtime_wasi::I32Exit>().map(|x| x.0 as u32);
             match exit_code {
                 Some(code) => TerminalExitStatus::new().exit_code(Some(code)),
                 None => TerminalExitStatus::new().signal(Some(format!("trap: {e}"))),
@@ -1314,10 +1267,7 @@ mod tests {
     impl NatsBroker for TestNats {
         type Sub = futures::stream::Empty<async_nats::Message>;
 
-        async fn subscribe(
-            &self,
-            _subject: &str,
-        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+        async fn subscribe(&self, _subject: &str) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
             unimplemented!()
         }
 
@@ -1348,15 +1298,15 @@ mod tests {
 
     fn store_data(limit: Option<usize>) -> WasmStoreData<TestNats> {
         WasmStoreData {
-            wasi:                  WasiCtxBuilder::new().build_p1(),
-            limits:                StoreLimitsData { memory_limit: limit },
-            nats:                  None,
-            session_id:            "test".into(),
+            wasi: WasiCtxBuilder::new().build_p1(),
+            limits: StoreLimitsData { memory_limit: limit },
+            nats: None,
+            session_id: "test".into(),
             auto_allow_permissions: false,
-            host_call_budget:      1000,
-            subscriptions:         HashMap::new(),
-            next_sub_id:           0,
-            acp_prefix:            "acp".into(),
+            host_call_budget: 1000,
+            subscriptions: HashMap::new(),
+            next_sub_id: 0,
+            acp_prefix: "acp".into(),
         }
     }
 

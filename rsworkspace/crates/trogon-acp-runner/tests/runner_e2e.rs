@@ -15,13 +15,15 @@ mod agent_subjects {
         acp_nats::nats::session::agent::PromptSubject::new(
             &AcpPrefix::new(prefix).expect("valid prefix"),
             &AcpSessionId::new(session_id).expect("valid session_id"),
-        ).to_string()
+        )
+        .to_string()
     }
     pub fn session_cancel(prefix: &str, session_id: &str) -> String {
         acp_nats::nats::session::agent::CancelSubject::new(
             &AcpPrefix::new(prefix).expect("valid prefix"),
             &AcpSessionId::new(session_id).expect("valid session_id"),
-        ).to_string()
+        )
+        .to_string()
     }
 }
 
@@ -31,15 +33,16 @@ mod client_subjects {
         acp_nats::nats::session::client::SessionUpdateSubject::new(
             &AcpPrefix::new(prefix).expect("valid prefix"),
             &AcpSessionId::new(session_id).expect("valid session_id"),
-        ).to_string()
+        )
+        .to_string()
     }
 }
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, ListSessionsRequest, ListSessionsResponse, PromptRequest, SetSessionConfigOptionRequest, SessionConfigOptionValue, SetSessionConfigOptionResponse, TextContent, TerminalId};
-use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
-use trogon_runner_tools::nats_todo_tool::NatsTodoTool;
-use trogon_runner_tools::spawn_agent_tool::SpawnAgentTool;
-use trogon_runner_tools::session_store::TodoItem;
+use agent_client_protocol::{
+    ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, ListSessionsRequest,
+    ListSessionsResponse, PromptRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, TerminalId, TextContent,
+};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -49,11 +52,15 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::{RwLock, mpsc};
 use trogon_acp_runner::{
-    ElicitationReq, ElicitationTx, GatewayConfig, NatsSessionNotifier, NatsSessionStore,
-    PermissionReq, SessionState, SessionStore, StoredMcpServer, TrogonAgent,
+    ElicitationReq, ElicitationTx, GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionState,
+    SessionStore, StoredMcpServer, TrogonAgent,
 };
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
+use trogon_runner_tools::nats_todo_tool::NatsTodoTool;
+use trogon_runner_tools::session_store::TodoItem;
+use trogon_runner_tools::spawn_agent_tool::SpawnAgentTool;
+use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -394,29 +401,44 @@ fn sse_end_turn_stream_with_tokens(
     cache_read_tokens: u64,
 ) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": 0,
-                "cache_creation_input_tokens": cache_creation_tokens,
-                "cache_read_input_tokens": cache_read_tokens
-            }}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": output_tokens}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": cache_creation_tokens,
+                    "cache_read_input_tokens": cache_read_tokens
+                }}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": output_tokens}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -424,25 +446,40 @@ fn sse_end_turn_stream_with_tokens(
 
 fn sse_end_turn_stream(text: &str) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {"type": "text_delta", "text": text}
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 8}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 8}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -450,28 +487,43 @@ fn sse_end_turn_stream(text: &str) -> String {
 
 fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value) -> String {
     [
-        sse_event("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
-                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        sse_event("content_block_start", serde_json::json!({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "tool_use", "id": tool_id, "name": tool_name}
-        })),
-        sse_event("content_block_delta", serde_json::json!({
-            "type": "content_block_delta", "index": 0,
-            "delta": {
-                "type": "input_json_delta",
-                "partial_json": serde_json::to_string(&input).unwrap()
-            }
-        })),
-        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
-        sse_event("message_delta", serde_json::json!({
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use"},
-            "usage": {"output_tokens": 5}
-        })),
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": tool_id, "name": tool_name}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": serde_json::to_string(&input).unwrap()
+                }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
@@ -479,42 +531,78 @@ fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value)
 
 fn end_turn_body(text: &str) -> String {
     sse_body(&[
-        ("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
-        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": text}})),
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": text}}),
+        ),
         ("content_block_stop", serde_json::json!({"index": 0})),
-        ("message_delta", serde_json::json!({"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5}})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5}}),
+        ),
         ("message_stop", serde_json::json!({"type": "message_stop"})),
     ])
 }
 
 fn tool_use_body() -> String {
     sse_body(&[
-        ("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}})),
-        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+        ),
         ("content_block_stop", serde_json::json!({"index": 0})),
-        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
         ("message_stop", serde_json::json!({"type": "message_stop"})),
     ])
 }
 
 fn max_tokens_body() -> String {
     sse_body(&[
-        ("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
-        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": "partial"}})),
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": "partial"}}),
+        ),
         ("content_block_stop", serde_json::json!({"index": 0})),
-        ("message_delta", serde_json::json!({"delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 4096}})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 4096}}),
+        ),
         ("message_stop", serde_json::json!({"type": "message_stop"})),
     ])
 }
@@ -567,15 +655,7 @@ async fn agent_new_creates_session_bucket() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let _store = start_agent(
-                nats,
-                &js,
-                "test-new",
-                agent,
-                None,
-                Arc::new(RwLock::new(None)),
-            )
-            .await;
+            let _store = start_agent(nats, &js, "test-new", agent, None, Arc::new(RwLock::new(None))).await;
 
             // Opening the store again must be idempotent (bucket already exists).
             NatsSessionStore::open(&js)
@@ -601,24 +681,14 @@ async fn runner_publishes_error_event_when_anthropic_unreachable() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            start_agent(
-                nats.clone(),
-                &js,
-                prefix,
-                agent,
-                None,
-                Arc::new(RwLock::new(None)),
-            )
-            .await;
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "hello").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
 
             // The agent retries send errors MAX_RETRIES (4) times with a 5s
             // backoff before surfacing the error, so the response only arrives
             // after ~20s — wait longer than that.
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
 
             // Must be either a PromptResponse (has "stopReason") or an ACP error (has "code").
             assert!(
@@ -661,16 +731,12 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "hello").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert!(
-                notifs
-                    .iter()
-                    .any(|n| n.to_string().contains("Great response!")),
+                notifs.iter().any(|n| n.to_string().contains("Great response!")),
                 "expected notification containing 'Great response!'"
             );
             assert_eq!(
@@ -712,8 +778,7 @@ async fn runner_persists_session_after_end_turn() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "persist me").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "persist me").await;
 
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
@@ -775,11 +840,9 @@ async fn runner_skips_invalid_prompt_payload() {
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             // Now send a valid prompt — agent must still handle it.
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "valid").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "valid").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert!(
                 resp.get("stopReason").is_some(),
@@ -820,11 +883,9 @@ async fn runner_publishes_done_max_tokens() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "fill the context").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "fill the context").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -858,21 +919,11 @@ async fn runner_publishes_done_max_turn_requests() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            start_agent(
-                nats.clone(),
-                &js,
-                prefix,
-                agent,
-                None,
-                Arc::new(RwLock::new(None)),
-            )
-            .await;
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "loop forever").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "loop forever").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -892,9 +943,7 @@ async fn runner_publishes_tool_call_events() {
     let server = MockServer::start();
     // Second call (has "tool_result" in body) → end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"));
@@ -923,16 +972,12 @@ async fn runner_publishes_tool_call_events() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert!(
-                notifs
-                    .iter()
-                    .any(|n| n.to_string().contains("unknown_tool")),
+                notifs.iter().any(|n| n.to_string().contains("unknown_tool")),
                 "expected notification containing 'unknown_tool'"
             );
             assert!(
@@ -962,9 +1007,7 @@ async fn runner_tool_call_allowed_via_permission_channel() {
     let server = MockServer::start();
     // Second call (has tool_result) → end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after approved tool"));
@@ -1002,11 +1045,9 @@ async fn runner_tool_call_allowed_via_permission_channel() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // ToolCall notification must appear — permission was checked and approved
             assert!(
@@ -1032,9 +1073,7 @@ async fn runner_tool_call_denied_via_permission_channel() {
     let server = MockServer::start();
     // Second call (has tool_result — the denial) → end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
@@ -1072,11 +1111,9 @@ async fn runner_tool_call_denied_via_permission_channel() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // The agent sends a denial tool-result and Anthropic returns end_turn
             assert_eq!(
@@ -1141,15 +1178,12 @@ async fn runner_static_deny_rule_blocks_tool_without_consulting_permission_chann
 
             // Pre-populate the session with a deny rule for .env paths.
             let mut state = store.load(session_id).await.unwrap();
-            state.permission_rules_text =
-                Some("## Permissions\ndeny_paths: .env\n".to_string());
+            state.permission_rules_text = Some("## Permissions\ndeny_paths: .env\n".to_string());
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "write to .env").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write to .env").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1182,9 +1216,7 @@ async fn runner_static_allow_rule_auto_approves_tool_without_permission_channel(
     let server = MockServer::start();
     // Second call: tool_result that must NOT contain "Permission denied" → end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("Got the file"));
@@ -1221,15 +1253,12 @@ async fn runner_static_allow_rule_auto_approves_tool_without_permission_channel(
 
             // Pre-populate the session with an allow rule for all paths.
             let mut state = store.load(session_id).await.unwrap();
-            state.permission_rules_text =
-                Some("## Permissions\nallow_paths: **\n".to_string());
+            state.permission_rules_text = Some("## Permissions\nallow_paths: **\n".to_string());
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "read a file").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "read a file").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1280,9 +1309,9 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
     // tools/call — returns text content
     mcp_server.mock(|when, then| {
         when.method(POST).body_contains("\"tools/call\"");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(r#"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"mcp result"}],"isError":false}}"#);
+        then.status(200).header("Content-Type", "application/json").body(
+            r#"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"mcp result"}],"isError":false}}"#,
+        );
     });
 
     // ── Anthropic mock ────────────────────────────────────────────────────────
@@ -1290,9 +1319,7 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
 
     // Second call (has tool_result) → end_turn
     anthropic.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done with MCP result"));
@@ -1347,17 +1374,13 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "call the MCP tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "call the MCP tool").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // The MCP tool must be dispatched (prefixed name = "my_srv__my_tool")
             assert!(
-                notifs
-                    .iter()
-                    .any(|n| n.to_string().contains("my_srv__my_tool")),
+                notifs.iter().any(|n| n.to_string().contains("my_srv__my_tool")),
                 "expected notification containing 'my_srv__my_tool'; notifs: {notifs:?}"
             );
             assert_eq!(
@@ -1406,15 +1429,13 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "do something slow").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "do something slow").await;
 
             // Give the agent a moment to start processing, then cancel
             tokio::time::sleep(Duration::from_millis(300)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1467,11 +1488,9 @@ async fn runner_uses_gateway_config_base_url_and_token() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "hello via gateway").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello via gateway").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
 
             // The notification must contain the response from the gateway mock
             assert!(
@@ -1547,8 +1566,7 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
 
             // Wait for Done on each subscription in order.
             for (i, mut resp_sub) in resp_subs.into_iter().enumerate() {
-                let (_notifs, resp) =
-                    collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
+                let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
                 assert!(
                     resp.get("stopReason").is_some(),
                     "expected stopReason in response for prompt #{i}; got: {resp}"
@@ -1590,21 +1608,17 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
             .await;
 
             // Send both prompts to different sessions simultaneously.
-            let (mut notif_a, mut resp_a) =
-                send_text(&nats, prefix, session_a, "hello session A").await;
-            let (mut notif_b, mut resp_b) =
-                send_text(&nats, prefix, session_b, "hello session B").await;
+            let (mut notif_a, mut resp_a) = send_text(&nats, prefix, session_a, "hello session A").await;
+            let (mut notif_b, mut resp_b) = send_text(&nats, prefix, session_b, "hello session B").await;
 
             // Both sessions must receive a terminal response.
-            let (_notifs_a, resp_a_val) =
-                collect_notifs_and_response(&mut notif_a, &mut resp_a, 15).await;
+            let (_notifs_a, resp_a_val) = collect_notifs_and_response(&mut notif_a, &mut resp_a, 15).await;
             assert!(
                 resp_a_val.get("stopReason").is_some(),
                 "expected stopReason for session_a; got: {resp_a_val}"
             );
 
-            let (_notifs_b, resp_b_val) =
-                collect_notifs_and_response(&mut notif_b, &mut resp_b, 15).await;
+            let (_notifs_b, resp_b_val) = collect_notifs_and_response(&mut notif_b, &mut resp_b, 15).await;
             assert!(
                 resp_b_val.get("stopReason").is_some(),
                 "expected stopReason for session_b; got: {resp_b_val}"
@@ -1652,11 +1666,9 @@ async fn runner_processes_prompt_with_context_content_block() {
                     "<context ref=\"file:///project/README.md\">\n# Project README\nThis is the content.\n</context>",
                 )),
             ];
-            let (mut notif_sub, mut resp_sub) =
-                subscribe_and_send(&nats, prefix, session_id, blocks).await;
+            let (mut notif_sub, mut resp_sub) = subscribe_and_send(&nats, prefix, session_id, blocks).await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1705,11 +1717,9 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
                     "image/png",
                 )),
             ];
-            let (mut notif_sub, mut resp_sub) =
-                subscribe_and_send(&nats, prefix, session_id, blocks).await;
+            let (mut notif_sub, mut resp_sub) = subscribe_and_send(&nats, prefix, session_id, blocks).await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -1730,9 +1740,7 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
     let server = MockServer::start();
     // Second call (has "Second question" in body) → end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("Second question");
+        when.method(POST).path("/messages").body_contains("Second question");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Answer to second question"));
@@ -1762,10 +1770,8 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             .await;
 
             // First prompt.
-            let (mut notif_sub_1, mut resp_sub_1) =
-                send_text(&nats, prefix, session_id, "First question").await;
-            let (_notifs_1, resp_1) =
-                collect_notifs_and_response(&mut notif_sub_1, &mut resp_sub_1, 15).await;
+            let (mut notif_sub_1, mut resp_sub_1) = send_text(&nats, prefix, session_id, "First question").await;
+            let (_notifs_1, resp_1) = collect_notifs_and_response(&mut notif_sub_1, &mut resp_sub_1, 15).await;
             assert_eq!(
                 resp_1["stopReason"].as_str(),
                 Some("end_turn"),
@@ -1776,10 +1782,8 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             // Second prompt — history should now include first exchange.
-            let (mut notif_sub_2, mut resp_sub_2) =
-                send_text(&nats, prefix, session_id, "Second question").await;
-            let (_notifs_2, resp_2) =
-                collect_notifs_and_response(&mut notif_sub_2, &mut resp_sub_2, 15).await;
+            let (mut notif_sub_2, mut resp_sub_2) = send_text(&nats, prefix, session_id, "Second question").await;
+            let (_notifs_2, resp_2) = collect_notifs_and_response(&mut notif_sub_2, &mut resp_sub_2, 15).await;
             assert_eq!(
                 resp_2["stopReason"].as_str(),
                 Some("end_turn"),
@@ -1802,23 +1806,33 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
     let server = MockServer::start();
     // Second call (tool_result) → end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done"));
     });
     // First call → tool_use with parent_tool_use_id set.
     let nested_tool_body = sse_body(&[
-        ("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_child_001", "name": "unknown_tool", "parent_tool_use_id": "tu_parent_001"}})),
-        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_child_001", "name": "unknown_tool", "parent_tool_use_id": "tu_parent_001"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+        ),
         ("content_block_stop", serde_json::json!({"index": 0})),
-        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
         ("message_stop", serde_json::json!({"type": "message_stop"})),
     ]);
     server.mock(|when, then| {
@@ -1844,23 +1858,17 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "run nested tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run nested tool").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // Find the notification for "unknown_tool" and verify parent_tool_use_id is present.
             assert!(
-                notifs
-                    .iter()
-                    .any(|n| n.to_string().contains("unknown_tool")),
+                notifs.iter().any(|n| n.to_string().contains("unknown_tool")),
                 "expected notification containing 'unknown_tool'; notifs: {notifs:?}"
             );
             assert!(
-                notifs
-                    .iter()
-                    .any(|n| n.to_string().contains("tu_parent_001")),
+                notifs.iter().any(|n| n.to_string().contains("tu_parent_001")),
                 "expected notification containing 'tu_parent_001'; notifs: {notifs:?}"
             );
             assert_eq!(
@@ -1892,9 +1900,7 @@ async fn runner_cancel_during_tool_execution_completes() {
 
     // Second call (tool_result arrives) → small delay then end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"))
@@ -1926,15 +1932,13 @@ async fn runner_cancel_during_tool_execution_completes() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
             // Wait for the tool call to start, then send cancel
             tokio::time::sleep(Duration::from_millis(50)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // Should complete with some stop_reason (cancelled or end_turn depending on timing)
             assert!(
@@ -1976,11 +1980,9 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "Hello").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "Hello").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2054,10 +2056,7 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
     // Spawn a mock compactor that always replies with a compacted conversation.
     let nats_for_compactor = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_for_compactor
-            .subscribe("trogon.compactor.compact")
-            .await
-            .unwrap();
+        let mut sub = nats_for_compactor.subscribe("trogon.compactor.compact").await.unwrap();
         while let Some(msg) = sub.next().await {
             let Some(reply) = msg.reply else { continue };
             let compacted = serde_json::json!({
@@ -2095,13 +2094,7 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let store = start_agent_with_compactor(
-                nats.clone(),
-                &js,
-                prefix,
-                make_agent(&server.base_url()),
-            )
-            .await;
+            let store = start_agent_with_compactor(nats.clone(), &js, prefix, make_agent(&server.base_url())).await;
 
             // Set token_budget = 1 so any non-empty message triggers the 85% threshold.
             let seed_state = trogon_acp_runner::SessionState {
@@ -2110,11 +2103,9 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
             };
             store.save(session_id, &seed_state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "hello").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2154,10 +2145,7 @@ async fn runner_continues_working_after_auto_compact() {
 
     let nats_for_compactor = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_for_compactor
-            .subscribe("trogon.compactor.compact")
-            .await
-            .unwrap();
+        let mut sub = nats_for_compactor.subscribe("trogon.compactor.compact").await.unwrap();
         while let Some(msg) = sub.next().await {
             let Some(reply) = msg.reply else { continue };
             let compacted = serde_json::json!({
@@ -2189,13 +2177,7 @@ async fn runner_continues_working_after_auto_compact() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let store = start_agent_with_compactor(
-                nats.clone(),
-                &js,
-                prefix,
-                make_agent(&server.base_url()),
-            )
-            .await;
+            let store = start_agent_with_compactor(nats.clone(), &js, prefix, make_agent(&server.base_url())).await;
 
             let seed_state = trogon_acp_runner::SessionState {
                 token_budget: 1,
@@ -2204,10 +2186,8 @@ async fn runner_continues_working_after_auto_compact() {
             store.save(session_id, &seed_state).await.unwrap();
 
             // ── Prompt 1 → compaction fires → end_turn ────────────────────────
-            let (mut notif_sub1, mut resp_sub1) =
-                send_text(&nats, prefix, session_id, "first message").await;
-            let (_notifs1, resp1) =
-                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            let (mut notif_sub1, mut resp_sub1) = send_text(&nats, prefix, session_id, "first message").await;
+            let (_notifs1, resp1) = collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
             assert_eq!(
                 resp1["stopReason"].as_str(),
                 Some("end_turn"),
@@ -2217,10 +2197,8 @@ async fn runner_continues_working_after_auto_compact() {
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             // ── Prompt 2 → runner must still work after compact ────────────────
-            let (mut notif_sub2, mut resp_sub2) =
-                send_text(&nats, prefix, session_id, "second message").await;
-            let (_notifs2, resp2) =
-                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "second message").await;
+            let (_notifs2, resp2) = collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
             assert_eq!(
                 resp2["stopReason"].as_str(),
                 Some("end_turn"),
@@ -2272,14 +2250,26 @@ async fn start_agent_with_elicitation(
 fn ask_user_tool_use_body(question: &str) -> String {
     let partial_json = serde_json::to_string(&serde_json::json!({"question": question})).unwrap();
     sse_body(&[
-        ("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_ask_001", "name": "ask_user"}})),
-        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json}})),
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_ask_001", "name": "ask_user"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json}}),
+        ),
         ("content_block_stop", serde_json::json!({"index": 0})),
-        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
         ("message_stop", serde_json::json!({"type": "message_stop"})),
     ])
 }
@@ -2300,9 +2290,7 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
     let server = MockServer::start();
     // Second call must contain the answer as a tool_result.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("the-user-answer");
+        when.method(POST).path("/messages").body_contains("the-user-answer");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Got the answer."));
@@ -2320,14 +2308,7 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            start_agent_with_elicitation(
-                nats.clone(),
-                &js,
-                prefix,
-                make_agent(&server.base_url()),
-                elic_tx,
-            )
-            .await;
+            start_agent_with_elicitation(nats.clone(), &js, prefix, make_agent(&server.base_url()), elic_tx).await;
 
             // Accept the elicitation with the hardcoded answer.
             tokio::spawn(async move {
@@ -2344,11 +2325,9 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "ask me something").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "ask me something").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2363,14 +2342,26 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
 
 fn workspace_tool_use_body() -> String {
     sse_body(&[
-        ("message_start", serde_json::json!({
-            "type": "message_start",
-            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
-        })),
-        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool"}})),
-        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"/workspace/foo.rs\"}"}})),
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"/workspace/foo.rs\"}"}}),
+        ),
         ("content_block_stop", serde_json::json!({"index": 0})),
-        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
         ("message_stop", serde_json::json!({"type": "message_stop"})),
     ])
 }
@@ -2386,9 +2377,7 @@ async fn runner_tool_policy_allow_bypasses_permission_channel() {
     let server = MockServer::start();
     // Second call (has tool_result) → end_turn
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after policy-allowed tool"));
@@ -2431,11 +2420,9 @@ async fn runner_tool_policy_allow_bypasses_permission_channel() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2463,9 +2450,7 @@ async fn runner_tool_policy_deny_bypasses_permission_channel() {
     let server = MockServer::start();
     // After denial, the tool result is sent back; Anthropic returns end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after policy-denied tool"));
@@ -2508,11 +2493,9 @@ async fn runner_tool_policy_deny_bypasses_permission_channel() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2593,11 +2576,9 @@ async fn runner_egress_deny_policy_skips_mcp_server_in_pipeline() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "hello").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2628,9 +2609,7 @@ async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
     let server = MockServer::start();
     // Second call (with tool_result) → end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"));
@@ -2668,11 +2647,9 @@ async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -2689,12 +2666,18 @@ async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
                 "audit_log must be non-empty after a tool call"
             );
             assert!(
-                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                state
+                    .audit_log
+                    .iter()
+                    .any(|e| e.outcome == AuditOutcome::RequiredApproval),
                 "expected RequiredApproval entry in audit_log; got: {:?}",
                 state.audit_log
             );
             assert!(
-                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::ApprovedByUser),
+                state
+                    .audit_log
+                    .iter()
+                    .any(|e| e.outcome == AuditOutcome::ApprovedByUser),
                 "expected ApprovedByUser entry in audit_log; got: {:?}",
                 state.audit_log
             );
@@ -2712,9 +2695,7 @@ async fn runner_audit_log_records_allowed_for_allow_policy() {
 
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after allowed tool"));
@@ -2756,12 +2737,14 @@ async fn runner_audit_log_records_allowed_for_allow_policy() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
-            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -2785,9 +2768,7 @@ async fn runner_audit_log_records_denied_for_deny_policy() {
 
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
@@ -2828,12 +2809,14 @@ async fn runner_audit_log_records_denied_for_deny_policy() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
-            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -2859,9 +2842,7 @@ async fn runner_audit_log_records_denied_by_user_for_channel_denial() {
     let server = MockServer::start();
     // After denial, agent sends a tool_result error; Anthropic returns end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
@@ -2898,18 +2879,23 @@ async fn runner_audit_log_records_denied_by_user_for_channel_denial() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "use a tool").await;
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
-            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             let state = store.load(session_id).await.unwrap();
             assert!(
-                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                state
+                    .audit_log
+                    .iter()
+                    .any(|e| e.outcome == AuditOutcome::RequiredApproval),
                 "expected RequiredApproval entry in audit_log; got: {:?}",
                 state.audit_log
             );
@@ -2937,9 +2923,7 @@ async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
     let server = MockServer::start();
     // Any second call (tool_result with declined message) → end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Understood, question was declined."));
@@ -2957,14 +2941,7 @@ async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            start_agent_with_elicitation(
-                nats.clone(),
-                &js,
-                prefix,
-                make_agent(&server.base_url()),
-                elic_tx,
-            )
-            .await;
+            start_agent_with_elicitation(nats.clone(), &js, prefix, make_agent(&server.base_url()), elic_tx).await;
 
             // Cancel every elicitation request.
             tokio::spawn(async move {
@@ -2974,11 +2951,9 @@ async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "ask me something").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "ask me something").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3013,9 +2988,7 @@ async fn runner_dispatches_real_read_file_tool_through_nats() {
 
     // Second call: tool_result sent back to Anthropic → end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("file content received"));
@@ -3046,21 +3019,11 @@ async fn runner_dispatches_real_read_file_tool_through_nats() {
                 http_client: reqwest::Client::new(),
             });
 
-            start_agent(
-                nats.clone(),
-                &js,
-                prefix,
-                agent,
-                None,
-                Arc::new(RwLock::new(None)),
-            )
-            .await;
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "read the file").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "read the file").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3097,9 +3060,7 @@ async fn runner_bash_tool_persists_terminal_id_in_nats_kv() {
 
     // Second call: tool_result containing bash output → end_turn.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("tool_result");
+        when.method(POST).path("/messages").body_contains("tool_result");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_end_turn_stream("bash completed"));
@@ -3120,20 +3081,11 @@ async fn runner_bash_tool_persists_terminal_id_in_nats_kv() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let store = start_agent_with_bash_tool(
-                nats.clone(),
-                &js,
-                prefix,
-                session_id,
-                &server.base_url(),
-            )
-            .await;
+            let store = start_agent_with_bash_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "run bash").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run bash").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3186,11 +3138,9 @@ async fn runner_todo_write_tool_returns_ok_and_completes() {
         .run_until(async {
             start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "add a todo").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "add a todo").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3235,9 +3185,7 @@ async fn runner_todo_read_returns_pre_populated_active_todos() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let store =
-                start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url())
-                    .await;
+            let store = start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
 
             let mut state = store.load(session_id).await.unwrap();
             state.todos.push(TodoItem {
@@ -3247,11 +3195,9 @@ async fn runner_todo_read_returns_pre_populated_active_todos() {
             });
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "list todos").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "list todos").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3342,11 +3288,9 @@ async fn runner_spawn_agent_sends_nats_request_and_returns_response() {
             tokio::task::spawn_local(io_task);
             tokio::time::sleep(Duration::from_millis(50)).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "spawn an agent").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "spawn an agent").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3411,8 +3355,8 @@ async fn runner_trogon_md_deny_path_blocks_tool_without_permission_channel() {
         .run_until(async {
             let mut agent = make_agent(&server.base_url());
             agent.tool_context = Arc::new(ToolContext {
-            web_search_api_key: None,
-            web_search_endpoint: None,
+                web_search_api_key: None,
+                web_search_endpoint: None,
                 proxy_url: "http://127.0.0.1:1".to_string(),
                 cwd: dir.path().to_string_lossy().into_owned(),
                 http_client: reqwest::Client::new(),
@@ -3433,11 +3377,9 @@ async fn runner_trogon_md_deny_path_blocks_tool_without_permission_channel() {
             state.cwd = dir.path().to_string_lossy().into_owned();
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "write secrets").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write secrets").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3504,15 +3446,12 @@ async fn runner_deny_commands_rule_blocks_bash_without_permission_channel() {
             .await;
 
             let mut state = store.load(session_id).await.unwrap();
-            state.permission_rules_text =
-                Some("## Permissions\ndeny_commands: rm\n".to_string());
+            state.permission_rules_text = Some("## Permissions\ndeny_commands: rm\n".to_string());
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "run rm").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run rm").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3543,13 +3482,7 @@ async fn runner_allow_commands_rule_auto_approves_bash_without_permission_channe
 
     let base = format!("{prefix}.session.{session_id}.client.terminal");
     let ext_base = format!("{prefix}.session.{session_id}.client.ext");
-    spawn_terminal_responders(
-        nats.clone(),
-        base,
-        ext_base,
-        terminal_id,
-        "hello-from-allow\n",
-    );
+    spawn_terminal_responders(nats.clone(), base, ext_base, terminal_id, "hello-from-allow\n");
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
@@ -3586,15 +3519,12 @@ async fn runner_allow_commands_rule_auto_approves_bash_without_permission_channe
             .await;
 
             let mut state = store.load(session_id).await.unwrap();
-            state.permission_rules_text =
-                Some("## Permissions\nallow_commands: echo\n".to_string());
+            state.permission_rules_text = Some("## Permissions\nallow_commands: echo\n".to_string());
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "echo something").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "echo something").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3625,12 +3555,9 @@ async fn runner_trogon_md_and_session_rules_merge_deny_beats_allow() {
     let (_c, nats, js) = start_nats().await;
 
     let dir = TempDir::new().unwrap();
-    tokio::fs::write(
-        dir.path().join("TROGON.md"),
-        "## Permissions\nallow_paths: src/**\n",
-    )
-    .await
-    .unwrap();
+    tokio::fs::write(dir.path().join("TROGON.md"), "## Permissions\nallow_paths: src/**\n")
+        .await
+        .unwrap();
 
     let prefix = "test-merge-rules";
     let session_id = "sess-merge-1";
@@ -3663,8 +3590,8 @@ async fn runner_trogon_md_and_session_rules_merge_deny_beats_allow() {
         .run_until(async {
             let mut agent = make_agent(&server.base_url());
             agent.tool_context = Arc::new(ToolContext {
-            web_search_api_key: None,
-            web_search_endpoint: None,
+                web_search_api_key: None,
+                web_search_endpoint: None,
                 proxy_url: "http://127.0.0.1:1".to_string(),
                 cwd: dir.path().to_string_lossy().into_owned(),
                 http_client: reqwest::Client::new(),
@@ -3681,15 +3608,12 @@ async fn runner_trogon_md_and_session_rules_merge_deny_beats_allow() {
             .await;
 
             let mut state = store.load(session_id).await.unwrap();
-            state.permission_rules_text =
-                Some("## Permissions\ndeny_paths: src/secret.rs\n".to_string());
+            state.permission_rules_text = Some("## Permissions\ndeny_paths: src/secret.rs\n".to_string());
             store.save(session_id, &state).await.unwrap();
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "write the secret file").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write the secret file").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3755,8 +3679,7 @@ async fn runner_no_matching_rule_falls_through_to_permission_channel() {
 
             // Rules only cover src/** — unmatched_file.txt falls through to the channel.
             let mut state = store.load(session_id).await.unwrap();
-            state.permission_rules_text =
-                Some("## Permissions\nallow_paths: src/**\n".to_string());
+            state.permission_rules_text = Some("## Permissions\nallow_paths: src/**\n".to_string());
             store.save(session_id, &state).await.unwrap();
 
             // Approve the interactive permission request from a background task.
@@ -3766,11 +3689,9 @@ async fn runner_no_matching_rule_falls_through_to_permission_channel() {
                 }
             });
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "write the file").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write the file").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3831,8 +3752,7 @@ async fn runner_config_permissions_persists_and_enforces_on_next_prompt() {
             .await;
 
             // Send the /config permissions ACP message via NATS request-reply.
-            let config_subject =
-                format!("{prefix}.session.{session_id}.agent.set_config_option");
+            let config_subject = format!("{prefix}.session.{session_id}.agent.set_config_option");
             let config_req = SetSessionConfigOptionRequest::new(
                 session_id,
                 "permissions",
@@ -3841,15 +3761,11 @@ async fn runner_config_permissions_persists_and_enforces_on_next_prompt() {
                 },
             );
             let resp_msg = nats
-                .request(
-                    config_subject,
-                    Bytes::from(serde_json::to_vec(&config_req).unwrap()),
-                )
+                .request(config_subject, Bytes::from(serde_json::to_vec(&config_req).unwrap()))
                 .await
                 .expect("set_config_option request must succeed");
-            let _: SetSessionConfigOptionResponse =
-                serde_json::from_slice(&resp_msg.payload)
-                    .expect("response must deserialize as SetSessionConfigOptionResponse");
+            let _: SetSessionConfigOptionResponse = serde_json::from_slice(&resp_msg.payload)
+                .expect("response must deserialize as SetSessionConfigOptionResponse");
 
             // Verify the store reflects the updated rules.
             let state = store.load(session_id).await.unwrap();
@@ -3864,11 +3780,9 @@ async fn runner_config_permissions_persists_and_enforces_on_next_prompt() {
 
             // Now send a prompt — the LLM will call bash with "rm".
             // The deny rule must block it without consulting the channel.
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "run rm").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run rm").await;
 
-            let (notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -3928,15 +3842,11 @@ async fn runner_fork_session_inherits_todos_and_permission_rules() {
             let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
             let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
             let resp_msg = nats
-                .request(
-                    fork_subject,
-                    Bytes::from(serde_json::to_vec(&fork_req).unwrap()),
-                )
+                .request(fork_subject, Bytes::from(serde_json::to_vec(&fork_req).unwrap()))
                 .await
                 .expect("fork request must succeed");
             let fork_resp: ForkSessionResponse =
-                serde_json::from_slice(&resp_msg.payload)
-                    .expect("response must deserialize as ForkSessionResponse");
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ForkSessionResponse");
 
             let forked_id = fork_resp.session_id.to_string();
 
@@ -4002,23 +3912,17 @@ async fn runner_prompt_on_forked_session_returns_end_turn() {
             let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
             let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
             let fork_msg = nats
-                .request(
-                    fork_subject,
-                    Bytes::from(serde_json::to_vec(&fork_req).unwrap()),
-                )
+                .request(fork_subject, Bytes::from(serde_json::to_vec(&fork_req).unwrap()))
                 .await
                 .expect("fork request must succeed");
             let fork_resp: ForkSessionResponse =
-                serde_json::from_slice(&fork_msg.payload)
-                    .expect("response must deserialize as ForkSessionResponse");
+                serde_json::from_slice(&fork_msg.payload).expect("response must deserialize as ForkSessionResponse");
             let forked_id = fork_resp.session_id.to_string();
             assert!(!forked_id.is_empty(), "fork must return a non-empty session_id");
 
             // Send a prompt to the forked session.
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, &forked_id, "continue here").await;
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, &forked_id, "continue here").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -4062,8 +3966,7 @@ async fn runner_completion_persists_token_totals() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "count tokens").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "count tokens").await;
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             let state = store.load(session_id).await.unwrap();
@@ -4113,8 +4016,7 @@ async fn runner_list_sessions_exposes_token_totals_via_nats() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "query").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "query").await;
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             let list_subject = format!("{prefix}.agent.session.list");
@@ -4126,8 +4028,7 @@ async fn runner_list_sessions_exposes_token_totals_via_nats() {
                 .await
                 .expect("list_sessions request must succeed");
             let list_resp: ListSessionsResponse =
-                serde_json::from_slice(&resp_msg.payload)
-                    .expect("response must deserialize as ListSessionsResponse");
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ListSessionsResponse");
 
             let info = list_resp
                 .sessions
@@ -4185,8 +4086,7 @@ async fn runner_list_sessions_exposes_cache_tokens_in_meta() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "cache query").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "cache query").await;
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             let list_subject = format!("{prefix}.agent.session.list");
@@ -4198,8 +4098,7 @@ async fn runner_list_sessions_exposes_cache_tokens_in_meta() {
                 .await
                 .expect("list_sessions request must succeed");
             let list_resp: ListSessionsResponse =
-                serde_json::from_slice(&resp_msg.payload)
-                    .expect("response must deserialize as ListSessionsResponse");
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ListSessionsResponse");
 
             let info = list_resp
                 .sessions
@@ -4258,8 +4157,7 @@ async fn runner_fork_session_resets_token_totals() {
             .await;
 
             // Prompt the source session so it accumulates token totals.
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, source_id, "accumulate").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, source_id, "accumulate").await;
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             let src_state = store.load(source_id).await.unwrap();
@@ -4278,8 +4176,7 @@ async fn runner_fork_session_resets_token_totals() {
                 .await
                 .expect("fork request must succeed");
             let fork_resp: ForkSessionResponse =
-                serde_json::from_slice(&resp_msg.payload)
-                    .expect("response must deserialize as ForkSessionResponse");
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ForkSessionResponse");
             let forked_id = fork_resp.session_id.to_string();
 
             // The forked session must have zero token totals.
@@ -4308,9 +4205,7 @@ async fn runner_cancel_preserves_prior_token_totals() {
     let server = MockServer::start();
     // Second prompt → slow (2 s), giving the cancel time to arrive.
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("turn 2");
+        when.method(POST).path("/messages").body_contains("turn 2");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .delay(Duration::from_secs(2))
@@ -4342,10 +4237,8 @@ async fn runner_cancel_preserves_prior_token_totals() {
             .await;
 
             // First prompt: completes normally, tokens saved to KV.
-            let (mut notif_sub1, mut resp_sub1) =
-                send_text(&nats, prefix, session_id, "turn 1").await;
-            let (_notifs1, resp1) =
-                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            let (mut notif_sub1, mut resp_sub1) = send_text(&nats, prefix, session_id, "turn 1").await;
+            let (_notifs1, resp1) = collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
             assert_eq!(
                 resp1["stopReason"].as_str(),
                 Some("end_turn"),
@@ -4353,14 +4246,12 @@ async fn runner_cancel_preserves_prior_token_totals() {
             );
 
             // Second prompt: slow — cancel fires during the HTTP call.
-            let (mut notif_sub2, mut resp_sub2) =
-                send_text(&nats, prefix, session_id, "turn 2").await;
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "turn 2").await;
 
             tokio::time::sleep(Duration::from_millis(300)).await;
             nats.publish(cancel_subject, Bytes::new()).await.unwrap();
 
-            let (_notifs2, resp2) =
-                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            let (_notifs2, resp2) = collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
             assert_eq!(
                 resp2["stopReason"].as_str(),
                 Some("cancelled"),
@@ -4415,10 +4306,8 @@ async fn runner_max_tokens_persists_token_totals_to_kv() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "fill the context").await;
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "fill the context").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -4476,13 +4365,11 @@ async fn runner_multi_turn_tokens_accumulate() {
             .await;
 
             // Turn 1.
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "turn 1").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "turn 1").await;
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             // Turn 2 — agent must load KV state from turn 1 and accumulate.
-            let (mut notif_sub2, mut resp_sub2) =
-                send_text(&nats, prefix, session_id, "turn 2").await;
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "turn 2").await;
             collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
 
             let state = store.load(session_id).await.unwrap();
@@ -4533,8 +4420,7 @@ async fn runner_cache_tokens_persisted_to_kv() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "cache test").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "cache test").await;
             collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             let state = store.load(session_id).await.unwrap();
@@ -4562,8 +4448,7 @@ async fn runner_cache_tokens_persisted_to_kv() {
 /// `<nonce>`) from a `terminal.write_stdin` payload, so the mock can echo back
 /// the start + nonce'd exit markers the bash tool's output extraction requires.
 fn markers_from_written_command(payload: &[u8]) -> (String, String) {
-    let req: serde_json::Value =
-        serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
+    let req: serde_json::Value = serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
     let bytes: Vec<u8> = req["data"]
         .as_array()
         .expect("write_stdin payload must carry `data` bytes")
@@ -4609,9 +4494,7 @@ fn spawn_two_bash_calls(
             markers1 = Some(markers_from_written_command(&msg.payload));
             nats.publish(
                 msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"ok": true}))
-                    .unwrap()
-                    .into(),
+                serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap().into(),
             )
             .await
             .unwrap();
@@ -4622,9 +4505,7 @@ fn spawn_two_bash_calls(
             let full = format!("{start1}\n{output1}__EXIT_{nonce1}_0__\n");
             nats.publish(
                 msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"output": full}))
-                    .unwrap()
-                    .into(),
+                serde_json::to_vec(&serde_json::json!({"output": full})).unwrap().into(),
             )
             .await
             .unwrap();
@@ -4637,9 +4518,7 @@ fn spawn_two_bash_calls(
             markers2 = Some(markers_from_written_command(&msg.payload));
             nats.publish(
                 msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"ok": true}))
-                    .unwrap()
-                    .into(),
+                serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap().into(),
             )
             .await
             .unwrap();
@@ -4650,9 +4529,7 @@ fn spawn_two_bash_calls(
             let full = format!("{start2}\n{output2}__EXIT_{nonce2}_0__\n");
             nats.publish(
                 msg.reply.unwrap(),
-                serde_json::to_vec(&serde_json::json!({"output": full}))
-                    .unwrap()
-                    .into(),
+                serde_json::to_vec(&serde_json::json!({"output": full})).unwrap().into(),
             )
             .await
             .unwrap();
@@ -4706,9 +4583,7 @@ async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
     });
     // Prompt 2, first LLM turn: → bash tool_use for cmd2
     server.mock(|when, then| {
-        when.method(POST)
-            .path("/messages")
-            .body_contains("output-from-cmd1"); // history from prompt 1 is present
+        when.method(POST).path("/messages").body_contains("output-from-cmd1"); // history from prompt 1 is present
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(sse_tool_use_stream(
@@ -4742,20 +4617,11 @@ async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let store = start_agent_with_bash_tool(
-                nats.clone(),
-                &js,
-                prefix,
-                session_id,
-                &server.base_url(),
-            )
-            .await;
+            let store = start_agent_with_bash_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
 
             // ── Prompt 1 ──────────────────────────────────────────────────────────
-            let (mut notif_sub1, mut resp_sub1) =
-                send_text(&nats, prefix, session_id, "run cmd1").await;
-            let (_notifs1, resp1) =
-                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            let (mut notif_sub1, mut resp_sub1) = send_text(&nats, prefix, session_id, "run cmd1").await;
+            let (_notifs1, resp1) = collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
             assert_eq!(
                 resp1["stopReason"].as_str(),
                 Some("end_turn"),
@@ -4773,10 +4639,8 @@ async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             // ── Prompt 2 ──────────────────────────────────────────────────────────
-            let (mut notif_sub2, mut resp_sub2) =
-                send_text(&nats, prefix, session_id, "run cmd2").await;
-            let (_notifs2, resp2) =
-                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "run cmd2").await;
+            let (_notifs2, resp2) = collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
             assert_eq!(
                 resp2["stopReason"].as_str(),
                 Some("end_turn"),
@@ -4807,11 +4671,7 @@ async fn programming_tool_sequence_read_str_replace_git_diff() {
     let (_c, nats, js) = start_nats().await;
 
     let dir = TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("src.rs"),
-        "fn old_function() {}\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("src.rs"), "fn old_function() {}\n").unwrap();
 
     let server = MockServer::start();
 
@@ -4828,11 +4688,7 @@ async fn programming_tool_sequence_read_str_replace_git_diff() {
         when.method(POST).path("/messages").body_contains("tu_sr");
         then.status(200)
             .header("Content-Type", "text/event-stream")
-            .body(sse_tool_use_stream(
-                "tu_gd",
-                "git_diff",
-                serde_json::json!({}),
-            ));
+            .body(sse_tool_use_stream("tu_gd", "git_diff", serde_json::json!({})));
     });
 
     // Call 2: read_file tool_result in body (identified by tu_rf) → str_replace.
@@ -4876,21 +4732,11 @@ async fn programming_tool_sequence_read_str_replace_git_diff() {
                 http_client: reqwest::Client::new(),
             });
 
-            start_agent(
-                nats.clone(),
-                &js,
-                prefix,
-                agent,
-                None,
-                Arc::new(RwLock::new(None)),
-            )
-            .await;
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "refactor the function").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "refactor the function").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 20).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 20).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),
@@ -4965,11 +4811,9 @@ async fn acp_request_has_required_anthropic_message_fields() {
             )
             .await;
 
-            let (mut notif_sub, mut resp_sub) =
-                send_text(&nats, prefix, session_id, "schema validation test").await;
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "schema validation test").await;
 
-            let (_notifs, resp) =
-                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
 
             assert_eq!(
                 resp["stopReason"].as_str(),

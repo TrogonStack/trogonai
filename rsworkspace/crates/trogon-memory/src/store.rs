@@ -28,21 +28,11 @@ pub trait MemoryStore: Send + Sync + Clone + 'static {
     type GetError: std::error::Error + Send + Sync + 'static;
     type DeleteError: std::error::Error + Send + Sync + 'static;
 
-    fn put(
-        &self,
-        key: &str,
-        value: Bytes,
-    ) -> impl Future<Output = Result<u64, Self::PutError>> + Send;
+    fn put(&self, key: &str, value: Bytes) -> impl Future<Output = Result<u64, Self::PutError>> + Send;
 
-    fn get(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
+    fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
 
-    fn delete(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<(), Self::DeleteError>> + Send;
+    fn delete(&self, key: &str) -> impl Future<Output = Result<(), Self::DeleteError>> + Send;
 }
 
 // ── Production implementation ─────────────────────────────────────────────────
@@ -82,11 +72,7 @@ impl<S: MemoryStore> MemoryClient<S> {
     }
 
     /// Load the current memory for an entity, or `None` if none exists yet.
-    pub async fn get(
-        &self,
-        actor_type: &str,
-        actor_key: &str,
-    ) -> Result<Option<EntityMemory>, DreamerError> {
+    pub async fn get(&self, actor_type: &str, actor_key: &str) -> Result<Option<EntityMemory>, DreamerError> {
         let key = memory_key(actor_type, actor_key);
         match self.store.get(&key).await {
             Ok(Some(bytes)) => serde_json::from_slice::<EntityMemory>(&bytes)
@@ -98,12 +84,7 @@ impl<S: MemoryStore> MemoryClient<S> {
     }
 
     /// Persist an updated memory for an entity.
-    pub async fn put(
-        &self,
-        actor_type: &str,
-        actor_key: &str,
-        memory: &EntityMemory,
-    ) -> Result<(), DreamerError> {
+    pub async fn put(&self, actor_type: &str, actor_key: &str, memory: &EntityMemory) -> Result<(), DreamerError> {
         let key = memory_key(actor_type, actor_key);
         let bytes = serde_json::to_vec(memory)
             .map(Bytes::from)
@@ -116,11 +97,7 @@ impl<S: MemoryStore> MemoryClient<S> {
     }
 
     /// Delete all memory for an entity (e.g. for privacy or reset).
-    pub async fn delete(
-        &self,
-        actor_type: &str,
-        actor_key: &str,
-    ) -> Result<(), DreamerError> {
+    pub async fn delete(&self, actor_type: &str, actor_key: &str) -> Result<(), DreamerError> {
         let key = memory_key(actor_type, actor_key);
         self.store
             .delete(&key)
@@ -136,14 +113,9 @@ impl<S: MemoryStore> MemoryClient<S> {
             return None;
         }
 
-        let mut out = String::from(
-            "<entity-memory>\nThe following facts were learned in previous sessions:\n\n",
-        );
+        let mut out = String::from("<entity-memory>\nThe following facts were learned in previous sessions:\n\n");
         for fact in &memory.facts {
-            out.push_str(&format!(
-                "- [{}] {}\n",
-                fact.category, fact.content
-            ));
+            out.push_str(&format!("- [{}] {}\n", fact.category, fact.content));
         }
         out.push_str("</entity-memory>");
         Some(out)
@@ -214,7 +186,11 @@ mod tests {
         let client = make_client();
         let mut memory = EntityMemory::default();
         memory.merge(
-            vec![RawFact { category: "fact".into(), content: "uses Rust".into(), confidence: 0.95 }],
+            vec![RawFact {
+                category: "fact".into(),
+                content: "uses Rust".into(),
+                confidence: 0.95,
+            }],
             "sess-1",
         );
         client.put("pr", "owner/repo/1", &memory).await.unwrap();
@@ -228,7 +204,11 @@ mod tests {
         let client = make_client();
         let mut memory_a = EntityMemory::default();
         memory_a.merge(
-            vec![RawFact { category: "fact".into(), content: "entity A".into(), confidence: 1.0 }],
+            vec![RawFact {
+                category: "fact".into(),
+                content: "entity A".into(),
+                confidence: 1.0,
+            }],
             "s1",
         );
         client.put("pr", "repo/1", &memory_a).await.unwrap();

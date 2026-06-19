@@ -89,10 +89,7 @@ impl<P: TranscriptPublisher> Session<P> {
         .await
     }
 
-    pub async fn append_system_message(
-        &self,
-        content: impl Into<String>,
-    ) -> Result<(), TranscriptError> {
+    pub async fn append_system_message(&self, content: impl Into<String>) -> Result<(), TranscriptError> {
         self.append(TranscriptEntry::Message {
             role: Role::System,
             content: content.into(),
@@ -212,10 +209,7 @@ mod tests {
     #[tokio::test]
     async fn append_assistant_message_records_entry() {
         let (session, mock) = mock_session("pr", "owner/repo/1");
-        session
-            .append_assistant_message("LGTM", Some(7))
-            .await
-            .unwrap();
+        session.append_assistant_message("LGTM", Some(7)).await.unwrap();
         let published = mock.take_published();
         assert_eq!(published.len(), 1);
         let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
@@ -233,19 +227,12 @@ mod tests {
     async fn append_tool_call_records_entry() {
         let (session, mock) = mock_session("pr", "owner/repo/1");
         session
-            .append_tool_call(
-                "search",
-                serde_json::json!({"q": "foo"}),
-                serde_json::json!([]),
-                99,
-            )
+            .append_tool_call("search", serde_json::json!({"q": "foo"}), serde_json::json!([]), 99)
             .await
             .unwrap();
         let published = mock.take_published();
         let entry: TranscriptEntry = serde_json::from_slice(&published[0].1).unwrap();
-        assert!(
-            matches!(entry, TranscriptEntry::ToolCall { name, duration_ms: 99, .. } if name == "search")
-        );
+        assert!(matches!(entry, TranscriptEntry::ToolCall { name, duration_ms: 99, .. } if name == "search"));
     }
 
     #[tokio::test]
@@ -275,10 +262,7 @@ mod tests {
         let entry: TranscriptEntry = serde_json::from_slice(payload).unwrap();
         match entry {
             TranscriptEntry::RoutingDecision {
-                from,
-                to,
-                reasoning,
-                ..
+                from, to, reasoning, ..
             } => {
                 assert_eq!(from, "gateway");
                 assert_eq!(to, "PrActor");

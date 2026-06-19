@@ -13,8 +13,7 @@ const AGENT_TYPE: &str = "openrouter";
 // Default model string from config.rs (before colon = model ID, after = label).
 const DEFAULT_MODELS_STR: &str =
     "anthropic/claude-sonnet-4-6:Claude Sonnet 4.6,openai/gpt-4o:GPT-4o,google/gemini-pro-1.5:Gemini Pro 1.5";
-const EXPECTED_MODELS: &[&str] =
-    &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
+const EXPECTED_MODELS: &[&str] = &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
 
 fn parse_model_ids(models_str: &str) -> Vec<String> {
     models_str
@@ -26,9 +25,7 @@ fn parse_model_ids(models_str: &str) -> Vec<String> {
 fn make_cap() -> AgentCapability {
     AgentCapability {
         agent_type: AGENT_TYPE.to_string(),
-        capabilities: RunnerCapability::to_strings(
-            trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap(),
-        ),
+        capabilities: RunnerCapability::to_strings(trogon_registry::expected_runner_capabilities(AGENT_TYPE).unwrap()),
         nats_subject: format!("{OR_PREFIX}.agent.>"),
         current_load: 0,
         metadata: serde_json::json!({

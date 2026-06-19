@@ -63,10 +63,7 @@ pub enum ContentBlock {
         parent_tool_use_id: Option<String>,
     },
     /// Result returned to the model after executing a tool.
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-    },
+    ToolResult { tool_use_id: String, content: String },
 }
 
 impl ContentBlock {
@@ -115,9 +112,7 @@ mod tests {
         let msg = Message {
             role: "user".into(),
             content: vec![
-                ContentBlock::Text {
-                    text: "hello".into(),
-                },
+                ContentBlock::Text { text: "hello".into() },
                 ContentBlock::ToolResult {
                     tool_use_id: "id".into(),
                     content: "result".into(),
@@ -143,9 +138,7 @@ mod tests {
 
     #[test]
     fn as_text_returns_text_content() {
-        let b = ContentBlock::Text {
-            text: "hello".into(),
-        };
+        let b = ContentBlock::Text { text: "hello".into() };
         assert_eq!(b.as_text(), Some("hello"));
     }
 
@@ -189,9 +182,7 @@ mod tests {
 
     #[test]
     fn content_block_text_serializes_with_snake_case_type_tag() {
-        let b = ContentBlock::Text {
-            text: "hello".into(),
-        };
+        let b = ContentBlock::Text { text: "hello".into() };
         let v = serde_json::to_value(&b).unwrap();
         assert_eq!(v["type"], "text");
         assert_eq!(v["text"], "hello");

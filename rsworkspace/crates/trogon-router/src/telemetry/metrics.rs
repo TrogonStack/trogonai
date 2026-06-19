@@ -75,10 +75,7 @@ fn dlq_published() -> &'static Counter<u64> {
 
 /// Record the latency of a single LLM call and the event type it was for.
 pub fn record_llm_latency(event_type: &str, latency_ms: f64) {
-    llm_latency_ms().record(
-        latency_ms,
-        &[KeyValue::new("event_type", event_type.to_string())],
-    );
+    llm_latency_ms().record(latency_ms, &[KeyValue::new("event_type", event_type.to_string())]);
 }
 
 /// Increment the routed-events counter.

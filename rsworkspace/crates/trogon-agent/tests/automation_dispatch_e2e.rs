@@ -66,10 +66,7 @@ fn runner_cfg_with_cron(
     cron_stream: Option<String>,
 ) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -96,10 +93,7 @@ fn runner_cfg_with_cron(
 
 fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str, api_port: u16) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -206,11 +200,7 @@ async fn automation_dispatch_uses_automation_prompt() {
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -256,19 +246,14 @@ async fn automation_dispatch_overrides_fallback_handler() {
 
     // Catch-all for the automation path.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
     })
     .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -306,11 +291,7 @@ async fn no_automation_falls_back_to_hardcoded_handler() {
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -334,12 +315,7 @@ async fn disabled_automation_falls_back_to_hardcoded_handler() {
     create_streams(&js).await;
 
     let store = AutomationStore::open(&js).await.expect("open store");
-    let mut auto = make_automation(
-        "auto-disabled",
-        "default",
-        "github.pull_request",
-        "DISABLED_PROMPT",
-    );
+    let mut auto = make_automation("auto-disabled", "default", "github.pull_request", "DISABLED_PROMPT");
     auto.enabled = false;
     store.put(&auto).await.expect("put disabled automation");
 
@@ -365,11 +341,7 @@ async fn disabled_automation_falls_back_to_hardcoded_handler() {
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -380,11 +352,7 @@ async fn disabled_automation_falls_back_to_hardcoded_handler() {
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
         "fallback handler was not called for disabled automation"
     );
-    assert_eq!(
-        bad_mock.hits_async().await,
-        0,
-        "disabled automation must not fire"
-    );
+    assert_eq!(bad_mock.hits_async().await, 0, "disabled automation must not fire");
 }
 
 /// The automations HTTP API is reachable on `api_port` while the runner is live.
@@ -402,11 +370,7 @@ async fn api_server_accessible_during_runner_run() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     // Poll until the API server accepts connections (up to 10s).
     let client = reqwest::Client::new();
@@ -441,8 +405,7 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
 
     // MCP initialize handshake.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .body_contains("\"initialize\"");
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -454,8 +417,7 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
 
     // MCP tools/list response — advertises one tool.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .body_contains("tools/list");
+        when.method(httpmock::Method::POST).body_contains("tools/list");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -484,23 +446,14 @@ async fn automation_mcp_server_tools_forwarded_to_model() {
         .await;
 
     let store = AutomationStore::open(&js).await.expect("open store");
-    let mut auto = make_automation(
-        "auto-mcp",
-        "default",
-        "github.pull_request",
-        "MCP_TEST_PROMPT",
-    );
+    let mut auto = make_automation("auto-mcp", "default", "github.pull_request", "MCP_TEST_PROMPT");
     auto.mcp_servers = vec![McpServer {
         name: "search_mcp".to_string(),
         url: format!("{}/mcp", mock_url),
     }];
     store.put(&auto).await.expect("put automation");
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -524,12 +477,7 @@ async fn automation_model_override_sent_to_anthropic() {
     create_streams(&js).await;
 
     let store = AutomationStore::open(&js).await.expect("open store");
-    let mut auto = make_automation(
-        "auto-model",
-        "default",
-        "github.pull_request",
-        "MODEL_OVERRIDE_PROMPT",
-    );
+    let mut auto = make_automation("auto-model", "default", "github.pull_request", "MODEL_OVERRIDE_PROMPT");
     auto.model = Some("claude-haiku-4-5-20251001".to_string());
     store.put(&auto).await.expect("put automation");
 
@@ -545,11 +493,7 @@ async fn automation_model_override_sent_to_anthropic() {
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -640,8 +584,7 @@ async fn dispatch_persists_run_record_accessible_via_api() {
         .expect("put automation");
 
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -653,23 +596,14 @@ async fn dispatch_persists_run_record_accessible_via_api() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     // Wait for API to come up.
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -756,8 +690,7 @@ async fn dispatch_records_failed_run_on_agent_error() {
 
     // Anthropic proxy always returns 500 → agent error → RunStatus::Failed.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(500).body("Internal Server Error");
     })
     .await;
@@ -767,23 +700,14 @@ async fn dispatch_records_failed_run_on_agent_error() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     // Wait for API to come up.
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -864,8 +788,7 @@ async fn dispatch_marks_promise_resolved_in_kv() {
         .expect("put automation");
 
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -877,23 +800,14 @@ async fn dispatch_marks_promise_resolved_in_kv() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     // Wait for the API to come up.
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -963,9 +877,7 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
     create_streams(&js).await;
 
     // Create the automation so the recovery can find and run it.
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-recover",
@@ -1004,8 +916,7 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
 
     // Anthropic mock — called once when the recovery re-runs the automation.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -1017,23 +928,14 @@ async fn startup_recovery_resumes_stale_automation_promise_to_resolved() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     // Wait for the API to come up.
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1127,20 +1029,10 @@ async fn startup_recovery_disabled_automation_marks_promise_permanent_failed() {
     create_streams(&js).await;
 
     // Seed the automation as disabled.
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
-    let mut disabled_auto = make_automation(
-        "auto-disabled",
-        "default",
-        "github.pull_request",
-        "DISABLED_PROMPT",
-    );
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
+    let mut disabled_auto = make_automation("auto-disabled", "default", "github.pull_request", "DISABLED_PROMPT");
     disabled_auto.enabled = false;
-    astore
-        .put(&disabled_auto)
-        .await
-        .expect("put disabled automation");
+    astore.put(&disabled_auto).await.expect("put disabled automation");
 
     // Seed a stale Running promise pointing at the disabled automation.
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
@@ -1167,22 +1059,15 @@ async fn startup_recovery_disabled_automation_marks_promise_permanent_failed() {
     // The model must NOT be called — disabled automation is never run.
     let model_mock = mock
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(500).body("must not be called");
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
 
     // Allow up to 45 s: jitter is 0–30 s plus processing time.
-    let promise =
-        poll_promise_until_permanent_failed(&ps, "default", promise_id, Duration::from_secs(45))
-            .await;
+    let promise = poll_promise_until_permanent_failed(&ps, "default", promise_id, Duration::from_secs(45)).await;
 
     assert_eq!(
         promise.failure_reason.as_deref(),
@@ -1211,9 +1096,7 @@ async fn startup_recovery_deleted_automation_marks_promise_permanent_failed() {
     create_streams(&js).await;
 
     // AutomationStore is open but has NO automation with this ID — simulates deletion.
-    let _astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let _astore = AutomationStore::open(&js).await.expect("open AutomationStore");
 
     let ps = PromiseStore::open(&js).await.expect("open PromiseStore");
     let promise_id = "github_pull_request.88.auto-deleted";
@@ -1238,21 +1121,14 @@ async fn startup_recovery_deleted_automation_marks_promise_permanent_failed() {
 
     let model_mock = mock
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(500).body("must not be called");
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
 
-    let promise =
-        poll_promise_until_permanent_failed(&ps, "default", promise_id, Duration::from_secs(45))
-            .await;
+    let promise = poll_promise_until_permanent_failed(&ps, "default", promise_id, Duration::from_secs(45)).await;
 
     assert_eq!(
         promise.failure_reason.as_deref(),
@@ -1312,21 +1188,14 @@ async fn startup_recovery_unknown_subject_marks_promise_permanent_failed() {
 
     let model_mock = mock
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(500).body("must not be called");
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
 
-    let promise =
-        poll_promise_until_permanent_failed(&ps, "default", promise_id, Duration::from_secs(45))
-            .await;
+    let promise = poll_promise_until_permanent_failed(&ps, "default", promise_id, Duration::from_secs(45)).await;
 
     assert_eq!(
         promise.status,
@@ -1353,9 +1222,7 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-pf",
@@ -1369,8 +1236,7 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
     // 400 Bad Request — non-retryable 4xx → agent marks promise PermanentFailed
     // immediately, without the 2s/4s/8s backoff applied to 5xx errors.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(400).body("bad request");
     })
     .await;
@@ -1379,22 +1245,13 @@ async fn dispatch_marks_promise_permanent_failed_on_4xx_error() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1458,19 +1315,14 @@ async fn builtin_handler_marks_promise_resolved_in_kv() {
 
     // No automations — the runner falls back to the built-in PR handler.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
     })
     .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -1515,9 +1367,7 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-multiturn",
@@ -1545,12 +1395,9 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
     // needed; the dispatcher returns an error result, which the agent sends back
     // as a tool_result block on the second call).
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
-        then.status(200)
-            .header("content-type", "application/json")
-            .body(
-                r#"{
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
+        then.status(200).header("content-type", "application/json").body(
+            r#"{
                     "stop_reason":"tool_use",
                     "content":[{
                         "type":"tool_use",
@@ -1559,7 +1406,7 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
                         "input":{}
                     }]
                 }"#,
-            );
+        );
     })
     .await;
 
@@ -1580,12 +1427,7 @@ async fn multi_turn_run_checkpoints_iteration_and_messages_in_kv() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1657,9 +1499,7 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-5xx",
@@ -1673,8 +1513,7 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
     // Anthropic always returns 500 — triggers the 2s+4s+8s retry backoff
     // (3 retries, ~14 s total) before the agent gives up.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(500).body("internal server error");
     })
     .await;
@@ -1683,22 +1522,13 @@ async fn dispatch_marks_promise_failed_on_transient_5xx_exhaustion() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1760,9 +1590,7 @@ async fn linear_event_marks_promise_resolved_in_kv() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-linear-kv",
@@ -1774,8 +1602,7 @@ async fn linear_event_marks_promise_resolved_in_kv() {
         .expect("put automation");
 
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -1786,22 +1613,13 @@ async fn linear_event_marks_promise_resolved_in_kv() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1878,9 +1696,7 @@ fn compute_tool_cache_key(tool_name: &str, input: &serde_json::Value) -> String 
                     .collect();
                 serde_json::Value::Object(sorted)
             }
-            serde_json::Value::Array(arr) => {
-                serde_json::Value::Array(arr.iter().map(sort_keys).collect())
-            }
+            serde_json::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(sort_keys).collect()),
             other => other.clone(),
         }
     }
@@ -1915,9 +1731,7 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-cache",
@@ -2001,8 +1815,7 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
     // GitHub mock — MUST NOT be hit when the cache replays the result.
     let github_mock = mock
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/github/repos/acme/api/pulls");
+            when.method(httpmock::Method::POST).path("/github/repos/acme/api/pulls");
             then.status(201)
                 .header("content-type", "application/json")
                 .body(r#"{"number":99,"html_url":"https://github.com/acme/api/pull/99"}"#);
@@ -2023,12 +1836,7 @@ async fn tool_cache_dedup_on_recovery_skips_tool_reexecution() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2087,9 +1895,7 @@ async fn resolved_promise_skips_redelivered_nats_message() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     // "auto-skip": pre-seeded as Resolved → must be skipped on dispatch.
     astore
         .put(&make_automation(
@@ -2134,9 +1940,7 @@ async fn resolved_promise_skips_redelivered_nats_message() {
         checkpoint_degraded: false,
         failure_reason: None,
     };
-    ps.put_promise(&resolved)
-        .await
-        .expect("seed resolved promise");
+    ps.put_promise(&resolved).await.expect("seed resolved promise");
 
     // Canary mock — fires when "CANARY_PROMPT" is in the Anthropic request body.
     let canary_mock = mock
@@ -2162,11 +1966,7 @@ async fn resolved_promise_skips_redelivered_nats_message() {
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -2201,9 +2001,7 @@ async fn two_automations_for_same_event_get_separate_resolved_promises() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-dispatch-a",
@@ -2247,22 +2045,13 @@ async fn two_automations_for_same_event_get_separate_resolved_promises() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2312,17 +2101,9 @@ async fn two_automations_for_same_event_get_separate_resolved_promises() {
         .expect("get promise-b")
         .expect("promise-b must exist");
 
-    assert_eq!(
-        pa.status,
-        PromiseStatus::Resolved,
-        "promise-a must be Resolved"
-    );
+    assert_eq!(pa.status, PromiseStatus::Resolved, "promise-a must be Resolved");
     assert_eq!(pa.automation_id, "auto-dispatch-a");
-    assert_eq!(
-        pb.status,
-        PromiseStatus::Resolved,
-        "promise-b must be Resolved"
-    );
+    assert_eq!(pb.status, PromiseStatus::Resolved, "promise-b must be Resolved");
     assert_eq!(pb.automation_id, "auto-dispatch-b");
 }
 
@@ -2343,11 +2124,7 @@ async fn automations_http_api_crud_lifecycle() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");
@@ -2395,15 +2172,9 @@ async fn automations_http_api_crud_lifecycle() {
         .unwrap();
     assert_eq!(create_resp.status(), 201);
     let created: serde_json::Value = create_resp.json().await.unwrap();
-    let auto_id = created["id"]
-        .as_str()
-        .expect("id must be present")
-        .to_string();
+    let auto_id = created["id"].as_str().expect("id must be present").to_string();
     assert_eq!(created["name"], "CRUD Automation");
-    assert!(
-        created["enabled"].as_bool().unwrap_or(false),
-        "enabled by default"
-    );
+    assert!(created["enabled"].as_bool().unwrap_or(false), "enabled by default");
 
     // 3. GET /automations/:id → round-trip.
     let fetched: serde_json::Value = client
@@ -2447,10 +2218,7 @@ async fn automations_http_api_crud_lifecycle() {
         .json()
         .await
         .unwrap();
-    assert!(
-        !disabled["enabled"].as_bool().unwrap_or(true),
-        "must be disabled"
-    );
+    assert!(!disabled["enabled"].as_bool().unwrap_or(true), "must be disabled");
 
     // 6. PATCH /automations/:id/enable → 200, enabled = true.
     let re_enabled: serde_json::Value = client
@@ -2462,10 +2230,7 @@ async fn automations_http_api_crud_lifecycle() {
         .json()
         .await
         .unwrap();
-    assert!(
-        re_enabled["enabled"].as_bool().unwrap_or(false),
-        "must be re-enabled"
-    );
+    assert!(re_enabled["enabled"].as_bool().unwrap_or(false), "must be re-enabled");
 
     // 7. DELETE /automations/:id → 204 No Content.
     let del_status = client
@@ -2497,11 +2262,7 @@ async fn automations_http_api_crud_lifecycle() {
         .json()
         .await
         .unwrap();
-    assert_eq!(
-        final_list.as_array().unwrap().len(),
-        0,
-        "empty after delete"
-    );
+    assert_eq!(final_list.as_array().unwrap().len(), 0, "empty after delete");
 }
 
 /// The `_idempotency_key` injected into built-in tool inputs must be forwarded
@@ -2518,9 +2279,7 @@ async fn write_tool_sends_idempotency_key_header() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     astore
         .put(&make_automation(
             "auto-idem",
@@ -2588,12 +2347,7 @@ async fn write_tool_sends_idempotency_key_header() {
     let runs_url = format!("http://127.0.0.1:{api_port}/runs");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(&runs_url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(&runs_url).header("x-tenant-id", "default").send().await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2700,11 +2454,7 @@ async fn automation_variables_substituted_in_prompt_before_model_call() {
         })
         .await;
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", 0))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", 0)).await.ok() });
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     js.publish("github.pull_request", pr_opened_payload().into())
@@ -2727,12 +2477,7 @@ async fn automation_variables_substituted_in_prompt_before_model_call() {
 async fn wait_for_api(client: &reqwest::Client, url: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        match client
-            .get(url)
-            .header("x-tenant-id", "default")
-            .send()
-            .await
-        {
+        match client.get(url).header("x-tenant-id", "default").send().await {
             Ok(_) => return,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2743,11 +2488,7 @@ async fn wait_for_api(client: &reqwest::Client, url: &str) {
 }
 
 /// Poll GET `url` until the JSON array is non-empty, then return it.
-async fn poll_runs_until_nonempty(
-    client: &reqwest::Client,
-    url: &str,
-    timeout: Duration,
-) -> serde_json::Value {
+async fn poll_runs_until_nonempty(client: &reqwest::Client, url: &str, timeout: Duration) -> serde_json::Value {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let body: serde_json::Value = client
@@ -2770,12 +2511,7 @@ async fn poll_runs_until_nonempty(
 }
 
 /// Poll GET `url` until `predicate` is satisfied, then return the body.
-async fn poll_runs_until<F>(
-    client: &reqwest::Client,
-    url: &str,
-    timeout: Duration,
-    predicate: F,
-) -> serde_json::Value
+async fn poll_runs_until<F>(client: &reqwest::Client, url: &str, timeout: Duration, predicate: F) -> serde_json::Value
 where
     F: Fn(&serde_json::Value) -> bool,
 {
@@ -2831,11 +2567,7 @@ async fn full_http_lifecycle_automation_created_via_http() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");
@@ -2865,8 +2597,7 @@ async fn full_http_lifecycle_automation_created_via_http() {
         .expect("publish");
 
     // Wait for RunRecord to appear via GET /runs.
-    let runs =
-        poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(10)).await;
+    let runs = poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(10)).await;
     let arr = runs.as_array().unwrap();
     assert_eq!(arr.len(), 1, "exactly one run");
     assert_eq!(arr[0]["automation_id"], auto_id.as_str());
@@ -2904,9 +2635,7 @@ async fn resolved_promise_redelivery_produces_single_run_record() {
     let (_, js) = js_client(nats_port).await;
     create_streams(&js).await;
 
-    let astore = AutomationStore::open(&js)
-        .await
-        .expect("open AutomationStore");
+    let astore = AutomationStore::open(&js).await.expect("open AutomationStore");
     // "auto-skip": pre-seeded as Resolved → skipped, must not produce a RunRecord.
     astore
         .put(&make_automation(
@@ -2949,9 +2678,7 @@ async fn resolved_promise_redelivery_produces_single_run_record() {
         checkpoint_degraded: false,
         failure_reason: None,
     };
-    ps.put_promise(&resolved)
-        .await
-        .expect("seed resolved promise");
+    ps.put_promise(&resolved).await.expect("seed resolved promise");
 
     // Canary mock — proves the event was processed.
     let canary_mock = mock
@@ -2966,8 +2693,7 @@ async fn resolved_promise_redelivery_produces_single_run_record() {
         .await;
     // Catch-all so skip automation doesn't hang if accidentally called.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -2978,11 +2704,7 @@ async fn resolved_promise_redelivery_produces_single_run_record() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");
@@ -3042,8 +2764,7 @@ async fn run_record_output_contains_agent_final_text() {
 
     // Return a distinctive final text so we can assert it lands in RunRecord.output.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"DISTINCTIVE_FINAL_OUTPUT"}]}"#);
@@ -3054,11 +2775,7 @@ async fn run_record_output_contains_agent_final_text() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");
@@ -3068,8 +2785,7 @@ async fn run_record_output_contains_agent_final_text() {
         .await
         .expect("publish");
 
-    let runs =
-        poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(10)).await;
+    let runs = poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(10)).await;
     let arr = runs.as_array().unwrap();
     assert_eq!(arr.len(), 1);
     let output = arr[0]["output"].as_str().unwrap_or("");
@@ -3113,8 +2829,7 @@ async fn two_concurrent_automations_both_appear_in_runs_and_stats() {
 
     // Both prompts hit the same catch-all mock and return successfully.
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -3125,11 +2840,7 @@ async fn two_concurrent_automations_both_appear_in_runs_and_stats() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");
@@ -3140,32 +2851,17 @@ async fn two_concurrent_automations_both_appear_in_runs_and_stats() {
         .expect("publish");
 
     // Wait until both RunRecords appear (both automations must complete).
-    let runs = poll_runs_until(
-        &client,
-        &format!("{base}/runs"),
-        Duration::from_secs(12),
-        |body| body.as_array().map(|a| a.len() >= 2).unwrap_or(false),
-    )
+    let runs = poll_runs_until(&client, &format!("{base}/runs"), Duration::from_secs(12), |body| {
+        body.as_array().map(|a| a.len() >= 2).unwrap_or(false)
+    })
     .await;
     let arr = runs.as_array().unwrap();
     assert_eq!(arr.len(), 2, "both automations must produce a RunRecord");
 
-    let ids: Vec<&str> = arr
-        .iter()
-        .map(|r| r["automation_id"].as_str().unwrap())
-        .collect();
-    assert!(
-        ids.contains(&"auto-concurrent-A"),
-        "RunRecord for A missing"
-    );
-    assert!(
-        ids.contains(&"auto-concurrent-B"),
-        "RunRecord for B missing"
-    );
-    assert!(
-        arr.iter().all(|r| r["status"] == "success"),
-        "both runs must succeed"
-    );
+    let ids: Vec<&str> = arr.iter().map(|r| r["automation_id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"auto-concurrent-A"), "RunRecord for A missing");
+    assert!(ids.contains(&"auto-concurrent-B"), "RunRecord for B missing");
+    assert!(arr.iter().all(|r| r["status"] == "success"), "both runs must succeed");
 
     // Stats must reflect both runs.
     let stats: serde_json::Value = client
@@ -3217,8 +2913,7 @@ async fn automation_filtered_runs_endpoint_returns_only_matching_automation() {
         .expect("put B");
 
     mock.mock_async(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .body(end_turn_body());
@@ -3229,11 +2924,7 @@ async fn automation_filtered_runs_endpoint_returns_only_matching_automation() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");
@@ -3244,12 +2935,9 @@ async fn automation_filtered_runs_endpoint_returns_only_matching_automation() {
         .expect("publish");
 
     // Wait until both RunRecords appear in the global /runs endpoint.
-    poll_runs_until(
-        &client,
-        &format!("{base}/runs"),
-        Duration::from_secs(12),
-        |body| body.as_array().map(|a| a.len() >= 2).unwrap_or(false),
-    )
+    poll_runs_until(&client, &format!("{base}/runs"), Duration::from_secs(12), |body| {
+        body.as_array().map(|a| a.len() >= 2).unwrap_or(false)
+    })
     .await;
 
     // /automations/auto-filter-A/runs must return only A's run.
@@ -3347,8 +3035,7 @@ async fn cron_tick_produces_run_record_accessible_via_api() {
         .await
         .expect("publish cron tick");
 
-    let runs =
-        poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(12)).await;
+    let runs = poll_runs_until_nonempty(&client, &format!("{base}/runs"), Duration::from_secs(12)).await;
 
     let arr = runs.as_array().unwrap();
     assert_eq!(arr.len(), 1, "exactly one RunRecord expected for cron tick");
@@ -3397,11 +3084,7 @@ async fn admin_promises_endpoint_returns_running_and_excludes_terminal() {
     let api_port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    tokio::spawn(async move {
-        run(runner_cfg(nats_port, mock_url, "default", api_port))
-            .await
-            .ok()
-    });
+    tokio::spawn(async move { run(runner_cfg(nats_port, mock_url, "default", api_port)).await.ok() });
 
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{api_port}");

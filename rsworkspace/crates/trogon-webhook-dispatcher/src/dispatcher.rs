@@ -3,9 +3,7 @@ use std::time::SystemTime;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, pull};
 use futures_util::StreamExt as _;
 use tracing::{info, warn};
-use trogon_nats::jetstream::{
-    JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageRef,
-};
+use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageRef};
 use uuid::Uuid;
 
 use crate::http_client::WebhookClient;
@@ -151,8 +149,7 @@ where
 }
 
 fn build_payload(subject: &str, raw: &[u8]) -> Vec<u8> {
-    let data: serde_json::Value =
-        serde_json::from_slice(raw).unwrap_or(serde_json::Value::Null);
+    let data: serde_json::Value = serde_json::from_slice(raw).unwrap_or(serde_json::Value::Null);
 
     let timestamp_ms = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -173,9 +170,7 @@ mod tests {
     use crate::http_client::mock::MockWebhookClient;
     use crate::store::mock::MockSubscriptionStore;
     use crate::subscription::WebhookSubscription;
-    use trogon_nats::jetstream::{
-        MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJsMessage,
-    };
+    use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJsMessage};
 
     fn make_nats_msg(subject: &str, payload: &[u8]) -> async_nats::Message {
         async_nats::Message {
@@ -375,7 +370,8 @@ mod tests {
         factory.add_consumer(consumer);
 
         // First: a stream error
-        tx.unbounded_send(Err(trogon_nats::mocks::MockError("transient error".into()))).unwrap();
+        tx.unbounded_send(Err(trogon_nats::mocks::MockError("transient error".into())))
+            .unwrap();
         // Then: a valid message
         let msg = MockJsMessage::new(make_nats_msg("transcripts.pr.x.y.z", b"{}"));
         tx.unbounded_send(Ok(msg)).unwrap();

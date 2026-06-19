@@ -25,12 +25,7 @@ impl SpawnTracker {
         }
     }
 
-    pub fn format_tasks(
-        &self,
-        prefix: &str,
-        parent_session_id: &str,
-        sessions: &[SessionSummary],
-    ) -> String {
+    pub fn format_tasks(&self, prefix: &str, parent_session_id: &str, sessions: &[SessionSummary]) -> String {
         format_active_spawns(prefix, parent_session_id, sessions, self.running)
     }
 }
@@ -73,10 +68,7 @@ pub fn format_active_spawns(
 
     for i in 0..extra_pending {
         let id = format!("pending-{}", i + 1);
-        out.push_str(&format!(
-            "  {:<36}  {:<10}  {:<20}  (starting…)\n",
-            id, "running", "-"
-        ));
+        out.push_str(&format!("  {:<36}  {:<10}  {:<20}  (starting…)\n", id, "running", "-"));
     }
 
     out.trim_end().to_string()

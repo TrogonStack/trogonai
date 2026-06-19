@@ -15,12 +15,11 @@ use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
-use trogon_vault::{ApiKeyToken, DualWriteVault, InfisicalAuth, InfisicalConfig, InfisicalVaultStore, MemoryVault, VaultStore};
+use trogon_vault::{
+    ApiKeyToken, DualWriteVault, InfisicalAuth, InfisicalConfig, InfisicalVaultStore, MemoryVault, VaultStore,
+};
 use trogon_vault_approvals::{
-    ApprovalService, JetStreamStatePublisher, NoopNotifier,
-    ensure_proposals_stream,
-    subjects,
-    state_update_subject,
+    ApprovalService, JetStreamStatePublisher, NoopNotifier, ensure_proposals_stream, state_update_subject, subjects,
 };
 use trogon_vault_nats::{CryptoCtx, NatsKvVault, ensure_vault_bucket};
 
@@ -42,24 +41,17 @@ async fn start_nats() -> (jetstream::Context, async_nats::Client, impl Drop) {
 
 /// Spawn an ApprovalService in the background with MemoryVault + NoopNotifier.
 /// Returns the vault so tests can inspect its state.
-async fn spawn_service(
-    js:         jetstream::Context,
-    nats:       async_nats::Client,
-    vault_name: &str,
-) -> Arc<MemoryVault> {
+async fn spawn_service(js: jetstream::Context, nats: async_nats::Client, vault_name: &str) -> Arc<MemoryVault> {
     ensure_proposals_stream(&js).await.expect("proposals stream");
 
-    let vault     = Arc::new(MemoryVault::new());
-    let notifier  = Arc::new(NoopNotifier);
+    let vault = Arc::new(MemoryVault::new());
+    let notifier = Arc::new(NoopNotifier);
     let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
-    let svc       = ApprovalService::new(
-        Arc::clone(&vault),
-        notifier,
-        publisher,
-        vault_name,
-    );
+    let svc = ApprovalService::new(Arc::clone(&vault), notifier, publisher, vault_name);
 
-    tokio::spawn(async move { svc.run(js, nats).await.ok(); });
+    tokio::spawn(async move {
+        svc.run(js, nats).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
     vault
 }
@@ -112,10 +104,7 @@ async fn create_proposal_is_stored_in_memory() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let status_resp = nats
-        .request(
-            subjects::status("default", "prop_create001"),
-            bytes::Bytes::new(),
-        )
+        .request(subjects::status("default", "prop_create001"), bytes::Bytes::new())
         .await
         .expect("status request");
 
@@ -147,17 +136,26 @@ async fn approve_proposal_writes_to_vault_and_updates_status() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_approve(&nats, "prod", serde_json::json!({
-        "proposal_id": "prop_approve001",
-        "approved_by": "mario",
-        "plaintext":   "sk_live_supersecret"
-    })).await;
+    publish_approve(
+        &nats,
+        "prod",
+        serde_json::json!({
+            "proposal_id": "prop_approve001",
+            "approved_by": "mario",
+            "plaintext":   "sk_live_supersecret"
+        }),
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let token = ApiKeyToken::new("tok_stripe_prod_abc123").unwrap();
     let resolved = vault.resolve(&token).await.unwrap();
-    assert_eq!(resolved, Some("sk_live_supersecret".to_string()), "vault must hold plaintext after approval");
+    assert_eq!(
+        resolved,
+        Some("sk_live_supersecret".to_string()),
+        "vault must hold plaintext after approval"
+    );
 
     let resp = nats
         .request(subjects::status("prod", "prop_approve001"), bytes::Bytes::new())
@@ -191,16 +189,25 @@ async fn reject_proposal_does_not_write_vault_and_updates_status() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_reject(&nats, "staging", serde_json::json!({
-        "proposal_id": "prop_reject001",
-        "rejected_by": "luigi",
-        "reason":      "budget exceeded"
-    })).await;
+    publish_reject(
+        &nats,
+        "staging",
+        serde_json::json!({
+            "proposal_id": "prop_reject001",
+            "rejected_by": "luigi",
+            "reason":      "budget exceeded"
+        }),
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let token = ApiKeyToken::new("tok_openai_staging_xyz789").unwrap();
-    assert_eq!(vault.resolve(&token).await.unwrap(), None, "rejected proposal must not write vault");
+    assert_eq!(
+        vault.resolve(&token).await.unwrap(),
+        None,
+        "rejected proposal must not write vault"
+    );
 
     let resp = nats
         .request(subjects::status("staging", "prop_reject001"), bytes::Bytes::new())
@@ -218,10 +225,7 @@ async fn status_returns_not_found_for_unknown_proposal() {
     let _vault = spawn_service(js.clone(), nats.clone(), "default").await;
 
     let resp = nats
-        .request(
-            subjects::status("default", "prop_does_not_exist"),
-            bytes::Bytes::new(),
-        )
+        .request(subjects::status("default", "prop_does_not_exist"), bytes::Bytes::new())
         .await
         .expect("status request");
 
@@ -234,11 +238,16 @@ async fn approve_unknown_proposal_is_ignored_and_service_continues() {
     let (js, nats, _c) = start_nats().await;
     let _vault = spawn_service(js.clone(), nats.clone(), "default").await;
 
-    publish_approve(&nats, "default", serde_json::json!({
-        "proposal_id": "prop_ghost",
-        "approved_by": "ghost",
-        "plaintext":   "sk_ghost"
-    })).await;
+    publish_approve(
+        &nats,
+        "default",
+        serde_json::json!({
+            "proposal_id": "prop_ghost",
+            "approved_by": "ghost",
+            "plaintext":   "sk_ghost"
+        }),
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
@@ -274,19 +283,29 @@ async fn second_approve_for_already_approved_proposal_is_ignored() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_approve(&nats, "prod", serde_json::json!({
-        "proposal_id": "prop_double001",
-        "approved_by": "mario",
-        "plaintext":   "sk-first"
-    })).await;
+    publish_approve(
+        &nats,
+        "prod",
+        serde_json::json!({
+            "proposal_id": "prop_double001",
+            "approved_by": "mario",
+            "plaintext":   "sk-first"
+        }),
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_approve(&nats, "prod", serde_json::json!({
-        "proposal_id": "prop_double001",
-        "approved_by": "luigi",
-        "plaintext":   "sk-second"
-    })).await;
+    publish_approve(
+        &nats,
+        "prod",
+        serde_json::json!({
+            "proposal_id": "prop_double001",
+            "approved_by": "luigi",
+            "plaintext":   "sk-second"
+        }),
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -301,7 +320,7 @@ async fn second_approve_for_already_approved_proposal_is_ignored() {
 #[tokio::test]
 async fn named_vaults_are_isolated() {
     let (js, nats, _c) = start_nats().await;
-    let vault_prod    = spawn_service(js.clone(), nats.clone(), "prod").await;
+    let vault_prod = spawn_service(js.clone(), nats.clone(), "prod").await;
     let vault_staging = spawn_service(js.clone(), nats.clone(), "staging").await;
 
     let token = ApiKeyToken::new("tok_anthropic_prod_abc123").unwrap();
@@ -324,11 +343,16 @@ async fn named_vaults_are_isolated() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_approve(&nats, "prod", serde_json::json!({
-        "proposal_id": "prop_iso001",
-        "approved_by": "mario",
-        "plaintext":   "sk-prod-key"
-    })).await;
+    publish_approve(
+        &nats,
+        "prod",
+        serde_json::json!({
+            "proposal_id": "prop_iso001",
+            "approved_by": "mario",
+            "plaintext":   "sk-prod-key"
+        }),
+    )
+    .await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -367,11 +391,16 @@ async fn approve_publishes_state_update_to_stream() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_approve(&nats, "prod", serde_json::json!({
-        "proposal_id": "prop_state001",
-        "approved_by": "mario",
-        "plaintext":   "sk_live_state_test"
-    })).await;
+    publish_approve(
+        &nats,
+        "prod",
+        serde_json::json!({
+            "proposal_id": "prop_state001",
+            "approved_by": "mario",
+            "plaintext":   "sk_live_state_test"
+        }),
+    )
+    .await;
 
     let msg = tokio::time::timeout(Duration::from_secs(2), state_sub.next())
         .await
@@ -413,11 +442,16 @@ async fn reject_publishes_state_update_to_stream() {
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    publish_reject(&nats, "staging", serde_json::json!({
-        "proposal_id": "prop_rstate001",
-        "rejected_by": "luigi",
-        "reason":      "policy violation"
-    })).await;
+    publish_reject(
+        &nats,
+        "staging",
+        serde_json::json!({
+            "proposal_id": "prop_rstate001",
+            "rejected_by": "luigi",
+            "reason":      "policy violation"
+        }),
+    )
+    .await;
 
     let msg = tokio::time::timeout(Duration::from_secs(2), state_sub.next())
         .await
@@ -451,12 +485,14 @@ async fn approve_proposal_writes_to_nats_kv_vault() {
 
     ensure_proposals_stream(&js).await.expect("proposals stream");
 
-    let vault     = Arc::new(make_nats_kv_vault(&js, "approvals-kv-test").await);
-    let notifier  = Arc::new(NoopNotifier);
+    let vault = Arc::new(make_nats_kv_vault(&js, "approvals-kv-test").await);
+    let notifier = Arc::new(NoopNotifier);
     let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
     let svc = ApprovalService::new(Arc::clone(&vault), notifier, publisher, "default");
     let (js_svc, nats_svc) = (js.clone(), nats.clone());
-    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::spawn(async move {
+        svc.run(js_svc, nats_svc).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     js.publish(
@@ -508,12 +544,14 @@ async fn reject_proposal_does_not_write_to_nats_kv_vault() {
 
     ensure_proposals_stream(&js).await.expect("proposals stream");
 
-    let vault     = Arc::new(make_nats_kv_vault(&js, "approvals-kv-rej-test").await);
-    let notifier  = Arc::new(NoopNotifier);
+    let vault = Arc::new(make_nats_kv_vault(&js, "approvals-kv-rej-test").await);
+    let notifier = Arc::new(NoopNotifier);
     let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
     let svc = ApprovalService::new(Arc::clone(&vault), notifier, publisher, "default");
     let (js_svc, nats_svc) = (js.clone(), nats.clone());
-    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::spawn(async move {
+        svc.run(js_svc, nats_svc).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     js.publish(
@@ -584,12 +622,14 @@ async fn approve_with_infisical_store_calls_infisical_api() {
     let (js, nats, _c) = start_nats().await;
     ensure_proposals_stream(&js).await.expect("proposals stream");
 
-    let vault     = Arc::new(make_infisical_store(&infisical));
-    let notifier  = Arc::new(NoopNotifier);
+    let vault = Arc::new(make_infisical_store(&infisical));
+    let notifier = Arc::new(NoopNotifier);
     let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
     let svc = ApprovalService::new(vault, notifier, publisher, "prod");
     let (js_svc, nats_svc) = (js.clone(), nats.clone());
-    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::spawn(async move {
+        svc.run(js_svc, nats_svc).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     js.publish(
@@ -648,14 +688,16 @@ async fn approve_with_dual_write_vault_writes_to_both_backends() {
     ensure_proposals_stream(&js).await.expect("proposals stream");
 
     let nk_vault = make_nats_kv_vault(&js, "approvals-dual-test").await;
-    let dual     = Arc::new(DualWriteVault::new(make_infisical_store(&infisical), nk_vault));
+    let dual = Arc::new(DualWriteVault::new(make_infisical_store(&infisical), nk_vault));
     let dual_check = Arc::clone(&dual);
 
-    let notifier  = Arc::new(NoopNotifier);
+    let notifier = Arc::new(NoopNotifier);
     let publisher = Arc::new(JetStreamStatePublisher::new(js.clone()));
     let svc = ApprovalService::new(Arc::clone(&dual), notifier, publisher, "prod");
     let (js_svc, nats_svc) = (js.clone(), nats.clone());
-    tokio::spawn(async move { svc.run(js_svc, nats_svc).await.ok(); });
+    tokio::spawn(async move {
+        svc.run(js_svc, nats_svc).await.ok();
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     js.publish(

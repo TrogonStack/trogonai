@@ -34,10 +34,7 @@ mod tests {
         let mut dirs = FixedDirs::new();
         dirs.set(DirKind::State, "/state");
 
-        assert_eq!(
-            state_file(&dirs, "lock"),
-            Some(PathBuf::from("/state/lock"))
-        );
+        assert_eq!(state_file(&dirs, "lock"), Some(PathBuf::from("/state/lock")));
         assert_eq!(state_file(&FixedDirs::new(), "lock"), None);
     }
 }

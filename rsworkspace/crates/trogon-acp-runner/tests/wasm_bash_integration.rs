@@ -8,8 +8,7 @@
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent, CreateTerminalResponse, InitializeRequest, NewSessionRequest, PromptRequest,
-    ProtocolVersion, TerminalId,
+    Agent, CreateTerminalResponse, InitializeRequest, NewSessionRequest, PromptRequest, ProtocolVersion, TerminalId,
 };
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
@@ -52,8 +51,7 @@ async fn connect(port: u16) -> (async_nats::Client, jetstream::Context) {
 /// marker-scoped output extraction never matches. (HIGH-21: the tool no longer
 /// reads a baseline before writing, so there is no baseline output request.)
 fn markers_from_written_command(payload: &[u8]) -> (String, String) {
-    let req: serde_json::Value =
-        serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
+    let req: serde_json::Value = serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
     let bytes: Vec<u8> = req["data"]
         .as_array()
         .expect("write_stdin payload must carry `data` bytes")
@@ -132,10 +130,7 @@ async fn wasm_bash_tool_call_tool_completes_round_trip() {
     );
 
     let args = serde_json::json!({ "command": "echo hello" });
-    let result = tool
-        .call_tool("bash", &args)
-        .await
-        .expect("call_tool must succeed");
+    let result = tool.call_tool("bash", &args).await.expect("call_tool must succeed");
 
     assert!(result.contains("hello"), "output must contain 'hello', got: {result}");
 }
@@ -151,9 +146,7 @@ async fn with_execution_backend_injects_bash_tool_when_registry_has_execution_en
     let (nats, js) = connect(port).await;
 
     // Provision and populate the registry.
-    let reg_store = trogon_registry::provision(&js)
-        .await
-        .expect("provision registry");
+    let reg_store = trogon_registry::provision(&js).await.expect("provision registry");
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
         agent_type: "wasm".to_string(),
@@ -187,15 +180,9 @@ async fn with_execution_backend_injects_bash_tool_when_registry_has_execution_en
                 .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
                 .await
                 .unwrap();
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -248,10 +235,7 @@ async fn wasm_bash_tool_no_responder_returns_error() {
         .call_tool("bash", &serde_json::json!({ "command": "echo hi" }))
         .await;
     assert!(result.is_err(), "expected Err when no responder is set up");
-    assert!(
-        !result.unwrap_err().is_empty(),
-        "error message must not be empty"
-    );
+    assert!(!result.unwrap_err().is_empty(), "error message must not be empty");
 }
 
 /// When the registry has no "execution" entries, no bash tool is injected and
@@ -261,9 +245,7 @@ async fn with_execution_backend_no_bash_tool_when_registry_empty() {
     let (_c, port) = start_nats().await;
     let (nats, js) = connect(port).await;
 
-    let reg_store = trogon_registry::provision(&js)
-        .await
-        .expect("provision registry");
+    let reg_store = trogon_registry::provision(&js).await.expect("provision registry");
     let registry = trogon_registry::Registry::new(reg_store);
     // Do NOT register any capability — registry is empty.
 
@@ -285,14 +267,9 @@ async fn with_execution_backend_no_bash_tool_when_registry_empty() {
             )
             .with_execution_backend(nats.clone(), registry);
 
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            let result = agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await;
+            let result = agent.prompt(PromptRequest::new(session_id, vec![])).await;
             assert!(result.is_ok(), "prompt must succeed even without execution backend");
         })
         .await;
@@ -313,9 +290,7 @@ async fn with_execution_backend_injects_bash_tool_when_acp_prefix_absent_from_me
     let (_c, port) = start_nats().await;
     let (nats, js) = connect(port).await;
 
-    let reg_store = trogon_registry::provision(&js)
-        .await
-        .expect("provision registry");
+    let reg_store = trogon_registry::provision(&js).await.expect("provision registry");
     let registry = trogon_registry::Registry::new(reg_store);
 
     let cap = trogon_registry::AgentCapability {
@@ -349,15 +324,9 @@ async fn with_execution_backend_injects_bash_tool_when_acp_prefix_absent_from_me
                 .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
                 .await
                 .unwrap();
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
@@ -377,9 +346,7 @@ async fn with_execution_backend_injects_bash_tool_exactly_once_with_multiple_ent
     let (_c, port) = start_nats().await;
     let (nats, js) = connect(port).await;
 
-    let reg_store = trogon_registry::provision(&js)
-        .await
-        .expect("provision registry");
+    let reg_store = trogon_registry::provision(&js).await.expect("provision registry");
     let registry = trogon_registry::Registry::new(reg_store);
 
     for i in 0..2u8 {
@@ -415,25 +382,16 @@ async fn with_execution_backend_injects_bash_tool_exactly_once_with_multiple_ent
                 .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
                 .await
                 .unwrap();
-            let resp = agent
-                .new_session(NewSessionRequest::new("/cwd"))
-                .await
-                .unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
         })
         .await;
 
-    let bash_count = runner
-        .captured_tool_names()
-        .iter()
-        .filter(|n| *n == "bash")
-        .count();
+    let bash_count = runner.captured_tool_names().iter().filter(|n| *n == "bash").count();
     assert_eq!(
-        bash_count, 1,
+        bash_count,
+        1,
         "bash tool must be injected exactly once even with multiple execution entries, got: {:?}",
         runner.captured_tool_names()
     );
@@ -552,8 +510,7 @@ async fn wasm_bash_tool_passes_sandbox_dir_as_cwd_in_create_request() {
             .unwrap();
 
         if let Some(msg) = create_sub.next().await {
-            *captured_clone.lock().await =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            *captured_clone.lock().await = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let resp = CreateTerminalResponse::new(TerminalId::new("tid-cwd"));
             nats_srv
                 .publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())

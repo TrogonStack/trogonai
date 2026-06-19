@@ -30,11 +30,7 @@ pub struct OutcomesConfig {
 
 impl OutcomesConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
-        let auth_style = match env
-            .var("OUTCOMES_LLM_AUTH_STYLE")
-            .as_deref()
-            .unwrap_or("xapikey")
-        {
+        let auth_style = match env.var("OUTCOMES_LLM_AUTH_STYLE").as_deref().unwrap_or("xapikey") {
             "bearer" => EvalAuthStyle::Bearer,
             _ => EvalAuthStyle::XApiKey,
         };

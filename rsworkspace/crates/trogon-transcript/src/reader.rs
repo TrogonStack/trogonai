@@ -74,8 +74,8 @@ pub mod mock {
 
 #[cfg(test)]
 mod tests {
-    use super::mock::MockTranscriptReader;
     use super::TranscriptRead;
+    use super::mock::MockTranscriptReader;
     use crate::entry::{Role, TranscriptEntry};
 
     fn user_msg(content: &str) -> TranscriptEntry {

@@ -18,7 +18,10 @@ pub struct Dreamer<P: MemoryProvider, S: MemoryStore> {
 
 impl<P: MemoryProvider, S: MemoryStore> Dreamer<P, S> {
     pub fn new(provider: P, store: S) -> Self {
-        Self { provider, client: MemoryClient::new(store) }
+        Self {
+            provider,
+            client: MemoryClient::new(store),
+        }
     }
 
     /// Process a completed session:
@@ -35,18 +38,11 @@ impl<P: MemoryProvider, S: MemoryStore> Dreamer<P, S> {
         session_id: &str,
         transcript: &[TranscriptEntry],
     ) -> Result<EntityMemory, DreamerError> {
-        let mut memory = self
-            .client
-            .get(actor_type, actor_key)
-            .await?
-            .unwrap_or_default();
+        let mut memory = self.client.get(actor_type, actor_key).await?.unwrap_or_default();
 
         let existing = if memory.facts.is_empty() { None } else { Some(&memory) };
 
-        let new_facts = self
-            .provider
-            .extract_facts(transcript, existing)
-            .await?;
+        let new_facts = self.provider.extract_facts(transcript, existing).await?;
 
         if new_facts.is_empty() {
             return Ok(memory);
@@ -189,10 +185,7 @@ mod tests {
         let store = MockMemoryStore::new();
         let dreamer = Dreamer::new(MockMemoryProvider::returning(vec![]), store.clone());
 
-        let result = dreamer
-            .process_session("agent", "proj/1", "sess-1", &[])
-            .await
-            .unwrap();
+        let result = dreamer.process_session("agent", "proj/1", "sess-1", &[]).await.unwrap();
 
         assert!(result.facts.is_empty());
 
@@ -203,10 +196,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_session_propagates_provider_error() {
-        let dreamer = Dreamer::new(
-            MockMemoryProvider::failing("LLM unavailable"),
-            MockMemoryStore::new(),
-        );
+        let dreamer = Dreamer::new(MockMemoryProvider::failing("LLM unavailable"), MockMemoryStore::new());
         let err = dreamer
             .process_session("agent", "proj/1", "sess-1", &sample_transcript())
             .await
@@ -217,10 +207,7 @@ mod tests {
     #[tokio::test]
     async fn process_session_empty_transcript_yields_no_facts_by_default() {
         let dreamer = Dreamer::new(MockMemoryProvider::returning(vec![]), MockMemoryStore::new());
-        let result = dreamer
-            .process_session("pr", "repo/2", "sess-1", &[])
-            .await
-            .unwrap();
+        let result = dreamer.process_session("pr", "repo/2", "sess-1", &[]).await.unwrap();
         assert!(result.facts.is_empty());
     }
 
@@ -246,10 +233,7 @@ mod tests {
             async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<u64, PutErr> {
                 Err(PutErr)
             }
-            async fn get(
-                &self,
-                _key: &str,
-            ) -> Result<Option<bytes::Bytes>, std::convert::Infallible> {
+            async fn get(&self, _key: &str) -> Result<Option<bytes::Bytes>, std::convert::Infallible> {
                 Ok(None)
             }
             async fn delete(&self, _key: &str) -> Result<(), std::convert::Infallible> {

@@ -26,13 +26,13 @@ pub async fn ensure_proposals_stream(js: &jetstream::Context) -> Result<(), Appr
 
 /// Like [`ensure_proposals_stream`] but with a configurable max-age.
 pub async fn ensure_proposals_stream_with_max_age(
-    js:      &jetstream::Context,
+    js: &jetstream::Context,
     max_age: Duration,
 ) -> Result<(), ApprovalError> {
     js.get_or_create_stream(jetstream::stream::Config {
-        name:     PROPOSALS_STREAM.to_string(),
+        name: PROPOSALS_STREAM.to_string(),
         subjects: stream_subjects(),
-        storage:  jetstream::stream::StorageType::File,
+        storage: jetstream::stream::StorageType::File,
         max_age,
         ..Default::default()
     })

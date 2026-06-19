@@ -406,10 +406,7 @@ async fn model_slash_command_cross_runner_switch_via_real_nats() {
     // export from src runner
     {
         let n = nats_bg.clone();
-        let mut sub = nats_bg
-            .subscribe("acp.src.agent.ext.session/export")
-            .await
-            .unwrap();
+        let mut sub = nats_bg.subscribe("acp.src.agent.ext.session/export").await.unwrap();
         tokio::spawn(async move {
             if let Some(msg) = sub.next().await {
                 if let Some(reply) = msg.reply {
@@ -421,10 +418,7 @@ async fn model_slash_command_cross_runner_switch_via_real_nats() {
     // new_session on target (grok) runner
     {
         let n = nats_bg.clone();
-        let mut sub = nats_bg
-            .subscribe("acp.grok.agent.session.new")
-            .await
-            .unwrap();
+        let mut sub = nats_bg.subscribe("acp.grok.agent.session.new").await.unwrap();
         tokio::spawn(async move {
             if let Some(msg) = sub.next().await {
                 if let Some(reply) = msg.reply {
@@ -438,10 +432,7 @@ async fn model_slash_command_cross_runner_switch_via_real_nats() {
     // session/import on target runner
     {
         let n = nats_bg.clone();
-        let mut sub = nats_bg
-            .subscribe("acp.grok.agent.ext.session/import")
-            .await
-            .unwrap();
+        let mut sub = nats_bg.subscribe("acp.grok.agent.ext.session/import").await.unwrap();
         tokio::spawn(async move {
             if let Some(msg) = sub.next().await {
                 if let Some(reply) = msg.reply {
@@ -456,8 +447,7 @@ async fn model_slash_command_cross_runner_switch_via_real_nats() {
     // ── Registry: grok-4 → acp.grok ──────────────────────────────────────
     let registry = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
     let mut cap = trogon_registry::AgentCapability::new("xai", ["chat"], "acp.grok.agent.>");
-    cap.metadata =
-        serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.grok" });
+    cap.metadata = serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.grok" });
     registry.register(&cap).await.unwrap();
 
     let base_config = acp_nats::Config::new(
@@ -474,10 +464,7 @@ async fn model_slash_command_cross_runner_switch_via_real_nats() {
         .await
         .expect("switch_model must succeed via real NATS");
 
-    assert_eq!(
-        new_prefix, "acp.grok",
-        "/model must route to the grok runner prefix"
-    );
+    assert_eq!(new_prefix, "acp.grok", "/model must route to the grok runner prefix");
     assert_eq!(
         new_session_id, "grok-sess-1",
         "/model must use the session_id returned by new_session"
@@ -492,8 +479,7 @@ async fn model_slash_command_same_runner_returns_unchanged_session() {
     let nats = connect(port).await;
 
     let registry = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
-    let mut cap =
-        trogon_registry::AgentCapability::new("claude", ["chat", "code_edit"], "acp.acp.agent.>");
+    let mut cap = trogon_registry::AgentCapability::new("claude", ["chat", "code_edit"], "acp.acp.agent.>");
     cap.metadata = serde_json::json!({
         "models": ["claude-opus-4-6"],
         "acp_prefix": "acp.acp"
@@ -538,10 +524,7 @@ async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
     // on the grok prefix (returns "grok-sess-1" then "grok-sess-2").
     {
         let n = nats_bg.clone();
-        let mut sub = nats_bg
-            .subscribe("acp.grok.agent.session.new")
-            .await
-            .unwrap();
+        let mut sub = nats_bg.subscribe("acp.grok.agent.session.new").await.unwrap();
         tokio::spawn(async move {
             let mut count = 0usize;
             while let Some(msg) = sub.next().await {
@@ -549,9 +532,7 @@ async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
                     count += 1;
                     let id = format!("grok-sess-{count}");
                     let body = serde_json::json!({ "sessionId": id });
-                    n.publish(reply, serde_json::to_vec(&body).unwrap().into())
-                        .await
-                        .ok();
+                    n.publish(reply, serde_json::to_vec(&body).unwrap().into()).await.ok();
                 }
             }
         });
@@ -559,10 +540,7 @@ async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
     // export from src runner
     {
         let n = nats_bg.clone();
-        let mut sub = nats_bg
-            .subscribe("acp.src.agent.ext.session/export")
-            .await
-            .unwrap();
+        let mut sub = nats_bg.subscribe("acp.src.agent.ext.session/export").await.unwrap();
         tokio::spawn(async move {
             if let Some(msg) = sub.next().await {
                 if let Some(reply) = msg.reply {
@@ -574,10 +552,7 @@ async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
     // session/import on grok runner
     {
         let n = nats_bg.clone();
-        let mut sub = nats_bg
-            .subscribe("acp.grok.agent.ext.session/import")
-            .await
-            .unwrap();
+        let mut sub = nats_bg.subscribe("acp.grok.agent.ext.session/import").await.unwrap();
         tokio::spawn(async move {
             if let Some(msg) = sub.next().await {
                 if let Some(reply) = msg.reply {

@@ -118,9 +118,7 @@ impl TurnRenderer {
                     while let Some(nl) = self.stream_line_buf.find('\n') {
                         let line: String = self.stream_line_buf[..nl].to_string();
                         self.stream_line_buf.drain(..=nl);
-                        if let Some(rendered) =
-                            crate::markdown::render_line(&line, true, &mut self.stream_in_code)
-                        {
+                        if let Some(rendered) = crate::markdown::render_line(&line, true, &mut self.stream_in_code) {
                             println!("{rendered}");
                         }
                     }
@@ -199,7 +197,9 @@ impl TurnRenderer {
                         "\n\x1b[33m[max tool rounds reached — try rephrasing or using \x1b[35m/compact\x1b[33m]\x1b[0m"
                     );
                 } else if metrics.context_size > 0 {
-                    let pct = (metrics.used_tokens * 100).checked_div(metrics.context_size).unwrap_or(0);
+                    let pct = (metrics.used_tokens * 100)
+                        .checked_div(metrics.context_size)
+                        .unwrap_or(0);
                     eprintln!(
                         "\x1b[90m── {}/{} tokens ({}%) ──\x1b[0m",
                         fmt_tokens(metrics.used_tokens),
@@ -231,9 +231,7 @@ impl TurnRenderer {
     fn flush_stream_line(&mut self) {
         if self.stream && !self.stream_line_buf.is_empty() {
             let line = std::mem::take(&mut self.stream_line_buf);
-            if let Some(rendered) =
-                crate::markdown::render_line(&line, true, &mut self.stream_in_code)
-            {
+            if let Some(rendered) = crate::markdown::render_line(&line, true, &mut self.stream_in_code) {
                 print!("{rendered}");
                 let _ = std::io::stdout().flush();
             }

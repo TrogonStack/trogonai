@@ -17,7 +17,10 @@ use std::time::Duration;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_nats::{NatsAuth, NatsConfig, connect};
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, worker,
+};
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -36,12 +39,7 @@ async fn start_nats() -> (ContainerAsync<Nats>, u16) {
 ///
 /// The vault is pre-seeded with `tok_anthropic_test_abc123 → sk-ant-realkey`.
 /// The AI provider URL is overridden to `ai_base_url` (mock server).
-async fn start_pipeline(
-    nats_port: u16,
-    ai_base_url: &str,
-    consumer_name: &str,
-    vault: Arc<MemoryVault>,
-) -> u16 {
+async fn start_pipeline(nats_port: u16, ai_base_url: &str, consumer_name: &str, vault: Arc<MemoryVault>) -> u16 {
     let nats_config = NatsConfig {
         servers: vec![format!("localhost:{}", nats_port)],
         auth: NatsAuth::None,
@@ -151,7 +149,10 @@ async fn e2e_streaming_assembles_full_body() {
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    assert!(ct.contains("text/event-stream"), "content-type must be text/event-stream, got: {ct}");
+    assert!(
+        ct.contains("text/event-stream"),
+        "content-type must be text/event-stream, got: {ct}"
+    );
 
     // The real key must never appear in any response header forwarded to the client.
     for (name, value) in resp.headers() {
@@ -195,8 +196,7 @@ async fn e2e_streaming_does_not_use_non_streaming_protocol() {
         .await
         .unwrap();
 
-    let proxy_port =
-        start_pipeline(nats_port, &mock.base_url(), "stream-protocol-worker", vault).await;
+    let proxy_port = start_pipeline(nats_port, &mock.base_url(), "stream-protocol-worker", vault).await;
 
     let body_json = serde_json::json!({
         "stream": true,
@@ -240,8 +240,7 @@ async fn e2e_streaming_unknown_token_returns_401() {
 
     let vault = Arc::new(MemoryVault::new()); // empty — no tokens
 
-    let proxy_port =
-        start_pipeline(nats_port, &mock.base_url(), "stream-unknown-token-worker", vault).await;
+    let proxy_port = start_pipeline(nats_port, &mock.base_url(), "stream-unknown-token-worker", vault).await;
 
     let body_json = serde_json::json!({
         "stream": true,
@@ -291,8 +290,7 @@ async fn e2e_streaming_upstream_error_status_is_forwarded() {
         .await
         .unwrap();
 
-    let proxy_port =
-        start_pipeline(nats_port, &mock.base_url(), "stream-upstream-error-worker", vault).await;
+    let proxy_port = start_pipeline(nats_port, &mock.base_url(), "stream-upstream-error-worker", vault).await;
 
     let body_json = serde_json::json!({
         "stream": true,
@@ -354,8 +352,7 @@ async fn e2e_streaming_large_body_is_preserved_in_order() {
         .await
         .unwrap();
 
-    let proxy_port =
-        start_pipeline(nats_port, &mock.base_url(), "stream-large-body-worker", vault).await;
+    let proxy_port = start_pipeline(nats_port, &mock.base_url(), "stream-large-body-worker", vault).await;
 
     let body_json = serde_json::json!({
         "stream": true,
@@ -413,8 +410,7 @@ async fn e2e_non_streaming_still_works_alongside_streaming() {
         .await
         .unwrap();
 
-    let proxy_port =
-        start_pipeline(nats_port, &mock.base_url(), "stream-mixed-worker", vault).await;
+    let proxy_port = start_pipeline(nats_port, &mock.base_url(), "stream-mixed-worker", vault).await;
 
     // Non-streaming request — no `"stream"` key in the body.
     let body_json = serde_json::json!({

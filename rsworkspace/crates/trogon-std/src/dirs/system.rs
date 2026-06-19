@@ -219,10 +219,7 @@ mod tests {
             let config = dirs.config_dir().expect("config_dir must be Some on Linux");
             // Either XDG_CONFIG_HOME was set (any absolute path) or we got ~/.config
             let s = config.to_string_lossy();
-            assert!(
-                s.ends_with(".config") || !s.is_empty(),
-                "config_dir must not be empty"
-            );
+            assert!(s.ends_with(".config") || !s.is_empty(), "config_dir must not be empty");
         }
     }
 

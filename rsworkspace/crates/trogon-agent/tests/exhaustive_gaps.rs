@@ -70,42 +70,21 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
 
 #[tokio::test]
 async fn get_pr_diff_missing_owner_returns_error() {
-    let result = dispatch_tool(
-        &dummy_ctx(),
-        "get_pr_diff",
-        &json!({ "repo": "r", "pr_number": 1 }),
-    )
-    .await;
+    let result = dispatch_tool(&dummy_ctx(), "get_pr_diff", &json!({ "repo": "r", "pr_number": 1 })).await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(
-        result.contains("owner"),
-        "expected 'owner' in error, got: {result}"
-    );
+    assert!(result.contains("owner"), "expected 'owner' in error, got: {result}");
 }
 
 #[tokio::test]
 async fn get_pr_diff_missing_repo_returns_error() {
-    let result = dispatch_tool(
-        &dummy_ctx(),
-        "get_pr_diff",
-        &json!({ "owner": "o", "pr_number": 1 }),
-    )
-    .await;
+    let result = dispatch_tool(&dummy_ctx(), "get_pr_diff", &json!({ "owner": "o", "pr_number": 1 })).await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(
-        result.contains("repo"),
-        "expected 'repo' in error, got: {result}"
-    );
+    assert!(result.contains("repo"), "expected 'repo' in error, got: {result}");
 }
 
 #[tokio::test]
 async fn get_pr_diff_missing_pr_number_returns_error() {
-    let result = dispatch_tool(
-        &dummy_ctx(),
-        "get_pr_diff",
-        &json!({ "owner": "o", "repo": "r" }),
-    )
-    .await;
+    let result = dispatch_tool(&dummy_ctx(), "get_pr_diff", &json!({ "owner": "o", "repo": "r" })).await;
     assert!(result.contains("Tool error"), "got: {result}");
     assert!(
         result.contains("pr_number"),
@@ -124,10 +103,7 @@ async fn get_file_contents_missing_owner_returns_error() {
     )
     .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(
-        result.contains("owner"),
-        "expected 'owner' in error, got: {result}"
-    );
+    assert!(result.contains("owner"), "expected 'owner' in error, got: {result}");
 }
 
 #[tokio::test]
@@ -139,10 +115,7 @@ async fn get_file_contents_missing_repo_returns_error() {
     )
     .await;
     assert!(result.contains("Tool error"), "got: {result}");
-    assert!(
-        result.contains("repo"),
-        "expected 'repo' in error, got: {result}"
-    );
+    assert!(result.contains("repo"), "expected 'repo' in error, got: {result}");
 }
 
 // ── pr_review::handle — missing repository fields → None ─────────────────────
@@ -205,22 +178,14 @@ async fn issue_triage_handle_missing_title_uses_fallback() {
 
     let agent = make_agent(&server.base_url());
     let result = issue_triage::handle(&agent, &payload).await;
-    assert!(
-        matches!(result, Some(Ok(_))),
-        "expected Some(Ok), got: {result:?}"
-    );
+    assert!(matches!(result, Some(Ok(_))), "expected Some(Ok), got: {result:?}");
 }
 
 // ── pr_review_tools — verify tool names ──────────────────────────────────────
 
 #[test]
 fn pr_review_tools_has_correct_names() {
-    let expected = [
-        "list_pr_files",
-        "get_pr_diff",
-        "get_file_contents",
-        "post_pr_review",
-    ];
+    let expected = ["list_pr_files", "get_pr_diff", "get_file_contents", "post_pr_review"];
     assert_eq!(expected.len(), 4);
 }
 
@@ -228,11 +193,7 @@ fn pr_review_tools_has_correct_names() {
 
 #[test]
 fn triage_tools_has_correct_names() {
-    let expected = [
-        "get_linear_issue",
-        "post_linear_comment",
-        "update_linear_issue",
-    ];
+    let expected = ["get_linear_issue", "post_linear_comment", "update_linear_issue"];
     assert_eq!(expected.len(), 3);
 }
 
@@ -270,10 +231,7 @@ async fn pr_review_prompt_contains_expected_keywords() {
     let agent = make_agent(&server.base_url());
     let result = pr_review::handle(&agent, &payload).await;
 
-    assert!(
-        matches!(result, Some(Ok(_))),
-        "expected Some(Ok), got: {result:?}"
-    );
+    assert!(matches!(result, Some(Ok(_))), "expected Some(Ok), got: {result:?}");
     mock.assert_hits_async(1).await;
 }
 
@@ -307,10 +265,7 @@ async fn issue_triage_prompt_contains_expected_keywords() {
     let agent = make_agent(&server.base_url());
     let result = issue_triage::handle(&agent, &payload).await;
 
-    assert!(
-        matches!(result, Some(Ok(_))),
-        "expected Some(Ok), got: {result:?}"
-    );
+    assert!(matches!(result, Some(Ok(_))), "expected Some(Ok), got: {result:?}");
     mock.assert_hits_async(1).await;
 }
 

@@ -69,11 +69,7 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
     let _guard = bin_env_lock().lock().await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "# Project rules\nAlways use Rust.\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "# Project rules\nAlways use Rust.\n").unwrap();
 
     let record_file = tempfile::NamedTempFile::new().unwrap();
     let record_path = record_file.path().to_str().unwrap().to_string();
@@ -91,10 +87,7 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
                 "o4-mini",
             );
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new(dir.path()))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
 
             agent
                 .prompt(PromptRequest::new(
@@ -150,11 +143,7 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
     let _guard = bin_env_lock().lock().await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("TROGON.md"),
-        "# Project rules\nAlways use Rust.\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "# Project rules\nAlways use Rust.\n").unwrap();
 
     let record_file = tempfile::NamedTempFile::new().unwrap();
     let record_path = record_file.path().to_str().unwrap().to_string();
@@ -172,10 +161,7 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
                 "o4-mini",
             );
 
-            let new_resp = agent
-                .new_session(NewSessionRequest::new(dir.path()))
-                .await
-                .unwrap();
+            let new_resp = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
             let session_id = new_resp.session_id;
 
             // First prompt: TROGON.md is injected (first_turn = true).

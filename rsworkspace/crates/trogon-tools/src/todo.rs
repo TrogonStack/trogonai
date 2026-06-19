@@ -36,7 +36,9 @@ struct TodoWriteItemWire {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum TodoWriteInput {
-    Batch { todos: Vec<TodoWriteItemWire> },
+    Batch {
+        todos: Vec<TodoWriteItemWire>,
+    },
     Single {
         id: String,
         content: String,
@@ -46,8 +48,7 @@ enum TodoWriteInput {
 
 fn parse_todo_write_input(input: &Value) -> Result<TodoWriteInput, String> {
     if input.get("todos").is_some() {
-        serde_json::from_value(input.clone())
-            .map_err(|e| format!("Error: invalid todos batch: {e}"))
+        serde_json::from_value(input.clone()).map_err(|e| format!("Error: invalid todos batch: {e}"))
     } else {
         serde_json::from_value(input.clone()).map_err(|e| format!("Error: {e}"))
     }
@@ -74,22 +75,16 @@ fn upsert_todo(store: &mut TodoStore, item: TodoItem) {
 
 async fn save_store(cwd: &str, store: &TodoStore) -> Result<(), String> {
     let dir = std::path::Path::new(cwd).join(".trogon");
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
     let path = dir.join("todos.json");
     // MED-12: unique temp name so concurrent saves don't clobber each other.
     let tmp = crate::fs::unique_tmp_path(&path);
     let json = serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?;
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
     file.write_all(&json).await.map_err(|e| e.to_string())?;
     file.flush().await.map_err(|e| e.to_string())?;
     drop(file);
-    tokio::fs::rename(&tmp, &path)
-        .await
-        .map_err(|e| e.to_string())?;
+    tokio::fs::rename(&tmp, &path).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -106,14 +101,7 @@ pub async fn todo_write(ctx: &ToolContext, input: &Value) -> String {
             }
 
             let mut store = load_store(&ctx.cwd).await;
-            upsert_todo(
-                &mut store,
-                TodoItem {
-                    id,
-                    content,
-                    status,
-                },
-            );
+            upsert_todo(&mut store, TodoItem { id, content, status });
 
             match save_store(&ctx.cwd, &store).await {
                 Ok(()) => "OK".to_string(),
@@ -144,11 +132,7 @@ pub async fn todo_write(ctx: &ToolContext, input: &Value) -> String {
 
 pub async fn todo_read(ctx: &ToolContext, _input: &Value) -> String {
     let store = load_store(&ctx.cwd).await;
-    let active: Vec<&TodoItem> = store
-        .todos
-        .iter()
-        .filter(|t| t.status != "completed")
-        .collect();
+    let active: Vec<&TodoItem> = store.todos.iter().filter(|t| t.status != "completed").collect();
 
     if active.is_empty() {
         return "No active todos.".to_string();
@@ -219,9 +203,21 @@ mod tests {
     async fn todo_read_returns_active_todos() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        todo_write(&ctx, &serde_json::json!({"id": "t1", "content": "pending task", "status": "pending"})).await;
-        todo_write(&ctx, &serde_json::json!({"id": "t2", "content": "in progress", "status": "in_progress"})).await;
-        todo_write(&ctx, &serde_json::json!({"id": "t3", "content": "done", "status": "completed"})).await;
+        todo_write(
+            &ctx,
+            &serde_json::json!({"id": "t1", "content": "pending task", "status": "pending"}),
+        )
+        .await;
+        todo_write(
+            &ctx,
+            &serde_json::json!({"id": "t2", "content": "in progress", "status": "in_progress"}),
+        )
+        .await;
+        todo_write(
+            &ctx,
+            &serde_json::json!({"id": "t3", "content": "done", "status": "completed"}),
+        )
+        .await;
 
         let result = todo_read(&ctx, &serde_json::json!({})).await;
         assert!(result.contains("t1"), "got: {result}");

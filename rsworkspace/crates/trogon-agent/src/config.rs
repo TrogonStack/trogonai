@@ -98,16 +98,12 @@ impl AgentConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
         Self {
             nats: NatsConfig::from_env(env),
-            proxy_url: env
-                .var("PROXY_URL")
-                .unwrap_or_else(|_| DEFAULT_PROXY_URL.to_string()),
+            proxy_url: env.var("PROXY_URL").unwrap_or_else(|_| DEFAULT_PROXY_URL.to_string()),
             anthropic_token: env.var("ANTHROPIC_TOKEN").unwrap_or_default(),
             github_token: env.var("GITHUB_TOKEN").unwrap_or_default(),
             linear_token: env.var("LINEAR_TOKEN").unwrap_or_default(),
             slack_token: env.var("SLACK_TOKEN").unwrap_or_default(),
-            model: env
-                .var("AGENT_MODEL")
-                .unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
+            model: env.var("AGENT_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
             max_iterations: env
                 .var("AGENT_MAX_ITERATIONS")
                 .ok()
@@ -131,9 +127,7 @@ impl AgentConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(8090),
-            tenant_id: env
-                .var("TENANT_ID")
-                .unwrap_or_else(|_| "default".to_string()),
+            tenant_id: env.var("TENANT_ID").unwrap_or_else(|_| "default".to_string()),
             split_evaluator_url: env.var("SPLIT_EVALUATOR_URL").ok(),
             split_auth_token: env.var("SPLIT_EVALUATOR_AUTH_TOKEN").ok(),
             agent_id: env.var("AGENT_ID").ok(),
@@ -385,10 +379,7 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("SPLIT_EVALUATOR_URL", "http://split:7548");
         let cfg = AgentConfig::from_env(&env);
-        assert_eq!(
-            cfg.split_evaluator_url.as_deref(),
-            Some("http://split:7548")
-        );
+        assert_eq!(cfg.split_evaluator_url.as_deref(), Some("http://split:7548"));
     }
 
     #[test]

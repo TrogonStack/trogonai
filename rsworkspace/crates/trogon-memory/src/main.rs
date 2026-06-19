@@ -1,11 +1,11 @@
 use std::time::Duration;
 
+use trogon_memory::{
+    AnthropicMemoryProvider, Dreamer, DreamingConfig, DreamingService, MemoryWriter, provision_kv, provision_stream,
+    serve,
+};
 use trogon_nats::connect;
 use trogon_std::env::SystemEnv;
-use trogon_memory::{
-    AnthropicMemoryProvider, DreamingConfig, DreamingService, Dreamer,
-    MemoryWriter, provision_kv, provision_stream, serve,
-};
 
 #[tokio::main]
 async fn main() {
@@ -23,8 +23,12 @@ async fn main() {
 
     let js = async_nats::jetstream::new(nats.clone());
 
-    provision_stream(&js).await.expect("Failed to provision SESSION_DREAMS stream");
-    let kv = provision_kv(&js).await.expect("Failed to provision SESSION_MEMORIES bucket");
+    provision_stream(&js)
+        .await
+        .expect("Failed to provision SESSION_DREAMS stream");
+    let kv = provision_kv(&js)
+        .await
+        .expect("Failed to provision SESSION_MEMORIES bucket");
 
     let provider = AnthropicMemoryProvider::new(config.llm);
     let dreamer = Dreamer::new(provider, kv.clone());
@@ -32,8 +36,14 @@ async fn main() {
     let writer = MemoryWriter::new(nats, kv.clone());
 
     tokio::join!(
-        async move { dreaming_service.run().await.ok(); },
-        async move { writer.run().await.ok(); },
-        async move { serve(config.port, kv).await.expect("Memory management API failed"); },
+        async move {
+            dreaming_service.run().await.ok();
+        },
+        async move {
+            writer.run().await.ok();
+        },
+        async move {
+            serve(config.port, kv).await.expect("Memory management API failed");
+        },
     );
 }

@@ -6,21 +6,19 @@ use crate::app::{
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
-use crate::session_rewind::{
-    RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns,
-};
-use crate::spawn_tracker::SpawnTracker;
+use crate::session_rewind::{RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns};
 use crate::session_store::{SessionIndex, new_session_entry};
+use crate::spawn_tracker::SpawnTracker;
 use crate::transcript::SessionTranscriptRecorder;
 use rustyline::completion::{Completer, Pair};
+use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::config::Configurer;
 use rustyline::{
-    Cmd, ConditionalEventHandler, Context, Editor, EditMode, EventContext, EventHandler, Helper,
-    KeyCode, KeyEvent, Modifiers,
+    Cmd, ConditionalEventHandler, Context, EditMode, Editor, EventContext, EventHandler, Helper, KeyCode, KeyEvent,
+    Modifiers,
 };
 use std::borrow::Cow;
 use std::io::Write;
@@ -62,7 +60,11 @@ impl FileAtHelper {
     }
 
     fn with_mode(cwd: PathBuf, mode: std::sync::Arc<std::sync::Mutex<String>>) -> Self {
-        Self { cwd, history_hinter: HistoryHinter::new(), mode }
+        Self {
+            cwd,
+            history_hinter: HistoryHinter::new(),
+            mode,
+        }
     }
 }
 
@@ -123,11 +125,7 @@ impl Highlighter for FileAtHelper {
     /// Render the prompt from the shared mode cell, coloured. The *visible* width
     /// matches `format_mode_prompt` (which is what rustyline measures for cursor
     /// math), so Shift+Tab can repaint a different-length mode name safely.
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
-        &'s self,
-        _prompt: &'p str,
-        _default: bool,
-    ) -> Cow<'b, str> {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, _prompt: &'p str, _default: bool) -> Cow<'b, str> {
         let mode = self
             .mode
             .lock()
@@ -512,7 +510,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // Shift+Tab (BackTab) cycles permission modes: default → acceptEdits → plan → …
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
-        EventHandler::Conditional(Box::new(TabModeHandler { mode: mode_cell.clone() })),
+        EventHandler::Conditional(Box::new(TabModeHandler {
+            mode: mode_cell.clone(),
+        })),
     );
     // Ctrl+X Ctrl+E opens the current prompt in $EDITOR (see EditorHandler). The
     // handler stashes the buffer here and returns Interrupt; the loop's interrupt
@@ -520,7 +520,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let editor_request = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
     rl.bind_sequence(
         rustyline::Event::KeySeq(vec![KeyEvent::ctrl('X'), KeyEvent::ctrl('E')]),
-        EventHandler::Conditional(Box::new(EditorHandler { request: editor_request.clone() })),
+        EventHandler::Conditional(Box::new(EditorHandler {
+            request: editor_request.clone(),
+        })),
     );
     let _ = rl.load_history(&history_path);
 
@@ -578,18 +580,17 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
-        let (read, from_queue): (rustyline::Result<String>, bool) =
-            match queued_prompts.pop_front() {
-                Some(q) => (Ok(q), true),
-                None => {
-                    let prompt = format_mode_prompt(&session_mode);
-                    let r = match pending_input.take() {
-                        Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
-                        None => rl.readline(&prompt),
-                    };
-                    (r, false)
-                }
-            };
+        let (read, from_queue): (rustyline::Result<String>, bool) = match queued_prompts.pop_front() {
+            Some(q) => (Ok(q), true),
+            None => {
+                let prompt = format_mode_prompt(&session_mode);
+                let r = match pending_input.take() {
+                    Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
+                    None => rl.readline(&prompt),
+                };
+                (r, false)
+            }
+        };
         match read {
             Ok(raw_line) => {
                 // Apply a Shift+Tab mode change made during readline. The cell was
@@ -621,10 +622,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 // Commands (cd, !…, /…) get a dim echo — they aren't messages to the
                 // model; real prompts get the "You" block. Queued lines are always
                 // prompts (no readline echo to erase).
-                let is_command = line == "cd"
-                    || line.starts_with("cd ")
-                    || line.starts_with('!')
-                    || line.starts_with('/');
+                let is_command =
+                    line == "cd" || line.starts_with("cd ") || line.starts_with('!') || line.starts_with('/');
                 if is_command {
                     print_command_echo(&line);
                 } else {
@@ -960,19 +959,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         match session.set_mode("plan").await {
                             Ok(()) => {
                                 session_mode = "plan".to_string();
-                                println!(
-                                    "plan mode on — read-only exploration; writes & bash are denied"
-                                );
+                                println!("plan mode on — read-only exploration; writes & bash are denied");
                             }
                             Err(e) => eprintln!("error entering plan mode: {e}"),
                         }
                     } else if cmd == "/vim" {
                         vim_mode = !vim_mode;
                         rl.set_edit_mode(if vim_mode { EditMode::Vi } else { EditMode::Emacs });
-                        println!(
-                            "{} input mode",
-                            if vim_mode { "vim" } else { "emacs" }
-                        );
+                        println!("{} input mode", if vim_mode { "vim" } else { "emacs" });
                     } else if cmd == "/allowed-tools" {
                         println!("{}", allowed_tools_for_mode(&session_mode));
                     } else if cmd == "/checkpoint" {
@@ -999,12 +993,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 "trigger": "manual",
                                 "session_id": session.session_id(),
                             });
-                            let _ = trogon_runner_tools::run_event_hooks(
-                                &hooks_config.pre_compact,
-                                None,
-                                &payload,
-                            )
-                            .await;
+                            let _ =
+                                trogon_runner_tools::run_event_hooks(&hooks_config.pre_compact, None, &payload).await;
                         }
                         match session.compact().await {
                             Ok(CompactResult {
@@ -1075,8 +1065,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 match do_compact_model(&session, &resolved).await {
                                     Ok(msg) => {
                                         println!("{msg}");
-                                        compactor_model_sel =
-                                            if resolved == "default" { None } else { Some(resolved) };
+                                        compactor_model_sel = if resolved == "default" { None } else { Some(resolved) };
                                     }
                                     Err(e) => eprintln!("error: {e}"),
                                 }
@@ -1091,20 +1080,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/tasks" {
                         match session.list_sessions().await {
                             Ok(list) => {
-                                let text = spawn_tracker.format_tasks(
-                                    &prefix,
-                                    session.session_id(),
-                                    &list,
-                                );
+                                let text = spawn_tracker.format_tasks(&prefix, session.session_id(), &list);
                                 println!("{text}");
                             }
                             Err(e) => {
                                 eprintln!("error listing spawns: {e}");
-                                let text = spawn_tracker.format_tasks(
-                                    &prefix,
-                                    session.session_id(),
-                                    &[],
-                                );
+                                let text = spawn_tracker.format_tasks(&prefix, session.session_id(), &[]);
                                 println!("{text}");
                             }
                         }
@@ -1184,10 +1165,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if let Some(dispatch) = custom_commands.dispatch(cmd, arg) {
                         if dispatch.model.is_some() || !dispatch.allowed_tools.is_empty() {
-                            eprintln!(
-                                "note: per-command model/allowed-tools from {} are not applied yet",
-                                cmd
-                            );
+                            eprintln!("note: per-command model/allowed-tools from {} are not applied yet", cmd);
                         }
                         queued_prompts.push_back(dispatch.prompt);
                     } else {
@@ -1219,13 +1197,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         "prompt": line,
                         "cwd": cwd.to_string_lossy(),
                     });
-                    match trogon_runner_tools::run_event_hooks(
-                        &hooks_config.user_prompt_submit,
-                        None,
-                        &payload,
-                    )
-                    .await
-                    {
+                    match trogon_runner_tools::run_event_hooks(&hooks_config.user_prompt_submit, None, &payload).await {
                         trogon_runner_tools::HookOutcome::Block { reason } => {
                             eprintln!("\x1b[33mprompt blocked by hook: {reason}\x1b[0m");
                             continue;
@@ -1286,8 +1258,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         let mut front_queued: Vec<String> = Vec::new();
                         let mut interrupted = false;
                         // Drives the live `Thinking… (Ns)` status line between events.
-                        let mut status_ticker =
-                            tokio::time::interval(std::time::Duration::from_millis(500));
+                        let mut status_ticker = tokio::time::interval(std::time::Duration::from_millis(500));
 
                         loop {
                             tokio::select! {
@@ -1406,15 +1377,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
 
                         let stop = renderer.take_stop();
-                        if let Some(recorder) =
-                            SessionTranscriptRecorder::for_session(&fs, session.session_id())
-                        {
-                            recorder.record_turn(
-                                &line,
-                                renderer.assistant_text(),
-                                stop.as_ref(),
-                                interrupted,
-                            );
+                        if let Some(recorder) = SessionTranscriptRecorder::for_session(&fs, session.session_id()) {
+                            recorder.record_turn(&line, renderer.assistant_text(), stop.as_ref(), interrupted);
                         }
 
                         // Persist on a clean turn end (matches programming-gaps'
@@ -1458,8 +1422,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 }
                 if !hooks_config.notification.is_empty() {
                     let payload = serde_json::json!({"hook_event_name": "Notification", "cwd": cwd.to_string_lossy()});
-                    let _ =
-                        trogon_runner_tools::run_event_hooks(&hooks_config.notification, None, &payload).await;
+                    let _ = trogon_runner_tools::run_event_hooks(&hooks_config.notification, None, &payload).await;
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -1949,16 +1912,7 @@ where
 
     // B5: the cross-runner session was created with NO mcp_servers. Bind MCP for
     // the new session before any post-switch work or REPL prompt unblock.
-    let session = match activate_session(
-        factory,
-        mcp,
-        &outcome.new_prefix,
-        &outcome.new_session_id,
-        cwd,
-        fs,
-    )
-    .await
-    {
+    let session = match activate_session(factory, mcp, &outcome.new_prefix, &outcome.new_session_id, cwd, fs).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("warning: could not bind MCP for new session: {e}");
@@ -2161,9 +2115,15 @@ fn review_prompt(arg: &str) -> String {
 fn pr_comments_prompt(arg: &str) -> String {
     let target = arg.trim();
     let (pr, cmd) = if target.is_empty() {
-        ("the current pull request".to_string(), "gh pr view --comments".to_string())
+        (
+            "the current pull request".to_string(),
+            "gh pr view --comments".to_string(),
+        )
     } else {
-        (format!("pull request {target}"), format!("gh pr view {target} --comments"))
+        (
+            format!("pull request {target}"),
+            format!("gh pr view {target} --comments"),
+        )
     };
     format!(
         "Fetch the review comments on {pr} (e.g. `{cmd}`, or the GitHub API via `gh api`). \
@@ -2295,37 +2255,27 @@ Ctrl+D    quit");
             env!("CARGO_PKG_VERSION")
         ),
 
-        "/login" | "/logout" => {
-            "trogon has no interactive login. Authentication uses provider tokens from the \
+        "/login" | "/logout" => "trogon has no interactive login. Authentication uses provider tokens from the \
              environment (ANTHROPIC_TOKEN, XAI_API_KEY, OPENROUTER_API_KEY, …) or the \
              secret-proxy / vault. Set or rotate those to change credentials."
-                .to_string()
-        }
+            .to_string(),
 
-        "/ide" => {
-            "trogon integrates with IDEs over the Agent Client Protocol (ACP): JetBrains and Zed \
+        "/ide" => "trogon integrates with IDEs over the Agent Client Protocol (ACP): JetBrains and Zed \
              connect natively — there is no trogon plugin to manage here. Run the ACP server \
              (acp-nats-server) and point your editor's ACP client at it."
-                .to_string()
-        }
+            .to_string(),
 
-        "/tasks" => {
-            "Lists live sub-agent spawns for the current session: child NATS sub-sessions \
+        "/tasks" => "Lists live sub-agent spawns for the current session: child NATS sub-sessions \
              (via the runner's session list) plus any in-flight spawn_agent tool calls. \
              Read-only — use /agents to inspect subagent definitions."
-                .to_string()
-        }
+            .to_string(),
 
-        "/agents" => {
-            "Sub-agents are spawned by the model via its spawn_agent tool (each gets an isolated \
+        "/agents" => "Sub-agents are spawned by the model via its spawn_agent tool (each gets an isolated \
              git worktree); the CLI doesn't manage them directly — ask the model to \"spawn a \
              sub-agent to …\". Use /sessions to list sessions on the current runner."
-                .to_string()
-        }
+            .to_string(),
 
-        "/rewind" | "/checkpoint" => {
-            "use /checkpoint and /rewind in the REPL — they need the live session".to_string()
-        }
+        "/rewind" | "/checkpoint" => "use /checkpoint and /rewind in the REPL — they need the live session".to_string(),
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
@@ -3349,10 +3299,7 @@ mod tests {
     #[test]
     fn slash_context_shows_usage_percentage_and_remaining() {
         let out = render_context_usage(12_345, 200_000);
-        assert_eq!(
-            out,
-            "context: 12,345 / 200,000 tokens (6%) · 187,655 remaining"
-        );
+        assert_eq!(out, "context: 12,345 / 200,000 tokens (6%) · 187,655 remaining");
         let via_cmd = handle_slash_command(
             "/context",
             "",
@@ -3492,9 +3439,22 @@ mod tests {
     #[test]
     fn informational_commands_are_recognised_not_unknown() {
         let fs = MockFs::new();
-        for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/release-notes", "/bug"] {
+        for cmd in [
+            "/login",
+            "/logout",
+            "/ide",
+            "/tasks",
+            "/agents",
+            "/rewind",
+            "/checkpoint",
+            "/release-notes",
+            "/bug",
+        ] {
             let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
-            assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
+            assert!(
+                !out.contains("unknown command"),
+                "{cmd} should be recognised, got: {out}"
+            );
             assert!(!out.is_empty());
         }
     }
@@ -3870,10 +3830,8 @@ mod tests {
 
     #[test]
     fn resolve_model_alias_targets_registered_ids() {
-        const ACP_IDS: &[&str] =
-            &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
-        const OR_IDS: &[&str] =
-            &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
+        const ACP_IDS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
+        const OR_IDS: &[&str] = &["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "google/gemini-pro-1.5"];
 
         for alias in ["haiku", "sonnet", "opus"] {
             let resolved = resolve_model_alias(alias);
@@ -3953,10 +3911,17 @@ mod tests {
         factory.push_session(new_sess.clone());
 
         old.close().await;
-        let created = factory.create_session("acp", PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let created = factory
+            .create_session("acp", PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         assert_eq!(old.close_count(), 1, "old session must be closed once");
-        assert_eq!(created.session_id(), "new-sess", "factory must return the queued session");
+        assert_eq!(
+            created.session_id(),
+            "new-sess",
+            "factory must return the queued session"
+        );
     }
 
     #[tokio::test]
@@ -3977,7 +3942,10 @@ mod tests {
 
         let session = Arc::new(MockSession::new("sess-1"));
         session.queue_turn(vec![
-            StreamEvent::Usage { used_tokens: 75_000, context_size: 150_000 },
+            StreamEvent::Usage {
+                used_tokens: 75_000,
+                context_size: 150_000,
+            },
             StreamEvent::Done("end_turn".into()),
         ]);
 
@@ -3987,7 +3955,10 @@ mod tests {
         loop {
             match rx.recv().await {
                 None => break,
-                Some(StreamEvent::Usage { used_tokens, context_size }) => {
+                Some(StreamEvent::Usage {
+                    used_tokens,
+                    context_size,
+                }) => {
                     used = used_tokens;
                     ctx = context_size;
                 }
@@ -4006,8 +3977,14 @@ mod tests {
 
         let session = Arc::new(MockSession::new("sess-1"));
         session.queue_turn(vec![
-            StreamEvent::Usage { used_tokens: 10_000, context_size: 100_000 },
-            StreamEvent::Usage { used_tokens: 20_000, context_size: 100_000 },
+            StreamEvent::Usage {
+                used_tokens: 10_000,
+                context_size: 100_000,
+            },
+            StreamEvent::Usage {
+                used_tokens: 20_000,
+                context_size: 100_000,
+            },
             StreamEvent::Done("end_turn".into()),
         ]);
 
@@ -4195,9 +4172,7 @@ mod tests {
         rewind_state.on_turn_complete();
         rewind_state.on_turn_complete();
 
-        let msg = handle_rewind_command(&session, &mut rewind_state, "t1")
-            .await
-            .unwrap();
+        let msg = handle_rewind_command(&session, &mut rewind_state, "t1").await.unwrap();
         assert!(msg.contains("turn 1"));
         assert_eq!(session.imported_history(), vec![snapshot]);
         assert_eq!(rewind_state.turn_count(), 1);
@@ -4221,9 +4196,7 @@ mod tests {
         rewind_state.on_turn_complete();
         rewind_state.on_turn_complete();
 
-        let msg = handle_rewind_command(&session, &mut rewind_state, "1")
-            .await
-            .unwrap();
+        let msg = handle_rewind_command(&session, &mut rewind_state, "1").await.unwrap();
         assert!(msg.contains("turn 1"));
         let imported = session.imported_history();
         assert_eq!(imported.len(), 1);

@@ -52,10 +52,7 @@ impl FeatureFlagClient for SplitFlagClient {
         Box::pin(async move {
             // Use get_treatment_or_control directly with the flag name string
             // to avoid object-safety issues with FeatureFlag.
-            inner
-                .get_treatment_or_control(&tenant, &flag_name, None)
-                .await
-                == "on"
+            inner.get_treatment_or_control(&tenant, &flag_name, None).await == "on"
         })
     }
 }
@@ -101,9 +98,7 @@ mod tests {
     async fn split_flag_client_control_treatment_returns_false() {
         // Flag not defined in mock → evaluator returns "control".
         let client = client_for_mock(MockEvaluator::new()).await;
-        let enabled = client
-            .is_enabled("tenant-1", &TestFlag("undefined_flag"))
-            .await;
+        let enabled = client.is_enabled("tenant-1", &TestFlag("undefined_flag")).await;
         assert!(!enabled, "treatment 'control' must return false");
     }
 

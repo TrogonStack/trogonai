@@ -12,52 +12,46 @@ pub mod permission_rules;
 pub mod portable_session;
 pub mod safety_classifier;
 pub mod scope;
-pub mod subagents;
-pub mod trogon_md;
 pub mod session_store;
 pub mod spawn_agent_tool;
 pub mod spawn_session;
+pub mod subagents;
+pub mod trogon_md;
 pub mod wasm_bash_tool;
 pub mod worktree;
 
 pub use compaction::{
-    compaction_requested, compaction_settings_from_env, estimate_tokens, maybe_compact,
-    over_threshold, CompactError, COMPACT_SUBJECT, DEFAULT_COMPACT_THRESHOLD_PCT,
-    DEFAULT_TOKEN_BUDGET,
+    COMPACT_SUBJECT, CompactError, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET, compaction_requested,
+    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold,
 };
 pub use egress::EgressPolicy;
 pub use elicitation::{
-    answer_from_response, elicit_via_channel, handle_elicitation_request_nats, ElicitationReq,
-    ElicitationTx,
+    ElicitationReq, ElicitationTx, answer_from_response, elicit_via_channel, handle_elicitation_request_nats,
 };
-pub use mcp::{build_session_mcp, convert_mcp_servers, McpDispatch, SessionMcpCache};
+pub use hooks::{HookMatcher, HookOutcome, HookPostToolObserver, HooksConfig, run_event_hooks};
+pub use mcp::{McpDispatch, SessionMcpCache, build_session_mcp, convert_mcp_servers};
 pub use permission::{
-    build_mode_permission_checker, check_tool_permission, ChannelPermissionChecker,
-    ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
-    RulesPermissionChecker, SafetyClassifier,
+    ChannelPermissionChecker, ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
+    RulesPermissionChecker, SafetyClassifier, build_mode_permission_checker, check_tool_permission,
 };
-pub use hooks::{
-    run_event_hooks, HookMatcher, HookOutcome, HookPostToolObserver, HooksConfig,
-};
-pub use safety_classifier::{build_auto_safety_classifier, LlmSafetyClassifier};
-pub use scope::{
-    CommandSet, GlobSet, NetworkPolicy, OnExceed, Scope, ScopeDecision, ScopeError, ScopeWire,
-};
-pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{
-    export_json_from_wire, message_to_v2, messages_need_v2, messages_to_export_v2,
-    messages_to_v1, parse_export_json, text_to_v2, v1_to_messages, v2_message_to_text,
-    v2_to_messages, ParsedExport, PortableBlock, PortableExportV2, PortableMessage,
-    PortableMessageV2, EXPORT_VERSION_V2,
+    EXPORT_VERSION_V2, ParsedExport, PortableBlock, PortableExportV2, PortableMessage, PortableMessageV2,
+    export_json_from_wire, message_to_v2, messages_need_v2, messages_to_export_v2, messages_to_v1, parse_export_json,
+    text_to_v2, v1_to_messages, v2_message_to_text, v2_to_messages,
 };
+pub use safety_classifier::{LlmSafetyClassifier, build_auto_safety_classifier};
+pub use scope::{CommandSet, GlobSet, NetworkPolicy, OnExceed, Scope, ScopeDecision, ScopeError, ScopeWire};
 pub use session_store::{
-    append_audit_entries, filter_tool_defs_by_allowlist, intersect_enabled_tools,
-    is_tool_in_allowlist, AllowedToolsSessionStore, AuditEntry, AuditOutcome, BashJob,
-    NatsSessionStore, SessionState, SessionStore, StoredMcpServer, TodoItem,
+    AllowedToolsSessionStore, AuditEntry, AuditOutcome, BashJob, NatsSessionStore, SessionState, SessionStore,
+    StoredMcpServer, TodoItem, append_audit_entries, filter_tool_defs_by_allowlist, intersect_enabled_tools,
+    is_tool_in_allowlist,
+};
+pub use subagents::{SubagentDef, load_subagent, load_subagents, parse_subagent};
+pub use trogon_md::{
+    FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogon_md_hierarchy, load_trogon_md, project_trogon_md_path,
 };
 pub use wasm_bash_tool::{BashOutputTool, WasmRuntimeBashTool};
-pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogon_md_hierarchy, load_trogon_md, project_trogon_md_path};
 
 /// Guidance appended to every interactive runner's system prompt so the agent
 /// retrieves URLs with the `fetch_url` tool instead of treating a link as a local

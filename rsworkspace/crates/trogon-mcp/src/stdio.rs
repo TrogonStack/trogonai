@@ -58,8 +58,7 @@ impl StdioConn {
     /// For a notification (no `id`), write and return immediately.
     async fn request(&mut self, body: Value) -> Result<Value, String> {
         let id = body.get("id").cloned();
-        let mut line =
-            serde_json::to_string(&body).map_err(|e| format!("MCP stdio encode error: {e}"))?;
+        let mut line = serde_json::to_string(&body).map_err(|e| format!("MCP stdio encode error: {e}"))?;
         line.push('\n');
         tokio::time::timeout(self.timeout, self.stdin.write_all(line.as_bytes()))
             .await
@@ -84,8 +83,7 @@ impl StdioConn {
             if text.trim().is_empty() {
                 continue;
             }
-            let v: Value =
-                serde_json::from_str(&text).map_err(|e| format!("MCP stdio parse error: {e}"))?;
+            let v: Value = serde_json::from_str(&text).map_err(|e| format!("MCP stdio parse error: {e}"))?;
             // Skip server-initiated notifications and id mismatches.
             if v.get("id") == id.as_ref() {
                 return Ok(v);
@@ -140,8 +138,7 @@ impl StdioMcpClient {
         Ok(Self {
             conn: Mutex::new(StdioConn {
                 stdin: Box::new(stdin),
-                stdout: BufReader::new(Box::new(stdout) as Box<dyn AsyncRead + Send + Unpin>)
-                    .lines(),
+                stdout: BufReader::new(Box::new(stdout) as Box<dyn AsyncRead + Send + Unpin>).lines(),
                 timeout: DEFAULT_STDIO_TIMEOUT,
                 _child: Some(child),
             }),
@@ -262,10 +259,7 @@ mod tests {
 
     /// Minimal fake MCP server: answers initialize/tools/list/tools/call, echoing
     /// the request id, and ignores the `initialized` notification.
-    async fn fake_server(
-        mut writer: impl AsyncWrite + Send + Unpin,
-        reader: impl tokio::io::AsyncRead + Send + Unpin,
-    ) {
+    async fn fake_server(mut writer: impl AsyncWrite + Send + Unpin, reader: impl tokio::io::AsyncRead + Send + Unpin) {
         let mut lines = TokBufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             if line.trim().is_empty() {

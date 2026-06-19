@@ -19,23 +19,23 @@ use std::time::Duration;
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    ContentBlock, PromptRequest, RequestPermissionOutcome, RequestPermissionResponse,
-    SelectedPermissionOutcome, TextContent,
+    ContentBlock, PromptRequest, RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome,
+    TextContent,
 };
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt as _;
 use httpmock::prelude::*;
 use tokio::sync::{RwLock, mpsc};
-use trogon_runner_tools::egress::{EgressAction, EgressPolicy};
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
 use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, PermissionTx, SessionState,
-    SessionStore, StoredMcpServer, TrogonAgent,
+    GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, PermissionTx, SessionState, SessionStore,
+    StoredMcpServer, TrogonAgent,
 };
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
+use trogon_runner_tools::egress::{EgressAction, EgressPolicy};
 use uuid::Uuid;
 
 // ── Subject helpers ────────────────────────────────────────────────────────────
@@ -72,7 +72,10 @@ fn make_agent(base_url: &str) -> AgentLoop {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
-            cwd: std::env::current_dir().unwrap_or_default().to_string_lossy().to_string(),
+            cwd: std::env::current_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             http_client: reqwest::Client::new(),
             web_search_api_key: None,
             web_search_endpoint: None,
@@ -126,10 +129,7 @@ async fn send_and_wait(
 ) -> serde_json::Value {
     let inbox = nats.new_inbox();
     let mut resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
-    let req = PromptRequest::new(
-        session_id.to_owned(),
-        vec![ContentBlock::Text(TextContent::new(text))],
-    );
+    let req = PromptRequest::new(session_id.to_owned(), vec![ContentBlock::Text(TextContent::new(text))]);
     nats.publish_with_reply(
         prompt_subject(prefix, session_id),
         inbox,
@@ -151,7 +151,10 @@ async fn send_and_wait(
 // response (text/event-stream). Plain JSON bodies produce an empty stop_reason.
 
 fn sse_event(event_type: &str, data: serde_json::Value) -> String {
-    format!("event: {event_type}\ndata: {}\n\n", serde_json::to_string(&data).unwrap())
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    )
 }
 
 fn sse_end_turn(text: &str) -> String {
@@ -216,30 +219,46 @@ async fn test_rbac_allow_bypasses_channel() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_workspace_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
 
-    NatsSessionStore::open(&js).await.unwrap()
-        .save(&session_id, &SessionState {
-            tool_policies: vec![ToolPolicy {
-                tool: "unknown_tool".to_string(),
-                path_pattern: "/workspace/**".to_string(),
-                action: PolicyAction::Allow,
-            }],
-            ..Default::default()
-        })
+    NatsSessionStore::open(&js)
+        .await
+        .unwrap()
+        .save(
+            &session_id,
+            &SessionState {
+                tool_policies: vec![ToolPolicy {
+                    tool: "unknown_tool".to_string(),
+                    path_pattern: "/workspace/**".to_string(),
+                    action: PolicyAction::Allow,
+                }],
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let _store = start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let _store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
             let resp = send_and_wait(&nats, &prefix, &session_id, "use a tool", 15).await;
             if resp["stopReason"].as_str() != Some("end_turn") {
                 return Err(format!("unexpected stopReason: {resp}"));
@@ -251,7 +270,16 @@ async fn test_rbac_allow_bypasses_channel() -> bool {
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_rbac_deny_bypasses_channel() -> bool {
@@ -264,30 +292,46 @@ async fn test_rbac_deny_bypasses_channel() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_workspace_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
 
-    NatsSessionStore::open(&js).await.unwrap()
-        .save(&session_id, &SessionState {
-            tool_policies: vec![ToolPolicy {
-                tool: "unknown_tool".to_string(),
-                path_pattern: "/workspace/**".to_string(),
-                action: PolicyAction::Deny,
-            }],
-            ..Default::default()
-        })
+    NatsSessionStore::open(&js)
+        .await
+        .unwrap()
+        .save(
+            &session_id,
+            &SessionState {
+                tool_policies: vec![ToolPolicy {
+                    tool: "unknown_tool".to_string(),
+                    path_pattern: "/workspace/**".to_string(),
+                    action: PolicyAction::Deny,
+                }],
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let _store = start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let _store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
             let resp = send_and_wait(&nats, &prefix, &session_id, "use a tool", 15).await;
             if resp["stopReason"].as_str() != Some("end_turn") {
                 return Err(format!("unexpected stopReason: {resp}"));
@@ -299,7 +343,16 @@ async fn test_rbac_deny_bypasses_channel() -> bool {
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -323,26 +376,33 @@ async fn test_egress_deny_skips_mcp() -> bool {
     let anthropic = MockServer::start();
     anthropic.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
 
-    NatsSessionStore::open(&js).await.unwrap()
-        .save(&session_id, &SessionState {
-            mcp_servers: vec![StoredMcpServer {
-                name: "blocked_srv".to_string(),
-                url: mcp.base_url(),
-                headers: vec![],
-                command: String::new(),
-                args: vec![],
-                env: vec![],
-                timeout_secs: None,
-            }],
-            egress_policy: Some(EgressPolicy {
-                default_action: EgressAction::Deny,
-                rules: vec![],
-            }),
-            ..Default::default()
-        })
+    NatsSessionStore::open(&js)
+        .await
+        .unwrap()
+        .save(
+            &session_id,
+            &SessionState {
+                mcp_servers: vec![StoredMcpServer {
+                    name: "blocked_srv".to_string(),
+                    url: mcp.base_url(),
+                    headers: vec![],
+                    command: String::new(),
+                    args: vec![],
+                    env: vec![],
+                    timeout_secs: None,
+                }],
+                egress_policy: Some(EgressPolicy {
+                    default_action: EgressAction::Deny,
+                    rules: vec![],
+                }),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
@@ -361,7 +421,16 @@ async fn test_egress_deny_skips_mcp() -> bool {
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -378,30 +447,46 @@ async fn test_audit_allow_policy_records_allowed() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_workspace_tool_use());
     });
 
     let (perm_tx, _perm_rx) = mpsc::channel::<PermissionReq>(8);
 
-    NatsSessionStore::open(&js).await.unwrap()
-        .save(&session_id, &SessionState {
-            tool_policies: vec![ToolPolicy {
-                tool: "unknown_tool".to_string(),
-                path_pattern: "/workspace/**".to_string(),
-                action: PolicyAction::Allow,
-            }],
-            ..Default::default()
-        })
+    NatsSessionStore::open(&js)
+        .await
+        .unwrap()
+        .save(
+            &session_id,
+            &SessionState {
+                tool_policies: vec![ToolPolicy {
+                    tool: "unknown_tool".to_string(),
+                    path_pattern: "/workspace/**".to_string(),
+                    action: PolicyAction::Allow,
+                }],
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store = start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
             let resp = send_and_wait(&nats, &prefix, &session_id, "use a tool", 15).await;
             if resp["stopReason"].as_str() != Some("end_turn") {
                 return Err(format!("unexpected stopReason: {resp}"));
@@ -415,7 +500,16 @@ async fn test_audit_allow_policy_records_allowed() -> bool {
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_audit_deny_policy_records_denied() -> bool {
@@ -428,30 +522,46 @@ async fn test_audit_deny_policy_records_denied() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_workspace_tool_use());
     });
 
     let (perm_tx, _perm_rx) = mpsc::channel::<PermissionReq>(8);
 
-    NatsSessionStore::open(&js).await.unwrap()
-        .save(&session_id, &SessionState {
-            tool_policies: vec![ToolPolicy {
-                tool: "unknown_tool".to_string(),
-                path_pattern: "/workspace/**".to_string(),
-                action: PolicyAction::Deny,
-            }],
-            ..Default::default()
-        })
+    NatsSessionStore::open(&js)
+        .await
+        .unwrap()
+        .save(
+            &session_id,
+            &SessionState {
+                tool_policies: vec![ToolPolicy {
+                    tool: "unknown_tool".to_string(),
+                    path_pattern: "/workspace/**".to_string(),
+                    action: PolicyAction::Deny,
+                }],
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store = start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
             let resp = send_and_wait(&nats, &prefix, &session_id, "use a tool", 15).await;
             if resp["stopReason"].as_str() != Some("end_turn") {
                 return Err(format!("unexpected stopReason: {resp}"));
@@ -465,7 +575,16 @@ async fn test_audit_deny_policy_records_denied() -> bool {
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_audit_channel_approval() -> bool {
@@ -478,18 +597,29 @@ async fn test_audit_channel_approval() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store = start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
 
             tokio::spawn(async move {
                 while let Some(req) = perm_rx.recv().await {
@@ -503,17 +633,34 @@ async fn test_audit_channel_approval() -> bool {
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
             let state = store.load(&session_id).await.unwrap();
-            if !state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval) {
+            if !state
+                .audit_log
+                .iter()
+                .any(|e| e.outcome == AuditOutcome::RequiredApproval)
+            {
                 return Err(format!("no RequiredApproval entry; got: {:?}", state.audit_log));
             }
-            if !state.audit_log.iter().any(|e| e.outcome == AuditOutcome::ApprovedByUser) {
+            if !state
+                .audit_log
+                .iter()
+                .any(|e| e.outcome == AuditOutcome::ApprovedByUser)
+            {
                 return Err(format!("no ApprovedByUser entry; got: {:?}", state.audit_log));
             }
             Ok(())
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 async fn test_audit_channel_denial() -> bool {
@@ -526,18 +673,29 @@ async fn test_audit_channel_denial() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store = start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
 
             tokio::spawn(async move {
                 while let Some(req) = perm_rx.recv().await {
@@ -551,7 +709,11 @@ async fn test_audit_channel_denial() -> bool {
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
             let state = store.load(&session_id).await.unwrap();
-            if !state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval) {
+            if !state
+                .audit_log
+                .iter()
+                .any(|e| e.outcome == AuditOutcome::RequiredApproval)
+            {
                 return Err(format!("no RequiredApproval entry; got: {:?}", state.audit_log));
             }
             if !state.audit_log.iter().any(|e| e.outcome == AuditOutcome::DeniedByUser) {
@@ -561,7 +723,16 @@ async fn test_audit_channel_denial() -> bool {
         })
         .await;
 
-    match result { Ok(()) => { ok(LABEL); true } Err(e) => { ko(LABEL, &e); false } }
+    match result {
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -575,9 +746,9 @@ fn perm_subject(prefix: &str, session_id: &str) -> String {
 
 /// Serialized `RequestPermissionResponse` for a given option_id.
 fn perm_response(option_id: &str) -> Bytes {
-    serde_json::to_vec(&RequestPermissionResponse::new(
-        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id.to_string())),
-    ))
+    serde_json::to_vec(&RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+        SelectedPermissionOutcome::new(option_id.to_string()),
+    )))
     .unwrap()
     .into()
 }
@@ -600,19 +771,29 @@ async fn test_permission_bridge_allow_via_nats() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store =
-                start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
 
             // Mock ACP client: subscribe before the prompt so the reply is ready.
             let nats_mock = nats.clone();
@@ -631,13 +812,8 @@ async fn test_permission_bridge_allow_via_nats() -> bool {
             let prefix_bridge = AcpPrefix::new(&prefix).unwrap();
             tokio::task::spawn_local(async move {
                 while let Some(req) = perm_rx.recv().await {
-                    handle_permission_request_nats(
-                        req,
-                        nats_bridge.clone(),
-                        prefix_bridge.clone(),
-                        &store_bridge,
-                    )
-                    .await;
+                    handle_permission_request_nats(req, nats_bridge.clone(), prefix_bridge.clone(), &store_bridge)
+                        .await;
                 }
             });
 
@@ -647,10 +823,18 @@ async fn test_permission_bridge_allow_via_nats() -> bool {
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
             let state = store.load(&session_id).await.unwrap();
-            if !state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval) {
+            if !state
+                .audit_log
+                .iter()
+                .any(|e| e.outcome == AuditOutcome::RequiredApproval)
+            {
                 return Err(format!("no RequiredApproval in audit_log; got: {:?}", state.audit_log));
             }
-            if !state.audit_log.iter().any(|e| e.outcome == AuditOutcome::ApprovedByUser) {
+            if !state
+                .audit_log
+                .iter()
+                .any(|e| e.outcome == AuditOutcome::ApprovedByUser)
+            {
                 return Err(format!("no ApprovedByUser in audit_log; got: {:?}", state.audit_log));
             }
             Ok(())
@@ -658,8 +842,14 @@ async fn test_permission_bridge_allow_via_nats() -> bool {
         .await;
 
     match result {
-        Ok(()) => { ok(LABEL); true }
-        Err(e) => { ko(LABEL, &e); false }
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
     }
 }
 
@@ -683,19 +873,29 @@ async fn test_permission_bridge_allow_always_persists_and_auto_approves() -> boo
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store =
-                start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
 
             // Count how many NATS permission requests arrive; respond allow_always to the first.
             let nats_mock = nats.clone();
@@ -717,13 +917,8 @@ async fn test_permission_bridge_allow_always_persists_and_auto_approves() -> boo
             let prefix_bridge = AcpPrefix::new(&prefix).unwrap();
             tokio::task::spawn_local(async move {
                 while let Some(req) = perm_rx.recv().await {
-                    handle_permission_request_nats(
-                        req,
-                        nats_bridge.clone(),
-                        prefix_bridge.clone(),
-                        &store_bridge,
-                    )
-                    .await;
+                    handle_permission_request_nats(req, nats_bridge.clone(), prefix_bridge.clone(), &store_bridge)
+                        .await;
                 }
             });
 
@@ -764,8 +959,14 @@ async fn test_permission_bridge_allow_always_persists_and_auto_approves() -> boo
         .await;
 
     match result {
-        Ok(()) => { ok(LABEL); true }
-        Err(e) => { ko(LABEL, &e); false }
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
     }
 }
 
@@ -777,8 +978,7 @@ async fn test_permission_bridge_allow_always_persists_and_auto_approves() -> boo
 /// (no multi-turn history) so the mock's `body_contains("tool_result")`
 /// discriminator works reliably.
 async fn test_allowed_tools_in_session_records_allowed_audit() -> bool {
-    const LABEL: &str =
-        "Auto-approve — allowed_tools in session state auto-approves and records Allowed in audit log";
+    const LABEL: &str = "Auto-approve — allowed_tools in session state auto-approves and records Allowed in audit log";
     let (nats, js) = connect_nats().await;
     let id = uid();
     let prefix = format!("live-aa-audit-{id}");
@@ -787,11 +987,15 @@ async fn test_allowed_tools_in_session_records_allowed_audit() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -812,8 +1016,14 @@ async fn test_allowed_tools_in_session_records_allowed_audit() -> bool {
 
     let result: Result<(), String> = tokio::task::LocalSet::new()
         .run_until(async {
-            let store =
-                start_agent(nats.clone(), &js, &prefix, make_agent(&server.base_url()), Some(perm_tx)).await;
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                &prefix,
+                make_agent(&server.base_url()),
+                Some(perm_tx),
+            )
+            .await;
 
             // Permission channel must never be consulted (auto-approved from allowed_tools).
             tokio::spawn(async move {
@@ -840,8 +1050,14 @@ async fn test_allowed_tools_in_session_records_allowed_audit() -> bool {
         .await;
 
     match result {
-        Ok(()) => { ok(LABEL); true }
-        Err(e) => { ko(LABEL, &e); false }
+        Ok(()) => {
+            ok(LABEL);
+            true
+        }
+        Err(e) => {
+            ko(LABEL, &e);
+            false
+        }
     }
 }
 

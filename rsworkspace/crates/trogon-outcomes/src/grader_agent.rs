@@ -178,9 +178,8 @@ mod tests {
                 &'a self,
                 _cap: &'a AgentCapability,
                 payload: Bytes,
-            ) -> impl Future<
-                Output = Result<Bytes, trogon_orchestrator::types::OrchestratorError>,
-            > + Send + 'a {
+            ) -> impl Future<Output = Result<Bytes, trogon_orchestrator::types::OrchestratorError>> + Send + 'a
+            {
                 *self.captured.lock().unwrap() = Some(payload.to_vec());
                 let response = grader_response(0.8);
                 async move { Ok(Bytes::from(response)) }
@@ -188,7 +187,9 @@ mod tests {
         }
 
         let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let caller = CapturingCaller { captured: captured.clone() };
+        let caller = CapturingCaller {
+            captured: captured.clone(),
+        };
         let provider = SubAgentEvaluationProvider::new(caller, cap());
 
         provider.evaluate(&rubric(), &transcript()).await.unwrap();

@@ -64,9 +64,7 @@ impl SubscriptionStore for kv::Store {
     }
 
     async fn keys(&self) -> Result<Vec<String>, Self::KeysError> {
-        let mut stream = kv::Store::keys(self)
-            .await
-            .map_err(KeysCollectError::Open)?;
+        let mut stream = kv::Store::keys(self).await.map_err(KeysCollectError::Open)?;
         let mut keys = Vec::new();
         while let Some(key) = stream.next().await {
             keys.push(key.map_err(KeysCollectError::Item)?);
@@ -79,8 +77,8 @@ impl SubscriptionStore for kv::Store {
 
 #[cfg(test)]
 mod tests {
-    use super::mock::MockSubscriptionStore;
     use super::SubscriptionStore;
+    use super::mock::MockSubscriptionStore;
     use bytes::Bytes;
 
     #[tokio::test]

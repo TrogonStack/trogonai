@@ -71,11 +71,7 @@ where
     // a double slash regardless of how base_url_override is configured.
     let base = base.trim_end_matches('/');
 
-    let query = req
-        .uri()
-        .query()
-        .map(|q| format!("?{}", q))
-        .unwrap_or_default();
+    let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
     let url = format!("{}/{}{}", base, path, query);
 
     let method = req.method().to_string();
@@ -106,9 +102,7 @@ where
             if HOP_BY_HOP.contains(&key) {
                 return None;
             }
-            v.to_str()
-                .ok()
-                .map(|v_str| (key.to_string(), v_str.to_string()))
+            v.to_str().ok().map(|v_str| (key.to_string(), v_str.to_string()))
         })
         .collect();
 
@@ -171,8 +165,8 @@ where
             })?
             .ok_or(ProxyError::ReplyChannelClosed)?;
 
-        let start_frame: StreamFrame = serde_json::from_slice(&start_msg.payload)
-            .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
+        let start_frame: StreamFrame =
+            serde_json::from_slice(&start_msg.payload).map_err(|e| ProxyError::Deserialize(e.to_string()))?;
 
         let (start_status, start_headers) = match start_frame {
             StreamFrame::Start { status, headers } => (status, headers),
@@ -183,8 +177,7 @@ where
             }
         };
 
-        let status_code =
-            StatusCode::from_u16(start_status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status_code = StatusCode::from_u16(start_status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
         // Spawn a task that forwards Chunk frames from NATS into a channel.
         // The channel feeds the streaming HTTP body so bytes reach the caller
@@ -250,11 +243,10 @@ where
         })?
         .ok_or(ProxyError::ReplyChannelClosed)?;
 
-    let proxy_response: OutboundHttpResponse = serde_json::from_slice(&reply_msg.payload)
-        .map_err(|e| ProxyError::Deserialize(e.to_string()))?;
+    let proxy_response: OutboundHttpResponse =
+        serde_json::from_slice(&reply_msg.payload).map_err(|e| ProxyError::Deserialize(e.to_string()))?;
 
-    let status =
-        StatusCode::from_u16(proxy_response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let status = StatusCode::from_u16(proxy_response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
     if let Some(err) = proxy_response.error {
         // Use the worker's status if it is already an error code (4xx/5xx),
@@ -270,15 +262,18 @@ where
             error = %err,
             "Worker reported an error"
         );
-        return Ok(Response::builder()
-            .status(error_status)
-            .body(Body::from(err))
-            .unwrap());
+        return Ok(Response::builder().status(error_status).body(Body::from(err)).unwrap());
     }
 
     const RESP_HOP_BY_HOP: &[&str] = &[
-        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-        "te", "trailers", "transfer-encoding", "upgrade",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
     ];
     let mut response_headers = HeaderMap::new();
     for (k, v) in &proxy_response.headers {
@@ -348,10 +343,7 @@ impl axum::response::IntoResponse for ProxyError {
 
         tracing::error!(error = %self, "Proxy error");
 
-        Response::builder()
-            .status(status)
-            .body(Body::from(body))
-            .unwrap()
+        Response::builder().status(status).body(Body::from(body)).unwrap()
     }
 }
 
@@ -392,10 +384,7 @@ mod tests {
             ProxyError::ReplyChannelClosed,
         ];
         for err in cases {
-            assert_eq!(
-                err.into_response().status(),
-                StatusCode::INTERNAL_SERVER_ERROR
-            );
+            assert_eq!(err.into_response().status(), StatusCode::INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -403,11 +392,7 @@ mod tests {
     fn invalid_upstream_status_code_falls_back_to_500() {
         for invalid in [0u16, 99, 1000] {
             let result = StatusCode::from_u16(invalid);
-            assert!(
-                result.is_err(),
-                "Status {} must be rejected as invalid",
-                invalid
-            );
+            assert!(result.is_err(), "Status {} must be rejected as invalid", invalid);
             let fallback = result.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(
                 fallback,
@@ -444,10 +429,7 @@ mod tests {
             } else {
                 StatusCode::BAD_GATEWAY
             };
-            assert_eq!(
-                error_status, status,
-                "4xx ({client_err}) with error must be preserved"
-            );
+            assert_eq!(error_status, status, "4xx ({client_err}) with error must be preserved");
         }
     }
 
@@ -477,10 +459,7 @@ mod tests {
             } else {
                 StatusCode::BAD_GATEWAY
             };
-            assert_eq!(
-                error_status, status,
-                "5xx ({server_err}) with error must be preserved"
-            );
+            assert_eq!(error_status, status, "5xx ({server_err}) with error must be preserved");
         }
     }
 
@@ -503,10 +482,7 @@ mod tests {
             ("authorization", "Bearer tok"),
             ("transfer-encoding", "chunked"),
         ];
-        let forwarded: Vec<_> = headers
-            .iter()
-            .filter(|(k, _)| !HOP_BY_HOP.contains(k))
-            .collect();
+        let forwarded: Vec<_> = headers.iter().filter(|(k, _)| !HOP_BY_HOP.contains(k)).collect();
 
         for stripped in ["te", "trailers", "transfer-encoding"] {
             assert!(
@@ -516,11 +492,7 @@ mod tests {
             );
         }
         for kept in ["content-type", "authorization"] {
-            assert!(
-                forwarded.iter().any(|(k, _)| *k == kept),
-                "{} must be forwarded",
-                kept
-            );
+            assert!(forwarded.iter().any(|(k, _)| *k == kept), "{} must be forwarded", kept);
         }
     }
 
@@ -559,11 +531,7 @@ mod tests {
             .to_string()
             .contains("req-1")
         );
-        assert!(
-            ProxyError::ReadBody("boom".to_string())
-                .to_string()
-                .contains("boom")
-        );
+        assert!(ProxyError::ReadBody("boom".to_string()).to_string().contains("boom"));
         assert!(!ProxyError::ReplyChannelClosed.to_string().is_empty());
     }
 
@@ -717,11 +685,12 @@ mod tests {
                 .get("content-type")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            assert!(ct.contains("text/event-stream"), "content-type must be text/event-stream");
+            assert!(
+                ct.contains("text/event-stream"),
+                "content-type must be text/event-stream"
+            );
 
-            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-                .await
-                .unwrap();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
             assert_eq!(body.as_ref(), b"data: hello\n\n");
         }
 

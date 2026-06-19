@@ -71,11 +71,7 @@ impl AgentLoader {
 pub(crate) fn parse_agent_config(val: &serde_json::Value) -> AgentConfig {
     let skill_ids = val["skill_ids"]
         .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
     let system_prompt = val["system_prompt"]

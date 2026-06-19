@@ -10,26 +10,24 @@ pub mod session_notifier;
 
 pub use agent::{GatewayConfig, TrogonAgent};
 pub use agent_runner::AgentRunner;
-pub use trogon_runner_tools::egress::EgressPolicy;
 pub use elicitation::{ElicitationReq, ElicitationTx};
 pub use session_notifier::{NatsSessionNotifier, PromptEventClient, SessionNotifier};
+pub use trogon_runner_tools::egress::EgressPolicy;
+pub use trogon_runner_tools::session_store::{AuditEntry, AuditOutcome, append_audit_entries};
 pub use trogon_runner_tools::{
-    ChannelPermissionChecker, FsTrogonMdLoader, NatsSessionStore, PermissionReq, PermissionTx,
-    SessionState, SessionStore, StoredMcpServer, TrogonMdLoading,
-};
-pub use trogon_runner_tools::session_store::{
-    AuditEntry, AuditOutcome, append_audit_entries,
+    ChannelPermissionChecker, FsTrogonMdLoader, NatsSessionStore, PermissionReq, PermissionTx, SessionState,
+    SessionStore, StoredMcpServer, TrogonMdLoading,
 };
 
 #[cfg(feature = "test-helpers")]
-pub use trogon_runner_tools::session_store;
-#[cfg(feature = "test-helpers")]
 pub use trogon_runner_tools::egress;
-#[cfg(feature = "test-helpers")]
-pub use trogon_runner_tools::wasm_bash_tool;
 #[cfg(feature = "test-helpers")]
 pub use trogon_runner_tools::nats_todo_tool;
 #[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::permission;
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::session_store;
+#[cfg(feature = "test-helpers")]
 pub use trogon_runner_tools::spawn_agent_tool;
 #[cfg(feature = "test-helpers")]
-pub use trogon_runner_tools::permission;
+pub use trogon_runner_tools::wasm_bash_tool;

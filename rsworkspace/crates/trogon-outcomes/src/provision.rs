@@ -1,8 +1,6 @@
 use async_nats::jetstream::{
     self, ErrorCode,
-    context::{
-        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-    },
+    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind},
     kv, stream,
 };
 
@@ -44,9 +42,7 @@ pub async fn provision_results_kv(
 }
 
 /// Provision the `SESSION_EVALUATIONS` JetStream stream.
-pub async fn provision_stream(
-    js: &jetstream::Context,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn provision_stream(js: &jetstream::Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     js.get_or_create_stream(stream::Config {
         name: EVALUATIONS_STREAM.to_string(),
         subjects: vec![EVALUATIONS_SUBJECT.to_string()],

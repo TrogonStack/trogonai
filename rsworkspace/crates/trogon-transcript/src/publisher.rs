@@ -9,11 +9,7 @@ use std::future::Future;
 /// `MockTranscriptPublisher` (behind the `test-support` feature) for unit tests.
 /// Using a trait here keeps `Session<P>` fully testable without a real NATS server.
 pub trait TranscriptPublisher: Send + Sync + Clone + 'static {
-    fn publish(
-        &self,
-        subject: String,
-        payload: Bytes,
-    ) -> impl Future<Output = Result<(), TranscriptError>> + Send;
+    fn publish(&self, subject: String, payload: Bytes) -> impl Future<Output = Result<(), TranscriptError>> + Send;
 }
 
 /// Production implementation: publishes to a real NATS JetStream context and

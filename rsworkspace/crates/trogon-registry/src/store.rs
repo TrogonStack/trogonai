@@ -15,11 +15,7 @@ pub trait RegistryStore: Send + Sync + Clone + 'static {
     type KeysError: std::error::Error + Send + Sync + 'static;
 
     /// Write or overwrite a key. Resets the TTL on the entry.
-    fn put(
-        &self,
-        key: &str,
-        value: Bytes,
-    ) -> impl Future<Output = Result<u64, Self::PutError>> + Send;
+    fn put(&self, key: &str, value: Bytes) -> impl Future<Output = Result<u64, Self::PutError>> + Send;
 
     /// Read the current value of a key. Returns `None` if the key does not
     /// exist or has expired.
@@ -81,9 +77,7 @@ impl RegistryStore for kv::Store {
     }
 
     async fn keys(&self) -> Result<Vec<String>, Self::KeysError> {
-        let mut stream = kv::Store::keys(self)
-            .await
-            .map_err(KeysCollectError::Open)?;
+        let mut stream = kv::Store::keys(self).await.map_err(KeysCollectError::Open)?;
         let mut keys = Vec::new();
         while let Some(key) = stream.next().await {
             keys.push(key.map_err(KeysCollectError::Item)?);
@@ -149,9 +143,9 @@ pub mod mock {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use super::RegistryStore as _;
     use super::mock::MockRegistryStore;
+    use bytes::Bytes;
 
     #[tokio::test]
     async fn put_then_get_returns_value() {

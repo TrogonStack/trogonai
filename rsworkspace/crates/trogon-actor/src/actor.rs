@@ -85,9 +85,7 @@ pub trait EntityActor: Send + 'static {
     /// Called when the entity is destroyed (PR closed, incident resolved, …).
     /// The runtime does not call this automatically — it must be triggered
     /// explicitly by the actor itself via `on_destroy_self`.
-    fn on_destroy(
-        _state: &mut Self::State,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn on_destroy(_state: &mut Self::State) -> impl Future<Output = Result<(), Self::Error>> + Send {
         std::future::ready(Ok(()))
     }
 }
@@ -110,11 +108,7 @@ mod tests {
             "minimal"
         }
 
-        async fn handle(
-            &mut self,
-            _state: &mut Empty,
-            _ctx: &ActorContext,
-        ) -> Result<(), Self::Error> {
+        async fn handle(&mut self, _state: &mut Empty, _ctx: &ActorContext) -> Result<(), Self::Error> {
             Ok(())
         }
     }

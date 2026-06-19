@@ -11,15 +11,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TerminalExitStatus, TerminalId,
+    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
     WriteTextFileRequest, WriteTextFileResponse,
 };
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
 use trogon_wasm_runtime::{dispatcher, traits::Runtime};
 
 async fn start_nats() -> (ContainerAsync<Nats>, u16) {
@@ -64,11 +63,7 @@ impl Runtime for CountingRuntime {
         Ok(KillTerminalResponse::new())
     }
 
-    async fn handle_write_to_terminal(
-        &self,
-        _terminal_id: &str,
-        _data: &[u8],
-    ) -> agent_client_protocol::Result<()> {
+    async fn handle_write_to_terminal(&self, _terminal_id: &str, _data: &[u8]) -> agent_client_protocol::Result<()> {
         Ok(())
     }
 
@@ -159,8 +154,12 @@ async fn queue_group_delivers_message_to_exactly_one_dispatcher() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let runtime1 = Rc::new(CountingRuntime { counter: counter.clone() });
-            let runtime2 = Rc::new(CountingRuntime { counter: counter.clone() });
+            let runtime1 = Rc::new(CountingRuntime {
+                counter: counter.clone(),
+            });
+            let runtime2 = Rc::new(CountingRuntime {
+                counter: counter.clone(),
+            });
 
             tokio::task::spawn_local(dispatcher::run(
                 nats1,
@@ -183,10 +182,7 @@ async fn queue_group_delivers_message_to_exactly_one_dispatcher() {
             let payload = serde_json::to_vec(&req).unwrap();
             let _ = tokio::time::timeout(
                 Duration::from_secs(5),
-                publisher.request(
-                    "qg-test.session.sess-qg.client.terminal.create",
-                    payload.into(),
-                ),
+                publisher.request("qg-test.session.sess-qg.client.terminal.create", payload.into()),
             )
             .await;
 

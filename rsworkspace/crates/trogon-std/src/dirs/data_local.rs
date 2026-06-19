@@ -22,10 +22,7 @@ mod tests {
         let mut dirs = FixedDirs::new();
         dirs.set(DirKind::DataLocal, "/home/user/.local/share");
 
-        assert_eq!(
-            dirs.data_local_dir(),
-            Some(PathBuf::from("/home/user/.local/share"))
-        );
+        assert_eq!(dirs.data_local_dir(), Some(PathBuf::from("/home/user/.local/share")));
     }
 
     #[test]

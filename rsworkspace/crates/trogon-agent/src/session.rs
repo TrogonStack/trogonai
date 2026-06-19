@@ -112,22 +112,12 @@ impl SessionStore {
     }
 
     /// Fetch a single session by tenant + id.
-    pub async fn get(
-        &self,
-        tenant_id: &str,
-        id: &str,
-    ) -> Result<Option<ChatSession>, SessionStoreError> {
+    pub async fn get(&self, tenant_id: &str, id: &str) -> Result<Option<ChatSession>, SessionStoreError> {
         let key = kv_key(tenant_id, id);
-        match self
-            .kv
-            .get(&key)
-            .await
-            .map_err(|e| SessionStoreError(e.to_string()))?
-        {
+        match self.kv.get(&key).await.map_err(|e| SessionStoreError(e.to_string()))? {
             None => Ok(None),
             Some(bytes) => {
-                let s = serde_json::from_slice::<ChatSession>(&bytes)
-                    .map_err(|e| SessionStoreError(e.to_string()))?;
+                let s = serde_json::from_slice::<ChatSession>(&bytes).map_err(|e| SessionStoreError(e.to_string()))?;
                 Ok(Some(s))
             }
         }
@@ -146,11 +136,7 @@ impl SessionStore {
     /// Return all sessions for `tenant_id`, sorted newest-first by `updated_at`.
     pub async fn list(&self, tenant_id: &str) -> Result<Vec<ChatSession>, SessionStoreError> {
         let prefix = format!("{tenant_id}.");
-        let mut keys = self
-            .kv
-            .keys()
-            .await
-            .map_err(|e| SessionStoreError(e.to_string()))?;
+        let mut keys = self.kv.keys().await.map_err(|e| SessionStoreError(e.to_string()))?;
         let mut result = Vec::new();
 
         while let Some(key) = keys.next().await {
@@ -213,8 +199,7 @@ impl SessionRepository for SessionStore {
         &'a self,
         tenant_id: &'a str,
         id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>> {
         Box::pin(async move { self.get(tenant_id, id).await })
     }
 
@@ -229,8 +214,7 @@ impl SessionRepository for SessionStore {
     fn list<'a>(
         &'a self,
         tenant_id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>> {
         Box::pin(async move { self.list(tenant_id).await })
     }
 }
@@ -288,8 +272,7 @@ pub mod mock {
             &'a self,
             _tenant_id: &'a str,
             _id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>> {
             Box::pin(async move { Err(SessionStoreError("injected get error".into())) })
         }
 
@@ -304,8 +287,7 @@ pub mod mock {
         fn list<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>> {
             Box::pin(async move { Err(SessionStoreError("injected list error".into())) })
         }
     }
@@ -353,8 +335,7 @@ pub mod mock {
             &'a self,
             _tenant_id: &'a str,
             _id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>> {
             Box::pin(async move { Ok(Some(Self::dummy_session())) })
         }
 
@@ -369,8 +350,7 @@ pub mod mock {
         fn list<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>> {
             Box::pin(async move { Err(SessionStoreError("injected list error".into())) })
         }
     }
@@ -393,8 +373,7 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ChatSession>, SessionStoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             let key = format!("{tenant_id}.{id}");
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
@@ -416,8 +395,7 @@ pub mod mock {
         fn list<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ChatSession>, SessionStoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             let prefix = format!("{tenant_id}.");
             Box::pin(async move {

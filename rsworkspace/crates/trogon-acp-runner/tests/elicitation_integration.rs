@@ -8,15 +8,15 @@
 
 use acp_nats::acp_prefix::AcpPrefix;
 use agent_client_protocol::{
-    ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationFormMode,
-    ElicitationMode, ElicitationRequest, ElicitationResponse, ElicitationSchema,
+    ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationFormMode, ElicitationMode,
+    ElicitationRequest, ElicitationResponse, ElicitationSchema,
 };
 use bytes::Bytes;
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::oneshot;
-use trogon_acp_runner::{elicitation::handle_elicitation_request_nats, ElicitationReq};
+use trogon_acp_runner::{ElicitationReq, elicitation::handle_elicitation_request_nats};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,14 +40,22 @@ fn subject() -> String {
     format!("{PREFIX}.session.{SESSION}.client.session.elicitation")
 }
 
-fn make_req() -> (ElicitationReq, oneshot::Receiver<agent_client_protocol::Result<ElicitationResponse>>) {
+fn make_req() -> (
+    ElicitationReq,
+    oneshot::Receiver<agent_client_protocol::Result<ElicitationResponse>>,
+) {
     let (tx, rx) = oneshot::channel();
     let request = ElicitationRequest::new(
         SESSION.to_string(),
-        ElicitationMode::Form(ElicitationFormMode::new(ElicitationSchema::new().string("answer", true))),
+        ElicitationMode::Form(ElicitationFormMode::new(
+            ElicitationSchema::new().string("answer", true),
+        )),
         "What is your preferred language?",
     );
-    let req = ElicitationReq { request, response_tx: tx };
+    let req = ElicitationReq {
+        request,
+        response_tx: tx,
+    };
     (req, rx)
 }
 
@@ -148,8 +156,7 @@ async fn request_payload_contains_question_text() {
     tokio::spawn(async move {
         let mut sub = nats_clone.subscribe(subject()).await.unwrap();
         if let Some(msg) = sub.next().await {
-            let body: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             *captured_clone.lock().unwrap() = Some(body);
             if let Some(reply) = msg.reply {
                 nats_clone.publish(reply, cancel_response()).await.unwrap();
@@ -164,7 +171,10 @@ async fn request_payload_contains_question_text() {
         ElicitationMode::Form(ElicitationFormMode::new(ElicitationSchema::new())),
         "unique-question-marker-xyz",
     );
-    let req = ElicitationReq { request, response_tx: tx };
+    let req = ElicitationReq {
+        request,
+        response_tx: tx,
+    };
     handle_elicitation_request_nats(req, nats, AcpPrefix::new(PREFIX).unwrap()).await;
 
     let payload = captured.lock().unwrap().clone().expect("payload captured");

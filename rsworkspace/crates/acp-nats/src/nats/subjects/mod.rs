@@ -33,9 +33,9 @@ pub mod session {
 
     pub mod client {
         pub use super::super::client_ops::{
-            FsReadTextFileSubject, FsWriteTextFileSubject, SessionElicitationSubject,
-            SessionRequestPermissionSubject, SessionUpdateSubject, TerminalCreateSubject, TerminalKillSubject,
-            TerminalOutputSubject, TerminalReleaseSubject, TerminalWaitForExitSubject,
+            FsReadTextFileSubject, FsWriteTextFileSubject, SessionElicitationSubject, SessionRequestPermissionSubject,
+            SessionUpdateSubject, TerminalCreateSubject, TerminalKillSubject, TerminalOutputSubject,
+            TerminalReleaseSubject, TerminalWaitForExitSubject,
         };
     }
 
@@ -417,14 +417,8 @@ mod tests {
             session::agent::SetConfigOptionSubject::STREAM,
             Some(AcpStream::Commands)
         );
-        assert_eq!(
-            session::agent::SetModelSubject::STREAM,
-            Some(AcpStream::Commands)
-        );
-        assert_eq!(
-            session::agent::SteerSubject::STREAM,
-            Some(AcpStream::Commands)
-        );
+        assert_eq!(session::agent::SetModelSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(session::agent::SteerSubject::STREAM, Some(AcpStream::Commands));
 
         assert_eq!(agent::InitializeSubject::STREAM, Some(AcpStream::Global));
         assert_eq!(agent::AuthenticateSubject::STREAM, Some(AcpStream::Global));

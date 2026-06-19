@@ -37,12 +37,13 @@ struct MockSpawnClient {
 }
 
 impl MockSpawnClient {
-    fn new(
-        response: impl Into<String>,
-    ) -> (Arc<Self>, Arc<Mutex<Option<String>>>) {
+    fn new(response: impl Into<String>) -> (Arc<Self>, Arc<Mutex<Option<String>>>) {
         let captured = Arc::new(Mutex::new(None));
         (
-            Arc::new(Self { response: response.into(), captured_prompt: Arc::clone(&captured) }),
+            Arc::new(Self {
+                response: response.into(),
+                captured_prompt: Arc::clone(&captured),
+            }),
             captured,
         )
     }
@@ -75,18 +76,12 @@ async fn spawn_subscriber_replies_with_http_client_result() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let payload = serde_json::to_vec(&serde_json::json!({ "prompt": "explain recursion" })).unwrap();
-    let reply = tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request("acp.agent.spawn", payload.into()),
-    )
-    .await
-    .expect("timed out waiting for spawn reply")
-    .expect("NATS request failed");
+    let reply = tokio::time::timeout(Duration::from_secs(5), nats.request("acp.agent.spawn", payload.into()))
+        .await
+        .expect("timed out waiting for spawn reply")
+        .expect("NATS request failed");
 
-    assert_eq!(
-        std::str::from_utf8(&reply.payload).unwrap(),
-        "agent result text"
-    );
+    assert_eq!(std::str::from_utf8(&reply.payload).unwrap(), "agent result text");
 }
 
 /// The subscriber extracts the prompt from the JSON payload and passes it to the client.
@@ -106,18 +101,12 @@ async fn spawn_subscriber_passes_prompt_to_http_client() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let payload = serde_json::to_vec(&serde_json::json!({ "prompt": "what is a monad?" })).unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request("acp.agent.spawn", payload.into()),
-    )
-    .await
-    .expect("timed out")
-    .expect("NATS request failed");
+    tokio::time::timeout(Duration::from_secs(5), nats.request("acp.agent.spawn", payload.into()))
+        .await
+        .expect("timed out")
+        .expect("NATS request failed");
 
-    assert_eq!(
-        captured_prompt.lock().unwrap().as_deref(),
-        Some("what is a monad?")
-    );
+    assert_eq!(captured_prompt.lock().unwrap().as_deref(), Some("what is a monad?"));
 }
 
 /// A message without a reply subject is skipped and the subscriber keeps running.
@@ -139,7 +128,9 @@ async fn spawn_subscriber_skips_message_without_reply_and_keeps_running() {
     // Publish without reply subject — subscriber must not crash.
     nats.publish(
         "acp.agent.spawn",
-        serde_json::to_vec(&serde_json::json!({ "prompt": "hi" })).unwrap().into(),
+        serde_json::to_vec(&serde_json::json!({ "prompt": "hi" }))
+            .unwrap()
+            .into(),
     )
     .await
     .unwrap();
@@ -147,13 +138,10 @@ async fn spawn_subscriber_skips_message_without_reply_and_keeps_running() {
 
     // Verify the subscriber is still running by sending a proper request.
     let payload = serde_json::to_vec(&serde_json::json!({ "prompt": "still alive?" })).unwrap();
-    let reply = tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request("acp.agent.spawn", payload.into()),
-    )
-    .await
-    .expect("subscriber must still be alive after no-reply message")
-    .expect("NATS request failed");
+    let reply = tokio::time::timeout(Duration::from_secs(5), nats.request("acp.agent.spawn", payload.into()))
+        .await
+        .expect("subscriber must still be alive after no-reply message")
+        .expect("NATS request failed");
 
     assert!(!reply.payload.is_empty());
 }
@@ -182,13 +170,10 @@ async fn spawn_subscriber_skips_invalid_json_and_keeps_running() {
 
     // Verify still alive.
     let payload = serde_json::to_vec(&serde_json::json!({ "prompt": "still alive?" })).unwrap();
-    let reply = tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request("acp.agent.spawn", payload.into()),
-    )
-    .await
-    .expect("subscriber must still be alive after invalid JSON message")
-    .expect("NATS request failed");
+    let reply = tokio::time::timeout(Duration::from_secs(5), nats.request("acp.agent.spawn", payload.into()))
+        .await
+        .expect("subscriber must still be alive after invalid JSON message")
+        .expect("NATS request failed");
 
     assert!(!reply.payload.is_empty());
 }
@@ -210,16 +195,10 @@ async fn spawn_subscriber_defaults_to_empty_prompt_when_field_missing() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let payload = serde_json::to_vec(&serde_json::json!({ "other": "field" })).unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request("acp.agent.spawn", payload.into()),
-    )
-    .await
-    .expect("timed out")
-    .expect("NATS request failed");
+    tokio::time::timeout(Duration::from_secs(5), nats.request("acp.agent.spawn", payload.into()))
+        .await
+        .expect("timed out")
+        .expect("NATS request failed");
 
-    assert_eq!(
-        captured_prompt.lock().unwrap().as_deref(),
-        Some("")
-    );
+    assert_eq!(captured_prompt.lock().unwrap().as_deref(), Some(""));
 }

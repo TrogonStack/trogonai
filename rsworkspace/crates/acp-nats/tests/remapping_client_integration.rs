@@ -20,17 +20,15 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use acp_nats::{
-    client, AcpPrefix, Bridge, Config, IdRemap, NatsAuth, NatsConfig, RemappingClient, StdJsonSerialize,
-};
+use acp_nats::{AcpPrefix, Bridge, Config, IdRemap, NatsAuth, NatsConfig, RemappingClient, StdJsonSerialize, client};
 use agent_client_protocol::{
-    Client, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionId, SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
+    Client, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionId,
+    SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync};
+use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_std::time::SystemClock;
 
 /// IDE-side client stand-in that records the `session_id` it actually received.
@@ -48,10 +46,7 @@ impl Client for CapturingClient {
         Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
     }
 
-    async fn session_notification(
-        &self,
-        _: SessionNotification,
-    ) -> agent_client_protocol::Result<()> {
+    async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
 }
@@ -83,8 +78,7 @@ fn make_bridge(
         },
     )
     .with_operation_timeout(Duration::from_millis(500));
-    let js_client =
-        trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     Bridge::new(
         nats,
@@ -141,8 +135,7 @@ async fn permission_request_is_relayed_with_remapped_session_id() {
                 vec![],
             );
             let payload = serde_json::to_vec(&req).unwrap();
-            let subject =
-                format!("{runner_prefix}.session.{runner_sid}.client.session.request_permission");
+            let subject = format!("{runner_prefix}.session.{runner_sid}.client.session.request_permission");
             let reply = nats_runner
                 .request(subject, Bytes::from(payload))
                 .await

@@ -96,10 +96,10 @@ impl SessionNotifier for MockSessionNotifier {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use agent_client_protocol::{SessionNotification, SessionUpdate, ContentChunk};
-    use super::SessionNotifier as _;
     use super::MockSessionNotifier;
+    use super::SessionNotifier as _;
+    use agent_client_protocol::{ContentChunk, SessionNotification, SessionUpdate};
+    use std::sync::Arc;
 
     fn test_notification(session_id: impl Into<String>) -> SessionNotification {
         SessionNotification::new(

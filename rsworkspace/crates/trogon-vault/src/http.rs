@@ -80,8 +80,7 @@ impl HttpClient for reqwest::Client {
         headers: Vec<(String, String)>,
         query: Vec<(String, String)>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-        let query_refs: Vec<(&str, &str)> =
-            query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let query_refs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let mut builder = reqwest::Client::get(self, &url).query(&query_refs);
         for (k, v) in &headers {
             builder = builder.header(k.as_str(), v.as_str());
@@ -186,7 +185,9 @@ pub mod mock {
 
     impl MockHttpClient {
         pub fn new() -> Self {
-            Self { responses: Mutex::new(VecDeque::new()) }
+            Self {
+                responses: Mutex::new(VecDeque::new()),
+            }
         }
 
         /// Queue a response to be returned on the next call.
@@ -199,37 +200,84 @@ pub mod mock {
     impl Clone for MockHttpClient {
         fn clone(&self) -> Self {
             let queue = self.responses.lock().unwrap().clone();
-            Self { responses: Mutex::new(queue) }
+            Self {
+                responses: Mutex::new(queue),
+            }
         }
     }
 
     impl HttpClient for MockHttpClient {
-        fn get(&self, _url: String, _headers: Vec<(String, String)>, _query: Vec<(String, String)>) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-            let (status, body) = self.responses.lock().unwrap().pop_front()
+        fn get(
+            &self,
+            _url: String,
+            _headers: Vec<(String, String)>,
+            _query: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
                 .expect("MockHttpClient: no response queued for get");
             Box::pin(async move { Ok(HttpResponse { status, body }) })
         }
 
-        fn post_json(&self, _url: String, _body: Value, _headers: Vec<(String, String)>) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-            let (status, body) = self.responses.lock().unwrap().pop_front()
+        fn post_json(
+            &self,
+            _url: String,
+            _body: Value,
+            _headers: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
                 .expect("MockHttpClient: no response queued for post_json");
             Box::pin(async move { Ok(HttpResponse { status, body }) })
         }
 
-        fn put_json(&self, _url: String, _body: Value, _headers: Vec<(String, String)>) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-            let (status, body) = self.responses.lock().unwrap().pop_front()
+        fn put_json(
+            &self,
+            _url: String,
+            _body: Value,
+            _headers: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
                 .expect("MockHttpClient: no response queued for put_json");
             Box::pin(async move { Ok(HttpResponse { status, body }) })
         }
 
-        fn patch_json(&self, _url: String, _body: Value, _headers: Vec<(String, String)>) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-            let (status, body) = self.responses.lock().unwrap().pop_front()
+        fn patch_json(
+            &self,
+            _url: String,
+            _body: Value,
+            _headers: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
                 .expect("MockHttpClient: no response queued for patch_json");
             Box::pin(async move { Ok(HttpResponse { status, body }) })
         }
 
-        fn delete(&self, _url: String, _body: Option<Value>, _headers: Vec<(String, String)>) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-            let (status, body) = self.responses.lock().unwrap().pop_front()
+        fn delete(
+            &self,
+            _url: String,
+            _body: Option<Value>,
+            _headers: Vec<(String, String)>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
                 .expect("MockHttpClient: no response queued for delete");
             Box::pin(async move { Ok(HttpResponse { status, body }) })
         }

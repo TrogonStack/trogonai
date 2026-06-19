@@ -77,10 +77,7 @@ mod tests {
 
     #[test]
     fn transcripts_wildcard() {
-        assert!(matches(
-            "transcripts.>",
-            "transcripts.pr.owner.repo.456.sess-123"
-        ));
+        assert!(matches("transcripts.>", "transcripts.pr.owner.repo.456.sess-123"));
         assert!(!matches("transcripts.>", "github.push"));
     }
 

@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use async_nats::jetstream;
-use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, pull};
 use async_nats::jetstream::AckKind;
+use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, pull};
 use dashmap::DashMap;
 use futures_util::StreamExt as _;
 use trogon_vault::{ApiKeyToken, VaultStore};
@@ -31,11 +31,11 @@ use crate::subjects::{self, PROPOSALS_STREAM};
 pub trait StatePublisher: Send + Sync + 'static {
     async fn publish_state_update(
         &self,
-        vault_name:  &str,
+        vault_name: &str,
         proposal_id: &str,
-        state:       &str,
-        by:          &str,
-        reason:      Option<&str>,
+        state: &str,
+        by: &str,
+        reason: Option<&str>,
     );
 }
 
@@ -56,11 +56,11 @@ impl JetStreamStatePublisher {
 impl StatePublisher for JetStreamStatePublisher {
     async fn publish_state_update(
         &self,
-        vault_name:  &str,
+        vault_name: &str,
         proposal_id: &str,
-        state:       &str,
-        by:          &str,
-        reason:      Option<&str>,
+        state: &str,
+        by: &str,
+        reason: Option<&str>,
     ) {
         let mut payload = serde_json::json!({
             "proposal_id": proposal_id,
@@ -73,12 +73,12 @@ impl StatePublisher for JetStreamStatePublisher {
         }
         let subject = subjects::state_update(vault_name, proposal_id);
         match serde_json::to_vec(&payload) {
-            Ok(bytes) => {
-                match self.js.publish(subject, bytes.into()).await {
-                    Ok(ack) => { ack.await.ok(); }
-                    Err(e)  => tracing::warn!(error = %e, "vault-approvals: failed to publish state update"),
+            Ok(bytes) => match self.js.publish(subject, bytes.into()).await {
+                Ok(ack) => {
+                    ack.await.ok();
                 }
-            }
+                Err(e) => tracing::warn!(error = %e, "vault-approvals: failed to publish state update"),
+            },
             Err(e) => tracing::warn!(error = %e, "vault-approvals: failed to serialize state update"),
         }
     }
@@ -97,12 +97,12 @@ impl StatePublisher for NoopStatePublisher {
 // ── ApprovalService ───────────────────────────────────────────────────────────
 
 pub struct ApprovalService<V: VaultStore, N: Notifier, P: StatePublisher> {
-    vault:      Arc<V>,
-    notifier:   Arc<N>,
-    publisher:  Arc<P>,
+    vault: Arc<V>,
+    notifier: Arc<N>,
+    publisher: Arc<P>,
     vault_name: String,
-    proposals:  Arc<DashMap<String, Proposal>>,
-    audit:      Option<Arc<dyn Audit>>,
+    proposals: Arc<DashMap<String, Proposal>>,
+    audit: Option<Arc<dyn Audit>>,
 }
 
 impl<V, N, P> ApprovalService<V, N, P>
@@ -112,19 +112,14 @@ where
     N: Notifier,
     P: StatePublisher,
 {
-    pub fn new(
-        vault:      Arc<V>,
-        notifier:   Arc<N>,
-        publisher:  Arc<P>,
-        vault_name: impl Into<String>,
-    ) -> Self {
+    pub fn new(vault: Arc<V>, notifier: Arc<N>, publisher: Arc<P>, vault_name: impl Into<String>) -> Self {
         Self {
             vault,
             notifier,
             publisher,
             vault_name: vault_name.into(),
-            proposals:  Arc::new(DashMap::new()),
-            audit:      None,
+            proposals: Arc::new(DashMap::new()),
+            audit: None,
         }
     }
 
@@ -141,11 +136,7 @@ where
     /// 2. `consume_approvals`  — Core NATS subscriber (ephemeral — plaintext must not persist).
     /// 3. `consume_rejections` — Core NATS subscriber (ephemeral — same reason as approvals).
     /// 4. `serve_status`       — Core NATS subscriber for status request-reply.
-    pub async fn run(
-        self,
-        js:   jetstream::Context,
-        nats: async_nats::Client,
-    ) -> Result<(), ApprovalError> {
+    pub async fn run(self, js: jetstream::Context, nats: async_nats::Client) -> Result<(), ApprovalError> {
         let this = Arc::new(self);
         tokio::try_join!(
             Self::consume_creates(Arc::clone(&this), js),
@@ -159,9 +150,9 @@ where
     // ── Consumer helpers ──────────────────────────────────────────────────────
 
     async fn make_consumer(
-        js:             &jetstream::Context,
-        vault_name:     &str,
-        name_suffix:    &str,
+        js: &jetstream::Context,
+        vault_name: &str,
+        name_suffix: &str,
         filter_subject: String,
     ) -> Result<jetstream::consumer::Consumer<pull::Config>, ApprovalError> {
         let stream: jetstream::stream::Stream = js
@@ -175,9 +166,9 @@ where
             .get_or_create_consumer(
                 &consumer_name,
                 pull::Config {
-                    durable_name:   Some(consumer_name.clone()),
+                    durable_name: Some(consumer_name.clone()),
                     filter_subject,
-                    ack_policy:     AckPolicy::Explicit,
+                    ack_policy: AckPolicy::Explicit,
                     deliver_policy: DeliverPolicy::All,
                     ..Default::default()
                 },
@@ -187,10 +178,7 @@ where
     }
 
     /// Ack on success, nack on transient errors, ack (skip) on parse errors.
-    async fn settle(
-        msg:    jetstream::Message,
-        result: Result<(), ApprovalError>,
-    ) -> Result<(), ApprovalError> {
+    async fn settle(msg: jetstream::Message, result: Result<(), ApprovalError>) -> Result<(), ApprovalError> {
         let kind = match &result {
             Ok(()) => AckKind::Ack,
             Err(ApprovalError::Serialize(e)) => {
@@ -202,21 +190,21 @@ where
                 AckKind::Nak(None)
             }
         };
-        msg.ack_with(kind)
-            .await
-            .map_err(|e| ApprovalError::Nats(e.to_string()))
+        msg.ack_with(kind).await.map_err(|e| ApprovalError::Nats(e.to_string()))
     }
 
     // ── Three parallel consumers ──────────────────────────────────────────────
 
     async fn consume_creates(this: Arc<Self>, js: jetstream::Context) -> Result<(), ApprovalError> {
-        let filter   = subjects::create(&this.vault_name);
+        let filter = subjects::create(&this.vault_name);
         let consumer = Self::make_consumer(&js, &this.vault_name, "create", filter).await?;
-        let mut msgs = consumer.messages().await
+        let mut msgs = consumer
+            .messages()
+            .await
             .map_err(|e| ApprovalError::JetStream(e.to_string()))?;
 
         while let Some(msg) = msgs.next().await {
-            let msg    = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
+            let msg = msg.map_err(|e| ApprovalError::JetStream(e.to_string()))?;
             let result = Self::handle_create(&this, &msg.payload).await;
             Self::settle(msg, result).await?;
         }
@@ -259,8 +247,8 @@ where
     // ── Event handlers ────────────────────────────────────────────────────────
 
     async fn handle_create(this: &Arc<Self>, payload: &[u8]) -> Result<(), ApprovalError> {
-        let req = serde_json::from_slice::<CreateRequest>(payload)
-            .map_err(|e| ApprovalError::Serialize(e.to_string()))?;
+        let req =
+            serde_json::from_slice::<CreateRequest>(payload).map_err(|e| ApprovalError::Serialize(e.to_string()))?;
 
         if this.proposals.contains_key(&req.id) {
             tracing::debug!(id = %req.id, "vault-approvals: duplicate create, skipping");
@@ -268,12 +256,12 @@ where
         }
 
         let proposal = Proposal {
-            id:             req.id.clone(),
+            id: req.id.clone(),
             credential_key: req.credential_key,
-            service:        req.service,
-            message:        req.message,
-            requested_at:   req.requested_at,
-            status:         ProposalStatus::Pending,
+            service: req.service,
+            message: req.message,
+            requested_at: req.requested_at,
+            status: ProposalStatus::Pending,
         };
 
         this.notifier.notify_pending(&proposal, &this.vault_name).await;
@@ -282,8 +270,8 @@ where
     }
 
     async fn handle_approve(this: &Arc<Self>, payload: &[u8]) -> Result<(), ApprovalError> {
-        let req = serde_json::from_slice::<ApproveRequest>(payload)
-            .map_err(|e| ApprovalError::Serialize(e.to_string()))?;
+        let req =
+            serde_json::from_slice::<ApproveRequest>(payload).map_err(|e| ApprovalError::Serialize(e.to_string()))?;
 
         // Extract what we need and release the lock BEFORE any async IO.
         // DashMap's RefMut holds a write-lock on its shard; keeping it across
@@ -309,8 +297,7 @@ where
             entry.credential_key.clone()
         }; // read lock released here
 
-        let token = ApiKeyToken::new(&credential_key)
-            .map_err(|e| ApprovalError::Vault(e.to_string()))?;
+        let token = ApiKeyToken::new(&credential_key).map_err(|e| ApprovalError::Vault(e.to_string()))?;
 
         this.vault
             .store(&token, &req.plaintext)
@@ -320,25 +307,25 @@ where
         // Re-acquire as write to update status; guard against concurrent approvals.
         let mut entry = match this.proposals.get_mut(&req.proposal_id) {
             Some(e) => e,
-            None    => return Ok(()),
+            None => return Ok(()),
         };
         if !matches!(entry.status, ProposalStatus::Pending) {
             return Ok(());
         }
-        entry.status = ProposalStatus::Approved { approved_by: req.approved_by.clone() };
+        entry.status = ProposalStatus::Approved {
+            approved_by: req.approved_by.clone(),
+        };
 
         let proposal_snapshot = entry.clone();
         drop(entry);
 
-        this.publisher.publish_state_update(
-            &this.vault_name,
-            &req.proposal_id,
-            "approved",
-            &req.approved_by,
-            None,
-        ).await;
+        this.publisher
+            .publish_state_update(&this.vault_name, &req.proposal_id, "approved", &req.approved_by, None)
+            .await;
 
-        this.notifier.notify_approved(&proposal_snapshot, &req.approved_by).await;
+        this.notifier
+            .notify_approved(&proposal_snapshot, &req.approved_by)
+            .await;
 
         if let Some(ref audit) = this.audit {
             audit.publish_approve(&req.proposal_id, &req.approved_by);
@@ -348,8 +335,8 @@ where
     }
 
     async fn handle_reject(this: &Arc<Self>, payload: &[u8]) -> Result<(), ApprovalError> {
-        let req = serde_json::from_slice::<RejectRequest>(payload)
-            .map_err(|e| ApprovalError::Serialize(e.to_string()))?;
+        let req =
+            serde_json::from_slice::<RejectRequest>(payload).map_err(|e| ApprovalError::Serialize(e.to_string()))?;
 
         let mut entry = match this.proposals.get_mut(&req.proposal_id) {
             Some(e) => e,
@@ -372,21 +359,25 @@ where
 
         entry.status = ProposalStatus::Rejected {
             rejected_by: req.rejected_by.clone(),
-            reason:      req.reason.clone(),
+            reason: req.reason.clone(),
         };
 
         let proposal_snapshot = entry.clone();
         drop(entry);
 
-        this.publisher.publish_state_update(
-            &this.vault_name,
-            &req.proposal_id,
-            "rejected",
-            &req.rejected_by,
-            Some(&req.reason),
-        ).await;
+        this.publisher
+            .publish_state_update(
+                &this.vault_name,
+                &req.proposal_id,
+                "rejected",
+                &req.rejected_by,
+                Some(&req.reason),
+            )
+            .await;
 
-        this.notifier.notify_rejected(&proposal_snapshot, &req.rejected_by, &req.reason).await;
+        this.notifier
+            .notify_rejected(&proposal_snapshot, &req.rejected_by, &req.reason)
+            .await;
 
         if let Some(ref audit) = this.audit {
             audit.publish_reject(&req.proposal_id, &req.rejected_by);
@@ -407,21 +398,19 @@ where
         let prefix = format!("vault.proposals.{}.status.", this.vault_name);
 
         while let Some(msg) = sub.next().await {
-            let Some(reply) = msg.reply.clone() else { continue; };
+            let Some(reply) = msg.reply.clone() else {
+                continue;
+            };
 
-            let proposal_id = msg.subject
-                .as_str()
-                .strip_prefix(&prefix)
-                .unwrap_or("")
-                .to_string();
+            let proposal_id = msg.subject.as_str().strip_prefix(&prefix).unwrap_or("").to_string();
 
             let response = match this.proposals.get(&proposal_id) {
-                None    => StatusResponse::not_found(proposal_id),
+                None => StatusResponse::not_found(proposal_id),
                 Some(p) => StatusResponse::from_proposal(&p),
             };
 
             let payload = match serde_json::to_vec(&response) {
-                Ok(b)  => b,
+                Ok(b) => b,
                 Err(e) => {
                     tracing::error!(error = %e, "vault-approvals: failed to serialize status response");
                     continue;
@@ -476,7 +465,8 @@ mod tests {
     #[tokio::test]
     async fn create_duplicate_is_idempotent() {
         let svc = arc_service();
-        let payload = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"api.stripe.com","message":"x"}"#;
+        let payload =
+            br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"api.stripe.com","message":"x"}"#;
 
         ApprovalService::handle_create(&svc, payload).await.unwrap();
         ApprovalService::handle_create(&svc, payload).await.unwrap();
@@ -509,7 +499,8 @@ mod tests {
         let svc = arc_service();
 
         // Create proposal first
-        let create_payload = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let create_payload =
+            br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
         ApprovalService::handle_create(&svc, create_payload).await.unwrap();
 
         let approve_payload = br#"{"proposal_id":"prop_abc","approved_by":"mario","plaintext":"sk_live_secret"}"#;
@@ -536,7 +527,7 @@ mod tests {
     async fn approve_non_pending_proposal_is_ignored() {
         let svc = arc_service();
 
-        let create  = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let create = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
         let approve = br#"{"proposal_id":"prop_abc","approved_by":"mario","plaintext":"sk_live_x"}"#;
         ApprovalService::handle_create(&svc, create).await.unwrap();
         ApprovalService::handle_approve(&svc, approve).await.unwrap();
@@ -546,8 +537,10 @@ mod tests {
         ApprovalService::handle_approve(&svc, second).await.unwrap();
 
         let p = svc.proposals.get("prop_abc").unwrap();
-        assert!(matches!(&p.status, ProposalStatus::Approved { approved_by } if approved_by == "mario"),
-            "second approve must not overwrite first");
+        assert!(
+            matches!(&p.status, ProposalStatus::Approved { approved_by } if approved_by == "mario"),
+            "second approve must not overwrite first"
+        );
     }
 
     // ── handle_reject ─────────────────────────────────────────────────────────
@@ -556,8 +549,8 @@ mod tests {
     async fn reject_updates_status_with_reason() {
         let svc = arc_service();
 
-        let create  = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
-        let reject  = br#"{"proposal_id":"prop_abc","rejected_by":"luigi","reason":"not authorised"}"#;
+        let create = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let reject = br#"{"proposal_id":"prop_abc","rejected_by":"luigi","reason":"not authorised"}"#;
         ApprovalService::handle_create(&svc, create).await.unwrap();
         ApprovalService::handle_reject(&svc, reject).await.unwrap();
 
@@ -580,7 +573,7 @@ mod tests {
     async fn reject_non_pending_proposal_is_ignored() {
         let svc = arc_service();
 
-        let create  = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
+        let create = br#"{"id":"prop_abc","credential_key":"tok_stripe_prod_abc1","service":"s","message":"m"}"#;
         let reject1 = br#"{"proposal_id":"prop_abc","rejected_by":"luigi","reason":"first"}"#;
         let reject2 = br#"{"proposal_id":"prop_abc","rejected_by":"mario","reason":"second"}"#;
         ApprovalService::handle_create(&svc, create).await.unwrap();
@@ -588,10 +581,13 @@ mod tests {
         ApprovalService::handle_reject(&svc, reject2).await.unwrap();
 
         let p = svc.proposals.get("prop_abc").unwrap();
-        assert!(matches!(
-            &p.status,
-            ProposalStatus::Rejected { rejected_by, .. } if rejected_by == "luigi"
-        ), "second reject must not overwrite first");
+        assert!(
+            matches!(
+                &p.status,
+                ProposalStatus::Rejected { rejected_by, .. } if rejected_by == "luigi"
+            ),
+            "second reject must not overwrite first"
+        );
     }
 
     #[tokio::test]

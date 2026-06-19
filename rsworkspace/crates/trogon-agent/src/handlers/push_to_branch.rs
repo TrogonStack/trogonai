@@ -33,9 +33,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let branch = git_ref.trim_start_matches("refs/heads/");
     let pusher = event["pusher"]["name"].as_str().unwrap_or("unknown");
     let commit_count = event["commits"].as_array().map(|c| c.len()).unwrap_or(0);
-    let head_commit_msg = event["head_commit"]["message"]
-        .as_str()
-        .unwrap_or("(no message)");
+    let head_commit_msg = event["head_commit"]["message"].as_str().unwrap_or("(no message)");
 
     info!(
         owner,

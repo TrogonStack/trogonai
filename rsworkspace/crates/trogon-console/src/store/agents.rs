@@ -80,11 +80,7 @@ impl AgentStore {
         self.kv.delete(id).await.map_err(|e| e.to_string())
     }
 
-    pub async fn get_version(
-        &self,
-        agent_id: &str,
-        version: u32,
-    ) -> Result<Option<AgentDefinition>, String> {
+    pub async fn get_version(&self, agent_id: &str, version: u32) -> Result<Option<AgentDefinition>, String> {
         let key = format!("{agent_id}.v{version}");
         match self.versions_kv.get(&key).await.map_err(|e| e.to_string())? {
             None => Ok(None),
@@ -101,11 +97,7 @@ impl AgentStore {
             if !key.starts_with(&prefix) {
                 continue;
             }
-            if let Some(bytes) = self
-                .versions_kv
-                .get(&key)
-                .await
-                .map_err(|e| e.to_string())?
+            if let Some(bytes) = self.versions_kv.get(&key).await.map_err(|e| e.to_string())?
                 && let Ok(def) = serde_json::from_slice::<AgentDefinition>(&bytes)
             {
                 versions.push(AgentVersion {
@@ -123,17 +115,13 @@ impl AgentStore {
 impl AgentRepository for AgentStore {
     fn list(
         &self,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<AgentDefinition>, String>> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentDefinition>, String>> + Send + '_>> {
         Box::pin(async move { self.list().await })
     }
     fn get<'a>(
         &'a self,
         id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>> {
         Box::pin(async move { self.get(id).await })
     }
     fn put<'a>(
@@ -151,9 +139,7 @@ impl AgentRepository for AgentStore {
     fn list_versions<'a>(
         &'a self,
         agent_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>> {
         Box::pin(async move { self.list_versions(agent_id).await })
     }
 
@@ -161,9 +147,7 @@ impl AgentRepository for AgentStore {
         &'a self,
         agent_id: &'a str,
         version: u32,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>> {
         Box::pin(async move { self.get_version(agent_id, version).await })
     }
 }

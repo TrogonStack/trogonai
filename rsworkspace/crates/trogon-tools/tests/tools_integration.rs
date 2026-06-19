@@ -103,8 +103,12 @@ async fn list_dir_respects_gitignore_glob_pattern() {
         .await
         .unwrap();
     tokio::fs::write(dir.path().join("app.log"), "log data").await.unwrap();
-    tokio::fs::write(dir.path().join("app.log.bak"), "backup").await.unwrap();
-    tokio::fs::write(dir.path().join("main.rs"), "fn main() {}").await.unwrap();
+    tokio::fs::write(dir.path().join("app.log.bak"), "backup")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("main.rs"), "fn main() {}")
+        .await
+        .unwrap();
 
     let result = dispatch(&ctx(&dir), "list_dir", &json!({})).await;
 
@@ -125,8 +129,7 @@ async fn list_dir_respects_gitignore_glob_pattern() {
 #[tokio::test]
 async fn read_file_path_traversal_rejected_via_dispatch() {
     let dir = TempDir::new().unwrap();
-    let result =
-        dispatch(&ctx(&dir), "read_file", &json!({"path": "../../etc/passwd"})).await;
+    let result = dispatch(&ctx(&dir), "read_file", &json!({"path": "../../etc/passwd"})).await;
     assert!(
         result.starts_with("Error"),
         "path traversal must be rejected; got: {result}"
@@ -155,8 +158,14 @@ async fn read_file_offset_and_limit_via_dispatch() {
 
     assert!(result.contains("2\tb"), "line 2 ('b') must be present; got: {result}");
     assert!(result.contains("3\tc"), "line 3 ('c') must be present; got: {result}");
-    assert!(!result.contains("1\ta"), "line 1 ('a') must NOT be present; got: {result}");
-    assert!(!result.contains("4\td"), "line 4 ('d') must NOT be present; got: {result}");
+    assert!(
+        !result.contains("1\ta"),
+        "line 1 ('a') must NOT be present; got: {result}"
+    );
+    assert!(
+        !result.contains("4\td"),
+        "line 4 ('d') must NOT be present; got: {result}"
+    );
 }
 
 // ── str_replace ───────────────────────────────────────────────────────────────
@@ -220,21 +229,13 @@ async fn fetch_url_html_to_text_via_dispatch() {
     });
 
     let dir = TempDir::new().unwrap();
-    let result = dispatch(
-        &ctx(&dir),
-        "fetch_url",
-        &json!({"url": server.url("/page")}),
-    )
-    .await;
+    let result = dispatch(&ctx(&dir), "fetch_url", &json!({"url": server.url("/page")})).await;
 
     assert!(
         result.contains("Hello integration world"),
         "HTML body must be converted to plain text; got: {result}"
     );
-    assert!(
-        !result.contains("<p>"),
-        "HTML tags must be stripped; got: {result}"
-    );
+    assert!(!result.contains("<p>"), "HTML tags must be stripped; got: {result}");
 }
 
 /// `fetch_url` via dispatch truncates responses larger than 8 KB.
@@ -301,12 +302,7 @@ async fn git_diff_truncates_large_output_via_dispatch() {
         .await
         .unwrap();
 
-    let result = dispatch(
-        &ctx(&dir),
-        "git_diff",
-        &json!({"args": "--staged"}),
-    )
-    .await;
+    let result = dispatch(&ctx(&dir), "git_diff", &json!({"args": "--staged"})).await;
 
     assert!(
         result.contains("truncated at 4KB"),
@@ -331,9 +327,7 @@ async fn write_file_creates_file_and_returns_ok_via_dispatch() {
 
     assert_eq!(result, "OK", "write_file must return 'OK'; got: {result}");
 
-    let on_disk = tokio::fs::read_to_string(dir.path().join("output.rs"))
-        .await
-        .unwrap();
+    let on_disk = tokio::fs::read_to_string(dir.path().join("output.rs")).await.unwrap();
     assert_eq!(on_disk, "fn main() {}\n", "file content must match what was written");
 }
 
@@ -355,14 +349,9 @@ async fn str_replace_applies_edit_via_dispatch() {
     )
     .await;
 
-    assert!(
-        !result.starts_with("Error"),
-        "str_replace must succeed; got: {result}"
-    );
+    assert!(!result.starts_with("Error"), "str_replace must succeed; got: {result}");
 
-    let on_disk = tokio::fs::read_to_string(dir.path().join("src.rs"))
-        .await
-        .unwrap();
+    let on_disk = tokio::fs::read_to_string(dir.path().join("src.rs")).await.unwrap();
     assert!(
         on_disk.contains("fn new_name()"),
         "file must contain the replacement; got: {on_disk}"
@@ -388,7 +377,10 @@ async fn write_file_creates_intermediate_directories_via_dispatch() {
     )
     .await;
 
-    assert_eq!(result, "OK", "write_file must return 'OK' for nested path; got: {result}");
+    assert_eq!(
+        result, "OK",
+        "write_file must return 'OK' for nested path; got: {result}"
+    );
 
     let on_disk = tokio::fs::read_to_string(dir.path().join("a/b/c/nested.rs"))
         .await
@@ -405,7 +397,9 @@ async fn list_dir_truncates_at_500_entries_via_dispatch() {
     let dir = TempDir::new().unwrap();
 
     for i in 0u32..502 {
-        tokio::fs::write(dir.path().join(format!("f{i:04}.txt")), "").await.unwrap();
+        tokio::fs::write(dir.path().join(format!("f{i:04}.txt")), "")
+            .await
+            .unwrap();
     }
 
     let result = dispatch(&ctx(&dir), "list_dir", &json!({})).await;
@@ -425,9 +419,15 @@ async fn glob_matches_files_recursively_via_dispatch() {
     let dir = TempDir::new().unwrap();
 
     tokio::fs::create_dir_all(dir.path().join("src/nested")).await.unwrap();
-    tokio::fs::write(dir.path().join("src/main.rs"), "fn main() {}").await.unwrap();
-    tokio::fs::write(dir.path().join("src/nested/util.rs"), "fn util() {}").await.unwrap();
-    tokio::fs::write(dir.path().join("build.sh"), "#!/bin/sh").await.unwrap();
+    tokio::fs::write(dir.path().join("src/main.rs"), "fn main() {}")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("src/nested/util.rs"), "fn util() {}")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("build.sh"), "#!/bin/sh")
+        .await
+        .unwrap();
 
     let result = dispatch(&ctx(&dir), "glob", &json!({"pattern": "**/*.rs"})).await;
 
@@ -453,7 +453,9 @@ async fn git_status_shows_untracked_file_via_dispatch() {
     let dir = TempDir::new().unwrap();
     git_init(&dir).await;
 
-    tokio::fs::write(dir.path().join("status_sentinel.rs"), "fn main() {}").await.unwrap();
+    tokio::fs::write(dir.path().join("status_sentinel.rs"), "fn main() {}")
+        .await
+        .unwrap();
 
     let result = dispatch(&ctx(&dir), "git_status", &json!({})).await;
 
@@ -471,7 +473,9 @@ async fn git_log_shows_commit_message_via_dispatch() {
     let dir = TempDir::new().unwrap();
     git_init(&dir).await;
 
-    tokio::fs::write(dir.path().join("README.md"), "# project\n").await.unwrap();
+    tokio::fs::write(dir.path().join("README.md"), "# project\n")
+        .await
+        .unwrap();
     tokio::process::Command::new("git")
         .args(["add", "README.md"])
         .current_dir(dir.path())
@@ -514,12 +518,9 @@ async fn notebook_edit_writes_new_cell_source_to_disk_via_dispatch() {
             }
         ]
     });
-    tokio::fs::write(
-        dir.path().join("notebook.ipynb"),
-        serde_json::to_string(&nb).unwrap(),
-    )
-    .await
-    .unwrap();
+    tokio::fs::write(dir.path().join("notebook.ipynb"), serde_json::to_string(&nb).unwrap())
+        .await
+        .unwrap();
 
     let result = dispatch(
         &ctx(&dir),
@@ -530,7 +531,9 @@ async fn notebook_edit_writes_new_cell_source_to_disk_via_dispatch() {
 
     assert_eq!(result, "OK", "notebook_edit must return 'OK'; got: {result}");
 
-    let raw = tokio::fs::read_to_string(dir.path().join("notebook.ipynb")).await.unwrap();
+    let raw = tokio::fs::read_to_string(dir.path().join("notebook.ipynb"))
+        .await
+        .unwrap();
     let on_disk: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let source = on_disk["cells"][0]["source"].to_string();
     assert!(
@@ -560,9 +563,12 @@ async fn search_files_returns_matching_lines_via_dispatch() {
         .await
         .unwrap();
 
-    let result =
-        dispatch(&ctx(&dir), "search_files", &json!({"pattern": "search_needle_sentinel"}))
-            .await;
+    let result = dispatch(
+        &ctx(&dir),
+        "search_files",
+        &json!({"pattern": "search_needle_sentinel"}),
+    )
+    .await;
 
     assert!(
         result.contains("haystack.rs"),

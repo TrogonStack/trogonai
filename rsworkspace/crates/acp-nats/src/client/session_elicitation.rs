@@ -22,10 +22,7 @@ impl<T> ElicitationClient for T {}
 
 /// Handles `session.elicitation`: parses raw JSON request, calls client, publishes raw JSON
 /// response to reply subject. On any error the handler publishes a `Cancel` response.
-#[instrument(
-    name = "acp.client.session.elicitation",
-    skip(payload, client, nats, serializer)
-)]
+#[instrument(name = "acp.client.session.elicitation", skip(payload, client, nats, serializer))]
 pub async fn handle<N: PublishClient + FlushClient, C: ElicitationClient, S: JsonSerialize>(
     payload: &[u8],
     client: &C,
@@ -166,7 +163,15 @@ mod tests {
         let client = DefaultClient;
         let payload = make_raw_payload(&make_request("sess-1"));
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "sess-1",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
         let payloads = nats.published_payloads();
@@ -179,7 +184,15 @@ mod tests {
         let nats = MockNatsClient::new();
         let client = DefaultClient;
 
-        handle(b"not json", &client, Some("_INBOX.err"), &nats, "sess-1", &StdJsonSerialize).await;
+        handle(
+            b"not json",
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "sess-1",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
         let payloads = nats.published_payloads();
@@ -193,7 +206,15 @@ mod tests {
         let client = DefaultClient;
         let payload = make_raw_payload(&make_request("sess-other"));
 
-        handle(&payload, &client, Some("_INBOX.err"), &nats, "sess-1", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.err"),
+            &nats,
+            "sess-1",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
         let payloads = nats.published_payloads();
@@ -220,7 +241,15 @@ mod tests {
         let client = DefaultClient;
         let payload = make_raw_payload(&make_request("sess-1"));
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "sess-1",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     }
@@ -232,7 +261,15 @@ mod tests {
         let client = DefaultClient;
         let payload = make_raw_payload(&make_request("sess-1"));
 
-        handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &StdJsonSerialize).await;
+        handle(
+            &payload,
+            &client,
+            Some("_INBOX.reply"),
+            &nats,
+            "sess-1",
+            &StdJsonSerialize,
+        )
+        .await;
 
         assert!(nats.published_messages().is_empty());
     }

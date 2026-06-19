@@ -22,10 +22,9 @@ use crate::error::NatsKvVaultError;
 /// default so existing call-sites are unchanged.
 pub trait KvOps: Send + Sync + 'static {
     fn kv_put(&self, key: &str, value: Bytes)
-        -> impl std::future::Future<Output = Result<(), NatsKvVaultError>> + Send;
+    -> impl std::future::Future<Output = Result<(), NatsKvVaultError>> + Send;
     /// Idempotent — returns `Ok(())` when the key does not exist.
-    fn kv_delete(&self, key: &str)
-        -> impl std::future::Future<Output = Result<(), NatsKvVaultError>> + Send;
+    fn kv_delete(&self, key: &str) -> impl std::future::Future<Output = Result<(), NatsKvVaultError>> + Send;
 }
 
 // ── impl KvOps for kv::Store (real NATS) ─────────────────────────────────────

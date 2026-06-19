@@ -42,8 +42,7 @@ fn shared_str_replace_def_includes_replace_all() {
 #[test]
 fn shared_multi_edit_def_present_with_edits_array() {
     let def = tool_def_by_name("multi_edit");
-    let edits = def
-        .input_schema["properties"]
+    let edits = def.input_schema["properties"]
         .get("edits")
         .expect("multi_edit schema must include edits array");
     assert_eq!(edits["type"], "array");
@@ -56,9 +55,7 @@ fn shared_multi_edit_def_present_with_edits_array() {
 #[tokio::test]
 async fn shared_dispatch_str_replace_replace_all() {
     let dir = TempDir::new().unwrap();
-    tokio::fs::write(dir.path().join("f.txt"), "a\na\n")
-        .await
-        .unwrap();
+    tokio::fs::write(dir.path().join("f.txt"), "a\na\n").await.unwrap();
 
     let result = dispatch(
         &ctx(&dir),
@@ -67,19 +64,18 @@ async fn shared_dispatch_str_replace_replace_all() {
     )
     .await;
 
-    assert!(!result.starts_with("Error"), "replace_all dispatch must succeed; got: {result}");
-    let content = tokio::fs::read_to_string(dir.path().join("f.txt"))
-        .await
-        .unwrap();
+    assert!(
+        !result.starts_with("Error"),
+        "replace_all dispatch must succeed; got: {result}"
+    );
+    let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
     assert_eq!(content, "b\nb\n");
 }
 
 #[tokio::test]
 async fn shared_dispatch_multi_edit_sequence() {
     let dir = TempDir::new().unwrap();
-    tokio::fs::write(dir.path().join("f.txt"), "one two\n")
-        .await
-        .unwrap();
+    tokio::fs::write(dir.path().join("f.txt"), "one two\n").await.unwrap();
 
     let result = dispatch(
         &ctx(&dir),
@@ -94,19 +90,18 @@ async fn shared_dispatch_multi_edit_sequence() {
     )
     .await;
 
-    assert!(!result.starts_with("Error"), "multi_edit dispatch must succeed; got: {result}");
-    let content = tokio::fs::read_to_string(dir.path().join("f.txt"))
-        .await
-        .unwrap();
+    assert!(
+        !result.starts_with("Error"),
+        "multi_edit dispatch must succeed; got: {result}"
+    );
+    let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
     assert_eq!(content, "1 2\n");
 }
 
 #[tokio::test]
 async fn shared_dispatch_multi_edit_atomic_failure() {
     let dir = TempDir::new().unwrap();
-    tokio::fs::write(dir.path().join("f.txt"), "unchanged\n")
-        .await
-        .unwrap();
+    tokio::fs::write(dir.path().join("f.txt"), "unchanged\n").await.unwrap();
 
     let result = dispatch(
         &ctx(&dir),
@@ -122,8 +117,6 @@ async fn shared_dispatch_multi_edit_atomic_failure() {
     .await;
 
     assert!(result.contains("No changes were written"), "got: {result}");
-    let content = tokio::fs::read_to_string(dir.path().join("f.txt"))
-        .await
-        .unwrap();
+    let content = tokio::fs::read_to_string(dir.path().join("f.txt")).await.unwrap();
     assert_eq!(content, "unchanged\n");
 }

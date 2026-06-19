@@ -61,9 +61,7 @@ pub fn format_history(entries: &[TranscriptEntry]) -> Option<String> {
 
     let shown = window.len();
     let header = if total > MAX_MESSAGES {
-        format!(
-            "## Entity history ({total} messages total, showing last {shown})\n\n"
-        )
+        format!("## Entity history ({total} messages total, showing last {shown})\n\n")
     } else {
         format!("## Entity history ({total} messages)\n\n")
     };

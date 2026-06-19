@@ -26,9 +26,7 @@ pub const UNROUTABLE_SUBJECT_PREFIX: &str = "trogon.unroutable";
 /// The stream captures every message published to `trogon.unroutable.>` and
 /// retains them for 7 days.  Calling this function when the stream already
 /// exists is a no-op.
-pub async fn provision_unroutable_stream(
-    js: &async_nats::jetstream::Context,
-) -> Result<(), String> {
+pub async fn provision_unroutable_stream(js: &async_nats::jetstream::Context) -> Result<(), String> {
     let config = StreamConfig {
         name: UNROUTABLE_STREAM.to_string(),
         subjects: vec!["trogon.unroutable.>".to_string()],

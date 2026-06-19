@@ -142,7 +142,10 @@ pub struct AnthropicMemoryProvider<C = reqwest::Client> {
 
 impl AnthropicMemoryProvider<reqwest::Client> {
     pub fn new(config: MemoryLlmConfig) -> Self {
-        Self { config, client: reqwest::Client::new() }
+        Self {
+            config,
+            client: reqwest::Client::new(),
+        }
     }
 }
 
@@ -178,7 +181,10 @@ pub(crate) async fn extract_facts<C: MemoryHttpClient>(
         model: &config.model,
         max_tokens: config.max_tokens,
         system: SYSTEM_PROMPT,
-        messages: [MemMessage { role: "user", content: &prompt }],
+        messages: [MemMessage {
+            role: "user",
+            content: &prompt,
+        }],
     };
 
     let (auth_header, auth_value) = match config.auth_style {
@@ -207,8 +213,7 @@ pub(crate) async fn extract_facts<C: MemoryHttpClient>(
         return Ok(vec![]);
     }
 
-    serde_json::from_str::<Vec<RawFact>>(text.trim())
-        .map_err(|e| DreamerError::Parse(format!("{e}: {text}")))
+    serde_json::from_str::<Vec<RawFact>>(text.trim()).map_err(|e| DreamerError::Parse(format!("{e}: {text}")))
 }
 
 fn build_prompt(transcript: &[TranscriptEntry], existing: Option<&EntityMemory>) -> String {
@@ -218,13 +223,22 @@ fn build_prompt(transcript: &[TranscriptEntry], existing: Option<&EntityMemory>)
             TranscriptEntry::Message { role, content, .. } => {
                 out.push_str(&format!("[{role:?}] {content}\n"));
             }
-            TranscriptEntry::ToolCall { name, input, output, .. } => {
+            TranscriptEntry::ToolCall {
+                name, input, output, ..
+            } => {
                 out.push_str(&format!("[tool:{name}] input={input} output={output}\n"));
             }
-            TranscriptEntry::RoutingDecision { from, to, reasoning, .. } => {
+            TranscriptEntry::RoutingDecision {
+                from, to, reasoning, ..
+            } => {
                 out.push_str(&format!("[route] {from} → {to}: {reasoning}\n"));
             }
-            TranscriptEntry::SubAgentSpawn { parent, child, capability, .. } => {
+            TranscriptEntry::SubAgentSpawn {
+                parent,
+                child,
+                capability,
+                ..
+            } => {
                 out.push_str(&format!("[spawn] {parent} → {child} ({capability})\n"));
             }
         }
@@ -263,20 +277,29 @@ mod tests {
         fn enqueue_json(self, json: &str) -> Self {
             self.responses.lock().unwrap().push_back(Ok(MemResponse {
                 stop_reason: "end_turn".into(),
-                content: vec![MemBlock { kind: "text".into(), text: json.to_string() }],
+                content: vec![MemBlock {
+                    kind: "text".into(),
+                    text: json.to_string(),
+                }],
             }));
             self
         }
 
         fn enqueue_err(self, msg: &str) -> Self {
-            self.responses.lock().unwrap().push_back(Err(DreamerError::Llm(msg.to_string())));
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(Err(DreamerError::Llm(msg.to_string())));
             self
         }
 
         fn enqueue_stop_reason(self, stop_reason: &str) -> Self {
             self.responses.lock().unwrap().push_back(Ok(MemResponse {
                 stop_reason: stop_reason.to_string(),
-                content: vec![MemBlock { kind: "text".into(), text: "[]".to_string() }],
+                content: vec![MemBlock {
+                    kind: "text".into(),
+                    text: "[]".to_string(),
+                }],
             }));
             self
         }
@@ -290,15 +313,13 @@ mod tests {
             _auth_value: &'a str,
             _request: &'a MemRequest<'a>,
         ) -> impl Future<Output = Result<MemResponse, DreamerError>> + Send + 'a {
-            let result = self
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or(Ok(MemResponse {
-                    stop_reason: "end_turn".into(),
-                    content: vec![MemBlock { kind: "text".into(), text: "[]".into() }],
-                }));
+            let result = self.responses.lock().unwrap().pop_front().unwrap_or(Ok(MemResponse {
+                stop_reason: "end_turn".into(),
+                content: vec![MemBlock {
+                    kind: "text".into(),
+                    text: "[]".into(),
+                }],
+            }));
             async move { result }
         }
     }
@@ -330,9 +351,8 @@ mod tests {
 
     #[tokio::test]
     async fn extracts_facts_from_transcript() {
-        let mock = MockMemoryHttpClient::default().enqueue_json(
-            r#"[{"category":"preference","content":"prefers Rust over Python","confidence":0.95}]"#,
-        );
+        let mock = MockMemoryHttpClient::default()
+            .enqueue_json(r#"[{"category":"preference","content":"prefers Rust over Python","confidence":0.95}]"#);
         let facts = extract_facts(&transcript(), None, &config(), &mock).await.unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].category, "preference");
@@ -413,14 +433,23 @@ mod tests {
                 _auth_value: &'a str,
                 _request: &'a MemRequest<'a>,
             ) -> impl Future<Output = Result<MemResponse, DreamerError>> + Send + 'a {
-                self.saw_x_api_key
-                    .store(auth_header == "x-api-key", Ordering::SeqCst);
-                async { Ok(MemResponse { stop_reason: "end_turn".into(), content: vec![MemBlock { kind: "text".into(), text: "[]".into() }] }) }
+                self.saw_x_api_key.store(auth_header == "x-api-key", Ordering::SeqCst);
+                async {
+                    Ok(MemResponse {
+                        stop_reason: "end_turn".into(),
+                        content: vec![MemBlock {
+                            kind: "text".into(),
+                            text: "[]".into(),
+                        }],
+                    })
+                }
             }
         }
 
         let saw = Arc::new(AtomicBool::new(false));
-        let client = HeaderCapture { saw_x_api_key: saw.clone() };
+        let client = HeaderCapture {
+            saw_x_api_key: saw.clone(),
+        };
         extract_facts(&[], None, &config(), &client).await.unwrap();
         assert!(saw.load(Ordering::SeqCst));
     }
@@ -438,7 +467,10 @@ mod tests {
                 _request: &'a MemRequest<'a>,
             ) -> impl Future<Output = Result<MemResponse, DreamerError>> + Send + 'a {
                 async {
-                    Ok(MemResponse { stop_reason: "end_turn".into(), content: vec![] })
+                    Ok(MemResponse {
+                        stop_reason: "end_turn".into(),
+                        content: vec![],
+                    })
                 }
             }
         }
@@ -453,11 +485,20 @@ mod tests {
         mock.responses.lock().unwrap().push_back(Ok(MemResponse {
             stop_reason: "end_turn".into(),
             content: vec![
-                MemBlock { kind: "tool_use".into(), text: "ignored".into() },
-                MemBlock { kind: "text".into(), text: "[]".into() },
+                MemBlock {
+                    kind: "tool_use".into(),
+                    text: "ignored".into(),
+                },
+                MemBlock {
+                    kind: "text".into(),
+                    text: "[]".into(),
+                },
             ],
         }));
         let facts = extract_facts(&[], None, &config(), &mock).await.unwrap();
-        assert!(facts.is_empty(), "non-text block should be skipped, text block with [] gives empty facts");
+        assert!(
+            facts.is_empty(),
+            "non-text block should be skipped, text block with [] gives empty facts"
+        );
     }
 }

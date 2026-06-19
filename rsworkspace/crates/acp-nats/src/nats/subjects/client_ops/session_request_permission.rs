@@ -45,9 +45,6 @@ mod tests {
     #[test]
     fn display_formats_subject_correctly() {
         let s = SessionRequestPermissionSubject::new(&prefix(), &session_id());
-        assert_eq!(
-            s.to_string(),
-            "acp.session.ses1.client.session.request_permission"
-        );
+        assert_eq!(s.to_string(), "acp.session.ses1.client.session.request_permission");
     }
 }

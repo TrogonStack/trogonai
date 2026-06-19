@@ -56,9 +56,7 @@ fn spawn_errors() -> &'static Counter<u64> {
     SPAWN_ERRORS.get_or_init(|| {
         meter()
             .u64_counter("trogon.actor.spawn.errors")
-            .with_description(
-                "Number of spawn_agent failures (no capability, timeout, request error)",
-            )
+            .with_description("Number of spawn_agent failures (no capability, timeout, request error)")
             .build()
     })
 }
@@ -85,10 +83,7 @@ fn handle_timeouts() -> &'static Counter<u64> {
 
 /// Record the latency of a completed `handle_event` call.
 pub fn record_handle_latency(actor_type: &str, latency_ms: f64) {
-    handle_latency_ms().record(
-        latency_ms,
-        &[KeyValue::new("actor_type", actor_type.to_string())],
-    );
+    handle_latency_ms().record(latency_ms, &[KeyValue::new("actor_type", actor_type.to_string())]);
 }
 
 /// Increment the OCC-retry counter.

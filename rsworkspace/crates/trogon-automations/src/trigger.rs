@@ -48,8 +48,7 @@ pub fn matches(trigger: &str, nats_subject: &str, payload: &Value) -> bool {
     match action_filter {
         None => true,
         Some("draft_opened") => {
-            payload["action"].as_str() == Some("opened")
-                && payload["pull_request"]["draft"].as_bool() == Some(true)
+            payload["action"].as_str() == Some("opened") && payload["pull_request"]["draft"].as_bool() == Some(true)
         }
         // "pushed" is the UI label for GitHub's "synchronize" action (new commits pushed to PR).
         Some("pushed") => payload["action"].as_str() == Some("synchronize"),
@@ -75,9 +74,7 @@ pub fn validate(trigger: &str) -> Result<(), String> {
             return Err("trigger subject must not be empty".to_string());
         }
         if action.is_empty() {
-            return Err(
-                "trigger action must not be empty (omit `:` to match any action)".to_string(),
-            );
+            return Err("trigger action must not be empty (omit `:` to match any action)".to_string());
         }
     }
     Ok(())
@@ -103,10 +100,7 @@ mod tests {
 
     #[test]
     fn parse_linear_with_action() {
-        assert_eq!(
-            parse("linear.Issue:create"),
-            ("linear.Issue", Some("create"))
-        );
+        assert_eq!(parse("linear.Issue:create"), ("linear.Issue", Some("create")));
     }
 
     #[test]
@@ -122,11 +116,7 @@ mod tests {
     #[test]
     fn matches_with_action_filter() {
         let opened = json!({"action": "opened"});
-        assert!(matches(
-            "github.pull_request:opened",
-            "github.pull_request",
-            &opened
-        ));
+        assert!(matches("github.pull_request:opened", "github.pull_request", &opened));
         assert!(!matches(
             "github.pull_request:opened",
             "github.pull_request",
@@ -146,21 +136,13 @@ mod tests {
             "github.pull_request",
             &json!({"action": "closed"})
         ));
-        assert!(matches(
-            "github.pull_request",
-            "github.pull_request",
-            &json!({})
-        ));
+        assert!(matches("github.pull_request", "github.pull_request", &json!({})));
     }
 
     #[test]
     fn matches_linear_prefix_with_action() {
         let payload = json!({"action": "create", "type": "Issue"});
-        assert!(matches(
-            "linear.Issue:create",
-            "linear.Issue.create",
-            &payload
-        ));
+        assert!(matches("linear.Issue:create", "linear.Issue.create", &payload));
         assert!(matches("linear.Issue:create", "linear.Issue", &payload));
         assert!(!matches(
             "linear.Issue:create",
@@ -245,31 +227,19 @@ mod tests {
     #[test]
     fn pushed_matches_synchronize_action() {
         let payload = json!({"action": "synchronize", "pull_request": {"number": 42}});
-        assert!(matches(
-            "github.pull_request:pushed",
-            "github.pull_request",
-            &payload
-        ));
+        assert!(matches("github.pull_request:pushed", "github.pull_request", &payload));
     }
 
     #[test]
     fn pushed_does_not_match_opened_action() {
         let payload = json!({"action": "opened"});
-        assert!(!matches(
-            "github.pull_request:pushed",
-            "github.pull_request",
-            &payload
-        ));
+        assert!(!matches("github.pull_request:pushed", "github.pull_request", &payload));
     }
 
     #[test]
     fn pushed_does_not_match_wrong_subject() {
         let payload = json!({"action": "synchronize"});
-        assert!(!matches(
-            "github.pull_request:pushed",
-            "github.push",
-            &payload
-        ));
+        assert!(!matches("github.pull_request:pushed", "github.push", &payload));
     }
 
     #[test]

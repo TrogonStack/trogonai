@@ -12,11 +12,7 @@ use trogon_agent::agent_loader::{AgentLoader, AgentLoading};
 const CONSOLE_AGENTS_BUCKET: &str = "CONSOLE_AGENTS";
 
 async fn make_loader() -> (AgentLoader, impl Drop) {
-    let container = Nats::default()
-        .with_cmd(["--jetstream"])
-        .start()
-        .await
-        .expect("NATS");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -27,11 +23,7 @@ async fn make_loader() -> (AgentLoader, impl Drop) {
 }
 
 async fn make_loader_with_js() -> (AgentLoader, jetstream::Context, impl Drop) {
-    let container = Nats::default()
-        .with_cmd(["--jetstream"])
-        .start()
-        .await
-        .expect("NATS");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -47,10 +39,7 @@ async fn make_loader_with_js() -> (AgentLoader, jetstream::Context, impl Drop) {
 async fn agent_loader_returns_skill_ids_from_kv() {
     let (loader, js, _c) = make_loader_with_js().await;
 
-    let kv = js
-        .get_key_value(CONSOLE_AGENTS_BUCKET)
-        .await
-        .expect("get KV bucket");
+    let kv = js.get_key_value(CONSOLE_AGENTS_BUCKET).await.expect("get KV bucket");
 
     let agent_json = serde_json::json!({
         "id": "agent_abc",
@@ -74,10 +63,7 @@ async fn agent_loader_returns_skill_ids_from_kv() {
 async fn agent_loader_returns_empty_for_missing_agent() {
     let (loader, _c) = make_loader().await;
     let ids = loader.get_skill_ids("does_not_exist").await;
-    assert!(
-        ids.is_empty(),
-        "missing agent must return empty skill_ids; got {ids:?}"
-    );
+    assert!(ids.is_empty(), "missing agent must return empty skill_ids; got {ids:?}");
 }
 
 // ── Malformed JSON returns empty ───────────────────────────────────────────────
@@ -86,10 +72,7 @@ async fn agent_loader_returns_empty_for_missing_agent() {
 async fn agent_loader_returns_empty_for_malformed_json() {
     let (loader, js, _c) = make_loader_with_js().await;
 
-    let kv = js
-        .get_key_value(CONSOLE_AGENTS_BUCKET)
-        .await
-        .expect("get KV bucket");
+    let kv = js.get_key_value(CONSOLE_AGENTS_BUCKET).await.expect("get KV bucket");
 
     kv.put("bad_agent", bytes::Bytes::from(b"not valid json" as &[u8]))
         .await
@@ -108,10 +91,7 @@ async fn agent_loader_returns_empty_for_malformed_json() {
 async fn agent_loader_returns_empty_when_skill_ids_field_missing() {
     let (loader, js, _c) = make_loader_with_js().await;
 
-    let kv = js
-        .get_key_value(CONSOLE_AGENTS_BUCKET)
-        .await
-        .expect("get KV bucket");
+    let kv = js.get_key_value(CONSOLE_AGENTS_BUCKET).await.expect("get KV bucket");
 
     let agent_json = serde_json::json!({
         "id": "agent_no_skills",

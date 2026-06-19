@@ -177,10 +177,7 @@ pub trait JetStreamConsumer: Send + Sync + 'static {
     /// Error yielded by individual stream items. Maps to async_nats `MessagesError`.
     type MessagesError: Error + Send + Sync;
     type Message: JsDispatchMessage;
-    type Messages: Stream<Item = Result<Self::Message, Self::MessagesError>>
-        + Unpin
-        + Send
-        + 'static;
+    type Messages: Stream<Item = Result<Self::Message, Self::MessagesError>> + Unpin + Send + 'static;
 
     fn messages(&self) -> impl Future<Output = Result<Self::Messages, Self::StreamError>> + Send;
 }

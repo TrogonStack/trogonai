@@ -23,7 +23,10 @@ use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::
 use trogon_agent_core::agent_loop::{AgentEvent, AgentLoop, Message};
 use trogon_agent_core::tools::ToolContext;
 use trogon_nats::{NatsAuth, NatsConfig, connect};
-use trogon_secret_proxy::{proxy::{ProxyState, router}, stream, subjects, worker};
+use trogon_secret_proxy::{
+    proxy::{ProxyState, router},
+    stream, subjects, worker,
+};
 use trogon_vault::{ApiKeyToken, MemoryVault, VaultStore as _};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -184,9 +187,7 @@ async fn agent_loop_run_chat_streaming_through_proxy_emits_text_delta() {
         "expected TextDelta('Hello from pipeline!') through full pipeline, got: {events:?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
+        events.iter().any(|e| matches!(e, AgentEvent::UsageSummary { .. })),
         "expected UsageSummary event"
     );
 }

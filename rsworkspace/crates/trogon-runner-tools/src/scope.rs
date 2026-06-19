@@ -65,10 +65,7 @@ pub enum ScopeDecision {
 #[derive(Debug)]
 pub enum ScopeError {
     /// A glob pattern failed to compile.
-    InvalidGlob {
-        pattern: String,
-        source: globset::Error,
-    },
+    InvalidGlob { pattern: String, source: globset::Error },
     /// The `network` field held an unrecognized value.
     UnknownNetwork(String),
     /// The `on_exceed` field held an unrecognized value.
@@ -200,9 +197,7 @@ impl CommandSet {
 
     /// A set that permits no command.
     pub fn empty() -> Self {
-        Self {
-            patterns: Vec::new(),
-        }
+        Self { patterns: Vec::new() }
     }
 
     /// Build a set from explicit prefix patterns.
@@ -304,8 +299,8 @@ impl Scope {
     /// escalates instead of being silently allowed. `cwd` is escaped so glob
     /// metacharacters in the path are treated literally. Pure; performs no I/O.
     pub fn baseline(cwd: &str) -> Self {
-        let write = GlobSet::compile(&anchor_to_cwd(&["**".to_string()], cwd))
-            .expect("cwd-anchored `**` is a valid glob");
+        let write =
+            GlobSet::compile(&anchor_to_cwd(&["**".to_string()], cwd)).expect("cwd-anchored `**` is a valid glob");
         Self {
             write,
             run: CommandSet::any(),
@@ -367,9 +362,7 @@ impl Scope {
         let normalized = normalize_tool_name(tool_name);
 
         // 2. Reads are always in scope.
-        if is_read_only_tool(tool_name)
-            || (normalized == "bash" && is_read_only_bash_command(tool_input))
-        {
+        if is_read_only_tool(tool_name) || (normalized == "bash" && is_read_only_bash_command(tool_input)) {
             return ScopeDecision::InScope;
         }
 
@@ -410,10 +403,7 @@ impl Scope {
         //    (Outright-dangerous commands are caught by deny rules upstream of
         //    scope, so run-any baselines stay safe in the live flow.)
         if normalized == "bash" {
-            let cmd = tool_input
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let cmd = tool_input.get("command").and_then(|v| v.as_str()).unwrap_or("");
             return if self.run.matches(cmd) {
                 ScopeDecision::InScope
             } else {
@@ -668,10 +658,7 @@ mod tests {
         // Host allow-list parsed and trimmed.
         assert_eq!(
             scope.network(),
-            &NetworkPolicy::AllowList(vec![
-                "api.github.com".to_string(),
-                "example.com".to_string()
-            ])
+            &NetworkPolicy::AllowList(vec!["api.github.com".to_string(), "example.com".to_string()])
         );
         assert_eq!(scope.on_exceed(), OnExceed::Deny);
         assert!(scope.protected().matches("/repo/src/.env"));
@@ -764,10 +751,7 @@ scope.on_exceed: deny
         assert_eq!(wire.write, vec!["src/**", "tests/**"]);
         assert_eq!(wire.run, vec!["cargo", "git"]);
         assert_eq!(wire.protected, vec!["**/.env"]);
-        assert_eq!(
-            wire.network,
-            Some("allow:api.github.com, example.com".to_string())
-        );
+        assert_eq!(wire.network, Some("allow:api.github.com, example.com".to_string()));
         assert_eq!(wire.on_exceed, Some("deny".to_string()));
     }
 
@@ -823,8 +807,7 @@ scope.on_exceed: deny
 
     #[test]
     fn scope_wire_deserializes_from_json_with_missing_fields() {
-        let wire: ScopeWire =
-            serde_json::from_str(r#"{"write":["src/**"],"on_exceed":"deny"}"#).expect("json");
+        let wire: ScopeWire = serde_json::from_str(r#"{"write":["src/**"],"on_exceed":"deny"}"#).expect("json");
         assert_eq!(wire.write, vec!["src/**".to_string()]);
         assert!(wire.run.is_empty());
         assert!(wire.network.is_none());
@@ -938,10 +921,7 @@ scope.on_exceed: deny
             s.evaluate("read_file", &json!({"path": "src/main.rs"}), "/repo"),
             ScopeDecision::InScope
         );
-        assert_eq!(
-            s.evaluate("git_status", &json!({}), "/repo"),
-            ScopeDecision::InScope
-        );
+        assert_eq!(s.evaluate("git_status", &json!({}), "/repo"), ScopeDecision::InScope);
         assert_eq!(
             s.evaluate("bash", &json!({"command": "cat src/main.rs"}), "/repo"),
             ScopeDecision::InScope
@@ -973,15 +953,9 @@ scope.on_exceed: deny
             s.evaluate("fetch_url", &json!({"url": "https://x"}), "/repo"),
             ScopeDecision::OutOfScope
         );
-        assert_eq!(
-            s.evaluate("git_commit", &json!({}), "/repo"),
-            ScopeDecision::InScope
-        );
+        assert_eq!(s.evaluate("git_commit", &json!({}), "/repo"), ScopeDecision::InScope);
         // Unknown tool fails closed.
-        assert_eq!(
-            s.evaluate("frobnicate", &json!({}), "/repo"),
-            ScopeDecision::OutOfScope
-        );
+        assert_eq!(s.evaluate("frobnicate", &json!({}), "/repo"), ScopeDecision::OutOfScope);
     }
 
     #[test]
@@ -1026,24 +1000,15 @@ scope.on_exceed: deny
             s.evaluate("fetch_url", &json!({"url": "https://x"}), "/repo"),
             ScopeDecision::InScope
         );
-        assert_eq!(
-            s.evaluate("git_push", &json!({}), "/repo"),
-            ScopeDecision::InScope
-        );
+        assert_eq!(s.evaluate("git_push", &json!({}), "/repo"), ScopeDecision::InScope);
         // Repo root is not under src/**, so committing escalates.
-        assert_eq!(
-            s.evaluate("git_commit", &json!({}), "/repo"),
-            ScopeDecision::OutOfScope
-        );
+        assert_eq!(s.evaluate("git_commit", &json!({}), "/repo"), ScopeDecision::OutOfScope);
     }
 
     #[test]
     fn evaluate_write_without_path_fails_closed() {
         let s = Scope::baseline("/repo");
-        assert_eq!(
-            s.evaluate("write_file", &json!({}), "/repo"),
-            ScopeDecision::OutOfScope
-        );
+        assert_eq!(s.evaluate("write_file", &json!({}), "/repo"), ScopeDecision::OutOfScope);
     }
 
     // ── SCOPE-5 comprehensive coverage (every classification row) ──────────
@@ -1140,10 +1105,7 @@ scope.on_exceed: deny
             s.evaluate("fetch_url", &json!({"url": "https://api.github.com/x"}), "/repo"),
             ScopeDecision::InScope
         );
-        assert_eq!(
-            s.evaluate("gh", &json!({}), "/repo"),
-            ScopeDecision::InScope
-        );
+        assert_eq!(s.evaluate("gh", &json!({}), "/repo"), ScopeDecision::InScope);
     }
 
     #[test]
@@ -1346,8 +1308,7 @@ scope.on_exceed: deny
 
     #[test]
     fn resolve_settings_beats_trogon_md_and_baseline() {
-        let scope = Scope::resolve(None, Some(settings_wire()), Some(trogon_wire()), "/repo")
-            .unwrap();
+        let scope = Scope::resolve(None, Some(settings_wire()), Some(trogon_wire()), "/repo").unwrap();
         assert_eq!(
             scope.network(),
             &NetworkPolicy::AllowList(vec!["api.github.com".to_string()])

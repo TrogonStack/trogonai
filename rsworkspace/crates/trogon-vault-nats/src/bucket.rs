@@ -36,9 +36,9 @@ pub async fn ensure_vault_bucket(
     );
 
     js.create_or_update_key_value(kv::Config {
-        bucket:       format!("vault_{vault_name}"),
-        history:      2,
-        storage:      StorageType::File,
+        bucket: format!("vault_{vault_name}"),
+        history: 2,
+        storage: StorageType::File,
         num_replicas,
         ..Default::default()
     })

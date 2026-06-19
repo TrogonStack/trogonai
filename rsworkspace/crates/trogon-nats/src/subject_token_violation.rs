@@ -20,26 +20,17 @@ mod tests {
             SubjectTokenViolation::InvalidCharacter('.'),
             SubjectTokenViolation::InvalidCharacter('.')
         );
-        assert_eq!(
-            SubjectTokenViolation::TooLong(200),
-            SubjectTokenViolation::TooLong(200)
-        );
+        assert_eq!(SubjectTokenViolation::TooLong(200), SubjectTokenViolation::TooLong(200));
     }
 
     #[test]
     fn variants_are_not_equal_to_each_other() {
-        assert_ne!(
-            SubjectTokenViolation::Empty,
-            SubjectTokenViolation::TooLong(1)
-        );
+        assert_ne!(SubjectTokenViolation::Empty, SubjectTokenViolation::TooLong(1));
         assert_ne!(
             SubjectTokenViolation::InvalidCharacter('*'),
             SubjectTokenViolation::InvalidCharacter('>')
         );
-        assert_ne!(
-            SubjectTokenViolation::TooLong(10),
-            SubjectTokenViolation::TooLong(20)
-        );
+        assert_ne!(SubjectTokenViolation::TooLong(10), SubjectTokenViolation::TooLong(20));
     }
 
     #[test]

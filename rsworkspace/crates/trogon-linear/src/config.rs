@@ -161,10 +161,7 @@ mod tests {
 
         let config = LinearConfig::from_env(&env);
 
-        assert_eq!(
-            config.stream_max_age,
-            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
-        );
+        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
     }
 
     #[test]
@@ -241,10 +238,7 @@ mod tests {
 
         let config = LinearConfig::from_env(&env);
 
-        assert_eq!(
-            config.stream_max_age,
-            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
-        );
+        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
     }
 
     #[test]
@@ -254,10 +248,7 @@ mod tests {
 
         let config = LinearConfig::from_env(&env);
 
-        assert_eq!(
-            config.stream_max_age,
-            Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)
-        );
+        assert_eq!(config.stream_max_age, Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS));
     }
 
     // ── Parser edge cases: timestamp tolerance ────────────────────────────────

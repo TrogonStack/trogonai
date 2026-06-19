@@ -21,7 +21,11 @@ pub struct OrchestratorEngine<P: OrchestratorProvider, C: AgentCaller, S: Regist
 
 impl<P: OrchestratorProvider, C: AgentCaller, S: RegistryStore> OrchestratorEngine<P, C, S> {
     pub fn new(provider: P, caller: C, registry: Registry<S>) -> Self {
-        Self { provider, caller, registry }
+        Self {
+            provider,
+            caller,
+            registry,
+        }
     }
 
     /// Run a full orchestration cycle for `task`.
@@ -36,8 +40,7 @@ impl<P: OrchestratorProvider, C: AgentCaller, S: RegistryStore> OrchestratorEngi
 
         let sub_results = self.execute_plan(&plan, &capabilities).await;
 
-        let synthesis =
-            self.provider.synthesize_results(task, &plan, &sub_results).await?;
+        let synthesis = self.provider.synthesize_results(task, &plan, &sub_results).await?;
 
         Ok(OrchestrationResult {
             task: task.to_string(),
@@ -47,11 +50,7 @@ impl<P: OrchestratorProvider, C: AgentCaller, S: RegistryStore> OrchestratorEngi
         })
     }
 
-    async fn execute_plan(
-        &self,
-        plan: &TaskPlan,
-        capabilities: &[AgentCapability],
-    ) -> Vec<SubTaskResult> {
+    async fn execute_plan(&self, plan: &TaskPlan, capabilities: &[AgentCapability]) -> Vec<SubTaskResult> {
         let futures: Vec<_> = plan
             .subtasks
             .iter()
@@ -61,14 +60,8 @@ impl<P: OrchestratorProvider, C: AgentCaller, S: RegistryStore> OrchestratorEngi
         join_all(futures).await
     }
 
-    async fn execute_subtask(
-        &self,
-        subtask: &SubTask,
-        capabilities: &[AgentCapability],
-    ) -> SubTaskResult {
-        let cap = capabilities
-            .iter()
-            .find(|c| c.has_capability(&subtask.capability));
+    async fn execute_subtask(&self, subtask: &SubTask, capabilities: &[AgentCapability]) -> SubTaskResult {
+        let cap = capabilities.iter().find(|c| c.has_capability(&subtask.capability));
 
         let Some(cap) = cap else {
             return SubTaskResult::err(
@@ -107,7 +100,10 @@ mod tests {
 
     impl MockOrchestratorProvider {
         fn returning(plan: TaskPlan, synthesis: impl Into<String>) -> Self {
-            Self { plan: Some(plan), synthesis: Some(synthesis.into()) }
+            Self {
+                plan: Some(plan),
+                synthesis: Some(synthesis.into()),
+            }
         }
     }
 
@@ -128,9 +124,7 @@ mod tests {
             _results: &'a [SubTaskResult],
         ) -> impl Future<Output = Result<String, OrchestratorError>> + Send + 'a {
             let synthesis = self.synthesis.clone();
-            async move {
-                synthesis.ok_or_else(|| OrchestratorError::Synthesis("no synthesis".into()))
-            }
+            async move { synthesis.ok_or_else(|| OrchestratorError::Synthesis("no synthesis".into())) }
         }
     }
 
@@ -154,7 +148,10 @@ mod tests {
     }
 
     fn plan_with(subtasks: Vec<SubTask>) -> TaskPlan {
-        TaskPlan { subtasks, reasoning: "test reasoning".into() }
+        TaskPlan {
+            subtasks,
+            reasoning: "test reasoning".into(),
+        }
     }
 
     fn subtask(id: &str, capability: &str) -> SubTask {
@@ -185,13 +182,9 @@ mod tests {
     async fn orchestrate_parallel_subtasks() {
         let cap1 = AgentCapability::new("ReviewActor", ["code_review"], "actors.review.>");
         let cap2 = AgentCapability::new("SecurityActor", ["security_analysis"], "actors.sec.>");
-        let plan = plan_with(vec![
-            subtask("1", "code_review"),
-            subtask("2", "security_analysis"),
-        ]);
+        let plan = plan_with(vec![subtask("1", "code_review"), subtask("2", "security_analysis")]);
         let caller = MockAgentCaller::returning(b"ok".to_vec());
-        let engine =
-            engine_with(vec![cap1, cap2], plan, "Both passed.", caller).await;
+        let engine = engine_with(vec![cap1, cap2], plan, "Both passed.", caller).await;
 
         let result = engine.orchestrate("Full review").await.unwrap();
 
@@ -210,7 +203,13 @@ mod tests {
 
         assert_eq!(result.sub_results.len(), 1);
         assert!(!result.sub_results[0].success);
-        assert!(result.sub_results[0].error.as_deref().unwrap().contains("no agent registered"));
+        assert!(
+            result.sub_results[0]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("no agent registered")
+        );
     }
 
     #[tokio::test]
@@ -223,7 +222,13 @@ mod tests {
         let result = engine.orchestrate("task").await.unwrap();
 
         assert!(!result.sub_results[0].success);
-        assert!(result.sub_results[0].error.as_deref().unwrap().contains("agent timed out"));
+        assert!(
+            result.sub_results[0]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("agent timed out")
+        );
     }
 
     #[tokio::test]
@@ -287,7 +292,10 @@ mod tests {
     #[tokio::test]
     async fn provider_planning_failure_propagates_as_error() {
         // MockOrchestratorProvider with no plan set always returns Planning error
-        let provider = MockOrchestratorProvider { plan: None, synthesis: None };
+        let provider = MockOrchestratorProvider {
+            plan: None,
+            synthesis: None,
+        };
         let store = MockRegistryStore::new();
         let registry = Registry::new(store);
         let caller = MockAgentCaller::returning(b"".to_vec());
@@ -302,7 +310,10 @@ mod tests {
         let cap = AgentCapability::new("PrActor", ["code_review"], "actors.pr.>");
         let plan = plan_with(vec![subtask("1", "code_review")]);
         // synthesis: None → MockOrchestratorProvider returns Synthesis error
-        let provider = MockOrchestratorProvider { plan: Some(plan), synthesis: None };
+        let provider = MockOrchestratorProvider {
+            plan: Some(plan),
+            synthesis: None,
+        };
         let store = MockRegistryStore::new();
         let registry = Registry::new(store.clone());
         registry.register(&cap).await.unwrap();
@@ -333,10 +344,7 @@ mod tests {
     async fn all_subtasks_fail_synthesis_is_still_called() {
         // No registered capabilities → all subtasks fail with "no agent registered"
         // The synthesis step is still reached and produces a result.
-        let plan = plan_with(vec![
-            subtask("1", "missing_cap_a"),
-            subtask("2", "missing_cap_b"),
-        ]);
+        let plan = plan_with(vec![subtask("1", "missing_cap_a"), subtask("2", "missing_cap_b")]);
         let caller = MockAgentCaller::returning(b"".to_vec());
         let engine = engine_with(vec![], plan, "degraded synthesis", caller).await;
 

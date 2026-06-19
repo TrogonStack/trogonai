@@ -31,9 +31,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let owner = event["repository"]["owner"]["login"].as_str()?;
     let repo = event["repository"]["name"].as_str()?;
     let pr_number = event["number"].as_u64()?;
-    let title = event["pull_request"]["title"]
-        .as_str()
-        .unwrap_or("(no title)");
+    let title = event["pull_request"]["title"].as_str().unwrap_or("(no title)");
     let merged_by = event["pull_request"]["merged_by"]["login"]
         .as_str()
         .unwrap_or("unknown");
@@ -211,10 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_returns_error_on_invalid_json() {
-        assert!(matches!(
-            handle(&make_stub_agent(), b"not json").await,
-            Some(Err(_))
-        ));
+        assert!(matches!(handle(&make_stub_agent(), b"not json").await, Some(Err(_))));
     }
 
     /// When `number`, `repository.owner.login`, or `repository.name` is absent

@@ -13,10 +13,7 @@ use super::{HttpClient, ToolContext};
 const GRAPHQL_PATH: &str = "/linear/graphql";
 
 /// Fetch a Linear issue by ID.
-pub async fn get_issue(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
+pub async fn get_issue(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
 
     let query = json!({
@@ -58,10 +55,7 @@ pub async fn get_issue(
 ///    can detect duplicates even if the `Idempotency-Key` header window expires.
 ///
 /// Graceful degradation: if the pre-check fetch fails, proceeds with the post.
-pub async fn post_comment(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
+pub async fn post_comment(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
     let body = input["body"].as_str().ok_or("missing body")?;
     let idempotency_key = input["_idempotency_key"].as_str();
@@ -73,16 +67,11 @@ pub async fn post_comment(
         match get_comments(ctx, &check_input).await {
             Ok(json_str) => {
                 if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str) {
-                    let already_posted = comments.iter().any(|c| {
-                        c["body"]
-                            .as_str()
-                            .map(|b| b.contains(&marker))
-                            .unwrap_or(false)
-                    });
+                    let already_posted = comments
+                        .iter()
+                        .any(|c| c["body"].as_str().map(|b| b.contains(&marker)).unwrap_or(false));
                     if already_posted {
-                        return Ok(format!(
-                            "Comment already posted to {issue_id} (skipped duplicate)"
-                        ));
+                        return Ok(format!("Comment already posted to {issue_id} (skipped duplicate)"));
                     }
                 }
             }
@@ -92,18 +81,12 @@ pub async fn post_comment(
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 match get_comments(ctx, &check_input).await {
                     Ok(json_str) => {
-                        if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str)
-                        {
-                            let already_posted = comments.iter().any(|c| {
-                                c["body"]
-                                    .as_str()
-                                    .map(|b| b.contains(&marker))
-                                    .unwrap_or(false)
-                            });
+                        if let Ok(Value::Array(comments)) = serde_json::from_str::<Value>(&json_str) {
+                            let already_posted = comments
+                                .iter()
+                                .any(|c| c["body"].as_str().map(|b| b.contains(&marker)).unwrap_or(false));
                             if already_posted {
-                                return Ok(format!(
-                                    "Comment already posted to {issue_id} (skipped duplicate)"
-                                ));
+                                return Ok(format!("Comment already posted to {issue_id} (skipped duplicate)"));
                             }
                         }
                     }
@@ -138,9 +121,7 @@ pub async fn post_comment(
     });
 
     let response: Value = graphql_request(ctx, &mutation, idempotency_key).await?;
-    let ok = response["data"]["commentCreate"]["success"]
-        .as_bool()
-        .unwrap_or(false);
+    let ok = response["data"]["commentCreate"]["success"].as_bool().unwrap_or(false);
 
     if ok {
         let url = response["data"]["commentCreate"]["comment"]["url"]
@@ -155,10 +136,7 @@ pub async fn post_comment(
 /// Get all comments on a Linear issue.
 ///
 /// Returns a JSON array of comments — suitable for injecting as prior-conversation memory.
-pub async fn get_comments(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
+pub async fn get_comments(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
 
     let query = json!({
@@ -185,10 +163,7 @@ pub async fn get_comments(
 
 /// Update a Linear issue — accepts `state_id`, `assignee_id`, and/or
 /// `priority` fields; any omitted field is left unchanged.
-pub async fn update_issue(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
+pub async fn update_issue(ctx: &ToolContext<impl HttpClient>, input: &Value) -> Result<String, String> {
     let issue_id = input["issue_id"].as_str().ok_or("missing issue_id")?;
     let idempotency_key = input["_idempotency_key"].as_str();
 
@@ -214,9 +189,7 @@ pub async fn update_issue(
     });
 
     let response: Value = graphql_request(ctx, &mutation, idempotency_key).await?;
-    let ok = response["data"]["issueUpdate"]["success"]
-        .as_bool()
-        .unwrap_or(false);
+    let ok = response["data"]["issueUpdate"]["success"].as_bool().unwrap_or(false);
 
     if ok {
         let issue = &response["data"]["issueUpdate"]["issue"];
@@ -235,10 +208,7 @@ async fn graphql_request<H: HttpClient>(
 ) -> Result<Value, String> {
     let url = format!("{}{GRAPHQL_PATH}", ctx.proxy_url);
     let mut headers = vec![
-        (
-            "Authorization".to_string(),
-            format!("Bearer {}", ctx.linear_token),
-        ),
+        ("Authorization".to_string(), format!("Bearer {}", ctx.linear_token)),
         ("Content-Type".to_string(), "application/json".to_string()),
     ];
     if let Some(key) = idempotency_key {
@@ -375,16 +345,9 @@ mod tests {
             })
             .to_string(),
         );
-        let result = update_issue(
-            &ctx,
-            &json!({"issue_id": "ISS-3", "state_id": "state-done-uuid"}),
-        )
-        .await;
+        let result = update_issue(&ctx, &json!({"issue_id": "ISS-3", "state_id": "state-done-uuid"})).await;
         assert!(result.is_ok(), "update_issue must succeed: {result:?}");
-        assert!(
-            result.unwrap().contains("Done"),
-            "result must include new state name"
-        );
+        assert!(result.unwrap().contains("Done"), "result must include new state name");
     }
 
     #[tokio::test]
@@ -412,10 +375,7 @@ mod tests {
             }),
         )
         .await;
-        assert!(
-            result.is_ok(),
-            "update_issue with all fields must succeed: {result:?}"
-        );
+        assert!(result.is_ok(), "update_issue with all fields must succeed: {result:?}");
         assert!(result.unwrap().contains("ISS-4"));
     }
 
@@ -459,11 +419,7 @@ mod tests {
             })
             .to_string(),
         );
-        let result = post_comment(
-            &ctx,
-            &json!({"issue_id": "ISS-5", "body": "Hello from agent"}),
-        )
-        .await;
+        let result = post_comment(&ctx, &json!({"issue_id": "ISS-5", "body": "Hello from agent"})).await;
         assert!(result.is_ok(), "first-time post must succeed: {result:?}");
         assert!(result.unwrap().contains("Comment posted"));
         assert!(
@@ -491,11 +447,7 @@ mod tests {
             .to_string(),
         );
 
-        let result = post_comment(
-            &ctx,
-            &json!({"issue_id": "ISS-42", "body": "This will fail"}),
-        )
-        .await;
+        let result = post_comment(&ctx, &json!({"issue_id": "ISS-42", "body": "This will fail"})).await;
 
         assert!(result.is_err(), "success:false must return Err: {result:?}");
         assert!(

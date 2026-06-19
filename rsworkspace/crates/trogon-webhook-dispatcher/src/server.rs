@@ -47,10 +47,7 @@ async fn serve_impl<S: SubscriptionStore>(
     let state = AppState { registry };
 
     let app = Router::new()
-        .route(
-            "/subscriptions",
-            post(handle_register::<S>).get(handle_list::<S>),
-        )
+        .route("/subscriptions", post(handle_register::<S>).get(handle_list::<S>))
         .route("/subscriptions/{id}", delete(handle_deregister::<S>))
         .route("/health", get(handle_health))
         .with_state(state);
@@ -126,9 +123,9 @@ async fn handle_deregister<S: SubscriptionStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::mock::MockSubscriptionStore;
     use axum::body::Body;
     use axum::http::Request;
-    use crate::store::mock::MockSubscriptionStore;
     use tower::util::ServiceExt as _;
 
     fn make_app() -> Router {
@@ -137,8 +134,7 @@ mod tests {
         Router::new()
             .route(
                 "/subscriptions",
-                post(handle_register::<MockSubscriptionStore>)
-                    .get(handle_list::<MockSubscriptionStore>),
+                post(handle_register::<MockSubscriptionStore>).get(handle_list::<MockSubscriptionStore>),
             )
             .route(
                 "/subscriptions/{id}",
@@ -308,10 +304,7 @@ mod tests {
                 "/subscriptions",
                 post(handle_register::<FailingStore>).get(handle_list::<FailingStore>),
             )
-            .route(
-                "/subscriptions/{id}",
-                delete(handle_deregister::<FailingStore>),
-            )
+            .route("/subscriptions/{id}", delete(handle_deregister::<FailingStore>))
             .with_state(state)
     }
 

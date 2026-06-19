@@ -6,18 +6,16 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::client_proxy::NatsClientProxy;
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode,
-    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
-    SessionCapabilities, SessionCloseCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
-    SessionListCapabilities, SessionMode, SessionModeState, SessionModelState, SessionNotification,
-    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ContentBlock, ContentChunk, Error, ErrorCode, ExtRequest, ExtResponse, ForkSessionRequest,
+    ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest, NewSessionResponse,
+    PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+    SessionCloseCapabilities, SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode,
+    SessionModeState, SessionModelState, SessionNotification, SessionResumeCapabilities, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind,
 };
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -38,9 +36,7 @@ struct ProcessGuard<P>(tokio::sync::OwnedMutexGuard<Option<P>>);
 impl<P> std::ops::Deref for ProcessGuard<P> {
     type Target = P;
     fn deref(&self) -> &P {
-        self.0
-            .as_ref()
-            .expect("CodexProcess guaranteed present by process()")
+        self.0.as_ref().expect("CodexProcess guaranteed present by process()")
     }
 }
 
@@ -50,13 +46,7 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
-const VALID_MODES: &[&str] = &[
-    "default",
-    "acceptEdits",
-    "plan",
-    "dontAsk",
-    "bypassPermissions",
-];
+const VALID_MODES: &[&str] = &["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
 
 fn default_session_mode() -> String {
     "default".to_string()
@@ -132,12 +122,8 @@ impl NatsNotifierFactory {
 impl SessionNotifierFactory for NatsNotifierFactory {
     type Notifier = NatsClientProxy<async_nats::Client>;
 
-    fn make_notifier(
-        &self,
-        session_id: &SessionId,
-    ) -> agent_client_protocol::Result<Self::Notifier> {
-        let acp_session_id =
-            AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
+    fn make_notifier(&self, session_id: &SessionId) -> agent_client_protocol::Result<Self::Notifier> {
+        let acp_session_id = AcpSessionId::try_from(session_id).map_err(|e| internal_error(e.to_string()))?;
         Ok(NatsClientProxy::new(
             self.nats.clone(),
             acp_session_id,
@@ -149,10 +135,7 @@ impl SessionNotifierFactory for NatsNotifierFactory {
 
 #[async_trait(?Send)]
 impl SessionNotifier for NatsClientProxy<async_nats::Client> {
-    async fn session_notification(
-        &self,
-        notif: SessionNotification,
-    ) -> agent_client_protocol::Result<()> {
+    async fn session_notification(&self, notif: SessionNotification) -> agent_client_protocol::Result<()> {
         agent_client_protocol::Client::session_notification(self, notif).await
     }
 }
@@ -215,15 +198,9 @@ where
             .map(|s| {
                 s.split(',')
                     .filter_map(|entry| match entry.split_once(':') {
-                        Some((id, label)) => Some(ModelInfo::new(
-                            id.trim().to_string(),
-                            label.trim().to_string(),
-                        )),
+                        Some((id, label)) => Some(ModelInfo::new(id.trim().to_string(), label.trim().to_string())),
                         None => {
-                            warn!(
-                                entry,
-                                "CODEX_MODELS: skipping malformed entry (expected 'id:label')"
-                            );
+                            warn!(entry, "CODEX_MODELS: skipping malformed entry (expected 'id:label')");
                             None
                         }
                     })
@@ -275,9 +252,7 @@ where
             match self.spawner.spawn().await {
                 Ok(p) => *guard = Some(p),
                 Err(e) => {
-                    return Err(internal_error(format!(
-                        "failed to spawn codex app-server: {e}"
-                    )));
+                    return Err(internal_error(format!("failed to spawn codex app-server: {e}")));
                 }
             }
         }
@@ -310,11 +285,7 @@ where
 impl DefaultCodexAgent {
     /// Convenience constructor that wires the production NATS notifier and
     /// real process spawner. This is what [`main`] calls.
-    pub fn with_nats(
-        nats: async_nats::Client,
-        acp_prefix: AcpPrefix,
-        default_model: impl Into<String>,
-    ) -> Self {
+    pub fn with_nats(nats: async_nats::Client, acp_prefix: AcpPrefix, default_model: impl Into<String>) -> Self {
         Self::new(
             NatsNotifierFactory::new(nats, acp_prefix),
             RealProcessSpawner,
@@ -338,43 +309,29 @@ where
     P: ProcessSpawner + 'static,
     P::Process: 'static,
 {
-    async fn initialize(
-        &self,
-        _req: InitializeRequest,
-    ) -> agent_client_protocol::Result<InitializeResponse> {
+    async fn initialize(&self, _req: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
         let mut caps_meta = serde_json::Map::new();
         caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
             .agent_capabilities(
-                AgentCapabilities::new()
-                    .load_session(true)
-                    .session_capabilities(
-                        SessionCapabilities::new()
-                            .fork(SessionForkCapabilities::new())
-                            .list(SessionListCapabilities::new())
-                            .resume(SessionResumeCapabilities::new())
-                            .close(SessionCloseCapabilities::new())
-                            .meta(caps_meta),
-                    ),
+                AgentCapabilities::new().load_session(true).session_capabilities(
+                    SessionCapabilities::new()
+                        .fork(SessionForkCapabilities::new())
+                        .list(SessionListCapabilities::new())
+                        .resume(SessionResumeCapabilities::new())
+                        .close(SessionCloseCapabilities::new())
+                        .meta(caps_meta),
+                ),
             )
-            .agent_info(Implementation::new(
-                "trogon-codex-runner",
-                env!("CARGO_PKG_VERSION"),
-            )))
+            .agent_info(Implementation::new("trogon-codex-runner", env!("CARGO_PKG_VERSION"))))
     }
 
-    async fn authenticate(
-        &self,
-        _req: AuthenticateRequest,
-    ) -> agent_client_protocol::Result<AuthenticateResponse> {
+    async fn authenticate(&self, _req: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
         // Codex uses the OPENAI_API_KEY env var — no per-session auth needed.
         Ok(AuthenticateResponse::new())
     }
 
-    async fn new_session(
-        &self,
-        req: NewSessionRequest,
-    ) -> agent_client_protocol::Result<NewSessionResponse> {
+    async fn new_session(&self, req: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
         let cwd = req.cwd.to_string_lossy().into_owned();
 
         let proc = self.process().await?;
@@ -405,10 +362,7 @@ where
             .models(self.session_model_state(None)))
     }
 
-    async fn load_session(
-        &self,
-        req: LoadSessionRequest,
-    ) -> agent_client_protocol::Result<LoadSessionResponse> {
+    async fn load_session(&self, req: LoadSessionRequest) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
@@ -425,10 +379,7 @@ where
         Err(internal_error(format!("session {session_id} not found")))
     }
 
-    async fn resume_session(
-        &self,
-        req: ResumeSessionRequest,
-    ) -> agent_client_protocol::Result<ResumeSessionResponse> {
+    async fn resume_session(&self, req: ResumeSessionRequest) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
 
         let thread_id = {
@@ -449,10 +400,7 @@ where
         Ok(ResumeSessionResponse::new())
     }
 
-    async fn fork_session(
-        &self,
-        req: ForkSessionRequest,
-    ) -> agent_client_protocol::Result<ForkSessionResponse> {
+    async fn fork_session(&self, req: ForkSessionRequest) -> agent_client_protocol::Result<ForkSessionResponse> {
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
@@ -491,10 +439,7 @@ where
             .models(self.session_model_state(inherited_model.as_deref())))
     }
 
-    async fn close_session(
-        &self,
-        req: CloseSessionRequest,
-    ) -> agent_client_protocol::Result<CloseSessionResponse> {
+    async fn close_session(&self, req: CloseSessionRequest) -> agent_client_protocol::Result<CloseSessionResponse> {
         let session_id = req.session_id.to_string();
         self.sessions.lock().await.remove(&session_id);
         // Codex app-server has no thread/close method — the subprocess retains
@@ -503,10 +448,7 @@ where
         Ok(CloseSessionResponse::new())
     }
 
-    async fn list_sessions(
-        &self,
-        _req: ListSessionsRequest,
-    ) -> agent_client_protocol::Result<ListSessionsResponse> {
+    async fn list_sessions(&self, _req: ListSessionsRequest) -> agent_client_protocol::Result<ListSessionsResponse> {
         let sessions = self.sessions.lock().await;
         let mut list: Vec<_> = sessions
             .iter()
@@ -556,11 +498,7 @@ where
         let session_id = req.session_id.to_string();
         let model_id = req.model_id.to_string();
 
-        if !self
-            .available_models
-            .iter()
-            .any(|m| m.model_id.0.as_ref() == model_id)
-        {
+        if !self.available_models.iter().any(|m| m.model_id.0.as_ref() == model_id) {
             return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
@@ -618,9 +556,11 @@ where
             let ph = s.pending_history.take();
             let cwd = s.cwd.clone();
             s.first_turn = false;
-            s.history.push(trogon_runner_tools::portable_session::PortableMessage::text_only(
-                "user", user_input.clone(),
-            ));
+            s.history
+                .push(trogon_runner_tools::portable_session::PortableMessage::text_only(
+                    "user",
+                    user_input.clone(),
+                ));
             (
                 s.thread_id.clone(),
                 s.model.clone().or_else(|| Some(self.default_model.clone())),
@@ -651,9 +591,7 @@ where
         // Single TROGON.md injection point (covers both the first turn and
         // imported-history replay via `prepend_trogon`). Injecting here AND in the
         // match arm above would duplicate TROGON.md in the first user message.
-        if prepend_trogon
-            && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await
-        {
+        if prepend_trogon && let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
             user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
         }
 
@@ -681,12 +619,7 @@ where
             }
         };
         let mut event_rx = match proc
-            .turn_start(
-                &thread_id,
-                &user_input,
-                model.as_deref(),
-                approval_policy,
-            )
+            .turn_start(&thread_id, &user_input, model.as_deref(), approval_policy)
             .await
         {
             Ok(rx) => rx,
@@ -737,9 +670,7 @@ where
                     assistant_text.push_str(&text);
                     let notif = SessionNotification::new(
                         session_id.clone(),
-                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
-                            text,
-                        ))),
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(text))),
                     );
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send text notification");
@@ -751,20 +682,15 @@ where
                         .status(ToolCallStatus::InProgress)
                         .raw_input(input.clone())
                         .kind(ToolKind::Execute);
-                    let notif = SessionNotification::new(
-                        session_id.clone(),
-                        SessionUpdate::ToolCall(tool_call),
-                    );
+                    let notif = SessionNotification::new(session_id.clone(), SessionUpdate::ToolCall(tool_call));
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool start notification");
                     }
-                    tool_call_blocks.push(
-                        trogon_runner_tools::portable_session::PortableBlock::ToolUse {
-                            id,
-                            name,
-                            input_summary: input.to_string(),
-                        },
-                    );
+                    tool_call_blocks.push(trogon_runner_tools::portable_session::PortableBlock::ToolUse {
+                        id,
+                        name,
+                        input_summary: input.to_string(),
+                    });
                 }
 
                 CodexEvent::ToolCompleted { id, output } => {
@@ -774,19 +700,14 @@ where
                             .status(ToolCallStatus::Completed)
                             .raw_output(serde_json::Value::String(output.clone())),
                     );
-                    let notif = SessionNotification::new(
-                        session_id.clone(),
-                        SessionUpdate::ToolCallUpdate(update),
-                    );
+                    let notif = SessionNotification::new(session_id.clone(), SessionUpdate::ToolCallUpdate(update));
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool complete notification");
                     }
-                    tool_result_blocks.push(
-                        trogon_runner_tools::portable_session::PortableBlock::ToolResult {
-                            id,
-                            output_summary: output,
-                        },
-                    );
+                    tool_result_blocks.push(trogon_runner_tools::portable_session::PortableBlock::ToolResult {
+                        id,
+                        output_summary: output,
+                    });
                 }
 
                 CodexEvent::TurnCompleted => {
@@ -817,11 +738,11 @@ where
                             // Defer recording the (empty) assistant text when nudging —
                             // the recap turn's TurnCompleted records it instead.
                             if !will_nudge {
-                                s.history.push(
-                                    trogon_runner_tools::portable_session::PortableMessage::text_only(
-                                        "assistant", text,
-                                    ),
-                                );
+                                s.history
+                                    .push(trogon_runner_tools::portable_session::PortableMessage::text_only(
+                                        "assistant",
+                                        text,
+                                    ));
                             }
                         }
                     } // drop sessions lock before re-acquiring the process
@@ -887,12 +808,8 @@ where
 
     async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
         if args.method.as_ref() == "session/list_children" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let parent_id = params
-                .get("sessionId")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let parent_id = params.get("sessionId").and_then(|v| v.as_str()).unwrap_or_default();
             let children: Vec<String> = self
                 .sessions
                 .lock()
@@ -907,29 +824,29 @@ where
             return Ok(ExtResponse::new(raw.into()));
         }
         if args.method.as_ref() == "session/get_state" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params
                 .get("sessionId")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
             let sessions = self.sessions.lock().await;
-            let state = sessions.get(session_id).ok_or_else(|| {
-                Error::new(ErrorCode::InvalidParams.into(), "session not found")
-            })?;
-            let raw = serde_json::to_string(state)
-                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let state = sessions
+                .get(session_id)
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+            let raw =
+                serde_json::to_string(state).map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             let raw = serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
         if args.method.as_ref() == "session/export" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params["sessionId"].as_str()
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"]
+                .as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
             let sessions = self.sessions.lock().await;
-            let s = sessions.get(session_id)
+            let s = sessions
+                .get(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
             // MED-22: a turn pushes the user message at turn start and the assistant
             // reply at turn end. If export runs mid-turn (or after a turn errored
@@ -944,18 +861,19 @@ where
             // tool turns, and a V1 array would be flattened by every importer —
             // dropping tool blocks and turning tool-result messages into empty text
             // (Anthropic 400). V2 preserves the blocks for the receiving runner.
-            let export = trogon_runner_tools::portable_session::portable_messages_to_export_v2(
-                &s.history[..end],
-            );
+            let export = trogon_runner_tools::portable_session::portable_messages_to_export_v2(&s.history[..end]);
             let raw = serde_json::to_string(&export)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
-            return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
-                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()));
+            return Ok(ExtResponse::new(
+                serde_json::value::RawValue::from_string(raw)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?
+                    .into(),
+            ));
         }
         if args.method.as_ref() == "session/import" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params["sessionId"].as_str()
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"]
+                .as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
             let messages_json = params["messages"].to_string();
             let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
@@ -975,7 +893,8 @@ where
                 ));
             }
             let mut sessions = self.sessions.lock().await;
-            let s = sessions.get_mut(session_id)
+            let s = sessions
+                .get_mut(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
             s.history = messages.clone();
             s.pending_history = Some(messages);
@@ -1012,11 +931,7 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
     }
 
     async fn test_session_model(&self, id: &str) -> Option<String> {
-        self.sessions
-            .lock()
-            .await
-            .get(id)
-            .and_then(|s| s.model.clone())
+        self.sessions.lock().await.get(id).and_then(|s| s.model.clone())
     }
 
     async fn test_session_parent_id(&self, id: &str) -> Option<String> {
@@ -1035,10 +950,7 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
         self.prompt_timeout
     }
 
-    async fn test_get_history(
-        &self,
-        id: &str,
-    ) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
+    async fn test_get_history(&self, id: &str) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
         self.sessions
             .lock()
             .await
@@ -1065,10 +977,10 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
 mod tests {
     use super::*;
     use agent_client_protocol::{
-        Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest,
-        ExtRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-        PromptRequest, ProtocolVersion, ResumeSessionRequest, SetSessionConfigOptionRequest,
-        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModelRequest, StopReason,
+        Agent, AuthMethodId, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtRequest,
+        ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest, PromptRequest, ProtocolVersion,
+        ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+        SetSessionModelRequest, StopReason,
     };
     use tokio::sync::broadcast;
 
@@ -1080,10 +992,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl SessionNotifier for MockSessionNotifier {
-        async fn session_notification(
-            &self,
-            notif: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, notif: SessionNotification) -> agent_client_protocol::Result<()> {
             self.recorded.lock().await.push(notif);
             Ok(())
         }
@@ -1104,10 +1013,7 @@ mod tests {
     impl SessionNotifierFactory for MockNotifierFactory {
         type Notifier = MockSessionNotifier;
 
-        fn make_notifier(
-            &self,
-            _session_id: &SessionId,
-        ) -> agent_client_protocol::Result<MockSessionNotifier> {
+        fn make_notifier(&self, _session_id: &SessionId) -> agent_client_protocol::Result<MockSessionNotifier> {
             Ok(MockSessionNotifier {
                 recorded: Arc::clone(&self.recorded),
             })
@@ -1124,24 +1030,15 @@ mod tests {
             true
         }
 
-        async fn thread_start(
-            &self,
-            _cwd: &str,
-        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        async fn thread_start(&self, _cwd: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             Ok("mock-thread-id".to_string())
         }
 
-        async fn thread_resume(
-            &self,
-            thread_id: &str,
-        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        async fn thread_resume(&self, thread_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             Ok(thread_id.to_string())
         }
 
-        async fn thread_fork(
-            &self,
-            _thread_id: &str,
-        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        async fn thread_fork(&self, _thread_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             Ok(format!("fork-{}", Uuid::new_v4()))
         }
 
@@ -1151,8 +1048,7 @@ mod tests {
             _user_input: &str,
             _model: Option<&str>,
             _approval_policy: Option<&str>,
-        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>>
-        {
+        ) -> Result<broadcast::Receiver<CodexEvent>, Box<dyn std::error::Error + Send + Sync>> {
             let (tx, rx) = broadcast::channel(64);
             for event in &self.events {
                 let _ = tx.send(event.clone());
@@ -1160,10 +1056,7 @@ mod tests {
             Ok(rx)
         }
 
-        async fn turn_interrupt(
-            &self,
-            _thread_id: &str,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn turn_interrupt(&self, _thread_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
     }
@@ -1182,9 +1075,7 @@ mod tests {
     impl ProcessSpawner for MockProcessSpawner {
         type Process = MockCodexProcess;
 
-        async fn spawn(
-            &self,
-        ) -> Result<MockCodexProcess, Box<dyn std::error::Error + Send + Sync>> {
+        async fn spawn(&self) -> Result<MockCodexProcess, Box<dyn std::error::Error + Send + Sync>> {
             Ok(MockCodexProcess {
                 events: self.events.clone(),
             })
@@ -1192,21 +1083,13 @@ mod tests {
     }
 
     async fn make_agent() -> CodexAgent<MockNotifierFactory, MockProcessSpawner> {
-        CodexAgent::new(
-            MockNotifierFactory::new(),
-            MockProcessSpawner::new(),
-            "o4-mini",
-        )
+        CodexAgent::new(MockNotifierFactory::new(), MockProcessSpawner::new(), "o4-mini")
     }
 
     /// Parse a session/export payload (now emitted as V2) into text-only
     /// PortableMessages for role/text assertions in these tests.
-    fn export_texts(
-        json: &str,
-    ) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
-        use trogon_runner_tools::portable_session::{
-            ParsedExport, parse_export_json, v2_message_to_text,
-        };
+    fn export_texts(json: &str) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
+        use trogon_runner_tools::portable_session::{ParsedExport, parse_export_json, v2_message_to_text};
         match parse_export_json(json).expect("export must be valid V1/V2") {
             ParsedExport::V2(exp) => exp.messages.iter().map(v2_message_to_text).collect(),
             ParsedExport::V1(msgs) => msgs,
@@ -1221,10 +1104,7 @@ mod tests {
         agent.test_insert_session("s1", "/tmp", None).await;
         assert_eq!(agent.test_session_count().await, 1);
 
-        agent
-            .close_session(CloseSessionRequest::new("s1"))
-            .await
-            .unwrap();
+        agent.close_session(CloseSessionRequest::new("s1")).await.unwrap();
         assert_eq!(agent.test_session_count().await, 0);
     }
 
@@ -1328,25 +1208,15 @@ mod tests {
         agent.test_insert_session("aaa", "/a", None).await;
         agent.test_insert_session("mmm", "/b", None).await;
 
-        let resp = agent
-            .list_sessions(ListSessionsRequest::new())
-            .await
-            .unwrap();
-        let ids: Vec<_> = resp
-            .sessions
-            .iter()
-            .map(|s| s.session_id.to_string())
-            .collect();
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let ids: Vec<_> = resp.sessions.iter().map(|s| s.session_id.to_string()).collect();
         assert_eq!(ids, vec!["aaa", "mmm", "zzz"]);
     }
 
     #[tokio::test]
     async fn list_sessions_empty() {
         let agent = make_agent().await;
-        let resp = agent
-            .list_sessions(ListSessionsRequest::new())
-            .await
-            .unwrap();
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
         assert!(resp.sessions.is_empty());
     }
 
@@ -1354,23 +1224,12 @@ mod tests {
 
     #[tokio::test]
     async fn default_model_added_when_not_in_list() {
-        let agent = CodexAgent::new(
-            MockNotifierFactory::new(),
-            MockProcessSpawner::new(),
-            "custom-model",
-        );
+        let agent = CodexAgent::new(MockNotifierFactory::new(), MockProcessSpawner::new(), "custom-model");
 
         // session_model_state should include "custom-model" in available list.
         let state = agent.session_model_state(None);
-        let ids: Vec<_> = state
-            .available_models
-            .iter()
-            .map(|m| m.model_id.to_string())
-            .collect();
-        assert!(
-            ids.contains(&"custom-model".to_string()),
-            "available: {ids:?}"
-        );
+        let ids: Vec<_> = state.available_models.iter().map(|m| m.model_id.to_string()).collect();
+        assert!(ids.contains(&"custom-model".to_string()), "available: {ids:?}");
         assert_eq!(state.current_model_id.to_string(), "custom-model");
     }
 
@@ -1393,10 +1252,7 @@ mod tests {
             .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
             .await
             .unwrap();
-        assert!(
-            resp.agent_capabilities.load_session,
-            "load_session should be true"
-        );
+        assert!(resp.agent_capabilities.load_session, "load_session should be true");
     }
 
     #[tokio::test]
@@ -1409,10 +1265,7 @@ mod tests {
         let sc = resp.agent_capabilities.session_capabilities;
         assert!(sc.fork.is_some(), "fork capability should be advertised");
         assert!(sc.list.is_some(), "list capability should be advertised");
-        assert!(
-            sc.resume.is_some(),
-            "resume capability should be advertised"
-        );
+        assert!(sc.resume.is_some(), "resume capability should be advertised");
         assert!(sc.close.is_some(), "close capability should be advertised");
         let meta = sc.meta.expect("session_capabilities must have _meta");
         assert!(
@@ -1547,10 +1400,7 @@ mod tests {
     async fn fork_session_creates_new_session() {
         let agent = make_agent().await;
         agent.test_insert_session("f1", "/src", None).await;
-        let resp = agent
-            .fork_session(ForkSessionRequest::new("f1", "/src"))
-            .await
-            .unwrap();
+        let resp = agent.fork_session(ForkSessionRequest::new("f1", "/src")).await.unwrap();
         assert!(!resp.session_id.to_string().is_empty());
         assert_eq!(agent.test_session_count().await, 2);
     }
@@ -1592,10 +1442,7 @@ mod tests {
             .unwrap();
         let fork_id = resp.session_id.to_string();
 
-        let list_resp = agent
-            .list_sessions(ListSessionsRequest::new())
-            .await
-            .unwrap();
+        let list_resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
 
         let branch_info = list_resp
             .sessions
@@ -1670,10 +1517,8 @@ mod tests {
             .unwrap();
         let child2 = resp2.session_id.to_string();
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "parent" }).to_string(),
-        )
-        .unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "parent" }).to_string()).unwrap();
         let ext_req = ExtRequest::new("session/list_children", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
         let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
@@ -1694,10 +1539,8 @@ mod tests {
         let agent = make_agent().await;
         agent.test_insert_session("root", "/tmp", None).await;
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "root" }).to_string(),
-        )
-        .unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "root" }).to_string()).unwrap();
         let ext_req = ExtRequest::new("session/list_children", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
         let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
@@ -1707,8 +1550,7 @@ mod tests {
     #[tokio::test]
     async fn ext_unknown_method_returns_method_not_found() {
         let agent = make_agent().await;
-        let raw_params =
-            serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
         let ext_req = ExtRequest::new("session/unknown", raw_params.into());
         let err = agent.ext_method(ext_req).await.unwrap_err();
         assert_eq!(err.code, ErrorCode::MethodNotFound);
@@ -1734,10 +1576,8 @@ mod tests {
             .to_string();
 
         let list_children = |sid: String| {
-            let raw = serde_json::value::RawValue::from_string(
-                serde_json::json!({ "sessionId": sid }).to_string(),
-            )
-            .unwrap();
+            let raw =
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": sid }).to_string()).unwrap();
             ExtRequest::new("session/list_children", raw.into())
         };
         let parse = |resp: ExtResponse| -> Vec<String> {
@@ -1767,13 +1607,18 @@ mod tests {
         let agent = make_agent().await;
         agent.test_insert_session("gs1", "/projects/myapp", None).await;
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "gs1" }).to_string(),
-        )
-        .unwrap();
-        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "gs1" }).to_string()).unwrap();
+        let resp = agent
+            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+            .await
+            .unwrap();
         let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
-        assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match inserted session");
+        assert_eq!(
+            state["cwd"].as_str(),
+            Some("/projects/myapp"),
+            "cwd must match inserted session"
+        );
     }
 
     #[tokio::test]
@@ -1781,11 +1626,12 @@ mod tests {
         let agent = make_agent().await;
         agent.test_insert_session("ti1", "/tmp", None).await;
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "ti1" }).to_string(),
-        )
-        .unwrap();
-        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "ti1" }).to_string()).unwrap();
+        let resp = agent
+            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+            .await
+            .unwrap();
         let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
         assert_eq!(
             state["thread_id"].as_str(),
@@ -1797,13 +1643,16 @@ mod tests {
     #[tokio::test]
     async fn ext_get_state_returns_model_when_set() {
         let agent = make_agent().await;
-        agent.test_insert_session("ms1", "/tmp", Some("o4-mini".to_string())).await;
+        agent
+            .test_insert_session("ms1", "/tmp", Some("o4-mini".to_string()))
+            .await;
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "ms1" }).to_string(),
-        )
-        .unwrap();
-        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "ms1" }).to_string()).unwrap();
+        let resp = agent
+            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+            .await
+            .unwrap();
         let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
         assert_eq!(
             state["model"].as_str(),
@@ -1816,18 +1665,23 @@ mod tests {
     async fn ext_get_state_missing_session_id_returns_invalid_params() {
         let agent = make_agent().await;
         let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
-        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        let err = agent
+            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+            .await
+            .unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 
     #[tokio::test]
     async fn ext_get_state_unknown_session_id_returns_invalid_params() {
         let agent = make_agent().await;
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
-        )
-        .unwrap();
-        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "nonexistent" }).to_string())
+                .unwrap();
+        let err = agent
+            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+            .await
+            .unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 
@@ -1836,10 +1690,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_unknown_session_is_noop() {
         let agent = make_agent().await;
-        agent
-            .cancel(CancelNotification::new("nonexistent"))
-            .await
-            .unwrap();
+        agent.cancel(CancelNotification::new("nonexistent")).await.unwrap();
     }
 
     // ── prompt ────────────────────────────────────────────────────────────────
@@ -1849,7 +1700,9 @@ mod tests {
         // A process that emits only TurnCompleted (no text) should yield EndTurn.
         let agent = CodexAgent::new(
             MockNotifierFactory::new(),
-            MockProcessSpawner { events: vec![CodexEvent::TurnCompleted] },
+            MockProcessSpawner {
+                events: vec![CodexEvent::TurnCompleted],
+            },
             "o4-mini",
         );
         agent.test_insert_session("p1", "/tmp", None).await;
@@ -1898,10 +1751,8 @@ mod tests {
             h.push(PortableMessage::text_only("assistant", "hi there"));
         }
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "e1" }).to_string(),
-        )
-        .unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "e1" }).to_string()).unwrap();
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
         let msgs = export_texts(resp.0.get());
@@ -1924,10 +1775,8 @@ mod tests {
             h.push(PortableMessage::text_only("assistant", "a1"));
             h.push(PortableMessage::text_only("user", "in-progress"));
         }
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "e2" }).to_string(),
-        )
-        .unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "e2" }).to_string()).unwrap();
         let resp = agent
             .ext_method(ExtRequest::new("session/export", raw_params.into()))
             .await
@@ -1940,10 +1789,9 @@ mod tests {
     #[tokio::test]
     async fn ext_method_export_unknown_session_returns_error() {
         let agent = make_agent().await;
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "no-such" }).to_string(),
-        )
-        .unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "no-such" }).to_string())
+                .unwrap();
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         assert!(agent.ext_method(ext_req).await.is_err());
     }
@@ -1951,8 +1799,7 @@ mod tests {
     #[tokio::test]
     async fn ext_method_export_missing_session_id_returns_error() {
         let agent = make_agent().await;
-        let raw_params =
-            serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         assert!(agent.ext_method(ext_req).await.is_err());
     }
@@ -1981,10 +1828,8 @@ mod tests {
             .await
             .unwrap();
 
-        let raw_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "ep1" }).to_string(),
-        )
-        .unwrap();
+        let raw_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "ep1" }).to_string()).unwrap();
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
         let msgs = export_texts(resp.0.get());
@@ -2003,13 +1848,7 @@ mod tests {
         let agent = make_agent().await;
         agent.test_insert_session("i1", "/tmp", None).await;
         // Simulate that first_turn was already consumed.
-        agent
-            .sessions
-            .lock()
-            .await
-            .get_mut("i1")
-            .unwrap()
-            .first_turn = false;
+        agent.sessions.lock().await.get_mut("i1").unwrap().first_turn = false;
 
         let raw_params = serde_json::value::RawValue::from_string(
             serde_json::json!({
@@ -2034,13 +1873,7 @@ mod tests {
         assert_eq!(history[0].text, "ctx");
 
         // import must reset first_turn to true
-        let first_turn = agent
-            .sessions
-            .lock()
-            .await
-            .get("i1")
-            .unwrap()
-            .first_turn;
+        let first_turn = agent.sessions.lock().await.get("i1").unwrap().first_turn;
         assert!(first_turn, "import must reset first_turn to true");
     }
 
@@ -2061,10 +1894,8 @@ mod tests {
         }
 
         // Export from src.
-        let export_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "src" }).to_string(),
-        )
-        .unwrap();
+        let export_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "src" }).to_string()).unwrap();
         let export_resp = agent
             .ext_method(ExtRequest::new("session/export", export_params.into()))
             .await
@@ -2073,10 +1904,9 @@ mod tests {
 
         // Import into dst.
         agent.test_insert_session("dst", "/tmp", None).await;
-        let import_params = serde_json::value::RawValue::from_string(format!(
-            r#"{{"sessionId":"dst","messages":{exported_json}}}"#
-        ))
-        .unwrap();
+        let import_params =
+            serde_json::value::RawValue::from_string(format!(r#"{{"sessionId":"dst","messages":{exported_json}}}"#))
+                .unwrap();
         agent
             .ext_method(ExtRequest::new("session/import", import_params.into()))
             .await
@@ -2084,16 +1914,18 @@ mod tests {
 
         // Re-export from dst: must return the imported messages immediately
         // (before any prompt) — consistent with xai/openrouter/acp behaviour.
-        let export_dst_params = serde_json::value::RawValue::from_string(
-            serde_json::json!({ "sessionId": "dst" }).to_string(),
-        )
-        .unwrap();
+        let export_dst_params =
+            serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "dst" }).to_string()).unwrap();
         let export_dst_resp = agent
             .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
             .await
             .unwrap();
         let dst_portable = export_texts(export_dst_resp.0.get());
-        assert_eq!(dst_portable.len(), 2, "export after import must return imported messages");
+        assert_eq!(
+            dst_portable.len(),
+            2,
+            "export after import must return imported messages"
+        );
         assert_eq!(dst_portable[0].role, "user");
         assert_eq!(dst_portable[0].text, "q");
         assert_eq!(dst_portable[1].role, "assistant");
@@ -2101,7 +1933,11 @@ mod tests {
 
         // pending_history must also be set (for subprocess injection on first prompt).
         let pending = agent.test_get_pending_history("dst").await.unwrap();
-        assert_eq!(pending.len(), 2, "pending_history must also be set for subprocess injection");
+        assert_eq!(
+            pending.len(),
+            2,
+            "pending_history must also be set for subprocess injection"
+        );
     }
 
     // ── history accumulation ──────────────────────────────────────────────────
@@ -2158,8 +1994,9 @@ mod tests {
         let agent = make_agent().await;
         // no sessions inserted
         let params = serde_json::value::RawValue::from_string(
-            serde_json::json!({"sessionId":"no-such","messages":[]}).to_string()
-        ).unwrap();
+            serde_json::json!({"sessionId":"no-such","messages":[]}).to_string(),
+        )
+        .unwrap();
         let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
         assert!(result.is_err(), "import of unknown session must return Err");
     }
@@ -2207,10 +2044,7 @@ mod tests {
         // Drive a prompt — the agent prepends "Prior conversation:\n..." to the
         // user input internally before handing it to the process.
         agent
-            .prompt(PromptRequest::new(
-                "ip1",
-                vec![ContentBlock::from("actual question")],
-            ))
+            .prompt(PromptRequest::new("ip1", vec![ContentBlock::from("actual question")]))
             .await
             .unwrap();
 

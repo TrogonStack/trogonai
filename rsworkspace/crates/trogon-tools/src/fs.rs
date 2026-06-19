@@ -2,8 +2,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::Value;
 
-use crate::types::{ContentBlock, ImageSource, ToolOutput};
 use crate::ToolContext;
+use crate::types::{ContentBlock, ImageSource, ToolOutput};
 
 /// Build a collision-resistant sibling temp path for atomic writes.
 ///
@@ -75,19 +75,13 @@ pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathB
                 .collect()
         });
         if !canonical.starts_with(&cwd_canonical) {
-            return Err(format!(
-                "cd: {} is outside the working directory",
-                attempted.display()
-            ));
+            return Err(format!("cd: {} is outside the working directory", attempted.display()));
         }
     }
     Ok(canonical)
 }
 
-pub fn resolve_path(
-    cwd: &str,
-    path: &str,
-) -> Result<std::path::PathBuf, String> {
+pub fn resolve_path(cwd: &str, path: &str) -> Result<std::path::PathBuf, String> {
     use std::path::{Component, Path, PathBuf};
 
     let cwd_norm: PathBuf = Path::new(cwd)
@@ -138,8 +132,8 @@ pub fn resolve_path(
         }
     }
 
-    let mut resolved = std::fs::canonicalize(&ancestor)
-        .map_err(|_| "path is outside the working directory".to_string())?;
+    let mut resolved =
+        std::fs::canonicalize(&ancestor).map_err(|_| "path is outside the working directory".to_string())?;
     trailing.reverse();
     for component in trailing {
         resolved.push(component);
@@ -240,14 +234,8 @@ fn image_output(data: &[u8], media_type: &str) -> ToolOutput {
 fn extract_pdf_text(data: &[u8]) -> String {
     match pdf_extract::extract_text_from_mem(data) {
         Ok(text) if !text.trim().is_empty() => text,
-        Ok(_) => format!(
-            "PDF document ({} bytes). No extractable text found.",
-            data.len()
-        ),
-        Err(e) => format!(
-            "PDF document ({} bytes). Text extraction failed: {e}",
-            data.len()
-        ),
+        Ok(_) => format!("PDF document ({} bytes). No extractable text found.", data.len()),
+        Err(e) => format!("PDF document ({} bytes). Text extraction failed: {e}", data.len()),
     }
 }
 
@@ -265,9 +253,7 @@ fn format_numbered_text(content: &str, offset: Option<usize>, limit: Option<usiz
         ));
     }
 
-    let end = limit
-        .map(|l| (start + l).min(lines.len()))
-        .unwrap_or(lines.len());
+    let end = limit.map(|l| (start + l).min(lines.len())).unwrap_or(lines.len());
 
     Ok(lines[start..end]
         .iter()
@@ -282,14 +268,8 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> ToolOutput {
         Some(p) => p,
         None => return ToolOutput::Text("Error: missing required parameter 'path'".to_string()),
     };
-    let offset = input
-        .get("offset")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize);
-    let limit = input
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize);
+    let offset = input.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
+    let limit = input.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
@@ -312,9 +292,7 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> ToolOutput {
             let content = match String::from_utf8(bytes) {
                 Ok(c) => c,
                 Err(_) => {
-                    return ToolOutput::Text(format!(
-                        "Error reading {path}: file is not valid UTF-8 text"
-                    ));
+                    return ToolOutput::Text(format!("Error reading {path}: file is not valid UTF-8 text"));
                 }
             };
             match format_numbered_text(&content, offset, limit) {
@@ -377,7 +355,8 @@ pub async fn write_file(ctx: &ToolContext, input: &Value) -> String {
     };
 
     if let Some(parent) = full_path.parent()
-        && let Err(e) = tokio::fs::create_dir_all(parent).await {
+        && let Err(e) = tokio::fs::create_dir_all(parent).await
+    {
         return format!("Error creating directories: {e}");
     }
 
@@ -411,10 +390,7 @@ pub async fn delete_file(ctx: &ToolContext, input: &Value) -> String {
 }
 
 pub async fn list_dir(ctx: &ToolContext, input: &Value) -> String {
-    let path = input
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+    let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
     let full_path = match resolve_path(&ctx.cwd, path) {
         Ok(p) => p,
@@ -423,9 +399,7 @@ pub async fn list_dir(ctx: &ToolContext, input: &Value) -> String {
 
     let mut entries: Vec<String> = Vec::new();
 
-    let walker = ignore::WalkBuilder::new(&full_path)
-        .hidden(false)
-        .build();
+    let walker = ignore::WalkBuilder::new(&full_path).hidden(false).build();
 
     for entry in walker {
         let e = match entry {
@@ -467,10 +441,7 @@ pub async fn glob_files(ctx: &ToolContext, input: &Value) -> String {
         Some(p) => p,
         None => return "Error: missing required parameter 'pattern'".to_string(),
     };
-    let base = input
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+    let base = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
     let full_base = match resolve_path(&ctx.cwd, base) {
         Ok(p) => p,
@@ -485,9 +456,7 @@ pub async fn glob_files(ctx: &ToolContext, input: &Value) -> String {
     const MAX_GLOB_RESULTS: usize = 500;
     let mut matches: Vec<String> = Vec::new();
 
-    let walker = ignore::WalkBuilder::new(&full_base)
-        .hidden(false)
-        .build();
+    let walker = ignore::WalkBuilder::new(&full_base).hidden(false).build();
 
     for e in walker.flatten() {
         if matches.len() >= MAX_GLOB_RESULTS {
@@ -675,11 +644,10 @@ mod tests {
 
     /// Smallest valid 1×1 PNG (67 bytes).
     const TINY_PNG: &[u8] = &[
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
-        0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08,
-        0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d,
-        0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
+        0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18,
+        0xdd, 0x8d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
 
     /// Valid PDF fixture with extractable text "Hello PDF".
@@ -789,8 +757,7 @@ mod tests {
         let cwd_dir = TempDir::new().unwrap();
         std::fs::create_dir(cwd_dir.path().join("real")).unwrap();
         std::fs::write(cwd_dir.path().join("real/file.txt"), b"ok").unwrap();
-        std::os::unix::fs::symlink(cwd_dir.path().join("real"), cwd_dir.path().join("link"))
-            .unwrap();
+        std::os::unix::fs::symlink(cwd_dir.path().join("real"), cwd_dir.path().join("link")).unwrap();
 
         let cwd = cwd_dir.path().to_string_lossy().into_owned();
         let resolved = resolve_path(&cwd, "link/file.txt").unwrap();
@@ -871,27 +838,19 @@ mod tests {
             media_kind_from_extension(std::path::Path::new("doc.pdf")),
             Some(MediaKind::Pdf)
         );
-        assert_eq!(
-            media_kind_from_extension(std::path::Path::new("readme.txt")),
-            None
-        );
+        assert_eq!(media_kind_from_extension(std::path::Path::new("readme.txt")), None);
     }
 
     #[test]
     fn extract_pdf_text_from_minimal_fixture() {
         let text = extract_pdf_text(TEST_PDF);
-        assert!(
-            text.contains("Hello PDF"),
-            "expected extracted PDF text, got: {text}"
-        );
+        assert!(text.contains("Hello PDF"), "expected extracted PDF text, got: {text}");
     }
 
     #[tokio::test]
     async fn read_file_png_returns_image_block() {
         let dir = TempDir::new().unwrap();
-        tokio::fs::write(dir.path().join("pixel.png"), TINY_PNG)
-            .await
-            .unwrap();
+        tokio::fs::write(dir.path().join("pixel.png"), TINY_PNG).await.unwrap();
         let ctx = ctx(&dir);
         let result = read_file(&ctx, &json!({"path": "pixel.png"})).await;
         match result {
@@ -914,9 +873,7 @@ mod tests {
     #[tokio::test]
     async fn read_file_pdf_returns_extracted_text() {
         let dir = TempDir::new().unwrap();
-        tokio::fs::write(dir.path().join("doc.pdf"), TEST_PDF)
-            .await
-            .unwrap();
+        tokio::fs::write(dir.path().join("doc.pdf"), TEST_PDF).await.unwrap();
         let ctx = ctx(&dir);
         let result = as_text(read_file(&ctx, &json!({"path": "doc.pdf"})).await);
         assert!(
@@ -989,14 +946,22 @@ mod tests {
         let ctx = ctx(&dir);
         let result = as_text(read_file(&ctx, &json!({"path": "src/main.rs"})).await);
         assert!(result.contains("fn main()"), "file content missing: {result}");
-        assert!(result.contains("Directory rules"), "subdir TROGON.md not surfaced: {result}");
-        assert!(result.contains("prefer iterators"), "subdir rule body missing: {result}");
+        assert!(
+            result.contains("Directory rules"),
+            "subdir TROGON.md not surfaced: {result}"
+        );
+        assert!(
+            result.contains("prefer iterators"),
+            "subdir rule body missing: {result}"
+        );
     }
 
     #[tokio::test]
     async fn read_file_in_cwd_does_not_resurface_cwd_trogon_md() {
         let dir = TempDir::new().unwrap();
-        tokio::fs::write(dir.path().join("TROGON.md"), "cwd rule").await.unwrap();
+        tokio::fs::write(dir.path().join("TROGON.md"), "cwd rule")
+            .await
+            .unwrap();
         tokio::fs::write(dir.path().join("a.txt"), "hello").await.unwrap();
         let ctx = ctx(&dir);
         let result = as_text(read_file(&ctx, &json!({"path": "a.txt"})).await);
@@ -1059,9 +1024,7 @@ mod tests {
         let ctx = ctx(&dir);
         let result = write_file(&ctx, &json!({"path": "out.txt", "content": "hello"})).await;
         assert_eq!(result, "OK");
-        let content = tokio::fs::read_to_string(dir.path().join("out.txt"))
-            .await
-            .unwrap();
+        let content = tokio::fs::read_to_string(dir.path().join("out.txt")).await.unwrap();
         assert_eq!(content, "hello");
     }
 
@@ -1069,8 +1032,7 @@ mod tests {
     async fn write_file_creates_intermediate_dirs() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result =
-            write_file(&ctx, &json!({"path": "a/b/c.txt", "content": "deep"})).await;
+        let result = write_file(&ctx, &json!({"path": "a/b/c.txt", "content": "deep"})).await;
         assert_eq!(result, "OK");
         assert!(dir.path().join("a/b/c.txt").exists());
     }
@@ -1131,10 +1093,7 @@ mod tests {
         }
         let ctx = ctx(&dir);
         let result = list_dir(&ctx, &json!({})).await;
-        assert!(
-            result.contains("truncated at 500 entries"),
-            "got: {result}"
-        );
+        assert!(result.contains("truncated at 500 entries"), "got: {result}");
         let file_lines = result.lines().filter(|l| l.contains("file_")).count();
         assert_eq!(file_lines, 500, "expected exactly 500 file lines, got {file_lines}");
     }
@@ -1189,8 +1148,7 @@ mod tests {
     async fn write_file_traversal_rejected() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result =
-            write_file(&ctx, &json!({"path": "../../evil.txt", "content": "bad"})).await;
+        let result = write_file(&ctx, &json!({"path": "../../evil.txt", "content": "bad"})).await;
         assert!(result.contains("Error"), "got: {result}");
         assert!(!std::path::Path::new("/tmp/evil.txt").exists());
     }
@@ -1208,7 +1166,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(&ctx, &json!({"path": "nb.ipynb", "content": "x"})).await;
-        assert!(result.contains("missing required parameter 'cell_index'"), "got: {result}");
+        assert!(
+            result.contains("missing required parameter 'cell_index'"),
+            "got: {result}"
+        );
     }
 
     #[tokio::test]
@@ -1240,18 +1201,11 @@ mod tests {
                 {"cell_type": "code", "source": ["x"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
-        let result = notebook_edit(
-            &ctx,
-            &json!({"path": "nb.ipynb", "cell_index": 99, "content": "x"}),
-        )
-        .await;
+        let result = notebook_edit(&ctx, &json!({"path": "nb.ipynb", "cell_index": 99, "content": "x"})).await;
         assert!(result.contains("Error"), "got: {result}");
         assert!(result.contains("out of range"), "got: {result}");
     }
@@ -1260,11 +1214,7 @@ mod tests {
     async fn notebook_edit_nonexistent_file_returns_error() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        let result = notebook_edit(
-            &ctx,
-            &json!({"path": "no_such.ipynb", "cell_index": 0, "content": "x"}),
-        )
-        .await;
+        let result = notebook_edit(&ctx, &json!({"path": "no_such.ipynb", "cell_index": 0, "content": "x"})).await;
         assert!(result.starts_with("Error"), "got: {result}");
     }
 
@@ -1277,12 +1227,9 @@ mod tests {
                 {"cell_type": "code", "source": ["old content"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(
             &ctx,
@@ -1290,9 +1237,7 @@ mod tests {
         )
         .await;
         assert_eq!(result, "OK");
-        let raw = tokio::fs::read_to_string(dir.path().join("nb.ipynb"))
-            .await
-            .unwrap();
+        let raw = tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap();
         assert!(raw.contains("new content"));
     }
 
@@ -1305,12 +1250,9 @@ mod tests {
                 {"cell_type": "code", "source": ["x"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(
             &ctx,
@@ -1333,12 +1275,9 @@ mod tests {
                 {"cell_type": "code", "source": ["third"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(
             &ctx,
@@ -1353,8 +1292,7 @@ mod tests {
         .await;
         assert_eq!(result, "OK");
         let parsed: serde_json::Value =
-            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
-                .unwrap();
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap()).unwrap();
         assert_eq!(parsed["cells"].as_array().unwrap().len(), 3);
         assert_eq!(parsed["cells"][0]["source"][0], "first");
         assert_eq!(parsed["cells"][1]["source"][0], "second");
@@ -1371,12 +1309,9 @@ mod tests {
                 {"cell_type": "code", "source": ["code"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(
             &ctx,
@@ -1391,8 +1326,7 @@ mod tests {
         .await;
         assert_eq!(result, "OK");
         let parsed: serde_json::Value =
-            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
-                .unwrap();
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap()).unwrap();
         assert_eq!(parsed["cells"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["cells"][0]["cell_type"], "markdown");
         assert_eq!(parsed["cells"][0]["source"][0], "# heading");
@@ -1408,12 +1342,9 @@ mod tests {
                 {"cell_type": "code", "source": ["only"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(
             &ctx,
@@ -1428,8 +1359,7 @@ mod tests {
         .await;
         assert_eq!(result, "OK");
         let parsed: serde_json::Value =
-            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
-                .unwrap();
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap()).unwrap();
         assert_eq!(parsed["cells"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["cells"][0]["source"][0], "only");
         assert_eq!(parsed["cells"][1]["source"][0], "appended");
@@ -1445,12 +1375,9 @@ mod tests {
                 {"cell_type": "code", "source": ["remove"], "metadata": {}, "outputs": [], "execution_count": null}
             ]
         });
-        tokio::fs::write(
-            dir.path().join("nb.ipynb"),
-            serde_json::to_string_pretty(&nb).unwrap(),
-        )
-        .await
-        .unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string_pretty(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ctx(&dir);
         let result = notebook_edit(
             &ctx,
@@ -1459,8 +1386,7 @@ mod tests {
         .await;
         assert_eq!(result, "OK");
         let parsed: serde_json::Value =
-            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap())
-                .unwrap();
+            serde_json::from_str(&tokio::fs::read_to_string(dir.path().join("nb.ipynb")).await.unwrap()).unwrap();
         assert_eq!(parsed["cells"].as_array().unwrap().len(), 1);
         assert_eq!(parsed["cells"][0]["source"][0], "keep");
     }

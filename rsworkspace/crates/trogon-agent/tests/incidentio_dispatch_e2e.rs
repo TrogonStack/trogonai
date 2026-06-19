@@ -93,10 +93,7 @@ async fn wait_for_hit(mock: &httpmock::Mock<'_>, timeout: Duration) -> bool {
 
 fn base_agent_config(nats_port: u16, proxy_url: String) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url,
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -141,9 +138,7 @@ async fn incidentio_webhook_triggers_full_pipeline_with_real_key() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Incident acknowledged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Incident acknowledged."}]}"#);
         })
         .await;
 
@@ -315,9 +310,7 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -342,16 +335,9 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     let wvault = Arc::clone(&vault);
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(
-            wjs,
-            wnats,
-            wvault,
-            http_client,
-            "iio-resolved-worker",
-            &wstream,
-        )
-        .await
-        .ok();
+        worker::run(wjs, wnats, wvault, http_client, "iio-resolved-worker", &wstream)
+            .await
+            .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -404,10 +390,7 @@ async fn incidentio_resolved_triggers_full_pipeline() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(
-        hit,
-        "Mock Anthropic not called for incident.resolved within 20 s"
-    );
+    assert!(hit, "Mock Anthropic not called for incident.resolved within 20 s");
     anthropic_mock.assert_async().await;
 }
 
@@ -426,9 +409,7 @@ async fn incidentio_updated_triggers_full_pipeline() {
                 .body_contains("incident.updated");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Status update posted."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Status update posted."}]}"#);
         })
         .await;
 
@@ -447,9 +428,7 @@ async fn incidentio_updated_triggers_full_pipeline() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -474,16 +453,9 @@ async fn incidentio_updated_triggers_full_pipeline() {
     let wvault = Arc::clone(&vault);
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(
-            wjs,
-            wnats,
-            wvault,
-            http_client,
-            "iio-updated-worker",
-            &wstream,
-        )
-        .await
-        .ok();
+        worker::run(wjs, wnats, wvault, http_client, "iio-updated-worker", &wstream)
+            .await
+            .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -536,10 +508,7 @@ async fn incidentio_updated_triggers_full_pipeline() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(
-        hit,
-        "Mock Anthropic not called for incident.updated within 20 s"
-    );
+    assert!(hit, "Mock Anthropic not called for incident.updated within 20 s");
     anthropic_mock.assert_async().await;
 }
 
@@ -570,9 +539,7 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     // Register a matching automation.
-    let store = trogon_automations::AutomationStore::open(&js)
-        .await
-        .unwrap();
+    let store = trogon_automations::AutomationStore::open(&js).await.unwrap();
     let auto = trogon_automations::Automation {
         id: "iio-auto-1".to_string(),
         tenant_id: "default".to_string(),
@@ -594,12 +561,12 @@ async fn incidentio_automation_dispatch_takes_precedence_over_fallback() {
 
     // Pre-create the INCIDENTIO stream so trogon-incidentio can publish.
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "INCIDENTIO".to_string(),
-            subjects: vec!["incidentio.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+        name: "INCIDENTIO".to_string(),
+        subjects: vec!["incidentio.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     let incidentio_port = next_port();
     let webhook_secret = "test-iio-auto-secret";
@@ -680,12 +647,12 @@ async fn incidentio_stream_name_none_skips_subscription() {
 
     // Manually create the INCIDENTIO stream so we can publish to it.
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "INCIDENTIO".to_string(),
-            subjects: vec!["incidentio.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+        name: "INCIDENTIO".to_string(),
+        subjects: vec!["incidentio.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     // Start agent runner with incidentio_stream_name = None → must skip subscription.
     let mut agent_cfg = base_agent_config(nats_port, mock_server.base_url());
@@ -737,9 +704,7 @@ async fn incidentio_no_automation_falls_back_to_handler() {
                 .body_contains("incident.created");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Fallback handler ran."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Fallback handler ran."}]}"#);
         })
         .await;
 
@@ -787,16 +752,9 @@ async fn incidentio_no_automation_falls_back_to_handler() {
     let wvault = Arc::clone(&vault);
     let wstream = trogon_secret_proxy::stream::stream_name("trogon");
     tokio::spawn(async move {
-        trogon_secret_proxy::worker::run(
-            wjs,
-            wnats,
-            wvault,
-            http_client,
-            "iio-fallback-worker",
-            &wstream,
-        )
-        .await
-        .ok();
+        trogon_secret_proxy::worker::run(wjs, wnats, wvault, http_client, "iio-fallback-worker", &wstream)
+            .await
+            .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -813,9 +771,7 @@ async fn incidentio_no_automation_falls_back_to_handler() {
         .await
         .unwrap();
     tokio::spawn(async move {
-        trogon_incidentio::serve(incidentio_config, nats_for_iio)
-            .await
-            .ok();
+        trogon_incidentio::serve(incidentio_config, nats_for_iio).await.ok();
     });
     wait_for_port(incidentio_port).await;
 

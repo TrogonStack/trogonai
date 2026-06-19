@@ -21,9 +21,9 @@ use std::rc::Rc;
 use agent_client_protocol::{
     Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionRequest, RequestPermissionResponse, Result, SessionId, SessionNotification,
-    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    RequestPermissionRequest, RequestPermissionResponse, Result, SessionId, SessionNotification, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 
 /// Shared `runner_sid → acp_sid` remap table. Owned by the orchestrator (which populates
@@ -54,10 +54,7 @@ impl<C> RemappingClient<C> {
 
 #[async_trait::async_trait(?Send)]
 impl<C: Client> Client for RemappingClient<C> {
-    async fn request_permission(
-        &self,
-        mut args: RequestPermissionRequest,
-    ) -> Result<RequestPermissionResponse> {
+    async fn request_permission(&self, mut args: RequestPermissionRequest) -> Result<RequestPermissionResponse> {
         args.session_id = self.remap(&args.session_id);
         self.inner.request_permission(args).await
     }
@@ -109,9 +106,7 @@ impl<C: Client> Client for RemappingClient<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
-        RequestPermissionOutcome, ToolCallUpdate, ToolCallUpdateFields,
-    };
+    use agent_client_protocol::{RequestPermissionOutcome, ToolCallUpdate, ToolCallUpdateFields};
     use std::sync::Mutex;
 
     /// Inner client that records the `session_id` it actually received.
@@ -121,10 +116,7 @@ mod tests {
 
     #[async_trait::async_trait(?Send)]
     impl Client for CapturingClient {
-        async fn request_permission(
-            &self,
-            args: RequestPermissionRequest,
-        ) -> Result<RequestPermissionResponse> {
+        async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse> {
             *self.seen.lock().unwrap() = Some(args.session_id.0.to_string());
             Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }

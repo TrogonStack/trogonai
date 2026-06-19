@@ -21,11 +21,7 @@ pub trait NatsClient: Clone + Send + Sync + 'static {
 
     fn subscribe(&self, subject: String) -> impl Future<Output = Result<Self::Sub, String>> + Send;
 
-    fn publish(
-        &self,
-        subject: String,
-        payload: Bytes,
-    ) -> impl Future<Output = Result<(), String>> + Send;
+    fn publish(&self, subject: String, payload: Bytes) -> impl Future<Output = Result<(), String>> + Send;
 }
 
 // ── JetStreamPublisher ────────────────────────────────────────────────────────

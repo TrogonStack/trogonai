@@ -67,9 +67,7 @@ fn now_iso() -> String {
         .to_string()
 }
 
-pub async fn list_skills(
-    State(state): State<Arc<AppState>>,
-) -> Result<impl IntoResponse, AppError> {
+pub async fn list_skills(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
     let skills = state.skills.list().await.map_err(AppError::Store)?;
     Ok(Json(skills))
 }
@@ -113,11 +111,7 @@ pub async fn create_skill(
         is_latest: true,
         created_at: now,
     };
-    state
-        .skills
-        .put_version(&sv)
-        .await
-        .map_err(AppError::Store)?;
+    state.skills.put_version(&sv).await.map_err(AppError::Store)?;
 
     Ok((StatusCode::CREATED, Json(skill)))
 }
@@ -126,11 +120,7 @@ pub async fn list_skill_versions(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let versions = state
-        .skills
-        .list_versions(&id)
-        .await
-        .map_err(AppError::Store)?;
+    let versions = state.skills.list_versions(&id).await.map_err(AppError::Store)?;
     Ok(Json(versions))
 }
 
@@ -164,11 +154,7 @@ pub async fn create_skill_version(
         is_latest: true,
         created_at: now.clone(),
     };
-    state
-        .skills
-        .put_version(&sv)
-        .await
-        .map_err(AppError::Store)?;
+    state.skills.put_version(&sv).await.map_err(AppError::Store)?;
 
     skill.latest_version = version;
     skill.updated_at = now;
@@ -195,10 +181,7 @@ mod tests {
     fn now_version_format_is_valid_yyyymmdd() {
         let v = now_version();
         assert_eq!(v.len(), 8, "version must be 8 digits: {v}");
-        assert!(
-            v.chars().all(|c| c.is_ascii_digit()),
-            "version must be all digits: {v}"
-        );
+        assert!(v.chars().all(|c| c.is_ascii_digit()), "version must be all digits: {v}");
         let year: u32 = v[0..4].parse().unwrap();
         let month: u32 = v[4..6].parse().unwrap();
         let day: u32 = v[6..8].parse().unwrap();

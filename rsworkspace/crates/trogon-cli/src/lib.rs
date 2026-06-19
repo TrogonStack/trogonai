@@ -1,6 +1,6 @@
 pub mod app;
-pub mod commands;
 pub mod client_supervisor;
+pub mod commands;
 pub mod doctor;
 pub mod env_local;
 pub mod fs;
@@ -15,8 +15,8 @@ pub mod runtime;
 pub mod session;
 pub mod session_rewind;
 pub mod session_store;
-pub mod spawn_tracker;
 pub mod settings;
+pub mod spawn_tracker;
 pub mod stdio_mcp_bridge;
 pub mod stream_input;
 pub mod terminal;
@@ -31,8 +31,8 @@ pub use print::{OutputFormat, PrintExitCode, PrintOptions, should_use_ansi};
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionInit, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, persist_session, project_key};
 pub use settings::{PermissionsSettings, Settings};
-pub use trogon_runner_tools::{HookOutcome, HooksConfig};
 pub use stdio_mcp_bridge::StdioMcpBridge;
+pub use trogon_runner_tools::{HookOutcome, HooksConfig};
 
 pub mod cross_runner;
 pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher};

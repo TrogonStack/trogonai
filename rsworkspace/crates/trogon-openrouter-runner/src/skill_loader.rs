@@ -38,10 +38,7 @@ impl SkillLoader {
             .await
             .map_err(|e| e.to_string())?;
 
-        Ok(Self {
-            skills_kv,
-            versions_kv,
-        })
+        Ok(Self { skills_kv, versions_kv })
     }
 
     async fn load_impl(&self, skill_ids: &[String]) -> Option<String> {
@@ -57,8 +54,7 @@ impl SkillLoader {
                     let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                         continue;
                     };
-                    let Some(version) = meta["latest_version"].as_str().map(|s| s.to_string())
-                    else {
+                    let Some(version) = meta["latest_version"].as_str().map(|s| s.to_string()) else {
                         continue;
                     };
                     let name = meta["name"]
@@ -135,11 +131,7 @@ mod tests {
 
     #[test]
     fn multiple_skills_joined_with_separator() {
-        let out = format_skill_sections(vec![
-            sec("Alpha", "Do alpha."),
-            sec("Beta", "Do beta."),
-        ])
-        .unwrap();
+        let out = format_skill_sections(vec![sec("Alpha", "Do alpha."), sec("Beta", "Do beta.")]).unwrap();
         assert!(out.contains("## Skill: Alpha\n\nDo alpha."));
         assert!(out.contains("## Skill: Beta\n\nDo beta."));
         assert!(out.contains("\n\n---\n\n"), "sections must be separated by ---");
@@ -147,12 +139,7 @@ mod tests {
 
     #[test]
     fn order_is_preserved() {
-        let out = format_skill_sections(vec![
-            sec("First", "1"),
-            sec("Second", "2"),
-            sec("Third", "3"),
-        ])
-        .unwrap();
+        let out = format_skill_sections(vec![sec("First", "1"), sec("Second", "2"), sec("Third", "3")]).unwrap();
         let pos_first = out.find("## Skill: First").unwrap();
         let pos_second = out.find("## Skill: Second").unwrap();
         let pos_third = out.find("## Skill: Third").unwrap();
@@ -191,11 +178,7 @@ mod tests {
 
     #[test]
     fn separator_is_only_between_skills_not_at_end() {
-        let out = format_skill_sections(vec![
-            sec("First", "a"),
-            sec("Second", "b"),
-        ])
-        .unwrap();
+        let out = format_skill_sections(vec![sec("First", "a"), sec("Second", "b")]).unwrap();
         // Exactly one separator between the two skills.
         let sep_count = out.matches("\n\n---\n\n").count();
         assert_eq!(sep_count, 1, "must have exactly one separator: {out:?}");

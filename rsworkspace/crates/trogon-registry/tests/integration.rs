@@ -11,10 +11,7 @@ async fn setup() -> (async_nats::jetstream::Context, impl Drop) {
         .start()
         .await
         .expect("failed to start NATS");
-    let port = container
-        .get_host_port_ipv4(4222)
-        .await
-        .expect("failed to get port");
+    let port = container.get_host_port_ipv4(4222).await.expect("failed to get port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
         .expect("failed to connect to NATS");
@@ -23,11 +20,7 @@ async fn setup() -> (async_nats::jetstream::Context, impl Drop) {
 }
 
 fn pr_actor() -> AgentCapability {
-    AgentCapability::new(
-        "PrActor",
-        ["code_review", "security_analysis"],
-        "actors.pr.>",
-    )
+    AgentCapability::new("PrActor", ["code_review", "security_analysis"], "actors.pr.>")
 }
 
 fn incident_actor() -> AgentCapability {
@@ -54,9 +47,7 @@ async fn provision_is_idempotent() {
     let (js, _container) = setup().await;
 
     provision(&js).await.expect("first provision failed");
-    provision(&js)
-        .await
-        .expect("second provision should not fail");
+    provision(&js).await.expect("second provision should not fail");
 }
 
 #[tokio::test]
@@ -285,9 +276,7 @@ async fn provision_falls_back_to_existing_bucket_on_config_mismatch() {
     .expect("pre-create should succeed");
 
     // provision() should open the existing bucket via the is_already_exists() path.
-    let store = provision(&js)
-        .await
-        .expect("provision should succeed via fallback");
+    let store = provision(&js).await.expect("provision should succeed via fallback");
 
     // Verify the returned store is functional.
     let registry = Registry::new(store);
@@ -385,10 +374,18 @@ async fn find_by_model_returns_matching_agent() {
     registry.register(&or_agent).await.unwrap();
 
     let found_xai = registry.find_by_model("grok-4").await.unwrap();
-    assert_eq!(found_xai.unwrap().agent_type, "xai", "grok-4 must resolve to xai runner");
+    assert_eq!(
+        found_xai.unwrap().agent_type,
+        "xai",
+        "grok-4 must resolve to xai runner"
+    );
 
     let found_or = registry.find_by_model("claude-3-5-sonnet").await.unwrap();
-    assert_eq!(found_or.unwrap().agent_type, "openrouter", "claude-3-5-sonnet must resolve to openrouter runner");
+    assert_eq!(
+        found_or.unwrap().agent_type,
+        "openrouter",
+        "claude-3-5-sonnet must resolve to openrouter runner"
+    );
 }
 
 #[tokio::test]

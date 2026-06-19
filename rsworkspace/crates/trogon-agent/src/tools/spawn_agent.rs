@@ -48,13 +48,10 @@ pub async fn dispatch(
 
     let subject = format!("{prefix}.agent.spawn");
 
-    let msg = tokio::time::timeout(
-        SPAWN_TIMEOUT,
-        nats.request(subject, payload.into()),
-    )
-    .await
-    .map_err(|_| format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs()))?
-    .map_err(|e| e.to_string())?;
+    let msg = tokio::time::timeout(SPAWN_TIMEOUT, nats.request(subject, payload.into()))
+        .await
+        .map_err(|_| format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs()))?
+        .map_err(|e| e.to_string())?;
 
     String::from_utf8(msg.payload.to_vec()).map_err(|e| e.to_string())
 }
@@ -71,9 +68,7 @@ mod tests {
     #[test]
     fn tool_def_requires_capability_and_prompt() {
         let def = tool_def();
-        let req = def.input_schema["required"]
-            .as_array()
-            .expect("required must be array");
+        let req = def.input_schema["required"].as_array().expect("required must be array");
         let names: Vec<&str> = req.iter().filter_map(|v| v.as_str()).collect();
         assert!(names.contains(&"capability"));
         assert!(names.contains(&"prompt"));

@@ -73,7 +73,9 @@ use trogon_std::SystemEnv;
 use trogon_vault::{ApiKeyToken, DualWriteVault, MemoryVault, VaultStore};
 use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
 use trogon_vault::{InfisicalConfig, InfisicalVaultStore};
-use trogon_vault_nats::{Audit, AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env};
+use trogon_vault_nats::{
+    Audit, AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env,
+};
 
 async fn run_all<V: VaultStore + 'static>(
     nats: async_nats::Client,
@@ -87,9 +89,9 @@ async fn run_all<V: VaultStore + 'static>(
     V::Error: std::fmt::Display,
 {
     tokio::spawn({
-        let nats       = nats.clone();
-        let vault      = Arc::clone(&vault);
-        let prefix     = prefix.to_string();
+        let nats = nats.clone();
+        let vault = Arc::clone(&vault);
+        let prefix = prefix.to_string();
         let vault_name = std::env::var("VAULT_ADMIN_NAME").ok();
         async move {
             vault_admin::run(nats, vault, &prefix, vault_name.as_deref())
@@ -98,32 +100,23 @@ async fn run_all<V: VaultStore + 'static>(
         }
     });
 
-    worker::run(
-        jetstream,
-        nats,
-        vault,
-        http_client,
-        consumer_name,
-        stream_name,
-    )
-    .await
-    .expect("Worker exited with error");
+    worker::run(jetstream, nats, vault, http_client, consumer_name, stream_name)
+        .await
+        .expect("Worker exited with error");
 }
 
 async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
     let mount = std::env::var("VAULT_MOUNT").unwrap_or_else(|_| "secret".to_string());
     let auth = match std::env::var("VAULT_AUTH_METHOD").as_deref() {
         Ok("approle") => VaultAuth::AppRole {
-            role_id:   std::env::var("VAULT_ROLE_ID").expect("VAULT_ROLE_ID required"),
+            role_id: std::env::var("VAULT_ROLE_ID").expect("VAULT_ROLE_ID required"),
             secret_id: std::env::var("VAULT_SECRET_ID").expect("VAULT_SECRET_ID required"),
         },
         Ok("kubernetes") => VaultAuth::Kubernetes {
-            role:     std::env::var("VAULT_K8S_ROLE").expect("VAULT_K8S_ROLE required"),
+            role: std::env::var("VAULT_K8S_ROLE").expect("VAULT_K8S_ROLE required"),
             jwt_path: std::env::var("VAULT_K8S_JWT_PATH").ok(),
         },
-        _ => VaultAuth::Token(
-            std::env::var("VAULT_TOKEN").expect("VAULT_TOKEN required for token auth"),
-        ),
+        _ => VaultAuth::Token(std::env::var("VAULT_TOKEN").expect("VAULT_TOKEN required for token auth")),
     };
     HashicorpVaultStore::new(HashicorpVaultConfig::new(vault_addr, mount, auth))
         .await
@@ -138,16 +131,15 @@ fn nats_kv_replicas() -> usize {
 }
 
 async fn build_nats_kv_vault(
-    jetstream:   &async_nats::jetstream::Context,
+    jetstream: &async_nats::jetstream::Context,
     bucket_name: &str,
-    audit:       Arc<dyn Audit>,
+    audit: Arc<dyn Audit>,
 ) -> NatsKvVault {
     let kv = ensure_vault_bucket(jetstream, bucket_name, nats_kv_replicas())
         .await
         .expect("Failed to ensure vault KV bucket");
     let crypto = Arc::new(
-        CryptoCtx::from_env()
-            .expect("VAULT_MASTER_PASSWORD and VAULT_KEY_SALT are required for NATS KV vault"),
+        CryptoCtx::from_env().expect("VAULT_MASTER_PASSWORD and VAULT_KEY_SALT are required for NATS KV vault"),
     );
     NatsKvVault::new(kv, crypto, grace_period_from_env())
         .await
@@ -164,7 +156,7 @@ async fn main() {
         )
         .init();
 
-    let prefix        = std::env::var("PROXY_PREFIX").unwrap_or_else(|_| "trogon".to_string());
+    let prefix = std::env::var("PROXY_PREFIX").unwrap_or_else(|_| "trogon".to_string());
     let consumer_name = std::env::var("WORKER_CONSUMER_NAME").unwrap_or_else(|_| "proxy-workers".to_string());
 
     let nats_config = NatsConfig::from_env(&SystemEnv);
@@ -191,7 +183,7 @@ async fn main() {
         .expect("Failed to build HTTP client");
 
     let has_infisical = std::env::var("INFISICAL_URL").is_ok();
-    let has_nats_kv   = std::env::var("VAULT_NATS_BUCKET").is_ok();
+    let has_nats_kv = std::env::var("VAULT_NATS_BUCKET").is_ok();
     let has_hashicorp = std::env::var("VAULT_ADDR").is_ok();
 
     tracing::info!(consumer = %consumer_name, "Detokenization worker starting");
@@ -199,25 +191,29 @@ async fn main() {
     match (has_infisical, has_nats_kv, has_hashicorp) {
         (true, true, _) => {
             tracing::info!("Vault backend: DualWrite (Infisical primary + NATS KV cache)");
-            let config    = InfisicalConfig::from_env().expect("Infisical env vars required");
+            let config = InfisicalConfig::from_env().expect("Infisical env vars required");
             let infisical = InfisicalVaultStore::new(config);
-            let bucket    = std::env::var("VAULT_NATS_BUCKET").unwrap();
-            ensure_audit_stream(&jetstream).await.expect("Failed to ensure VAULT_AUDIT stream");
+            let bucket = std::env::var("VAULT_NATS_BUCKET").unwrap();
+            ensure_audit_stream(&jetstream)
+                .await
+                .expect("Failed to ensure VAULT_AUDIT stream");
             let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
             let nats_kv = build_nats_kv_vault(&jetstream, &bucket, audit).await;
-            let vault   = Arc::new(DualWriteVault::new(infisical, nats_kv));
+            let vault = Arc::new(DualWriteVault::new(infisical, nats_kv));
             run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
         }
         (true, false, _) => {
             tracing::info!("Vault backend: Infisical");
             let config = InfisicalConfig::from_env().expect("Infisical env vars required");
-            let vault  = Arc::new(InfisicalVaultStore::new(config));
+            let vault = Arc::new(InfisicalVaultStore::new(config));
             run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
         }
         (false, true, _) => {
             let bucket = std::env::var("VAULT_NATS_BUCKET").unwrap();
             tracing::info!(bucket = %bucket, "Vault backend: NATS KV");
-            ensure_audit_stream(&jetstream).await.expect("Failed to ensure VAULT_AUDIT stream");
+            ensure_audit_stream(&jetstream)
+                .await
+                .expect("Failed to ensure VAULT_AUDIT stream");
             let audit = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
             let vault = Arc::new(build_nats_kv_vault(&jetstream, &bucket, audit).await);
             run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
@@ -233,7 +229,9 @@ async fn main() {
             let vault = Arc::new(MemoryVault::new());
             let mut seeded = 0usize;
             for (key, value) in std::env::vars() {
-                let Some(token_str) = key.strip_prefix("VAULT_TOKEN_") else { continue };
+                let Some(token_str) = key.strip_prefix("VAULT_TOKEN_") else {
+                    continue;
+                };
                 match ApiKeyToken::new(token_str) {
                     Ok(token) => {
                         vault.store(&token, &value).await.expect("Failed to store vault token");

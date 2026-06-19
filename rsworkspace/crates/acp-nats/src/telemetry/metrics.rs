@@ -28,10 +28,7 @@ impl Metrics {
     }
 
     pub fn record_request(&self, method: &'static str, duration: f64, success: bool) {
-        let attrs = &[
-            KeyValue::new("method", method),
-            KeyValue::new("success", success),
-        ];
+        let attrs = &[KeyValue::new("method", method), KeyValue::new("success", success)];
         self.requests_total.add(1, attrs);
         self.request_duration.record(duration, attrs);
     }
@@ -91,9 +88,7 @@ mod tests {
     use opentelemetry::Value;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-    use opentelemetry_sdk::metrics::{
-        PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter,
-    };
+    use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter};
     use std::time::Duration;
 
     fn make_metrics() -> (Metrics, InMemoryMetricExporter, SdkMeterProvider) {
@@ -258,9 +253,8 @@ mod tests {
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() {
                     s.data_points()
                         .filter(|dp| {
-                            dp.attributes().any(|a| {
-                                a.key.as_str() == "operation" && a.value.as_str() == "cancel"
-                            })
+                            dp.attributes()
+                                .any(|a| a.key.as_str() == "operation" && a.value.as_str() == "cancel")
                         })
                         .map(|dp| dp.value())
                         .collect::<Vec<_>>()
@@ -317,7 +311,6 @@ mod tests {
         provider.shutdown().unwrap();
     }
 
-
     /// Calling `record_request` multiple times accumulates count in the counter.
     #[test]
     fn record_request_accumulates_multiple_calls() {
@@ -339,9 +332,8 @@ mod tests {
                 if let AggregatedMetrics::U64(MetricData::Sum(s)) = m.data() {
                     s.data_points()
                         .filter(|dp| {
-                            dp.attributes().any(|a| {
-                                a.key.as_str() == "success" && a.value == Value::Bool(true)
-                            })
+                            dp.attributes()
+                                .any(|a| a.key.as_str() == "success" && a.value == Value::Bool(true))
                         })
                         .map(|dp| dp.value())
                         .collect::<Vec<_>>()

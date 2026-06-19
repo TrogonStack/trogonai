@@ -45,22 +45,14 @@ pub const DEFAULT_MEMORY_PATH: &str = ".trogon/memory.md";
 /// Returns `Some(content)` when the file exists and is valid UTF-8.
 /// Returns `None` silently on 404 (file not yet created) or any error — the
 /// agent continues without a system prompt rather than failing.
-pub async fn fetch_memory(
-    agent: &AgentLoop,
-    owner: &str,
-    repo: &str,
-    path: &str,
-) -> Option<String> {
+pub async fn fetch_memory(agent: &AgentLoop, owner: &str, repo: &str, path: &str) -> Option<String> {
     let url = format!(
         "{}/github/repos/{owner}/{repo}/contents/{path}",
         agent.tool_context.proxy_url(),
     );
 
     let token = agent.tool_context.github_token().to_string();
-    let body = agent
-        .tool_context
-        .fetch_github_contents(&url, &token)
-        .await?;
+    let body = agent.tool_context.fetch_github_contents(&url, &token).await?;
 
     let raw = body["content"].as_str()?.replace('\n', "");
     let bytes = general_purpose::STANDARD.decode(&raw).ok()?;
@@ -108,9 +100,7 @@ pub async fn run_automation(
     let mut tools: Vec<crate::tools::ToolDef> = if automation.tools.is_empty() {
         all
     } else {
-        all.into_iter()
-            .filter(|t| automation.tools.contains(&t.name))
-            .collect()
+        all.into_iter().filter(|t| automation.tools.contains(&t.name)).collect()
     };
 
     // Initialise automation-specific MCP servers and extend the tool list.
@@ -122,8 +112,7 @@ pub async fn run_automation(
             url: s.url.clone(),
         })
         .collect();
-    let (auto_mcp_defs, auto_mcp_dispatch) =
-        agent.tool_context.init_mcp_clients(&auto_mcp_configs).await;
+    let (auto_mcp_defs, auto_mcp_dispatch) = agent.tool_context.init_mcp_clients(&auto_mcp_configs).await;
     tools.extend(auto_mcp_defs);
 
     // Build a temporary AgentLoop when the automation overrides model or MCP dispatch.
@@ -135,10 +124,7 @@ pub async fn run_automation(
         merged_dispatch.extend(auto_mcp_dispatch);
         merged = AgentLoop {
             anthropic_client: Arc::clone(&agent.anthropic_client),
-            model: automation
-                .model
-                .clone()
-                .unwrap_or_else(|| agent.model.clone()),
+            model: automation.model.clone().unwrap_or_else(|| agent.model.clone()),
             max_iterations: agent.max_iterations,
             tool_dispatcher: Arc::clone(&agent.tool_dispatcher),
             tool_context: Arc::clone(&agent.tool_context),
@@ -172,9 +158,8 @@ pub async fn run_automation(
             acc.replace(&format!("{{{{{k}}}}}"), v)
         });
 
-    let full_prompt = format!(
-        "Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{resolved_prompt}"
-    );
+    let full_prompt =
+        format!("Event subject: {nats_subject}\n\nEvent payload:\n```json\n{event_json}\n```\n\n{resolved_prompt}");
 
     // Resolve the memory path: automation override → agent default → built-in default.
     let mem_path = automation
@@ -185,10 +170,7 @@ pub async fn run_automation(
 
     let memory = match (&effective.memory_owner, &effective.memory_repo) {
         (Some(owner), Some(repo)) => {
-            if effective
-                .is_flag_enabled(&crate::flags::AgentFlag::MemoryEnabled)
-                .await
-            {
+            if effective.is_flag_enabled(&crate::flags::AgentFlag::MemoryEnabled).await {
                 fetch_memory(effective, owner, repo, mem_path).await
             } else {
                 debug!("Memory fetch skipped — agent_memory_enabled flag is off");
@@ -277,15 +259,9 @@ mod tests {
 
         let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
         let agent = make_agent_with_anthropic(mock_client);
-        let automation = make_automation(vec![
-            "get_pr_diff".to_string(),
-            "post_pr_comment".to_string(),
-        ]);
+        let automation = make_automation(vec!["get_pr_diff".to_string(), "post_pr_comment".to_string()]);
         let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
-        assert!(
-            result.is_ok(),
-            "list_pr_files was incorrectly included: {result:?}"
-        );
+        assert!(result.is_ok(), "list_pr_files was incorrectly included: {result:?}");
     }
 
     /// Automation memory_path overrides the agent's default memory path.
@@ -326,12 +302,13 @@ mod tests {
         assert!(result.is_ok(), "expected Ok: {result:?}");
         // Verify the automation's memory_path (not the agent's) was forwarded to fetch.
         let url = cfg.last_fetched_url().expect("fetch_github_contents was not called");
-        assert!(url.contains("custom/notes.md"), "URL {url:?} does not contain the override path");
+        assert!(
+            url.contains("custom/notes.md"),
+            "URL {url:?} does not contain the override path"
+        );
     }
 
-    fn make_agent_with_anthropic(
-        anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient>,
-    ) -> AgentLoop {
+    fn make_agent_with_anthropic(anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient>) -> AgentLoop {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         let tool_ctx = Arc::new(ToolContext::for_test(
@@ -424,7 +401,10 @@ mod tests {
     /// 404 response → fetch_memory returns None.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_404() {
-        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: None,
+            ..Default::default()
+        };
         let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
@@ -478,13 +458,19 @@ mod tests {
         let result = fetch_memory(&agent, "owner", "repo", "custom/notes.md").await;
         assert_eq!(result.as_deref(), Some("custom memory"));
         let url = cfg.last_fetched_url().expect("fetch_github_contents was not called");
-        assert!(url.contains("custom/notes.md"), "URL {url:?} does not contain the custom path");
+        assert!(
+            url.contains("custom/notes.md"),
+            "URL {url:?} does not contain the custom path"
+        );
     }
 
     /// Network error → fetch_memory returns None rather than propagating error.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_network_error() {
-        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: None,
+            ..Default::default()
+        };
         let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
@@ -493,7 +479,10 @@ mod tests {
     /// 403 Forbidden → fetch_memory returns None (not found / no access).
     #[tokio::test]
     async fn fetch_memory_returns_none_on_403() {
-        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: None,
+            ..Default::default()
+        };
         let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
@@ -502,7 +491,10 @@ mod tests {
     /// 500 Internal Server Error → fetch_memory returns None gracefully.
     #[tokio::test]
     async fn fetch_memory_returns_none_on_500() {
-        let cfg = crate::tools::mock::MockAgentConfig { github_contents: None, ..Default::default() };
+        let cfg = crate::tools::mock::MockAgentConfig {
+            github_contents: None,
+            ..Default::default()
+        };
         let agent = make_agent_with_mock_config(cfg);
         let result = fetch_memory(&agent, "owner", "repo", DEFAULT_MEMORY_PATH).await;
         assert!(result.is_none());
@@ -569,9 +561,6 @@ mod tests {
         automation.model = Some("claude-haiku-override".to_string());
 
         let result = run_automation(&agent, &automation, "github.push", b"{}", None).await;
-        assert!(
-            result.is_ok(),
-            "expected Ok with model override: {result:?}"
-        );
+        assert!(result.is_ok(), "expected Ok with model override: {result:?}");
     }
 }

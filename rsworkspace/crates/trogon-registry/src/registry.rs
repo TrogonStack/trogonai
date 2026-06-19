@@ -67,7 +67,12 @@ impl<S: RegistryStore> Registry<S> {
     /// Returns `Ok(None)` when the agent is not registered (or its TTL has expired).
     #[instrument(skip(self), fields(agent_type), err)]
     pub async fn get(&self, agent_type: &str) -> Result<Option<AgentCapability>, RegistryError> {
-        match self.store.get(agent_type).await.map_err(|e| RegistryError::Get(Box::new(e)))? {
+        match self
+            .store
+            .get(agent_type)
+            .await
+            .map_err(|e| RegistryError::Get(Box::new(e)))?
+        {
             Some(bytes) => {
                 let cap = serde_json::from_slice(&bytes).map_err(RegistryError::Serialization)?;
                 Ok(Some(cap))
@@ -94,10 +99,7 @@ impl<S: RegistryStore> Registry<S> {
     /// The Router calls this to build its context for the LLM routing prompt.
     pub async fn discover(&self, capability: &str) -> Result<Vec<AgentCapability>, RegistryError> {
         let all = self.list_all().await?;
-        Ok(all
-            .into_iter()
-            .filter(|c| c.has_capability(capability))
-            .collect())
+        Ok(all.into_iter().filter(|c| c.has_capability(capability)).collect())
     }
 
     /// Return every currently-registered agent.
@@ -105,11 +107,7 @@ impl<S: RegistryStore> Registry<S> {
     /// This is a snapshot — agents may register or expire between calls.
     #[instrument(skip(self), err)]
     pub async fn list_all(&self) -> Result<Vec<AgentCapability>, RegistryError> {
-        let keys = self
-            .store
-            .keys()
-            .await
-            .map_err(|e| RegistryError::List(Box::new(e)))?;
+        let keys = self.store.keys().await.map_err(|e| RegistryError::List(Box::new(e)))?;
         let mut capabilities = Vec::with_capacity(keys.len());
 
         for key in keys {
@@ -185,11 +183,7 @@ mod tests {
     }
 
     fn pr_actor() -> AgentCapability {
-        AgentCapability::new(
-            "PrActor",
-            ["code_review", "security_analysis"],
-            "actors.pr.>",
-        )
+        AgentCapability::new("PrActor", ["code_review", "security_analysis"], "actors.pr.>")
     }
 
     fn incident_actor() -> AgentCapability {
@@ -392,8 +386,12 @@ mod tests {
     #[tokio::test]
     async fn find_by_model_returns_matching_agent() {
         let r = registry();
-        r.register(&agent_with_models("xai", &["grok-4", "grok-3"])).await.unwrap();
-        r.register(&agent_with_models("openrouter", &["anthropic/claude-sonnet-4-6"])).await.unwrap();
+        r.register(&agent_with_models("xai", &["grok-4", "grok-3"]))
+            .await
+            .unwrap();
+        r.register(&agent_with_models("openrouter", &["anthropic/claude-sonnet-4-6"]))
+            .await
+            .unwrap();
 
         let found = r.find_by_model("grok-4").await.unwrap();
         assert!(found.is_some(), "must find agent advertising grok-4");
@@ -403,7 +401,9 @@ mod tests {
     #[tokio::test]
     async fn find_by_model_returns_none_when_no_agent_has_model() {
         let r = registry();
-        r.register(&agent_with_models("xai", &["grok-4", "grok-3"])).await.unwrap();
+        r.register(&agent_with_models("xai", &["grok-4", "grok-3"]))
+            .await
+            .unwrap();
 
         let found = r.find_by_model("o4-mini").await.unwrap();
         assert!(found.is_none(), "must return None for unknown model");
@@ -441,7 +441,9 @@ mod tests {
     #[tokio::test]
     async fn find_by_model_matches_second_model_in_list() {
         let r = registry();
-        r.register(&agent_with_models("codex", &["o4-mini", "o3", "gpt-4o"])).await.unwrap();
+        r.register(&agent_with_models("codex", &["o4-mini", "o3", "gpt-4o"]))
+            .await
+            .unwrap();
 
         let found = r.find_by_model("o3").await.unwrap();
         assert_eq!(found.unwrap().agent_type, "codex");

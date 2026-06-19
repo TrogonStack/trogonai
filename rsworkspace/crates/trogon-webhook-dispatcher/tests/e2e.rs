@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use axum::{Router, body::Bytes, extract::State, http::StatusCode, routing::post};
-use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
-use tokio::net::TcpListener;
-use trogon_webhook_dispatcher::{
-    Dispatcher, ReqwestWebhookClient, WebhookRegistry, provision,
+use testcontainers_modules::{
+    nats::Nats,
+    testcontainers::{ImageExt, runners::AsyncRunner as _},
 };
+use tokio::net::TcpListener;
 use trogon_webhook_dispatcher::subscription::WebhookSubscription;
+use trogon_webhook_dispatcher::{Dispatcher, ReqwestWebhookClient, WebhookRegistry, provision};
 
 // ── Helper: spin up an echo HTTP server that records inbound POST bodies ──────
 
@@ -48,9 +49,7 @@ async fn hook_receiver(
 }
 
 async fn spawn_hook_server(received: ReceivedHooks) -> SocketAddr {
-    let app = Router::new()
-        .route("/hook", post(hook_receiver))
-        .with_state(received);
+    let app = Router::new().route("/hook", post(hook_receiver)).with_state(received);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -70,11 +69,7 @@ async fn setup(
     async_nats::Client,
     jetstream::Context,
     WebhookRegistry<async_nats::jetstream::kv::Store>,
-    Dispatcher<
-        jetstream::Context,
-        async_nats::jetstream::kv::Store,
-        ReqwestWebhookClient,
-    >,
+    Dispatcher<jetstream::Context, async_nats::jetstream::kv::Store, ReqwestWebhookClient>,
 ) {
     let nats = async_nats::connect(nats_url).await.unwrap();
     let js = jetstream::new(nats.clone());
@@ -125,18 +120,20 @@ async fn dispatches_transcript_event_to_webhook() {
     let received = ReceivedHooks::new();
     let hook_addr = spawn_hook_server(received.clone()).await;
 
-    let (nats, js, _registry, dispatcher) =
-        setup(&nats_url, &hook_addr.to_string(), "transcripts.>", None).await;
+    let (nats, js, _registry, dispatcher) = setup(&nats_url, &hook_addr.to_string(), "transcripts.>", None).await;
 
     tokio::spawn(async move { dispatcher.run().await.ok() });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    js.publish("transcripts.pr.owner.repo.1.sess-abc", br#"{"type":"message","role":"user","content":"review this"}"#.as_slice().into())
-        .await
-        .unwrap()
-        .await
-        .unwrap();
+    js.publish(
+        "transcripts.pr.owner.repo.1.sess-abc",
+        br#"{"type":"message","role":"user","content":"review this"}"#.as_slice().into(),
+    )
+    .await
+    .unwrap()
+    .await
+    .unwrap();
 
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -207,8 +204,7 @@ async fn non_matching_subject_is_not_dispatched() {
     let received = ReceivedHooks::new();
     let hook_addr = spawn_hook_server(received.clone()).await;
 
-    let (_nats, js, _registry, dispatcher) =
-        setup(&nats_url, &hook_addr.to_string(), "github.>", None).await;
+    let (_nats, js, _registry, dispatcher) = setup(&nats_url, &hook_addr.to_string(), "github.>", None).await;
 
     tokio::spawn(async move { dispatcher.run().await.ok() });
 
@@ -221,5 +217,8 @@ async fn non_matching_subject_is_not_dispatched() {
         .unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(received.take_bodies().is_empty(), "should not dispatch to github.> subscription");
+    assert!(
+        received.take_bodies().is_empty(),
+        "should not dispatch to github.> subscription"
+    );
 }

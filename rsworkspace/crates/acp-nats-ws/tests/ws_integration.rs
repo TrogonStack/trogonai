@@ -55,15 +55,11 @@ fn make_config(nats_port: u16) -> Config {
 }
 
 /// Starts the acp-nats-ws server backed by real NATS with only the plain `/ws` route.
-async fn start_server(
-    nats_port: u16,
-) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
+async fn start_server(nats_port: u16) -> (String, watch::Sender<bool>, std::thread::JoinHandle<()>) {
     let nats_client = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("connect to NATS");
-    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(
-        async_nats::jetstream::new(nats_client.clone()),
-    );
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
 
     let config = make_config(nats_port);
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
@@ -109,8 +105,8 @@ async fn start_server(
 /// - the connection thread `JoinHandle` for clean teardown
 async fn start_server_with_registry() -> (
     ContainerAsync<Nats>,
-    u16,                  // nats_port — for mock agents that need a direct NATS connection
-    String,               // base WebSocket URL
+    u16,    // nats_port — for mock agents that need a direct NATS connection
+    String, // base WebSocket URL
     trogon_registry::Registry<trogon_registry::KvStore>,
     watch::Sender<bool>,
     std::thread::JoinHandle<()>,
@@ -122,8 +118,7 @@ async fn start_server_with_registry() -> (
         .expect("connect to NATS");
 
     let js_context = async_nats::jetstream::new(nats_client.clone());
-    let js_client =
-        trogon_nats::jetstream::NatsJetStreamClient::new(js_context.clone());
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context.clone());
 
     let store = trogon_registry::provision(&js_context)
         .await
@@ -153,9 +148,7 @@ async fn start_server_with_registry() -> (
     let app = axum::Router::new()
         .route(
             "/ws/{agent_type}",
-            axum::routing::get(
-                upgrade::handle_with_agent_type::<trogon_registry::KvStore>,
-            ),
+            axum::routing::get(upgrade::handle_with_agent_type::<trogon_registry::KvStore>),
         )
         .layer(axum::extract::Extension(registry_ext))
         .with_state(state);
@@ -172,7 +165,14 @@ async fn start_server_with_registry() -> (
             .unwrap();
     });
 
-    (container, nats_port, format!("ws://{addr}"), registry, shutdown_tx, conn_thread)
+    (
+        container,
+        nats_port,
+        format!("ws://{addr}"),
+        registry,
+        shutdown_tx,
+        conn_thread,
+    )
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -192,8 +192,7 @@ async fn ws_initialize_with_real_nats_returns_protocol_version() {
     let agent_nats2 = agent_nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 agent_nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -346,9 +345,7 @@ async fn ws_request_permission_forwarded_and_replied_via_nats() {
         "id": rpc_id,
         "result": allow_result,
     });
-    ws.send(Message::Text(rpc_reply.to_string().into()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(rpc_reply.to_string().into())).await.unwrap();
 
     // The NATS reply should be a raw RequestPermissionResponse JSON (no JSON-RPC
     // envelope), because that's what NatsClientProxy::request_with_timeout parses.
@@ -358,9 +355,8 @@ async fn ws_request_permission_forwarded_and_replied_via_nats() {
         .expect("NATS request timed out")
         .expect("NATS request failed");
 
-    let nats_response: RequestPermissionResponse =
-        serde_json::from_slice(&nats_outcome.payload)
-            .expect("NATS reply payload should deserialize as raw RequestPermissionResponse");
+    let nats_response: RequestPermissionResponse = serde_json::from_slice(&nats_outcome.payload)
+        .expect("NATS reply payload should deserialize as raw RequestPermissionResponse");
 
     assert!(
         matches!(nats_response.outcome, RequestPermissionOutcome::Selected(_)),
@@ -385,8 +381,7 @@ async fn multiple_ws_clients_get_independent_responses() {
     let agent_nats2 = agent_nats.clone();
     tokio::spawn(async move {
         while let Some(msg) = agent_sub.next().await {
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 let _ = agent_nats2.publish(reply, resp.into()).await;
             }
@@ -434,16 +429,8 @@ async fn multiple_ws_clients_get_independent_responses() {
     let val2: serde_json::Value = serde_json::from_str(&text2).unwrap();
 
     // Each client receives a response with its own request id and a protocolVersion.
-    assert_eq!(
-        val1["id"],
-        serde_json::json!(10),
-        "wrong id in ws1 response"
-    );
-    assert_eq!(
-        val2["id"],
-        serde_json::json!(20),
-        "wrong id in ws2 response"
-    );
+    assert_eq!(val1["id"], serde_json::json!(10), "wrong id in ws1 response");
+    assert_eq!(val2["id"], serde_json::json!(20), "wrong id in ws2 response");
     assert!(
         val1["result"]["protocolVersion"].is_number(),
         "ws1 response missing protocolVersion"
@@ -465,8 +452,7 @@ async fn multiple_ws_clients_get_independent_responses() {
 /// agent replies and the client receives a valid `protocolVersion` response.
 #[tokio::test]
 async fn ws_agent_type_route_uses_registered_prefix() {
-    let (_container, nats_port, base_url, registry, shutdown_tx, conn_thread) =
-        start_server_with_registry().await;
+    let (_container, nats_port, base_url, registry, shutdown_tx, conn_thread) = start_server_with_registry().await;
 
     // Register "claude" with prefix acp.claude.
     let cap = trogon_registry::AgentCapability {
@@ -482,15 +468,11 @@ async fn ws_agent_type_route_uses_registered_prefix() {
     let agent_nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("agent NATS connect");
-    let mut agent_sub = agent_nats
-        .subscribe("acp.claude.agent.initialize")
-        .await
-        .unwrap();
+    let mut agent_sub = agent_nats.subscribe("acp.claude.agent.initialize").await.unwrap();
     let agent_nats2 = agent_nats.clone();
     tokio::spawn(async move {
         if let Some(msg) = agent_sub.next().await {
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 agent_nats2.publish(reply, resp.into()).await.unwrap();
             }
@@ -529,8 +511,7 @@ async fn ws_agent_type_route_uses_registered_prefix() {
 /// fails before the WebSocket upgrade is completed.
 #[tokio::test]
 async fn ws_agent_type_route_returns_404_for_unregistered_agent() {
-    let (_container, _nats_port, base_url, _registry, shutdown_tx, conn_thread) =
-        start_server_with_registry().await;
+    let (_container, _nats_port, base_url, _registry, shutdown_tx, conn_thread) = start_server_with_registry().await;
 
     // No agent registered — connect attempt must be rejected with 404.
     let ws_url = format!("{base_url}/ws/ghost");
@@ -558,8 +539,7 @@ async fn ws_agent_type_route_returns_404_for_unregistered_agent() {
 async fn runner_isolation_messages_only_reach_registered_runner() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    let (_container, nats_port, base_url, registry, shutdown_tx, conn_thread) =
-        start_server_with_registry().await;
+    let (_container, nats_port, base_url, registry, shutdown_tx, conn_thread) = start_server_with_registry().await;
 
     // Register two agents with distinct prefixes.
     registry
@@ -594,8 +574,7 @@ async fn runner_isolation_messages_only_reach_registered_runner() {
     tokio::spawn(async move {
         while let Some(msg) = xai_sub.next().await {
             xai_received2.store(true, Ordering::Relaxed);
-            let resp =
-                serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
+            let resp = serde_json::to_vec(&InitializeResponse::new(ProtocolVersion::LATEST)).unwrap();
             if let Some(reply) = msg.reply {
                 xai_nats2.publish(reply, resp.into()).await.ok();
             }
@@ -607,10 +586,7 @@ async fn runner_isolation_messages_only_reach_registered_runner() {
     let claude_nats = async_nats::connect(format!("127.0.0.1:{nats_port}"))
         .await
         .expect("claude agent NATS connect");
-    let mut claude_sub = claude_nats
-        .subscribe("acp.claude.agent.initialize")
-        .await
-        .unwrap();
+    let mut claude_sub = claude_nats.subscribe("acp.claude.agent.initialize").await.unwrap();
     let claude_received2 = claude_received.clone();
     tokio::spawn(async move {
         while let Some(_msg) = claude_sub.next().await {

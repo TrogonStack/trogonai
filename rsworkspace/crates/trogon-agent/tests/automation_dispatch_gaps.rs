@@ -61,10 +61,7 @@ async fn create_streams(js: &jetstream::Context) {
 
 fn runner_cfg(nats_port: u16, proxy_url: String, tenant_id: &str) -> AgentConfig {
     AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url,
         anthropic_token: "test-token".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -247,11 +244,7 @@ async fn action_filtered_trigger_skips_non_matching_action() {
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
         "fallback handler was not called when action didn't match automation trigger"
     );
-    assert_eq!(
-        bad_mock.hits_async().await,
-        0,
-        "automation fired for wrong action"
-    );
+    assert_eq!(bad_mock.hits_async().await, 0, "automation fired for wrong action");
 }
 
 /// An automation stored for tenant "acme" must NOT run when the runner
@@ -283,8 +276,7 @@ async fn tenant_isolation_automation_does_not_fire_for_wrong_tenant() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("ACME_TENANT_PROMPT_XYZ");
-            then.status(500)
-                .body("cross-tenant automation must not fire");
+            then.status(500).body("cross-tenant automation must not fire");
         })
         .await;
 
@@ -318,11 +310,7 @@ async fn tenant_isolation_automation_does_not_fire_for_wrong_tenant() {
         wait_for_hits(&fallback_mock, 1, Duration::from_secs(8)).await,
         "fallback did not run — wrong-tenant automation may have matched"
     );
-    assert_eq!(
-        bad_mock.hits_async().await,
-        0,
-        "cross-tenant automation fired"
-    );
+    assert_eq!(bad_mock.hits_async().await, 0, "cross-tenant automation fired");
 }
 
 /// A Linear Issue event dispatches to a matching automation.
@@ -480,8 +468,7 @@ async fn pr_merged_event_dispatches_to_automation_not_hardcoded_handler() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("was just merged by");
-            then.status(500)
-                .body("hardcoded pr_merged handler must not run");
+            then.status(500).body("hardcoded pr_merged handler must not run");
         })
         .await;
 
@@ -606,8 +593,7 @@ async fn draft_opened_trigger_does_not_fire_for_non_draft_pr() {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
                 .body_contains("SHOULD_NOT_FIRE_FOR_NON_DRAFT");
-            then.status(500)
-                .body("draft_opened must not fire for non-draft PR");
+            then.status(500).body("draft_opened must not fire for non-draft PR");
         })
         .await;
 
@@ -642,11 +628,7 @@ async fn draft_opened_trigger_does_not_fire_for_non_draft_pr() {
         wait_for_hits(&fallback, 1, Duration::from_secs(8)).await,
         "fallback handler not called for non-draft PR"
     );
-    assert_eq!(
-        bad_mock.hits_async().await,
-        0,
-        "draft_opened fired for non-draft PR"
-    );
+    assert_eq!(bad_mock.hits_async().await, 0, "draft_opened fired for non-draft PR");
 }
 
 /// An automation with trigger `github.pull_request:pushed` fires when a PR

@@ -86,7 +86,9 @@ fn message_to_wire(m: &Message) -> WireMessage {
         // Assistant with tool_calls → one message: optional Text + N ToolUse.
         let mut content = Vec::new();
         if !m.content.is_empty() {
-            content.push(WireBlock::Text { text: m.content.clone() });
+            content.push(WireBlock::Text {
+                text: m.content.clone(),
+            });
         }
         for tc in m.tool_calls.as_deref().unwrap_or(&[]) {
             content.push(WireBlock::ToolUse {
@@ -95,11 +97,16 @@ fn message_to_wire(m: &Message) -> WireMessage {
                 input: serde_json::from_str(&tc.arguments).unwrap_or(serde_json::Value::Null),
             });
         }
-        WireMessage { role: "assistant".into(), content }
+        WireMessage {
+            role: "assistant".into(),
+            content,
+        }
     } else {
         WireMessage {
             role: m.role.clone(),
-            content: vec![WireBlock::Text { text: m.content.clone() }],
+            content: vec![WireBlock::Text {
+                text: m.content.clone(),
+            }],
         }
     }
 }
@@ -286,8 +293,14 @@ mod tests {
     fn resp(summary: &str, kept_count: usize, compacted: bool) -> CompactResp {
         CompactResp {
             messages: vec![
-                WireMessage { role: "user".into(), content: vec![WireBlock::Text { text: summary.into() }] },
-                WireMessage { role: "assistant".into(), content: vec![WireBlock::Text { text: "ack".into() }] },
+                WireMessage {
+                    role: "user".into(),
+                    content: vec![WireBlock::Text { text: summary.into() }],
+                },
+                WireMessage {
+                    role: "assistant".into(),
+                    content: vec![WireBlock::Text { text: "ack".into() }],
+                },
             ],
             compacted,
             kept_count,

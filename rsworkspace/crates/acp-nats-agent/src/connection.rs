@@ -891,8 +891,14 @@ mod tests {
         let value: serde_json::Value = published_response(&nats);
         // Reply must be discriminated: {"result": <ext response body>}
         assert!(value.is_object(), "ext reply must be a JSON object");
-        assert!(value.get("result").is_some(), "ext success reply must have a 'result' key");
-        assert!(value.get("error").is_none(), "ext success reply must not have an 'error' key");
+        assert!(
+            value.get("result").is_some(),
+            "ext success reply must have a 'result' key"
+        );
+        assert!(
+            value.get("error").is_none(),
+            "ext success reply must not have an 'error' key"
+        );
     }
 
     #[tokio::test]
@@ -915,10 +921,16 @@ mod tests {
             async fn initialize(&self, _: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
                 Err(AcpError::internal_error())
             }
-            async fn authenticate(&self, _: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+            async fn authenticate(
+                &self,
+                _: AuthenticateRequest,
+            ) -> agent_client_protocol::Result<AuthenticateResponse> {
                 Err(AcpError::internal_error())
             }
-            async fn logout(&self, _: LogoutRequest) -> agent_client_protocol::Result<agent_client_protocol::LogoutResponse> {
+            async fn logout(
+                &self,
+                _: LogoutRequest,
+            ) -> agent_client_protocol::Result<agent_client_protocol::LogoutResponse> {
                 Err(AcpError::internal_error())
             }
             async fn new_session(&self, _: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
@@ -930,7 +942,10 @@ mod tests {
             async fn cancel(&self, _: CancelNotification) -> agent_client_protocol::Result<()> {
                 Err(AcpError::internal_error())
             }
-            async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<agent_client_protocol::ExtResponse> {
+            async fn ext_method(
+                &self,
+                _: ExtRequest,
+            ) -> agent_client_protocol::Result<agent_client_protocol::ExtResponse> {
                 Err(AcpError::method_not_found())
             }
         }
@@ -946,7 +961,10 @@ mod tests {
         // Reply must be discriminated: {"error": {...}}
         assert!(value.is_object(), "ext error reply must be a JSON object");
         assert!(value.get("error").is_some(), "ext error reply must have an 'error' key");
-        assert!(value.get("result").is_none(), "ext error reply must not have a 'result' key");
+        assert!(
+            value.get("result").is_none(),
+            "ext error reply must not have a 'result' key"
+        );
         let error_obj = &value["error"];
         assert!(error_obj.get("code").is_some(), "error object must have 'code'");
         assert!(error_obj.get("message").is_some(), "error object must have 'message'");

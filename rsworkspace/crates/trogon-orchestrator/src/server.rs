@@ -226,10 +226,8 @@ mod tests {
         let store = MockRegistryStore::new();
         let registry = Registry::new(store);
         let caller = MockAgentCaller::returning(b"ok".to_vec());
-        let engine =
-            OrchestratorEngine::new(NoOpProvider, caller, registry);
-        let results_store: Arc<Mutex<Vec<OrchestrationResult>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let engine = OrchestratorEngine::new(NoOpProvider, caller, registry);
+        let results_store: Arc<Mutex<Vec<OrchestrationResult>>> = Arc::new(Mutex::new(Vec::new()));
         let state: AppState<NoOpProvider, MockAgentCaller, MockRegistryStore> = AppState {
             engine: Arc::new(engine),
             results: Arc::clone(&results_store),

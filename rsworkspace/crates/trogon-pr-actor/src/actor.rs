@@ -172,12 +172,7 @@ impl<H: HttpClient> PrActor<H> {
     ///
     /// Returns `(head_sha, diff_text)`. The diff uses
     /// `Accept: application/vnd.github.diff`.
-    async fn fetch_pr_diff_and_sha(
-        &self,
-        owner: &str,
-        repo: &str,
-        number: u64,
-    ) -> Result<(String, String), String> {
+    async fn fetch_pr_diff_and_sha(&self, owner: &str, repo: &str, number: u64) -> Result<(String, String), String> {
         let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", self.github_api_url);
         let auth = format!("Bearer {}", self.github_token);
 
@@ -195,8 +190,8 @@ impl<H: HttpClient> PrActor<H> {
             .await
             .map_err(|e| format!("GitHub API request failed: {e}"))?;
 
-        let info: serde_json::Value = serde_json::from_str(&info_text)
-            .map_err(|e| format!("parsing PR info JSON failed: {e}"))?;
+        let info: serde_json::Value =
+            serde_json::from_str(&info_text).map_err(|e| format!("parsing PR info JSON failed: {e}"))?;
 
         let head_sha = info
             .pointer("/head/sha")
@@ -235,11 +230,7 @@ impl<H: HttpClient> PrActor<H> {
         let url = format!("{}/chat/completions", self.llm_api_url);
 
         // Truncate very large diffs to avoid context overflow.
-        let diff_preview = if diff.len() > 20_000 {
-            &diff[..20_000]
-        } else {
-            diff
-        };
+        let diff_preview = if diff.len() > 20_000 { &diff[..20_000] } else { diff };
 
         let prompt = format!(
             "You are a senior engineer performing a code review on pull request `{entity_key}` \
@@ -270,8 +261,7 @@ impl<H: HttpClient> PrActor<H> {
             return Err(format!("LLM returned {status}: {text}"));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| format!("parsing LLM response: {e}"))?;
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("parsing LLM response: {e}"))?;
 
         let content = json
             .pointer("/choices/0/message/content")
@@ -292,13 +282,7 @@ impl<H: HttpClient> PrActor<H> {
     }
 
     /// Post a review comment to a GitHub pull request.
-    async fn post_review_comment(
-        &self,
-        owner: &str,
-        repo: &str,
-        number: u64,
-        body: &str,
-    ) -> Result<(), String> {
+    async fn post_review_comment(&self, owner: &str, repo: &str, number: u64, body: &str) -> Result<(), String> {
         let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", self.github_api_url);
 
         let payload = serde_json::json!({
@@ -385,16 +369,9 @@ impl<H: HttpClient> EntityActor for PrActor<H> {
                                     let comment = format!(
                                         "## Automated Code Review (event #{n})\n\n{items}",
                                         n = state.events_processed,
-                                        items = issues
-                                            .iter()
-                                            .map(|i| format!("- {i}"))
-                                            .collect::<Vec<_>>()
-                                            .join("\n"),
+                                        items = issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n"),
                                     );
-                                    match self
-                                        .post_review_comment(&owner, &repo, number, &comment)
-                                        .await
-                                    {
+                                    match self.post_review_comment(&owner, &repo, number, &comment).await {
                                         Ok(()) => {
                                             state.comments_posted += 1;
                                             review_summary = format!(
@@ -414,16 +391,12 @@ impl<H: HttpClient> EntityActor for PrActor<H> {
                                                 error = %e,
                                                 "failed to post review comment"
                                             );
-                                            review_summary = format!(
-                                                "LLM review done but comment post failed: {e}"
-                                            );
+                                            review_summary = format!("LLM review done but comment post failed: {e}");
                                         }
                                     }
                                 } else {
-                                    review_summary = format!(
-                                        "Event #{n}: no issues found.",
-                                        n = state.events_processed
-                                    );
+                                    review_summary =
+                                        format!("Event #{n}: no issues found.", n = state.events_processed);
                                 }
                             }
                             Err(e) => {
@@ -453,9 +426,7 @@ impl<H: HttpClient> EntityActor for PrActor<H> {
             }
         }
 
-        ctx.append_assistant_message(&review_summary, None)
-            .await
-            .ok();
+        ctx.append_assistant_message(&review_summary, None).await.ok();
 
         Ok(())
     }
@@ -492,11 +463,7 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        async fn get(
-            &self,
-            _url: &str,
-            _headers: Vec<(String, String)>,
-        ) -> Result<(u16, String), String> {
+        async fn get(&self, _url: &str, _headers: Vec<(String, String)>) -> Result<(u16, String), String> {
             self.responses
                 .lock()
                 .unwrap()
@@ -573,10 +540,7 @@ mod tests {
     #[test]
     fn parse_entity_key_standard_format() {
         let result = PrActor::<reqwest::Client>::parse_entity_key("anthropics.my-repo.42");
-        assert_eq!(
-            result,
-            Some(("anthropics".to_string(), "my-repo".to_string(), 42))
-        );
+        assert_eq!(result, Some(("anthropics".to_string(), "my-repo".to_string(), 42)));
     }
 
     #[test]
@@ -593,10 +557,7 @@ mod tests {
     #[test]
     fn parse_entity_key_multi_segment_repo() {
         let result = PrActor::<reqwest::Client>::parse_entity_key("acme.infra.my-repo.7");
-        assert_eq!(
-            result,
-            Some(("acme".to_string(), "infra.my-repo".to_string(), 7))
-        );
+        assert_eq!(result, Some(("acme".to_string(), "infra.my-repo".to_string(), 7)));
     }
 
     // ── HTTP error paths ──────────────────────────────────────────────────────
@@ -655,10 +616,7 @@ mod tests {
         #[tokio::test]
         async fn review_with_llm_returns_err_when_content_is_not_valid_json() {
             let http = MockHttpClient::new();
-            http.push(
-                200,
-                r#"{"choices":[{"message":{"content":"not json {"}}]}"#,
-            );
+            http.push(200, r#"{"choices":[{"message":{"content":"not json {"}}]}"#);
 
             let actor = mock_actor(http);
             let result = actor.review_with_llm("owner.repo.1", 1, "diff").await;

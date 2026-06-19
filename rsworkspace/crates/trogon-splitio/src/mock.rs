@@ -168,11 +168,7 @@ async fn handle_get_treatment(
     Query(params): Query<TreatmentParams>,
 ) -> axum::Json<serde_json::Value> {
     let name = params.split_name.as_deref().unwrap_or("");
-    let treatment = state
-        .flags
-        .get(name)
-        .cloned()
-        .unwrap_or_else(|| "control".to_string());
+    let treatment = state.flags.get(name).cloned().unwrap_or_else(|| "control".to_string());
     axum::Json(serde_json::json!({ "splitName": name, "treatment": treatment }))
 }
 
@@ -185,15 +181,8 @@ async fn handle_get_treatments(
         .split(',')
         .filter(|s| !s.is_empty())
         .map(|name| {
-            let treatment = state
-                .flags
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| "control".to_string());
-            (
-                name.to_string(),
-                serde_json::json!({ "treatment": treatment }),
-            )
+            let treatment = state.flags.get(name).cloned().unwrap_or_else(|| "control".to_string());
+            (name.to_string(), serde_json::json!({ "treatment": treatment }))
         })
         .collect();
     axum::Json(serde_json::Value::Object(result))
@@ -204,11 +193,7 @@ async fn handle_get_treatment_with_config(
     Query(params): Query<TreatmentParams>,
 ) -> axum::Json<serde_json::Value> {
     let name = params.split_name.as_deref().unwrap_or("");
-    let treatment = state
-        .flags
-        .get(name)
-        .cloned()
-        .unwrap_or_else(|| "control".to_string());
+    let treatment = state.flags.get(name).cloned().unwrap_or_else(|| "control".to_string());
     let config = state.configs.get(name).cloned();
     axum::Json(serde_json::json!({
         "splitName": name,
@@ -264,10 +249,7 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let t = client
-            .get_treatment("user-1", "my_flag", None)
-            .await
-            .unwrap();
+        let t = client.get_treatment("user-1", "my_flag", None).await.unwrap();
         assert_eq!(t, "on");
     }
 
@@ -277,10 +259,7 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        let t = client
-            .get_treatment("user-1", "unknown_flag", None)
-            .await
-            .unwrap();
+        let t = client.get_treatment("user-1", "unknown_flag", None).await.unwrap();
         assert_eq!(t, "control");
     }
 
@@ -393,14 +372,8 @@ mod tests {
         let (addr, _h) = mock.serve().await;
         let client = client_for(addr);
 
-        client
-            .track("user-1", "user", "page_view", None, None)
-            .await
-            .unwrap();
-        client
-            .track("user-2", "user", "signup", None, None)
-            .await
-            .unwrap();
+        client.track("user-1", "user", "page_view", None, None).await.unwrap();
+        client.track("user-2", "user", "signup", None, None).await.unwrap();
 
         let evs = events.lock().unwrap();
         assert_eq!(evs.len(), 2);
@@ -420,10 +393,7 @@ mod tests {
 
         // Pass an empty flag name — equivalent to a missing split-name param.
         let t = client.get_treatment("user-1", "", None).await.unwrap();
-        assert_eq!(
-            t, "control",
-            "empty / missing split-name must return 'control'"
-        );
+        assert_eq!(t, "control", "empty / missing split-name must return 'control'");
     }
 
     /// When required track params (`key`, `traffic-type`, `event-type`) are

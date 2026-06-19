@@ -15,18 +15,16 @@ use std::time::Duration;
 
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
-use async_trait::async_trait;
 use agent_client_protocol::{
-    Agent, AuthenticateRequest, CloseSessionRequest, ContentBlock, McpServer, McpServerHttp,
-    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
+    Agent, AuthenticateRequest, CloseSessionRequest, ContentBlock, McpServer, McpServerHttp, NewSessionRequest,
+    PromptRequest, SessionNotification, SetSessionModelRequest,
 };
+use async_trait::async_trait;
 use futures_util::StreamExt as _;
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
-use trogon_openrouter_runner::{
-    NatsSessionNotifier, OpenRouterAgent, OpenRouterClient, SessionNotifier,
-};
+use trogon_openrouter_runner::{NatsSessionNotifier, OpenRouterAgent, OpenRouterClient, SessionNotifier};
 
 /// No-op session notifier for the in-memory live tests (drops notifications).
 struct NoopNotifier;
@@ -36,8 +34,7 @@ impl SessionNotifier for NoopNotifier {
 }
 
 fn test_key() -> String {
-    std::env::var("OPENROUTER_TEST_KEY")
-        .expect("OPENROUTER_TEST_KEY must be set — see file header for usage")
+    std::env::var("OPENROUTER_TEST_KEY").expect("OPENROUTER_TEST_KEY must be set — see file header for usage")
 }
 
 async fn start_nats() -> (impl Drop, async_nats::Client) {
@@ -68,7 +65,9 @@ async fn start_agent_with_real_openrouter(nats: async_nats::Client, api_key: Str
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats, prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
-        rt.block_on(local.run_until(async move { io_task.await.ok(); }));
+        rt.block_on(local.run_until(async move {
+            io_task.await.ok();
+        }));
     });
     // Give agent time to subscribe.
     tokio::time::sleep(Duration::from_millis(400)).await;
@@ -76,26 +75,22 @@ async fn start_agent_with_real_openrouter(nats: async_nats::Client, api_key: Str
 
 async fn nats_req(nats: &async_nats::Client, subject: impl Into<String>, payload: Vec<u8>) -> Value {
     let subject = subject.into();
-    let msg = tokio::time::timeout(
-        Duration::from_secs(30),
-        nats.request(subject.clone(), payload.into()),
-    )
-    .await
-    .unwrap_or_else(|_| panic!("timed out on {subject}"))
-    .unwrap_or_else(|e| panic!("NATS request failed on {subject}: {e}"));
+    let msg = tokio::time::timeout(Duration::from_secs(30), nats.request(subject.clone(), payload.into()))
+        .await
+        .unwrap_or_else(|_| panic!("timed out on {subject}"))
+        .unwrap_or_else(|e| panic!("NATS request failed on {subject}: {e}"));
     serde_json::from_slice(&msg.payload).expect("valid JSON response")
 }
 
 async fn collect_text_chunks(sub: &mut async_nats::Subscriber) -> String {
     let mut chunks = Vec::new();
-    while let Ok(Some(msg)) =
-        tokio::time::timeout(Duration::from_millis(500), sub.next()).await
-    {
+    while let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(500), sub.next()).await {
         let v: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
         if v["update"]["sessionUpdate"].as_str() == Some("agent_message_chunk")
-            && let Some(text) = v["update"]["content"]["text"].as_str() {
-                chunks.push(text.to_string());
-            }
+            && let Some(text) = v["update"]["content"]["text"].as_str()
+        {
+            chunks.push(text.to_string());
+        }
     }
     chunks.join("")
 }
@@ -119,7 +114,10 @@ async fn do_authenticate_agent_key(nats: &async_nats::Client) {
     let req = AuthenticateRequest::new("agent");
     let payload = serde_json::to_vec(&req).unwrap();
     let resp = nats_req(nats, "acp.agent.authenticate", payload).await;
-    assert!(resp.get("error").is_none(), "agent-key authenticate must not error: {resp}");
+    assert!(
+        resp.get("error").is_none(),
+        "agent-key authenticate must not error: {resp}"
+    );
 }
 
 async fn do_new_session(nats: &async_nats::Client) -> String {
@@ -145,17 +143,16 @@ async fn do_set_session_model(nats: &async_nats::Client, session_id: &str, model
     let model = model.to_string();
     let payload = serde_json::to_vec(&SetSessionModelRequest::new(session_id.clone(), model.clone())).unwrap();
     let resp = nats_req(nats, format!("acp.session.{session_id}.agent.set_model"), payload).await;
-    assert!(resp.get("error").is_none(), "set_session_model to {model} must not error: {resp}");
+    assert!(
+        resp.get("error").is_none(),
+        "set_session_model to {model} must not error: {resp}"
+    );
 }
 
 async fn do_prompt(nats: &async_nats::Client, session_id: &str, text: &str) -> Value {
     let session_id = session_id.to_string();
     let text = text.to_string();
-    let payload = serde_json::to_vec(&PromptRequest::new(
-        session_id.clone(),
-        vec![ContentBlock::from(text)],
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&PromptRequest::new(session_id.clone(), vec![ContentBlock::from(text)])).unwrap();
     let subject = format!("acp.session.{session_id}.agent.prompt");
     let resp = nats_req(nats, subject, payload).await;
     assert!(resp.get("error").is_none(), "prompt must not error: {resp}");
@@ -177,8 +174,7 @@ async fn do_prompt(nats: &async_nats::Client, session_id: &str, text: &str) -> V
 #[tokio::test]
 async fn full_stack_nats_to_openrouter_and_back() {
     let key = test_key();
-    let model = std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    let model = std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
 
     let (_container, nats) = start_nats().await;
     start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
@@ -192,11 +188,18 @@ async fn full_stack_nats_to_openrouter_and_back() {
     let mut notif_sub = nats.subscribe(notif_subject).await.expect("subscribe");
 
     let resp = do_prompt(&nats, &session_id, "Reply with exactly one word: hello").await;
-    assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn: {resp}");
+    assert_eq!(
+        resp["stopReason"].as_str(),
+        Some("end_turn"),
+        "expected end_turn: {resp}"
+    );
 
     let full_text = collect_text_chunks(&mut notif_sub).await;
     eprintln!("full_text={full_text:?}");
-    assert!(!full_text.is_empty(), "expected at least one text chunk via NATS notification");
+    assert!(
+        !full_text.is_empty(),
+        "expected at least one text chunk via NATS notification"
+    );
 }
 
 /// Multi-turn conversation: verify conversation history is sent to OpenRouter.
@@ -208,8 +211,7 @@ async fn full_stack_nats_to_openrouter_and_back() {
 #[tokio::test]
 async fn multi_turn_conversation_history_is_maintained() {
     let key = test_key();
-    let model = std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    let model = std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
 
     let (_container, nats) = start_nats().await;
     start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
@@ -223,14 +225,24 @@ async fn multi_turn_conversation_history_is_maintained() {
     let notif_subject = format!("acp.session.{session_id}.client.session.update");
     let mut notif_sub = nats.subscribe(notif_subject).await.expect("subscribe");
 
-    let resp1 = do_prompt(&nats, &session_id, "The secret word is BANANA. Acknowledge with just: OK").await;
+    let resp1 = do_prompt(
+        &nats,
+        &session_id,
+        "The secret word is BANANA. Acknowledge with just: OK",
+    )
+    .await;
     assert_eq!(resp1["stopReason"].as_str(), Some("end_turn"), "{resp1}");
     let text1 = collect_text_chunks(&mut notif_sub).await;
     eprintln!("turn1={text1:?}");
     assert!(!text1.is_empty(), "first turn must return text");
 
     // ── second turn: verify model recalls the secret word ─────────────────────
-    let resp2 = do_prompt(&nats, &session_id, "What is the secret word I gave you? Reply with only that word.").await;
+    let resp2 = do_prompt(
+        &nats,
+        &session_id,
+        "What is the secret word I gave you? Reply with only that word.",
+    )
+    .await;
     assert_eq!(resp2["stopReason"].as_str(), Some("end_turn"), "{resp2}");
     let text2 = collect_text_chunks(&mut notif_sub).await;
     eprintln!("turn2={text2:?}");
@@ -286,8 +298,7 @@ async fn bad_model_name_returns_end_turn_gracefully() {
 #[tokio::test]
 async fn close_session_then_prompt_returns_not_found() {
     let key = test_key();
-    let model = std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    let model = std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
 
     let (_container, nats) = start_nats().await;
     start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
@@ -332,8 +343,7 @@ async fn close_session_then_prompt_returns_not_found() {
 #[tokio::test]
 async fn usage_notification_reports_nonzero_token_counts() {
     let key = test_key();
-    let model = std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    let model = std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
 
     let (_container, nats) = start_nats().await;
     start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
@@ -352,9 +362,7 @@ async fn usage_notification_reports_nonzero_token_counts() {
     // Drain all notifications and find the usage_update.
     let mut usage_used: Option<u64> = None;
     let mut usage_size: Option<u64> = None;
-    while let Ok(Some(msg)) =
-        tokio::time::timeout(Duration::from_millis(500), notif_sub.next()).await
-    {
+    while let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(500), notif_sub.next()).await {
         let v: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
         if v["update"]["sessionUpdate"].as_str() == Some("usage_update") {
             usage_used = v["update"]["used"].as_u64();
@@ -383,8 +391,7 @@ async fn usage_notification_reports_nonzero_token_counts() {
 async fn set_session_model_switches_model_for_next_prompt() {
     let key = test_key();
     // Start with the cheap default model; switch to another available model.
-    let default_model = std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    let default_model = std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
     // openai/gpt-4o is always in the default available_models list.
     let target_model = "openai/gpt-4o";
 
@@ -407,7 +414,10 @@ async fn set_session_model_switches_model_for_next_prompt() {
 
     let full_text = collect_text_chunks(&mut notif_sub).await;
     eprintln!("set_session_model full_text={full_text:?}");
-    assert!(!full_text.is_empty(), "prompt after set_session_model must return text via NATS");
+    assert!(
+        !full_text.is_empty(),
+        "prompt after set_session_model must return text via NATS"
+    );
 }
 
 /// Agent-key auth: authenticate using the server-configured API key.
@@ -419,8 +429,7 @@ async fn set_session_model_switches_model_for_next_prompt() {
 #[tokio::test]
 async fn agent_key_auth_uses_server_configured_key() {
     let key = test_key();
-    let model = std::env::var("OPENROUTER_TEST_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    let model = std::env::var("OPENROUTER_TEST_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
 
     let (_container, nats) = start_nats().await;
     start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
@@ -439,7 +448,10 @@ async fn agent_key_auth_uses_server_configured_key() {
 
     let full_text = collect_text_chunks(&mut notif_sub).await;
     eprintln!("agent-key full_text={full_text:?}");
-    assert!(!full_text.is_empty(), "agent-key session must produce text chunks via NATS");
+    assert!(
+        !full_text.is_empty(),
+        "agent-key session must produce text chunks via NATS"
+    );
 }
 
 // ── In-memory LIVE tests (no Docker/NATS) — real model via OpenAI-compatible API ──
@@ -454,8 +466,7 @@ async fn agent_key_auth_uses_server_configured_key() {
 
 fn live_cfg() -> Option<(String, String, String)> {
     let key = std::env::var("OR_LIVE_KEY").ok().filter(|k| !k.is_empty())?;
-    let base = std::env::var("OR_LIVE_BASE_URL")
-        .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+    let base = std::env::var("OR_LIVE_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
     let model = std::env::var("OR_LIVE_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
     Some((key, base, model))
 }
@@ -526,12 +537,14 @@ async fn live_inmem_mcp_and_ask_user() {
     .expect("MCP prompt timed out")
     .expect("MCP prompt failed");
     let hits = call_mock.hits();
-    eprintln!("LIVE/MCP(openrouter): stop_reason={:?}, tools/call hits={hits}", r1.stop_reason);
+    eprintln!(
+        "LIVE/MCP(openrouter): stop_reason={:?}, tools/call hits={hits}",
+        r1.stop_reason
+    );
     assert!(hits >= 1, "real model did not call the MCP tool web__search (hits=0)");
 
     // ---- ask_user ----
-    let (elic_tx, mut elic_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let (elic_tx, mut elic_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
     let captured_q = Arc::new(Mutex::new(None::<String>));
     let cq = Arc::clone(&captured_q);
     let responder = tokio::spawn(async move {
@@ -542,21 +555,15 @@ async fn live_inmem_mcp_and_ask_user() {
                 "answer".to_string(),
                 agent_client_protocol::ElicitationContentValue::String("teal".to_string()),
             );
-            let resp = agent_client_protocol::ElicitationResponse::new(
-                agent_client_protocol::ElicitationAction::Accept(
+            let resp =
+                agent_client_protocol::ElicitationResponse::new(agent_client_protocol::ElicitationAction::Accept(
                     agent_client_protocol::ElicitationAcceptAction::new().content(content),
-                ),
-            );
+                ));
             let _ = req.response_tx.send(Ok(resp));
         }
     });
-    let agent2 = OpenRouterAgent::with_deps(
-        NoopNotifier,
-        model,
-        key,
-        OpenRouterClient::with_base_url(base),
-    )
-    .with_elicitation(elic_tx);
+    let agent2 = OpenRouterAgent::with_deps(NoopNotifier, model, key, OpenRouterClient::with_base_url(base))
+        .with_elicitation(elic_tx);
     let sid2 = agent2
         .new_session(NewSessionRequest::new("/tmp"))
         .await
@@ -574,7 +581,10 @@ async fn live_inmem_mcp_and_ask_user() {
     .expect("ask_user prompt failed");
     let _ = responder.await;
     let q = captured_q.lock().unwrap().clone();
-    eprintln!("LIVE/ask_user(openrouter): stop_reason={:?}, question={q:?}", r2.stop_reason);
+    eprintln!(
+        "LIVE/ask_user(openrouter): stop_reason={:?}, question={q:?}",
+        r2.stop_reason
+    );
     assert!(q.is_some(), "real model did not call ask_user (no question forwarded)");
 }
 
@@ -596,8 +606,7 @@ async fn live_inmem_permission_round_trip() {
         }));
     });
 
-    let (perm_tx, mut perm_rx) =
-        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+    let (perm_tx, mut perm_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
     let requested = Arc::new(Mutex::new(Vec::<String>::new()));
     let rq = Arc::clone(&requested);
     let approver = tokio::spawn(async move {
@@ -608,13 +617,8 @@ async fn live_inmem_permission_round_trip() {
         }
     });
 
-    let agent = OpenRouterAgent::with_deps(
-        NoopNotifier,
-        model,
-        key,
-        OpenRouterClient::with_base_url(base),
-    )
-    .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new());
+    let agent = OpenRouterAgent::with_deps(NoopNotifier, model, key, OpenRouterClient::with_base_url(base))
+        .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new());
     let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
     let sid = agent
         .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))

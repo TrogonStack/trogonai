@@ -40,8 +40,7 @@ async fn connect_with_no_auth_succeeds() -> Result<(), Box<dyn std::error::Error
 /// Covers the `NatsAuth::Token` arm (lines 115-122).
 #[tokio::test]
 #[ignore = "requires Docker"]
-async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn std::error::Error>> {
     // An open NATS server accepts any token — the token is just passed through.
     let (_container, host, port) = start_nats().await?;
 
@@ -59,8 +58,7 @@ async fn connect_with_token_auth_succeeds_on_open_server() -> Result<(), Box<dyn
 /// Covers the `NatsAuth::UserPassword` arm (lines 107-114).
 #[tokio::test]
 #[ignore = "requires Docker"]
-async fn connect_with_user_password_succeeds_on_open_server()
--> Result<(), Box<dyn std::error::Error>> {
+async fn connect_with_user_password_succeeds_on_open_server() -> Result<(), Box<dyn std::error::Error>> {
     let (_container, host, port) = start_nats().await?;
 
     let config = NatsConfig::new(
@@ -127,12 +125,8 @@ async fn connect_with_missing_credentials_file_returns_invalid_credentials() {
 /// `ConnectError::AuthorizationViolation` immediately instead of retrying forever.
 #[tokio::test]
 #[ignore = "requires Docker"]
-async fn connect_with_wrong_token_returns_authorization_violation()
--> Result<(), Box<dyn std::error::Error>> {
-    let container = Nats::default()
-        .with_cmd(["--auth", "correct-token"])
-        .start()
-        .await?;
+async fn connect_with_wrong_token_returns_authorization_violation() -> Result<(), Box<dyn std::error::Error>> {
+    let container = Nats::default().with_cmd(["--auth", "correct-token"]).start().await?;
     let host = container.get_host().await?.to_string();
     let port = container.get_host_port_ipv4(4222).await?;
 
@@ -194,12 +188,9 @@ async fn connect_to_unreachable_server_returns_ok_with_background_retry() {
     let config = NatsConfig::new(vec![format!("nats://127.0.0.1:{port}")], NatsAuth::None);
 
     // connect() must return within a few seconds (INITIAL_CONNECT_CHECK_SECS + margin).
-    let result = tokio::time::timeout(
-        Duration::from_secs(10),
-        connect(&config, Duration::from_secs(30)),
-    )
-    .await
-    .expect("connect() must not hang indefinitely on unreachable server");
+    let result = tokio::time::timeout(Duration::from_secs(10), connect(&config, Duration::from_secs(30)))
+        .await
+        .expect("connect() must not hang indefinitely on unreachable server");
 
     assert!(
         result.is_ok(),

@@ -158,10 +158,7 @@ mod tests {
             "command": "pr create --title \"My PR\" --body 'hello world'"
         }))
         .unwrap();
-        assert_eq!(
-            argv,
-            vec!["pr", "create", "--title", "My PR", "--body", "hello world"]
-        );
+        assert_eq!(argv, vec!["pr", "create", "--title", "My PR", "--body", "hello world"]);
     }
 
     #[test]

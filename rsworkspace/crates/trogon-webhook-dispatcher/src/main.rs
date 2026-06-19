@@ -37,6 +37,8 @@ async fn main() {
 
     tokio::join!(
         async move { serve(config.port, registry).await.expect("management API failed") },
-        async move { dispatcher.run().await.ok(); },
+        async move {
+            dispatcher.run().await.ok();
+        },
     );
 }

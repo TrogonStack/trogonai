@@ -13,18 +13,18 @@ pub type ProposalId = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proposal {
     /// Unique identifier supplied by the requesting agent.
-    pub id:             String,
+    pub id: String,
     /// The proxy token (`tok_...`) for which the credential is requested.
     pub credential_key: String,
     /// Upstream service that will receive the credential (e.g. `api.stripe.com`).
-    pub service:        String,
+    pub service: String,
     /// Human-readable reason provided by the agent.
-    pub message:        String,
+    pub message: String,
     /// ISO-8601 timestamp from the originating agent (preserved as-is).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requested_at:   Option<String>,
+    pub requested_at: Option<String>,
     /// Current lifecycle state.
-    pub status:         ProposalStatus,
+    pub status: ProposalStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,13 +41,13 @@ pub enum ProposalStatus {
 #[derive(Debug, Deserialize)]
 pub struct CreateRequest {
     /// Caller-chosen unique ID — `prop_{random}` by convention.
-    pub id:             String,
+    pub id: String,
     pub credential_key: String,
-    pub service:        String,
-    pub message:        String,
+    pub service: String,
+    pub message: String,
     /// ISO-8601 timestamp supplied by the agent (optional — ignored if absent).
     #[serde(default)]
-    pub requested_at:   Option<String>,
+    pub requested_at: Option<String>,
 }
 
 /// Published by a human approver to `vault.proposals.{vault}.approve`.
@@ -56,7 +56,7 @@ pub struct ApproveRequest {
     pub proposal_id: String,
     pub approved_by: String,
     /// The plaintext API key — never stored in JetStream, consumed immediately.
-    pub plaintext:   String,
+    pub plaintext: String,
 }
 
 /// Published by a human approver to `vault.proposals.{vault}.reject`.
@@ -65,7 +65,7 @@ pub struct RejectRequest {
     pub proposal_id: String,
     pub rejected_by: String,
     #[serde(default)]
-    pub reason:      String,
+    pub reason: String,
 }
 
 /// Reply to `vault.proposals.{vault}.status.{id}`.
@@ -73,42 +73,48 @@ pub struct RejectRequest {
 pub struct StatusResponse {
     pub proposal_id: String,
     /// One of: `"pending"`, `"approved"`, `"rejected"`, `"not_found"`.
-    pub status:      String,
+    pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approved_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rejected_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason:      Option<String>,
+    pub reason: Option<String>,
 }
 
 impl StatusResponse {
     pub fn not_found(proposal_id: String) -> Self {
-        Self { proposal_id, status: "not_found".into(), approved_by: None, rejected_by: None, reason: None }
+        Self {
+            proposal_id,
+            status: "not_found".into(),
+            approved_by: None,
+            rejected_by: None,
+            reason: None,
+        }
     }
 
     pub fn from_proposal(p: &Proposal) -> Self {
         match &p.status {
             ProposalStatus::Pending => Self {
                 proposal_id: p.id.clone(),
-                status:      "pending".into(),
+                status: "pending".into(),
                 approved_by: None,
                 rejected_by: None,
-                reason:      None,
+                reason: None,
             },
             ProposalStatus::Approved { approved_by } => Self {
                 proposal_id: p.id.clone(),
-                status:      "approved".into(),
+                status: "approved".into(),
                 approved_by: Some(approved_by.clone()),
                 rejected_by: None,
-                reason:      None,
+                reason: None,
             },
             ProposalStatus::Rejected { rejected_by, reason } => Self {
                 proposal_id: p.id.clone(),
-                status:      "rejected".into(),
+                status: "rejected".into(),
                 approved_by: None,
                 rejected_by: Some(rejected_by.clone()),
-                reason:      Some(reason.clone()),
+                reason: Some(reason.clone()),
             },
         }
     }
@@ -150,12 +156,14 @@ mod tests {
     #[test]
     fn status_response_from_approved_proposal() {
         let proposal = Proposal {
-            id:             "prop_abc".into(),
+            id: "prop_abc".into(),
             credential_key: "tok_stripe_prod_abc1".into(),
-            service:        "api.stripe.com".into(),
-            message:        "need stripe".into(),
-            requested_at:   None,
-            status:         ProposalStatus::Approved { approved_by: "mario".into() },
+            service: "api.stripe.com".into(),
+            message: "need stripe".into(),
+            requested_at: None,
+            status: ProposalStatus::Approved {
+                approved_by: "mario".into(),
+            },
         };
         let resp = StatusResponse::from_proposal(&proposal);
         assert_eq!(resp.status, "approved");
@@ -165,12 +173,12 @@ mod tests {
     #[test]
     fn status_response_from_pending_proposal() {
         let proposal = Proposal {
-            id:             "prop_abc".into(),
+            id: "prop_abc".into(),
             credential_key: "tok_stripe_prod_abc1".into(),
-            service:        "s".into(),
-            message:        "m".into(),
-            requested_at:   None,
-            status:         ProposalStatus::Pending,
+            service: "s".into(),
+            message: "m".into(),
+            requested_at: None,
+            status: ProposalStatus::Pending,
         };
         let resp = StatusResponse::from_proposal(&proposal);
         assert_eq!(resp.status, "pending");
@@ -182,14 +190,14 @@ mod tests {
     #[test]
     fn status_response_from_rejected_proposal() {
         let proposal = Proposal {
-            id:             "prop_abc".into(),
+            id: "prop_abc".into(),
             credential_key: "tok_stripe_prod_abc1".into(),
-            service:        "s".into(),
-            message:        "m".into(),
-            requested_at:   None,
-            status:         ProposalStatus::Rejected {
+            service: "s".into(),
+            message: "m".into(),
+            requested_at: None,
+            status: ProposalStatus::Rejected {
                 rejected_by: "luigi".into(),
-                reason:      "not authorised".into(),
+                reason: "not authorised".into(),
             },
         };
         let resp = StatusResponse::from_proposal(&proposal);
@@ -207,7 +215,10 @@ mod tests {
 
     #[test]
     fn proposal_status_serialises_state_tag_approved() {
-        let v = serde_json::to_value(ProposalStatus::Approved { approved_by: "mario".into() }).unwrap();
+        let v = serde_json::to_value(ProposalStatus::Approved {
+            approved_by: "mario".into(),
+        })
+        .unwrap();
         assert_eq!(v["state"], "approved");
         assert_eq!(v["approved_by"], "mario");
     }
@@ -216,8 +227,9 @@ mod tests {
     fn proposal_status_serialises_state_tag_rejected() {
         let v = serde_json::to_value(ProposalStatus::Rejected {
             rejected_by: "luigi".into(),
-            reason:      "expired".into(),
-        }).unwrap();
+            reason: "expired".into(),
+        })
+        .unwrap();
         assert_eq!(v["state"], "rejected");
         assert_eq!(v["rejected_by"], "luigi");
         assert_eq!(v["reason"], "expired");

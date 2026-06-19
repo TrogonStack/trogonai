@@ -12,24 +12,19 @@ use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::RwLock;
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent,
-    agent_runner::mock::MockAgentRunner,
+    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent, agent_runner::mock::MockAgentRunner,
     session_notifier::mock::MockSessionNotifier,
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message as AgentMessage};
 use trogon_runner_tools::portable_session::PortableMessage;
 
-use trogon_xai_runner::{
-    Message as XaiMessage, MockSessionNotifier as XaiMockNotifier, MockXaiHttpClient, XaiAgent,
-};
+use trogon_xai_runner::{Message as XaiMessage, MockSessionNotifier as XaiMockNotifier, MockXaiHttpClient, XaiAgent};
 
 use trogon_openrouter_runner::{
-    AssembledToolCall, Message as OrMessage, MockOpenRouterHttpClient,
-    MockSessionNotifier as OrMockNotifier, OpenRouterAgent,
+    AssembledToolCall, Message as OrMessage, MockOpenRouterHttpClient, MockSessionNotifier as OrMockNotifier,
+    OpenRouterAgent,
 };
-use trogon_runner_tools::portable_session::{
-    EXPORT_VERSION_V2, PortableBlock, PortableExportV2, PortableMessageV2,
-};
+use trogon_runner_tools::portable_session::{EXPORT_VERSION_V2, PortableBlock, PortableExportV2, PortableMessageV2};
 
 fn local() -> tokio::task::LocalSet {
     tokio::task::LocalSet::new()
@@ -74,10 +69,7 @@ fn export_messages(json: &str) -> Vec<InspectMessage> {
 
 /// Collect all `PortableBlock`s from an export JSON (handles V1 array and V2 wrapper).
 fn export_blocks(json: &str) -> Vec<trogon_runner_tools::portable_session::PortableBlock> {
-    export_messages(json)
-        .into_iter()
-        .flat_map(|m| m.blocks)
-        .collect()
+    export_messages(json).into_iter().flat_map(|m| m.blocks).collect()
 }
 
 // ── acp helpers ───────────────────────────────────────────────────────────────
@@ -126,18 +118,13 @@ async fn cross_runner_xai_export_into_openrouter_import() {
         .test_insert_session_with_history(
             "xai-s1",
             "/tmp",
-            vec![
-                XaiMessage::user("question"),
-                XaiMessage::assistant_text("answer"),
-            ],
+            vec![XaiMessage::user("question"), XaiMessage::assistant_text("answer")],
         )
         .await;
 
     // ── 2. Export from xai-runner ────────────────────────────────────────────────
-    let export_params = serde_json::value::RawValue::from_string(
-        serde_json::json!({ "sessionId": "xai-s1" }).to_string(),
-    )
-    .unwrap();
+    let export_params =
+        serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "xai-s1" }).to_string()).unwrap();
     let xai_export_resp = xai_agent
         .ext_method(ExtRequest::new("session/export", Arc::from(export_params)))
         .await
@@ -159,39 +146,30 @@ async fn cross_runner_xai_export_into_openrouter_import() {
         .run_until(async move {
             let or_http = MockOpenRouterHttpClient::new();
             let or_notifier = OrMockNotifier::new();
-            let or_agent =
-                OpenRouterAgent::with_deps(or_notifier, "test-model", "", or_http);
+            let or_agent = OpenRouterAgent::with_deps(or_notifier, "test-model", "", or_http);
 
             // Create an empty openrouter session to import into
             or_agent.test_insert_session("or-s1").await;
 
             // ── 4. Import the xai export into openrouter ─────────────────────────
-            let import_body = format!(
-                r#"{{"sessionId":"or-s1","messages":{exported_json}}}"#
-            );
-            let import_params =
-                serde_json::value::RawValue::from_string(import_body).unwrap();
+            let import_body = format!(r#"{{"sessionId":"or-s1","messages":{exported_json}}}"#);
+            let import_params = serde_json::value::RawValue::from_string(import_body).unwrap();
             or_agent
                 .ext_method(ExtRequest::new("session/import", Arc::from(import_params)))
                 .await
                 .expect("openrouter session/import should succeed");
 
             // ── 5. Export from openrouter ────────────────────────────────────────
-            let or_export_params = serde_json::value::RawValue::from_string(
-                serde_json::json!({ "sessionId": "or-s1" }).to_string(),
-            )
-            .unwrap();
+            let or_export_params =
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "or-s1" }).to_string())
+                    .unwrap();
             let or_export_resp = or_agent
-                .ext_method(ExtRequest::new(
-                    "session/export",
-                    Arc::from(or_export_params),
-                ))
+                .ext_method(ExtRequest::new("session/export", Arc::from(or_export_params)))
                 .await
                 .expect("openrouter session/export should succeed");
 
             let or_portable: Vec<PortableMessage> =
-                serde_json::from_str(or_export_resp.0.get())
-                    .expect("openrouter export should be valid JSON");
+                serde_json::from_str(or_export_resp.0.get()).expect("openrouter export should be valid JSON");
 
             // ── 6. Assert round-trip fidelity ────────────────────────────────────
             assert_eq!(
@@ -200,14 +178,8 @@ async fn cross_runner_xai_export_into_openrouter_import() {
                 "message count should match after cross-runner round-trip"
             );
             for (xai_msg, or_msg) in xai_portable.iter().zip(or_portable.iter()) {
-                assert_eq!(
-                    xai_msg.role, or_msg.role,
-                    "role mismatch in cross-runner round-trip"
-                );
-                assert_eq!(
-                    xai_msg.text, or_msg.text,
-                    "text mismatch in cross-runner round-trip"
-                );
+                assert_eq!(xai_msg.role, or_msg.role, "role mismatch in cross-runner round-trip");
+                assert_eq!(xai_msg.text, or_msg.text, "text mismatch in cross-runner round-trip");
             }
         })
         .await;
@@ -228,9 +200,7 @@ async fn cross_runner_acp_export_into_openrouter_import() {
             let state = SessionState {
                 messages: vec![
                     AgentMessage::user_text("question"),
-                    AgentMessage::assistant(vec![AgentContentBlock::Text {
-                        text: "answer".into(),
-                    }]),
+                    AgentMessage::assistant(vec![AgentContentBlock::Text { text: "answer".into() }]),
                 ],
                 ..Default::default()
             };
@@ -239,11 +209,9 @@ async fn cross_runner_acp_export_into_openrouter_import() {
 
             // ── 2. Export from acp ────────────────────────────────────────────────
             let export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "acp-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "acp-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let acp_export_resp = acp_agent
                 .ext_method(ExtRequest::new("session/export", export_params))
                 .await
@@ -274,19 +242,16 @@ async fn cross_runner_acp_export_into_openrouter_import() {
 
             // ── 4. Export from openrouter and verify fidelity ─────────────────────
             let or_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "or-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "or-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let or_export_resp = or_agent
                 .ext_method(ExtRequest::new("session/export", or_export_params))
                 .await
                 .expect("openrouter session/export should succeed");
 
             let or_portable: Vec<PortableMessage> =
-                serde_json::from_str(or_export_resp.0.get())
-                    .expect("openrouter export should be valid JSON");
+                serde_json::from_str(or_export_resp.0.get()).expect("openrouter export should be valid JSON");
 
             assert_eq!(
                 acp_portable.len(),
@@ -319,19 +284,14 @@ async fn cross_runner_xai_export_into_acp_import() {
                 .test_insert_session_with_history(
                     "xai-s2",
                     "/tmp",
-                    vec![
-                        XaiMessage::user("hello"),
-                        XaiMessage::assistant_text("world"),
-                    ],
+                    vec![XaiMessage::user("hello"), XaiMessage::assistant_text("world")],
                 )
                 .await;
 
             let export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "xai-s2" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "xai-s2" }).to_string())
+                    .unwrap()
+                    .into();
             let xai_export_resp = xai_agent
                 .ext_method(ExtRequest::new("session/export", export_params))
                 .await
@@ -356,19 +316,16 @@ async fn cross_runner_xai_export_into_acp_import() {
 
             // ── 3. Export from acp and verify fidelity ────────────────────────────
             let acp_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "acp-s2" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "acp-s2" }).to_string())
+                    .unwrap()
+                    .into();
             let acp_export_resp = acp_agent
                 .ext_method(ExtRequest::new("session/export", acp_export_params))
                 .await
                 .expect("acp session/export should succeed");
 
             let acp_portable: Vec<PortableMessage> =
-                serde_json::from_str(acp_export_resp.0.get())
-                    .expect("acp export should be valid JSON");
+                serde_json::from_str(acp_export_resp.0.get()).expect("acp export should be valid JSON");
 
             assert_eq!(
                 xai_portable.len(),
@@ -414,11 +371,9 @@ async fn cross_runner_openrouter_export_into_acp_import_normalizes_tool_role() {
 
             // ── 2. Export from openrouter ─────────────────────────────────────────
             let or_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "or-tool-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "or-tool-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let or_export = or_agent
                 .ext_method(ExtRequest::new("session/export", or_export_params))
                 .await
@@ -441,8 +396,7 @@ async fn cross_runner_openrouter_export_into_acp_import_normalizes_tool_role() {
             let store = NatsSessionStore::open(&js).await.unwrap();
             let acp_agent = make_acp_agent(store);
 
-            let import_body =
-                format!(r#"{{"sessionId":"acp-tool-s1","messages":{exported_json}}}"#);
+            let import_body = format!(r#"{{"sessionId":"acp-tool-s1","messages":{exported_json}}}"#);
             let import_params: Arc<serde_json::value::RawValue> =
                 serde_json::value::RawValue::from_string(import_body).unwrap().into();
             acp_agent
@@ -452,11 +406,9 @@ async fn cross_runner_openrouter_export_into_acp_import_normalizes_tool_role() {
 
             // ── 4. Export from acp and verify role normalization (Fix 3) ──────────
             let acp_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "acp-tool-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "acp-tool-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let acp_export = acp_agent
                 .ext_method(ExtRequest::new("session/export", acp_export_params))
                 .await
@@ -515,11 +467,9 @@ async fn cross_runner_acp_export_into_xai_import_converts_tool_calls_to_text() {
 
             // ── 2. Export from acp ────────────────────────────────────────────────
             let export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "acp-xai-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "acp-xai-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let acp_export = acp_agent
                 .ext_method(ExtRequest::new("session/export", export_params))
                 .await
@@ -536,14 +486,12 @@ async fn cross_runner_acp_export_into_xai_import_converts_tool_calls_to_text() {
             // ── 3. Import into xai-runner ─────────────────────────────────────────
             let xai_http = Arc::new(MockXaiHttpClient::new());
             let xai_notifier = Arc::new(XaiMockNotifier::new());
-            let xai_agent =
-                XaiAgent::with_deps(xai_notifier, "grok-3", "test-key", xai_http);
+            let xai_agent = XaiAgent::with_deps(xai_notifier, "grok-3", "test-key", xai_http);
             xai_agent
                 .test_insert_session_with_history("xai-acp-s1", "/tmp", vec![])
                 .await;
 
-            let import_body =
-                format!(r#"{{"sessionId":"xai-acp-s1","messages":{exported_json}}}"#);
+            let import_body = format!(r#"{{"sessionId":"xai-acp-s1","messages":{exported_json}}}"#);
             let import_params: Arc<serde_json::value::RawValue> =
                 serde_json::value::RawValue::from_string(import_body).unwrap().into();
             xai_agent
@@ -553,25 +501,25 @@ async fn cross_runner_acp_export_into_xai_import_converts_tool_calls_to_text() {
 
             // ── 4. Export from xai and verify ToolCall → "[called: read_file]" ────
             let xai_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "xai-acp-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "xai-acp-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let xai_export = xai_agent
                 .ext_method(ExtRequest::new("session/export", xai_export_params))
                 .await
                 .expect("xai session/export should succeed");
 
             let xai_portable: Vec<PortableMessage> =
-                serde_json::from_str(xai_export.0.get())
-                    .expect("xai export should be valid JSON");
+                serde_json::from_str(xai_export.0.get()).expect("xai export should be valid JSON");
 
             // ours (xai_history_from_wire / MED-18) DROPS the tool_use block from the
             // text-only xai history — a bare tool name as prose corrupts the message.
             // The tool name must not leak into the re-exported text.
-            let joined: String =
-                xai_portable.iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+            let joined: String = xai_portable
+                .iter()
+                .map(|m| m.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             assert!(
                 !joined.contains("read_file"),
                 "xai (text-only) drops the tool call; the tool name must not leak into text; got: {joined:?}"
@@ -603,8 +551,8 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
 
     local()
         .run_until(async move {
-            use std::sync::Arc;
             use agent_client_protocol::{Agent as _, ContentBlock, NewSessionRequest, PromptRequest};
+            use std::sync::Arc;
 
             // ── 1. OR prompt cycle: tool call → dispatch → done ───────────────────
             let http = Arc::new(MockOpenRouterHttpClient::new());
@@ -624,12 +572,8 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("cross_runner_test.txt"), "real content").unwrap();
 
-            let or_agent = OpenRouterAgent::with_deps(
-                OrMockNotifier2::new(),
-                "test-model",
-                "test-key",
-                Arc::clone(&http),
-            );
+            let or_agent =
+                OpenRouterAgent::with_deps(OrMockNotifier2::new(), "test-model", "test-key", Arc::clone(&http));
 
             let new_resp = or_agent
                 .new_session(NewSessionRequest::new(dir.path().to_path_buf()))
@@ -647,11 +591,9 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
 
             // ── 2. Export from OR (history now has real tool calls) ───────────────
             let or_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": sid }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": sid }).to_string())
+                    .unwrap()
+                    .into();
             let or_export = or_agent
                 .ext_method(ExtRequest::new("session/export", or_export_params))
                 .await
@@ -661,18 +603,14 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
             let or_blocks = export_blocks(&exported_json);
 
             // Must have a ToolCall block (from the assistant's tool_calls message)
-            let has_tool_call = or_blocks
-                .iter()
-                .any(|b| matches!(b, PortableBlock::ToolUse { .. }));
+            let has_tool_call = or_blocks.iter().any(|b| matches!(b, PortableBlock::ToolUse { .. }));
             assert!(
                 has_tool_call,
                 "OR export after real prompt must contain PortableBlock::ToolUse; got: {or_blocks:?}"
             );
 
             // Must have a ToolResult block (from the role:"tool" result message)
-            let has_tool_result = or_blocks
-                .iter()
-                .any(|b| matches!(b, PortableBlock::ToolResult { .. }));
+            let has_tool_result = or_blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. }));
             assert!(
                 has_tool_result,
                 "OR export after real prompt must contain PortableBlock::ToolResult; got: {or_blocks:?}"
@@ -682,8 +620,7 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
             let store = NatsSessionStore::open(&js).await.unwrap();
             let acp_agent = make_acp_agent(store);
 
-            let import_body =
-                format!(r#"{{"sessionId":"acp-real-tool-s1","messages":{exported_json}}}"#);
+            let import_body = format!(r#"{{"sessionId":"acp-real-tool-s1","messages":{exported_json}}}"#);
             let import_params: Arc<serde_json::value::RawValue> =
                 serde_json::value::RawValue::from_string(import_body).unwrap().into();
             acp_agent
@@ -692,12 +629,11 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
                 .expect("acp session/import should succeed");
 
             // ── 4. Re-export from ACP and verify blocks survived ──────────────────
-            let acp_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "acp-real-tool-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+            let acp_export_params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "acp-real-tool-s1" }).to_string(),
+            )
+            .unwrap()
+            .into();
             let acp_export = acp_agent
                 .ext_method(ExtRequest::new("session/export", acp_export_params))
                 .await
@@ -747,7 +683,9 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
                         role: "user".to_string(),
-                        blocks: vec![PortableBlock::Text { text: "use a tool".to_string() }],
+                        blocks: vec![PortableBlock::Text {
+                            text: "use a tool".to_string(),
+                        }],
                     },
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
@@ -755,7 +693,8 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                         blocks: vec![PortableBlock::ToolUse {
                             id: "c1".to_string(),
                             name: "str_replace".to_string(),
-                            input_summary: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"}).to_string(),
+                            input_summary: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"})
+                                .to_string(),
                         }],
                     },
                     PortableMessageV2 {
@@ -769,7 +708,9 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
                         role: "assistant".to_string(),
-                        blocks: vec![PortableBlock::Text { text: "done".to_string() }],
+                        blocks: vec![PortableBlock::Text {
+                            text: "done".to_string(),
+                        }],
                     },
                 ],
             };
@@ -782,31 +723,28 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                 .test_insert_session_with_history("xai-codex-s1", "/tmp", vec![])
                 .await;
 
-            let import_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    format!(r#"{{"sessionId":"xai-codex-s1","messages":{exported_json}}}"#),
-                )
-                .unwrap()
-                .into();
+            let import_params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(format!(
+                r#"{{"sessionId":"xai-codex-s1","messages":{exported_json}}}"#
+            ))
+            .unwrap()
+            .into();
             xai_agent
                 .ext_method(ExtRequest::new("session/import", import_params))
                 .await
                 .expect("xai session/import of codex-style messages must succeed");
 
-            let xai_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "xai-codex-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+            let xai_export_params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "xai-codex-s1" }).to_string(),
+            )
+            .unwrap()
+            .into();
             let xai_export = xai_agent
                 .ext_method(ExtRequest::new("session/export", xai_export_params))
                 .await
                 .expect("xai session/export must succeed");
 
             let xai_portable: Vec<PortableMessage> =
-                serde_json::from_str(xai_export.0.get())
-                    .expect("xai export must be valid JSON");
+                serde_json::from_str(xai_export.0.get()).expect("xai export must be valid JSON");
 
             // ours drops the tool_use block in the text-only xai history; the tool
             // name must not leak into the re-exported text.
@@ -817,9 +755,7 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
             );
 
             // ToolResult content is preserved.
-            let has_tool_result_text = xai_portable
-                .iter()
-                .any(|m| m.text.contains("edit-applied"));
+            let has_tool_result_text = xai_portable.iter().any(|m| m.text.contains("edit-applied"));
             assert!(
                 has_tool_result_text,
                 "XAI must convert ToolResult block to its content text; got: {xai_portable:?}"
@@ -845,7 +781,9 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
                         role: "user".to_string(),
-                        blocks: vec![PortableBlock::Text { text: "use a tool".to_string() }],
+                        blocks: vec![PortableBlock::Text {
+                            text: "use a tool".to_string(),
+                        }],
                     },
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
@@ -867,7 +805,9 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
                     PortableMessageV2 {
                         version: EXPORT_VERSION_V2,
                         role: "assistant".to_string(),
-                        blocks: vec![PortableBlock::Text { text: "found it".to_string() }],
+                        blocks: vec![PortableBlock::Text {
+                            text: "found it".to_string(),
+                        }],
                     },
                 ],
             };
@@ -880,31 +820,27 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
                 .test_insert_session_with_history("xai-or-s1", "/tmp", vec![])
                 .await;
 
-            let import_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    format!(r#"{{"sessionId":"xai-or-s1","messages":{exported_json}}}"#),
-                )
-                .unwrap()
-                .into();
+            let import_params: Arc<serde_json::value::RawValue> = serde_json::value::RawValue::from_string(format!(
+                r#"{{"sessionId":"xai-or-s1","messages":{exported_json}}}"#
+            ))
+            .unwrap()
+            .into();
             xai_agent
                 .ext_method(ExtRequest::new("session/import", import_params))
                 .await
                 .expect("xai session/import of OR-style messages must succeed");
 
             let xai_export_params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": "xai-or-s1" }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": "xai-or-s1" }).to_string())
+                    .unwrap()
+                    .into();
             let xai_export = xai_agent
                 .ext_method(ExtRequest::new("session/export", xai_export_params))
                 .await
                 .expect("xai session/export must succeed");
 
             let xai_portable: Vec<PortableMessage> =
-                serde_json::from_str(xai_export.0.get())
-                    .expect("xai export must be valid JSON");
+                serde_json::from_str(xai_export.0.get()).expect("xai export must be valid JSON");
 
             // ours drops the tool_use block in the text-only xai history; the tool
             // name must not leak into the re-exported text.
@@ -915,9 +851,7 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
             );
 
             // ToolResult content is preserved.
-            let has_tool_result_text = xai_portable
-                .iter()
-                .any(|m| m.text.contains("found: main.rs"));
+            let has_tool_result_text = xai_portable.iter().any(|m| m.text.contains("found: main.rs"));
             assert!(
                 has_tool_result_text,
                 "XAI must convert OR ToolResult block to its content text; got: {xai_portable:?}"
@@ -936,12 +870,7 @@ async fn portable_message_without_blocks_field_imports_into_or_runner() {
         text: "done".to_string(),
     }]);
 
-    let agent = OpenRouterAgent::with_deps(
-        OrMockNotifier::new(),
-        "test-model",
-        "test-key",
-        Arc::clone(&http),
-    );
+    let agent = OpenRouterAgent::with_deps(OrMockNotifier::new(), "test-model", "test-key", Arc::clone(&http));
 
     tokio::task::LocalSet::new()
         .run_until(async move {

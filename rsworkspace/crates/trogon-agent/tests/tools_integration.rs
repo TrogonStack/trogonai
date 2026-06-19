@@ -41,10 +41,7 @@ async fn get_pr_diff_calls_correct_proxy_path() {
     let input = json!({ "owner": "owner", "repo": "repo", "pr_number": 42 });
     let result = dispatch_tool(&ctx, "get_pr_diff", &input).await;
 
-    assert!(
-        result.contains("diff --git"),
-        "expected diff content, got: {result}"
-    );
+    assert!(result.contains("diff --git"), "expected diff content, got: {result}");
 }
 
 #[tokio::test]
@@ -235,11 +232,7 @@ async fn post_pr_comment_degrades_gracefully_when_get_fails() {
     let result = dispatch_tool(&ctx, "post_pr_comment", &input).await;
 
     assert!(result.contains("comment-300"), "got: {result}");
-    assert_eq!(
-        post_mock.hits(),
-        1,
-        "POST must still be called after GET failure"
-    );
+    assert_eq!(post_mock.hits(), 1, "POST must still be called after GET failure");
 }
 
 #[tokio::test]
@@ -447,8 +440,7 @@ async fn send_slack_message_returns_error_on_slack_error() {
 
     // No history mock: no _idempotency_key in input, so no check is done.
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/slack/chat.postMessage");
+        when.method(httpmock::Method::POST).path("/slack/chat.postMessage");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": false, "error": "channel_not_found" }));
@@ -458,14 +450,8 @@ async fn send_slack_message_returns_error_on_slack_error() {
     let input = json!({ "channel": "#nonexistent", "text": "hello" });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
-    assert!(
-        result.contains("Tool error:"),
-        "unexpected result: {result}"
-    );
-    assert!(
-        result.contains("channel_not_found"),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("Tool error:"), "unexpected result: {result}");
+    assert!(result.contains("channel_not_found"), "unexpected result: {result}");
 }
 
 /// Primary dedup path: history contains a message whose `metadata` carries the
@@ -477,8 +463,7 @@ async fn send_slack_message_skips_duplicate_by_metadata_key() {
     // History returns a message with matching metadata key (different text to
     // confirm that the metadata check fires before the text fallback).
     let history_mock = server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
+        when.method(httpmock::Method::GET).path("/slack/conversations.history");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -505,10 +490,7 @@ async fn send_slack_message_skips_duplicate_by_metadata_key() {
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
     history_mock.assert_hits_async(1).await;
-    assert!(
-        result.contains("skipped duplicate"),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("skipped duplicate"), "unexpected result: {result}");
 }
 
 /// Fallback dedup path: metadata scope unavailable (no `metadata` field in
@@ -519,8 +501,7 @@ async fn send_slack_message_skips_duplicate_by_text_fallback_when_no_metadata() 
 
     // History has matching text but no metadata field (missing scope).
     let history_mock = server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
+        when.method(httpmock::Method::GET).path("/slack/conversations.history");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -541,10 +522,7 @@ async fn send_slack_message_skips_duplicate_by_text_fallback_when_no_metadata() 
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
     history_mock.assert_hits_async(1).await;
-    assert!(
-        result.contains("skipped duplicate"),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("skipped duplicate"), "unexpected result: {result}");
 }
 
 /// Graceful degradation: history returns ok:false (e.g. missing channel scope)
@@ -554,16 +532,14 @@ async fn send_slack_message_sends_when_history_check_returns_error() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
+        when.method(httpmock::Method::GET).path("/slack/conversations.history");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": false, "error": "not_in_channel" }));
     });
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/slack/chat.postMessage");
+        when.method(httpmock::Method::POST).path("/slack/chat.postMessage");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": true, "ts": "1700000002.000002" }));
@@ -578,10 +554,7 @@ async fn send_slack_message_sends_when_history_check_returns_error() {
     });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
-    assert!(
-        result.contains("Message sent"),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("Message sent"), "unexpected result: {result}");
 }
 
 /// Neither metadata nor text matches → send proceeds normally.
@@ -590,8 +563,7 @@ async fn send_slack_message_sends_when_no_matching_message_in_history() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
+        when.method(httpmock::Method::GET).path("/slack/conversations.history");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -603,8 +575,7 @@ async fn send_slack_message_sends_when_no_matching_message_in_history() {
     });
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/slack/chat.postMessage");
+        when.method(httpmock::Method::POST).path("/slack/chat.postMessage");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": true, "ts": "1700000003.000003" }));
@@ -618,10 +589,7 @@ async fn send_slack_message_sends_when_no_matching_message_in_history() {
     });
     let result = dispatch_tool(&ctx, "send_slack_message", &input).await;
 
-    assert!(
-        result.contains("Message sent"),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("Message sent"), "unexpected result: {result}");
 }
 
 #[tokio::test]
@@ -647,14 +615,8 @@ async fn read_slack_channel_calls_correct_proxy_path() {
     let input = json!({ "channel": "#general", "limit": 10 });
     let result = dispatch_tool(&ctx, "read_slack_channel", &input).await;
 
-    assert!(
-        result.contains("Hello team!"),
-        "unexpected result: {result}"
-    );
-    assert!(
-        result.contains("CI is green."),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("Hello team!"), "unexpected result: {result}");
+    assert!(result.contains("CI is green."), "unexpected result: {result}");
 }
 
 #[tokio::test]
@@ -662,8 +624,7 @@ async fn read_slack_channel_returns_error_on_slack_error() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::GET)
-            .path("/slack/conversations.history");
+        when.method(httpmock::Method::GET).path("/slack/conversations.history");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({ "ok": false, "error": "not_in_channel" }));
@@ -673,12 +634,6 @@ async fn read_slack_channel_returns_error_on_slack_error() {
     let input = json!({ "channel": "#private" });
     let result = dispatch_tool(&ctx, "read_slack_channel", &input).await;
 
-    assert!(
-        result.contains("Tool error:"),
-        "unexpected result: {result}"
-    );
-    assert!(
-        result.contains("not_in_channel"),
-        "unexpected result: {result}"
-    );
+    assert!(result.contains("Tool error:"), "unexpected result: {result}");
+    assert!(result.contains("not_in_channel"), "unexpected result: {result}");
 }

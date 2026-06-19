@@ -144,11 +144,7 @@ where
         match &result {
             RouteResult::Routed(decision) => {
                 if let Err(e) = session
-                    .append_routing_decision(
-                        event.event_type(),
-                        &decision.agent_type,
-                        &decision.reasoning,
-                    )
+                    .append_routing_decision(event.event_type(), &decision.agent_type, &decision.reasoning)
                     .await
                 {
                     warn!(error = %e, "failed to write routing decision to transcript");
@@ -156,11 +152,9 @@ where
                 // ── 4. Forward to actor ───────────────────────────────────────
                 // Pass the already-fetched agent list so dispatch() does not
                 // perform a second registry lookup (eliminates TOCTOU race).
-                self.dispatch(&event, decision, &agents)
-                    .await
-                    .inspect_err(|_| {
-                        metrics::inc_events_error(event.event_type(), "dispatch");
-                    })?;
+                self.dispatch(&event, decision, &agents).await.inspect_err(|_| {
+                    metrics::inc_events_error(event.event_type(), "dispatch");
+                })?;
                 metrics::inc_events_routed(event.event_type(), &decision.agent_type);
             }
             RouteResult::Unroutable { reasoning } => {
@@ -256,21 +250,11 @@ mod tests {
         llm::mock::MockLlmClient,
     };
 
-    type TestRouter = Router<
-        MockLlmClient,
-        MockRegistryStore,
-        MockTranscriptPublisher,
-        MockNatsClient,
-        MockJetStreamPublisher,
-    >;
+    type TestRouter =
+        Router<MockLlmClient, MockRegistryStore, MockTranscriptPublisher, MockNatsClient, MockJetStreamPublisher>;
 
-    type TestRouterFailPub = Router<
-        MockLlmClient,
-        MockRegistryStore,
-        FailPublisher,
-        MockNatsClient,
-        MockJetStreamPublisher,
-    >;
+    type TestRouterFailPub =
+        Router<MockLlmClient, MockRegistryStore, FailPublisher, MockNatsClient, MockJetStreamPublisher>;
 
     fn make_router() -> (
         TestRouter,
@@ -286,13 +270,7 @@ mod tests {
         let nats = MockNatsClient::new();
         let js = MockJetStreamPublisher::new();
         let registry = Registry::new(store.clone());
-        let router = Router::new(
-            llm.clone(),
-            registry,
-            publisher.clone(),
-            nats.clone(),
-            js.clone(),
-        );
+        let router = Router::new(llm.clone(), registry, publisher.clone(), nats.clone(), js.clone());
         (router, llm, store, publisher, nats, js)
     }
 
@@ -377,10 +355,7 @@ mod tests {
             reasoning: "test".into(),
         });
 
-        let event = RouterEvent::new(
-            "trogon.events.github.pull_request",
-            br#"{"action":"closed"}"#.as_ref(),
-        );
+        let event = RouterEvent::new("trogon.events.github.pull_request", br#"{"action":"closed"}"#.as_ref());
 
         router.route_event(event).await.unwrap();
 
@@ -417,9 +392,7 @@ mod tests {
             _subject: String,
             _payload: bytes::Bytes,
         ) -> Result<(), trogon_transcript::TranscriptError> {
-            Err(trogon_transcript::TranscriptError::Publish(
-                "always fails".into(),
-            ))
+            Err(trogon_transcript::TranscriptError::Publish("always fails".into()))
         }
     }
 
@@ -435,13 +408,7 @@ mod tests {
         let nats = MockNatsClient::new();
         let js = MockJetStreamPublisher::new();
         let registry = Registry::new(store.clone());
-        let router = Router::new(
-            llm.clone(),
-            registry,
-            FailPublisher,
-            nats.clone(),
-            js.clone(),
-        );
+        let router = Router::new(llm.clone(), registry, FailPublisher, nats.clone(), js.clone());
         (router, llm, store, nats, js)
     }
 

@@ -111,9 +111,7 @@ async fn datadog_webhook_http_triggers_full_pipeline_with_real_key() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Alert acknowledged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Alert acknowledged."}]}"#);
         })
         .await;
 
@@ -201,10 +199,7 @@ async fn datadog_webhook_http_triggers_full_pipeline_with_real_key() {
 
     // ── 8. Start agent runner ──────────────────────────────────────────────
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: "tok_github_prod_test01".to_string(),
@@ -291,9 +286,7 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
                 .body_contains("Recovered");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Recovery noted."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Recovery noted."}]}"#);
         })
         .await;
 
@@ -312,9 +305,7 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -339,16 +330,9 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
     let wvault = Arc::clone(&vault);
     let wstream = stream::stream_name("trogon");
     tokio::spawn(async move {
-        worker::run(
-            wjs,
-            wnats,
-            wvault,
-            http_client,
-            "dd-recovered-worker",
-            &wstream,
-        )
-        .await
-        .ok();
+        worker::run(wjs, wnats, wvault, http_client, "dd-recovered-worker", &wstream)
+            .await
+            .ok();
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -371,10 +355,7 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
     wait_for_port(datadog_port).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -428,10 +409,7 @@ async fn datadog_recovered_alert_triggers_full_pipeline() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(
-        hit,
-        "Mock Anthropic not called for Recovered alert within 20 s"
-    );
+    assert!(hit, "Mock Anthropic not called for Recovered alert within 20 s");
     anthropic_mock.assert_async().await;
 }
 
@@ -464,9 +442,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     // ── Register a matching automation in the store ──
-    let store = trogon_automations::AutomationStore::open(&js)
-        .await
-        .unwrap();
+    let store = trogon_automations::AutomationStore::open(&js).await.unwrap();
     let auto = trogon_automations::Automation {
         id: "dd-auto-1".to_string(),
         tenant_id: "default".to_string(),
@@ -489,12 +465,12 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     // Ensure DATADOG stream exists (the runner will also ensure it, but
     // we need it before the datadog server can publish to it).
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "DATADOG".to_string(),
-            subjects: vec!["datadog.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+        name: "DATADOG".to_string(),
+        subjects: vec!["datadog.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     let datadog_port = next_port();
     let webhook_secret = "test-dd-auto-secret";
@@ -513,10 +489,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     wait_for_port(datadog_port).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: mock_server.base_url(),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -567,10 +540,7 @@ async fn datadog_automation_dispatch_takes_precedence_over_fallback() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(
-        hit,
-        "Automation was not dispatched for Datadog alert within 20 s"
-    );
+    assert!(hit, "Automation was not dispatched for Datadog alert within 20 s");
     anthropic_mock.assert_async().await;
 }
 
@@ -590,9 +560,7 @@ async fn datadog_event_subject_triggers_full_pipeline() {
                 .header("authorization", "Bearer sk-ant-realkey");
             then.status(200)
                 .header("content-type", "application/json")
-                .body(
-                    r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Event logged."}]}"#,
-                );
+                .body(r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"Event logged."}]}"#);
         })
         .await;
 
@@ -611,9 +579,7 @@ async fn datadog_event_subject_triggers_full_pipeline() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     let outbound_subject = subjects::outbound("trogon");
-    stream::ensure_stream(&js, "trogon", &outbound_subject)
-        .await
-        .unwrap();
+    stream::ensure_stream(&js, "trogon", &outbound_subject).await.unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = listener.local_addr().unwrap().port();
@@ -662,10 +628,7 @@ async fn datadog_event_subject_triggers_full_pipeline() {
     wait_for_port(datadog_port).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: format!("http://127.0.0.1:{proxy_port}"),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -736,8 +699,7 @@ async fn datadog_handler_error_still_acks_and_continues() {
     // failure, the second message will never be processed within the timeout.
     let anthropic_mock = mock_server
         .mock_async(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/anthropic/v1/messages");
+            when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
             then.status(500)
                 .header("content-type", "application/json")
                 .body(r#"{"error":"internal server error"}"#);
@@ -750,12 +712,12 @@ async fn datadog_handler_error_still_acks_and_continues() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "DATADOG".to_string(),
-            subjects: vec!["datadog.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+        name: "DATADOG".to_string(),
+        subjects: vec!["datadog.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     let datadog_port = next_port();
     let webhook_secret = "test-dd-err-secret";
@@ -774,10 +736,7 @@ async fn datadog_handler_error_still_acks_and_continues() {
     wait_for_port(datadog_port).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: mock_server.base_url(),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -872,9 +831,7 @@ async fn datadog_event_automation_dispatch() {
     let js = Arc::new(jetstream::new(nats.clone()));
 
     // Register automation matching datadog.event.
-    let store = trogon_automations::AutomationStore::open(&js)
-        .await
-        .unwrap();
+    let store = trogon_automations::AutomationStore::open(&js).await.unwrap();
     let auto = trogon_automations::Automation {
         id: "dd-event-auto-1".to_string(),
         tenant_id: "default".to_string(),
@@ -895,12 +852,12 @@ async fn datadog_event_automation_dispatch() {
     store.put(&auto).await.unwrap();
 
     js.get_or_create_stream(jetstream::stream::Config {
-            name: "DATADOG".to_string(),
-            subjects: vec!["datadog.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+        name: "DATADOG".to_string(),
+        subjects: vec!["datadog.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .unwrap();
 
     let datadog_port = next_port();
     let webhook_secret = "test-dd-event-auto-secret";
@@ -919,10 +876,7 @@ async fn datadog_event_automation_dispatch() {
     wait_for_port(datadog_port).await;
 
     let agent_cfg = AgentConfig {
-        nats: NatsConfig::new(
-            vec![format!("nats://127.0.0.1:{nats_port}")],
-            NatsAuth::None,
-        ),
+        nats: NatsConfig::new(vec![format!("nats://127.0.0.1:{nats_port}")], NatsAuth::None),
         proxy_url: mock_server.base_url(),
         anthropic_token: "tok_anthropic_prod_test01".to_string(),
         github_token: String::new(),
@@ -971,9 +925,6 @@ async fn datadog_event_automation_dispatch() {
     assert_eq!(resp.status(), 200);
 
     let hit = wait_for_hit(&anthropic_mock, Duration::from_secs(20)).await;
-    assert!(
-        hit,
-        "Automation was not dispatched for datadog.event within 20 s"
-    );
+    assert!(hit, "Automation was not dispatched for datadog.event within 20 s");
     anthropic_mock.assert_async().await;
 }

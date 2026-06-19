@@ -55,12 +55,7 @@ impl AgentCapability {
     pub fn explore(nats_subject: impl Into<String>) -> Self {
         Self::new(
             "Explore",
-            [
-                "file_search",
-                "code_lookup",
-                "read_only",
-                "question_answering",
-            ],
+            ["file_search", "code_lookup", "read_only", "question_answering"],
             nats_subject,
         )
     }
@@ -84,9 +79,7 @@ impl AgentCapability {
 
     /// True if the agent advertises `capability` (case-insensitive).
     pub fn has_capability(&self, capability: &str) -> bool {
-        self.capabilities
-            .iter()
-            .any(|c| c.eq_ignore_ascii_case(capability))
+        self.capabilities.iter().any(|c| c.eq_ignore_ascii_case(capability))
     }
 }
 

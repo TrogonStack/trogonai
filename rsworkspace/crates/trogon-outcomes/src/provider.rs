@@ -146,7 +146,10 @@ pub struct AnthropicEvaluationProvider<C = reqwest::Client> {
 
 impl AnthropicEvaluationProvider<reqwest::Client> {
     pub fn new(config: EvalLlmConfig) -> Self {
-        Self { config, client: reqwest::Client::new() }
+        Self {
+            config,
+            client: reqwest::Client::new(),
+        }
     }
 }
 
@@ -182,7 +185,10 @@ pub(crate) async fn evaluate<C: EvalHttpClient>(
         model: &config.model,
         max_tokens: config.max_tokens,
         system: SYSTEM_PROMPT,
-        messages: [EvalMessage { role: "user", content: &prompt }],
+        messages: [EvalMessage {
+            role: "user",
+            content: &prompt,
+        }],
     };
 
     let (auth_header, auth_value) = match config.auth_style {
@@ -207,8 +213,8 @@ pub(crate) async fn evaluate<C: EvalHttpClient>(
         .collect::<Vec<_>>()
         .join("");
 
-    let output: EvalOutput = serde_json::from_str(text.trim())
-        .map_err(|e| OutcomesError::Parse(format!("{e}: {text}")))?;
+    let output: EvalOutput =
+        serde_json::from_str(text.trim()).map_err(|e| OutcomesError::Parse(format!("{e}: {text}")))?;
 
     Ok((output.scores, output.overall_reasoning))
 }
@@ -230,13 +236,22 @@ fn build_prompt(rubric: &Rubric, transcript: &[TranscriptEntry]) -> String {
             TranscriptEntry::Message { role, content, .. } => {
                 out.push_str(&format!("[{role:?}] {content}\n"));
             }
-            TranscriptEntry::ToolCall { name, input, output, .. } => {
+            TranscriptEntry::ToolCall {
+                name, input, output, ..
+            } => {
                 out.push_str(&format!("[tool:{name}] input={input} output={output}\n"));
             }
-            TranscriptEntry::RoutingDecision { from, to, reasoning, .. } => {
+            TranscriptEntry::RoutingDecision {
+                from, to, reasoning, ..
+            } => {
                 out.push_str(&format!("[route] {from} → {to}: {reasoning}\n"));
             }
-            TranscriptEntry::SubAgentSpawn { parent, child, capability, .. } => {
+            TranscriptEntry::SubAgentSpawn {
+                parent,
+                child,
+                capability,
+                ..
+            } => {
                 out.push_str(&format!("[spawn] {parent} → {child} ({capability})\n"));
             }
         }
@@ -262,8 +277,16 @@ mod tests {
             "Code Review Quality",
             "Evaluates the quality of code review feedback",
             vec![
-                Criterion { name: "thoroughness".into(), description: "Covers all issues".into(), weight: 1.0 },
-                Criterion { name: "clarity".into(), description: "Clear explanations".into(), weight: 1.0 },
+                Criterion {
+                    name: "thoroughness".into(),
+                    description: "Covers all issues".into(),
+                    weight: 1.0,
+                },
+                Criterion {
+                    name: "clarity".into(),
+                    description: "Clear explanations".into(),
+                    weight: 1.0,
+                },
             ],
         )
     }
@@ -296,7 +319,10 @@ mod tests {
         fn enqueue_json(self, json: &str) -> Self {
             self.responses.lock().unwrap().push_back(Ok(EvalResponse {
                 stop_reason: "end_turn".into(),
-                content: vec![EvalBlock { kind: "text".into(), text: json.to_string() }],
+                content: vec![EvalBlock {
+                    kind: "text".into(),
+                    text: json.to_string(),
+                }],
             }));
             self
         }
@@ -318,24 +344,23 @@ mod tests {
             _auth_value: &'a str,
             _request: &'a EvalRequest<'a>,
         ) -> impl Future<Output = Result<EvalResponse, OutcomesError>> + Send + 'a {
-            let result = self
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or(Ok(EvalResponse {
-                    stop_reason: "end_turn".into(),
-                    content: vec![EvalBlock {
-                        kind: "text".into(),
-                        text: r#"{"scores":[],"overall_reasoning":""}"#.into(),
-                    }],
-                }));
+            let result = self.responses.lock().unwrap().pop_front().unwrap_or(Ok(EvalResponse {
+                stop_reason: "end_turn".into(),
+                content: vec![EvalBlock {
+                    kind: "text".into(),
+                    text: r#"{"scores":[],"overall_reasoning":""}"#.into(),
+                }],
+            }));
             async move { result }
         }
     }
 
     fn config() -> EvalLlmConfig {
-        EvalLlmConfig { api_url: "http://unused".into(), api_key: "test".into(), ..Default::default() }
+        EvalLlmConfig {
+            api_url: "http://unused".into(),
+            api_key: "test".into(),
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
@@ -348,8 +373,7 @@ mod tests {
             "overall_reasoning":"good review overall"
         }"#;
         let mock = MockEvalHttpClient::default().enqueue_json(json);
-        let (scores, reasoning) =
-            evaluate(&rubric(), &transcript(), &config(), &mock).await.unwrap();
+        let (scores, reasoning) = evaluate(&rubric(), &transcript(), &config(), &mock).await.unwrap();
         assert_eq!(scores.len(), 2);
         assert_eq!(scores[0].criterion, "thoroughness");
         assert!((scores[0].score - 0.9).abs() < 1e-5);

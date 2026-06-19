@@ -90,11 +90,7 @@ where
     JP: JetStreamPublisher,
 {
     /// Create a host with the [`DEFAULT_EVENT_TIMEOUT`].
-    pub fn new(
-        runtime: ActorRuntime<S, P, N, R, JP>,
-        actor: A,
-        capability: AgentCapability,
-    ) -> Self {
+    pub fn new(runtime: ActorRuntime<S, P, N, R, JP>, actor: A, capability: AgentCapability) -> Self {
         Self::with_event_timeout(runtime, actor, capability, DEFAULT_EVENT_TIMEOUT)
     }
 
@@ -160,8 +156,7 @@ where
         let heartbeat_cap = self.capability.clone();
         let mut cancel_rx_hb = self.cancel_rx.clone();
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(trogon_registry::provision::HEARTBEAT_INTERVAL);
+            let mut interval = tokio::time::interval(trogon_registry::provision::HEARTBEAT_INTERVAL);
             interval.tick().await;
             loop {
                 tokio::select! {
@@ -321,8 +316,7 @@ where
         let heartbeat_cap = self.capability.clone();
         let mut cancel_rx_hb = self.cancel_rx.clone();
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(trogon_registry::provision::HEARTBEAT_INTERVAL);
+            let mut interval = tokio::time::interval(trogon_registry::provision::HEARTBEAT_INTERVAL);
             interval.tick().await;
             loop {
                 tokio::select! {
@@ -431,13 +425,8 @@ where
 ///
 /// Failures are logged as warnings — the spawning actor will time out and NAK
 /// its own event for retry if it doesn't receive the reply in time.
-async fn send_spawn_reply<N, S>(
-    nats: &N,
-    state: &S,
-    actor_type: &str,
-    entity_key: &str,
-    reply_subject: String,
-) where
+async fn send_spawn_reply<N, S>(nats: &N, state: &S, actor_type: &str, entity_key: &str, reply_subject: String)
+where
     N: PublishClient,
     S: StateStore,
 {
@@ -491,15 +480,7 @@ mod tests {
 
     #[test]
     fn host_error_display() {
-        assert!(
-            HostError::Register("x".into())
-                .to_string()
-                .contains("register")
-        );
-        assert!(
-            HostError::Subscribe("x".into())
-                .to_string()
-                .contains("subscribe")
-        );
+        assert!(HostError::Register("x".into()).to_string().contains("register"));
+        assert!(HostError::Subscribe("x".into()).to_string().contains("subscribe"));
     }
 }

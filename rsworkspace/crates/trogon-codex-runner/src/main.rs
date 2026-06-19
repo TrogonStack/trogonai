@@ -2,18 +2,16 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use tracing::{error, info, warn};
-use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_codex_runner::DefaultCodexAgent;
+use trogon_nats::jetstream::NatsJetStreamClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let default_model =
-        std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".to_string());
+    let default_model = std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".to_string());
 
     info!(nats_url, prefix, default_model, "codex-runner starting");
 
@@ -30,11 +28,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Registry self-registration ────────────────────────────────────────────
 
     let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "codex".to_string());
-    let reg_store = trogon_registry::provision(&js_ctx).await
+    let reg_store = trogon_registry::provision(&js_ctx)
+        .await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
-    let codex_models = std::env::var("CODEX_MODELS")
-        .unwrap_or_else(|_| "o4-mini:o4-mini,o3:o3,gpt-4o:GPT-4o".to_string());
+    let codex_models =
+        std::env::var("CODEX_MODELS").unwrap_or_else(|_| "o4-mini:o4-mini,o3:o3,gpt-4o:GPT-4o".to_string());
     let model_ids: Vec<String> = codex_models
         .split(',')
         .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
@@ -49,7 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         current_load: 0,
         metadata: serde_json::json!({ "acp_prefix": &prefix, "models": model_ids }),
     };
-    registry.register(&cap).await
+    registry
+        .register(&cap)
+        .await
         .map_err(|e| format!("initial registry registration failed: {e}"))?;
     info!(agent_type, prefix, "registered in agent registry");
     tokio::spawn({

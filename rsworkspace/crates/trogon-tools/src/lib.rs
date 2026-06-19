@@ -13,8 +13,8 @@ pub mod types;
 pub mod web;
 
 pub use types::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
-    ToolOutput, ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver, ToolOutput,
+    ToolResult,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,11 +46,7 @@ pub fn web_search_config_from_env() -> (Option<String>, Option<String>) {
     let api_key = std::env::var("WEB_SEARCH_API_KEY")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            std::env::var("SERPER_API_KEY")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-        });
+        .or_else(|| std::env::var("SERPER_API_KEY").ok().filter(|s| !s.trim().is_empty()));
     let endpoint = std::env::var("WEB_SEARCH_ENDPOINT")
         .ok()
         .filter(|s| !s.trim().is_empty());
@@ -58,11 +54,7 @@ pub fn web_search_config_from_env() -> (Option<String>, Option<String>) {
 }
 
 impl ToolContext {
-    pub fn new(
-        proxy_url: impl Into<String>,
-        cwd: impl Into<String>,
-        http_client: reqwest::Client,
-    ) -> Self {
+    pub fn new(proxy_url: impl Into<String>, cwd: impl Into<String>, http_client: reqwest::Client) -> Self {
         let (web_search_api_key, web_search_endpoint) = web_search_config_from_env();
         Self {
             proxy_url: proxy_url.into(),
@@ -407,32 +399,31 @@ pub fn exit_plan_mode_tool_def() -> ToolDef {
 
 pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> ToolOutput {
     match name {
-        "read_file"        => fs::read_file(ctx, input).await,
-        "write_file"       => ToolOutput::Text(fs::write_file(ctx, input).await),
-        "delete_file"      => ToolOutput::Text(fs::delete_file(ctx, input).await),
-        "list_dir"         => ToolOutput::Text(fs::list_dir(ctx, input).await),
-        "glob"             => ToolOutput::Text(fs::glob_files(ctx, input).await),
-        "str_replace"      => ToolOutput::Text(editor::str_replace(ctx, input).await),
-        "multi_edit"       => ToolOutput::Text(editor::multi_edit(ctx, input).await),
-        "git_status"       => ToolOutput::Text(git::status(ctx, input).await),
-        "git_diff"         => ToolOutput::Text(git::diff(ctx, input).await),
-        "git_log"          => ToolOutput::Text(git::log(ctx, input).await),
-        "git_commit"       => ToolOutput::Text(git::commit(ctx, input).await),
+        "read_file" => fs::read_file(ctx, input).await,
+        "write_file" => ToolOutput::Text(fs::write_file(ctx, input).await),
+        "delete_file" => ToolOutput::Text(fs::delete_file(ctx, input).await),
+        "list_dir" => ToolOutput::Text(fs::list_dir(ctx, input).await),
+        "glob" => ToolOutput::Text(fs::glob_files(ctx, input).await),
+        "str_replace" => ToolOutput::Text(editor::str_replace(ctx, input).await),
+        "multi_edit" => ToolOutput::Text(editor::multi_edit(ctx, input).await),
+        "git_status" => ToolOutput::Text(git::status(ctx, input).await),
+        "git_diff" => ToolOutput::Text(git::diff(ctx, input).await),
+        "git_log" => ToolOutput::Text(git::log(ctx, input).await),
+        "git_commit" => ToolOutput::Text(git::commit(ctx, input).await),
         "git_create_branch" => ToolOutput::Text(git::create_branch(ctx, input).await),
-        "git_push"         => ToolOutput::Text(git::push(ctx, input).await),
-        "gh"               => ToolOutput::Text(github::gh(ctx, input).await),
-        "fetch_url"        => ToolOutput::Text(web::fetch_url(ctx, input).await),
-        "web_search"       => ToolOutput::Text(web::web_search(ctx, input).await),
-        "notebook_edit"    => ToolOutput::Text(fs::notebook_edit(ctx, input).await),
-        "search_files"     => ToolOutput::Text(search::search_files(ctx, input).await),
-        "todo_write"       => ToolOutput::Text(todo::todo_write(ctx, input).await),
-        "todo_read"        => ToolOutput::Text(todo::todo_read(ctx, input).await),
+        "git_push" => ToolOutput::Text(git::push(ctx, input).await),
+        "gh" => ToolOutput::Text(github::gh(ctx, input).await),
+        "fetch_url" => ToolOutput::Text(web::fetch_url(ctx, input).await),
+        "web_search" => ToolOutput::Text(web::web_search(ctx, input).await),
+        "notebook_edit" => ToolOutput::Text(fs::notebook_edit(ctx, input).await),
+        "search_files" => ToolOutput::Text(search::search_files(ctx, input).await),
+        "todo_write" => ToolOutput::Text(todo::todo_write(ctx, input).await),
+        "todo_read" => ToolOutput::Text(todo::todo_read(ctx, input).await),
         // Reached only when the user approved leaving plan mode (a denial / "keep
         // planning" never dispatches). The actual mode switch is applied by the
         // runner from the exit-plan dialog selection.
         "ExitPlanMode" => ToolOutput::Text(
-            "Plan approved by the user. Plan mode is now exited; proceed with the approved plan."
-                .to_string(),
+            "Plan approved by the user. Plan mode is now exited; proceed with the approved plan.".to_string(),
         ),
         "change_directory" => {
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
@@ -457,10 +448,7 @@ mod tests {
     fn test_ctx() -> ToolContext {
         ToolContext {
             proxy_url: "http://localhost:8080".to_string(),
-            cwd: std::env::current_dir()
-                .unwrap()
-                .to_string_lossy()
-                .to_string(),
+            cwd: std::env::current_dir().unwrap().to_string_lossy().to_string(),
             http_client: reqwest::Client::new(),
             web_search_api_key: None,
             web_search_endpoint: None,
@@ -469,11 +457,7 @@ mod tests {
 
     #[test]
     fn tool_def_stores_fields() {
-        let t = tool_def(
-            "my_tool",
-            "Does something",
-            json!({"type": "object", "properties": {}}),
-        );
+        let t = tool_def("my_tool", "Does something", json!({"type": "object", "properties": {}}));
         assert_eq!(t.name, "my_tool");
         assert_eq!(t.description, "Does something");
     }
@@ -608,9 +592,7 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = out_text(
-            dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await,
-        );
+        let result = out_text(dispatch_tool(&ctx, "write_file", &json!({"path": "out.txt", "content": "data"})).await);
         assert_eq!(result, "OK");
         let content = tokio::fs::read_to_string(dir.path().join("out.txt")).await.unwrap();
         assert_eq!(content, "data");
@@ -772,9 +754,7 @@ mod tests {
             web_search_api_key: None,
             web_search_endpoint: None,
         };
-        let result = out_text(
-            dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await,
-        );
+        let result = out_text(dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await);
         assert!(result.contains("dispatched"), "got: {result}");
     }
 
@@ -797,7 +777,9 @@ mod tests {
             "nbformat": 4,
             "cells": [{"cell_type": "code", "source": ["old"], "metadata": {}, "outputs": [], "execution_count": null}]
         });
-        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&nb).unwrap()).await.unwrap();
+        tokio::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&nb).unwrap())
+            .await
+            .unwrap();
         let ctx = ToolContext {
             proxy_url: String::new(),
             cwd: dir.path().to_string_lossy().into_owned(),

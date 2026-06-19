@@ -104,6 +104,9 @@ mod tests {
         let env = InMemoryEnv::new();
         env.set("WEBHOOK_DISPATCH_TIMEOUT_SECS", "not-a-number");
         let config = WebhookDispatcherConfig::from_env(&env);
-        assert_eq!(config.dispatch_timeout, Duration::from_secs(DEFAULT_DISPATCH_TIMEOUT_SECS));
+        assert_eq!(
+            config.dispatch_timeout,
+            Duration::from_secs(DEFAULT_DISPATCH_TIMEOUT_SECS)
+        );
     }
 }

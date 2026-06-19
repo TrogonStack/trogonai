@@ -93,17 +93,9 @@ impl RunStore {
 
     /// List all runs for `tenant_id`, optionally filtered by `automation_id`.
     /// Results are sorted newest-first.
-    pub async fn list(
-        &self,
-        tenant_id: &str,
-        automation_id: Option<&str>,
-    ) -> Result<Vec<RunRecord>, StoreError> {
+    pub async fn list(&self, tenant_id: &str, automation_id: Option<&str>) -> Result<Vec<RunRecord>, StoreError> {
         let prefix = format!("{tenant_id}.");
-        let mut keys = self
-            .kv
-            .keys()
-            .await
-            .map_err(|e| StoreError(e.to_string()))?;
+        let mut keys = self.kv.keys().await.map_err(|e| StoreError(e.to_string()))?;
         let mut result = Vec::new();
 
         while let Some(key) = keys.next().await {
@@ -111,11 +103,7 @@ impl RunStore {
             if !key.starts_with(&prefix) {
                 continue;
             }
-            if let Some(bytes) = self
-                .kv
-                .get(&key)
-                .await
-                .map_err(|e| StoreError(e.to_string()))?
+            if let Some(bytes) = self.kv.get(&key).await.map_err(|e| StoreError(e.to_string()))?
                 && let Ok(run) = serde_json::from_slice::<RunRecord>(&bytes)
             {
                 if let Some(aid) = automation_id
@@ -162,10 +150,7 @@ impl RunStore {
 
 /// Abstraction over a run-history store.
 pub trait RunRepository: Clone + Send + Sync + 'static {
-    fn record<'a>(
-        &'a self,
-        run: &'a RunRecord,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
+    fn record<'a>(&'a self, run: &'a RunRecord) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
 
     fn list<'a>(
         &'a self,
@@ -180,10 +165,7 @@ pub trait RunRepository: Clone + Send + Sync + 'static {
 }
 
 impl RunRepository for RunStore {
-    fn record<'a>(
-        &'a self,
-        run: &'a RunRecord,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+    fn record<'a>(&'a self, run: &'a RunRecord) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
         Box::pin(async move { self.record(run).await })
     }
 
@@ -291,11 +273,7 @@ pub mod mock {
                 let mut runs: Vec<RunRecord> = guard
                     .iter()
                     .filter(|r| r.tenant_id == tenant_id)
-                    .filter(|r| {
-                        automation_id
-                            .as_deref()
-                            .is_none_or(|aid| r.automation_id == aid)
-                    })
+                    .filter(|r| automation_id.as_deref().is_none_or(|aid| r.automation_id == aid))
                     .cloned()
                     .collect();
                 runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
@@ -313,8 +291,7 @@ pub mod mock {
                 let now = now_unix();
                 let seven_days_ago = now.saturating_sub(7 * 86_400);
                 let guard = data.lock().unwrap();
-                let runs: Vec<&RunRecord> =
-                    guard.iter().filter(|r| r.tenant_id == tenant_id).collect();
+                let runs: Vec<&RunRecord> = guard.iter().filter(|r| r.tenant_id == tenant_id).collect();
                 let total = runs.len() as u64;
                 let successful_7d = runs
                     .iter()
@@ -479,19 +456,9 @@ mod tests {
             .filter(|r| r.started_at >= seven_days_ago && r.status == RunStatus::Failed)
             .count() as u64;
 
-        assert_eq!(
-            successful_7d, 2,
-            "r1 (boundary) and r3 (now) must be counted"
-        );
-        assert_eq!(
-            failed_7d, 0,
-            "r2 (just before boundary) must not be counted"
-        );
-        assert_eq!(
-            runs.len() as u64,
-            3,
-            "total includes all records regardless of age"
-        );
+        assert_eq!(successful_7d, 2, "r1 (boundary) and r3 (now) must be counted");
+        assert_eq!(failed_7d, 0, "r2 (just before boundary) must not be counted");
+        assert_eq!(runs.len() as u64, 3, "total includes all records regardless of age");
     }
 
     /// When all runs are older than 7 days the 7d counters must be zero but
@@ -554,19 +521,14 @@ mod tests {
             .collect();
 
         for h in handles {
-            h.await
-                .expect("task must not panic")
-                .expect("record must succeed");
+            h.await.expect("task must not panic").expect("record must succeed");
         }
 
         let all = store.list("acme", None).await.unwrap();
         assert_eq!(all.len(), 20, "all 20 concurrent records must be present");
 
         // Half successful, half failed
-        let successes = all
-            .iter()
-            .filter(|r| r.status == RunStatus::Success)
-            .count();
+        let successes = all.iter().filter(|r| r.status == RunStatus::Success).count();
         let failures = all.iter().filter(|r| r.status == RunStatus::Failed).count();
         assert_eq!(successes, 10);
         assert_eq!(failures, 10);

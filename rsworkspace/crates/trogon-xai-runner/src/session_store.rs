@@ -102,11 +102,7 @@ impl TextBlock {
 pub trait SessionStoring: Send + Sync + 'static {
     fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()>;
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()>;
-    fn load<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        session_id: &'a str,
-    ) -> BoxFuture<'a, Option<SessionSnapshot>>;
+    fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>>;
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -179,11 +175,7 @@ impl SessionStoring for NatsSessionStore {
         Box::pin(self.remove_impl(tenant_id, session_id))
     }
 
-    fn load<'a>(
-        &'a self,
-        tenant_id: &'a str,
-        session_id: &'a str,
-    ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+    fn load<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>> {
         Box::pin(self.load_impl(tenant_id, session_id))
     }
 }
@@ -223,17 +215,12 @@ impl DefaultSessionStore {
 ///
 /// Mirrors the ACP runner's unconditional `NatsSessionStore::open`, but falls
 /// back to [`DefaultSessionStore::InMemory`] instead of failing startup.
-pub async fn open_default_session_store(
-    js: &jetstream::Context,
-    session_ttl_secs: u64,
-) -> DefaultSessionStore {
+pub async fn open_default_session_store(js: &jetstream::Context, session_ttl_secs: u64) -> DefaultSessionStore {
     session_store_from_open(NatsSessionStore::open(js, session_ttl_secs).await)
 }
 
 /// Select the session store backend from a NATS KV open attempt.
-pub fn session_store_from_open(
-    result: Result<NatsSessionStore, impl Into<String>>,
-) -> DefaultSessionStore {
+pub fn session_store_from_open(result: Result<NatsSessionStore, impl Into<String>>) -> DefaultSessionStore {
     match result {
         Ok(store) => {
             info!("xai: session persistence enabled");
@@ -253,9 +240,7 @@ pub fn session_store_from_open(
 
 /// Returns the current UTC time as an ISO 8601 string (e.g. `2026-04-20T15:30:00.123Z`).
 pub fn now_iso() -> String {
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = d.as_secs();
     let millis = d.subsec_millis();
     let time_secs = secs % 86400;
@@ -309,10 +294,7 @@ pub mod mock {
 
     impl SessionStoring for MockSessionStore {
         fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()> {
-            self.saves
-                .lock()
-                .expect("saves lock poisoned")
-                .push(snapshot.clone());
+            self.saves.lock().expect("saves lock poisoned").push(snapshot.clone());
             Box::pin(std::future::ready(()))
         }
 
@@ -324,11 +306,7 @@ pub mod mock {
             Box::pin(std::future::ready(()))
         }
 
-        fn load<'a>(
-            &'a self,
-            _tenant_id: &'a str,
-            session_id: &'a str,
-        ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+        fn load<'a>(&'a self, _tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, Option<SessionSnapshot>> {
             let result = self
                 .loads
                 .lock()

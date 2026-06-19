@@ -11,8 +11,8 @@ use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_nats::{
-    ConnectError, FlushClient, NatsAuth, NatsConfig, PublishClient, PublishOptions,
-    SubscribeClient, connect, publish, request_with_timeout,
+    ConnectError, FlushClient, NatsAuth, NatsConfig, PublishClient, PublishOptions, SubscribeClient, connect, publish,
+    request_with_timeout,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -72,19 +72,12 @@ async fn publish_and_subscribe_roundtrip() {
     let (_container, port) = start_nats().await;
     let nats = nats_client(port).await;
 
-    let mut sub = SubscribeClient::subscribe(&nats, "roundtrip.subject")
-        .await
-        .unwrap();
+    let mut sub = SubscribeClient::subscribe(&nats, "roundtrip.subject").await.unwrap();
 
     let payload = serde_json::json!({ "hello": "world" });
-    publish(
-        &nats,
-        "roundtrip.subject",
-        &payload,
-        PublishOptions::simple(),
-    )
-    .await
-    .unwrap();
+    publish(&nats, "roundtrip.subject", &payload, PublishOptions::simple())
+        .await
+        .unwrap();
 
     let msg = tokio::time::timeout(Duration::from_secs(2), sub.next())
         .await
@@ -120,11 +113,7 @@ async fn request_reply_roundtrip() {
     )
     .await;
 
-    assert!(
-        result.is_ok(),
-        "expected Ok, got: {:?}",
-        result.unwrap_err()
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.unwrap_err());
     let response = result.unwrap();
     assert_eq!(response["status"], "ok");
 }
@@ -241,10 +230,7 @@ async fn connect_fails_on_invalid_credentials_file() {
     };
 
     let result = connect(&config, Duration::from_secs(5)).await;
-    assert!(
-        result.is_err(),
-        "expected error for non-existent credentials file"
-    );
+    assert!(result.is_err(), "expected error for non-existent credentials file");
     assert!(
         matches!(result.unwrap_err(), ConnectError::InvalidCredentials(_)),
         "expected InvalidCredentials variant"
@@ -262,10 +248,7 @@ async fn connect_with_token_auth_succeeds() {
         .expect("Failed to start NATS container");
     let port = container.get_host_port_ipv4(4222).await.unwrap();
 
-    let config = NatsConfig::new(
-        vec![format!("127.0.0.1:{port}")],
-        NatsAuth::Token(token.to_string()),
-    );
+    let config = NatsConfig::new(vec![format!("127.0.0.1:{port}")], NatsAuth::Token(token.to_string()));
 
     let result = connect(&config, Duration::from_secs(5)).await;
     assert!(
@@ -322,8 +305,5 @@ async fn connect_with_user_password_auth_succeeds() {
         b"hello".as_ref().into(),
     )
     .await;
-    assert!(
-        pub_result.is_ok(),
-        "publish after user/password auth must succeed"
-    );
+    assert!(pub_result.is_ok(), "publish after user/password auth must succeed");
 }

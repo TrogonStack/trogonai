@@ -22,9 +22,9 @@ pub mod stream;
 pub mod subjects;
 
 pub use error::ApprovalError;
-pub use notifier::{LoggingNotifier, NoopNotifier, Notifier};
 #[cfg(feature = "slack")]
 pub use notifier::SlackWebhookNotifier;
+pub use notifier::{LoggingNotifier, NoopNotifier, Notifier};
 pub use proposal::{
     ApproveRequest, CreateRequest, Proposal, ProposalId, ProposalStatus, RejectRequest, StatusResponse,
 };

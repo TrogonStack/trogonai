@@ -33,10 +33,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     let event_type = event["type"].as_str().unwrap_or("");
 
     if action != "create" || event_type != "Issue" {
-        info!(
-            action,
-            event_type, "Linear event not relevant for triage — skipping"
-        );
+        info!(action, event_type, "Linear event not relevant for triage — skipping");
         return None;
     }
 
@@ -59,10 +56,7 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
 
     let tools = triage_tools();
 
-    let mem_path = agent
-        .memory_path
-        .as_deref()
-        .unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
         (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
@@ -220,9 +214,6 @@ mod tests {
             "data": { "title": "No ID here" }   // id field missing
         });
         let result = handle(&make_stub_agent(), &serde_json::to_vec(&payload).unwrap()).await;
-        assert!(
-            result.is_none(),
-            "absent data.id must return None; got: {result:?}"
-        );
+        assert!(result.is_none(), "absent data.id must return None; got: {result:?}");
     }
 }

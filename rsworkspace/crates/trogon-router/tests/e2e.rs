@@ -11,15 +11,12 @@ use testcontainers_modules::{
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_actor::{
-    ActorContext, ActorRuntime, EntityActor, StateStore, host::ActorHost,
-    inbox::provision_actor_inbox, provision_state,
+    ActorContext, ActorRuntime, EntityActor, StateStore, host::ActorHost, inbox::provision_actor_inbox, provision_state,
 };
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_router::{Router, decision::LlmRoutingResponse, error::RouterError, llm::LlmClient};
-use trogon_transcript::{
-    entry::TranscriptEntry, publisher::NatsTranscriptPublisher, store::TranscriptStore,
-};
+use trogon_transcript::{entry::TranscriptEntry, publisher::NatsTranscriptPublisher, store::TranscriptStore};
 
 // ── Test actor ────────────────────────────────────────────────────────────────
 
@@ -39,18 +36,12 @@ impl EntityActor for ScribeActor {
         "scribe"
     }
 
-    async fn handle(
-        &mut self,
-        state: &mut ScribeState,
-        ctx: &ActorContext,
-    ) -> Result<(), Self::Error> {
+    async fn handle(&mut self, state: &mut ScribeState, ctx: &ActorContext) -> Result<(), Self::Error> {
         state.count += 1;
         ctx.append_user_message(&format!("event received (count={})", state.count), None)
             .await
             .ok();
-        ctx.append_assistant_message("acknowledged", None)
-            .await
-            .ok();
+        ctx.append_assistant_message("acknowledged", None).await.ok();
         Ok(())
     }
 }
@@ -162,10 +153,7 @@ async fn router_routes_to_actor_and_both_write_transcript() {
     // Poll until the actor transcript appears (up to 3 s).
     let actor_entries = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let entries = transcript_store
-                .query("scribe", "test.entity.1")
-                .await
-                .unwrap();
+            let entries = transcript_store.query("scribe", "test.entity.1").await.unwrap();
             if entries.len() >= 2 {
                 return entries;
             }
@@ -285,8 +273,5 @@ async fn actor_state_is_persisted_after_routing() {
     router_handle.abort();
 
     let state: ScribeState = serde_json::from_slice(&raw_state).unwrap();
-    assert_eq!(
-        state.count, 1,
-        "actor should have processed exactly one event"
-    );
+    assert_eq!(state.count, 1, "actor should have processed exactly one event");
 }

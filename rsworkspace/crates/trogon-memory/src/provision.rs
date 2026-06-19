@@ -1,9 +1,6 @@
 use async_nats::jetstream::{
     self, ErrorCode,
-    context::{
-        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-        KeyValueError,
-    },
+    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind, KeyValueError},
     kv, stream,
 };
 
@@ -12,9 +9,7 @@ pub const DREAMS_STREAM: &str = "SESSION_DREAMS";
 pub const DREAMS_SUBJECT: &str = "sessions.dream.>";
 
 /// Create or open the `SESSION_MEMORIES` KV bucket.
-pub async fn provision_kv(
-    js: &jetstream::Context,
-) -> Result<kv::Store, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn provision_kv(js: &jetstream::Context) -> Result<kv::Store, Box<dyn std::error::Error + Send + Sync>> {
     match js
         .create_key_value(kv::Config {
             bucket: MEMORIES_BUCKET.to_string(),
@@ -34,9 +29,7 @@ pub async fn provision_kv(
 }
 
 /// Create or ensure the `SESSION_DREAMS` JetStream stream exists.
-pub async fn provision_stream(
-    js: &jetstream::Context,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn provision_stream(js: &jetstream::Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     js.get_or_create_stream(stream::Config {
         name: DREAMS_STREAM.to_string(),
         subjects: vec![DREAMS_SUBJECT.to_string()],

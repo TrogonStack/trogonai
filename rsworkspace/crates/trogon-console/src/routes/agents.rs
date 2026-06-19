@@ -21,9 +21,7 @@ fn now_iso() -> String {
     format!("{secs}")
 }
 
-pub async fn list_agents(
-    State(state): State<Arc<AppState>>,
-) -> Result<impl IntoResponse, AppError> {
+pub async fn list_agents(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
     let agents = state.agents.list().await.map_err(AppError::Store)?;
     Ok(Json(agents))
 }
@@ -131,11 +129,7 @@ pub async fn list_agent_versions(
         .map_err(AppError::Store)?
         .ok_or_else(|| AppError::NotFound(format!("agent {id} not found")))?;
 
-    let versions = state
-        .agents
-        .list_versions(&id)
-        .await
-        .map_err(AppError::Store)?;
+    let versions = state.agents.list_versions(&id).await.map_err(AppError::Store)?;
     Ok(Json(versions))
 }
 
@@ -178,12 +172,12 @@ pub async fn rollback_to_version(
         .ok_or_else(|| AppError::NotFound(format!("agent {id} not found")))?;
 
     agent.system_prompt = snap.system_prompt;
-    agent.skill_ids     = snap.skill_ids;
-    agent.tools         = snap.tools;
-    agent.mcp_servers   = snap.mcp_servers;
-    agent.model         = snap.model;
-    agent.version      += 1;
-    agent.updated_at    = now_iso();
+    agent.skill_ids = snap.skill_ids;
+    agent.tools = snap.tools;
+    agent.mcp_servers = snap.mcp_servers;
+    agent.model = snap.model;
+    agent.version += 1;
+    agent.updated_at = now_iso();
 
     state.agents.put(&agent).await.map_err(AppError::Store)?;
     Ok(Json(agent))
@@ -193,10 +187,6 @@ pub async fn list_agent_sessions(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let sessions = state
-        .sessions
-        .list_by_agent_id(&id)
-        .await
-        .map_err(AppError::Store)?;
+    let sessions = state.sessions.list_by_agent_id(&id).await.map_err(AppError::Store)?;
     Ok(Json(sessions))
 }

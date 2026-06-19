@@ -50,11 +50,10 @@ pub fn build_routing_prompt(event: &RouterEvent, agents: &[AgentCapability]) -> 
     // ── Instructions ─────────────────────────────────────────────────────────
     lines.push("## Task".to_string());
     lines.push(String::new());
-    lines.push("Decide which agent should handle this event based on its capabilities and the event type/content.".to_string());
     lines.push(
-        "The entity key uniquely identifies the domain object, e.g. `owner/repo/456` for a PR."
-            .to_string(),
+        "Decide which agent should handle this event based on its capabilities and the event type/content.".to_string(),
     );
+    lines.push("The entity key uniquely identifies the domain object, e.g. `owner/repo/456` for a PR.".to_string());
     lines.push(String::new());
     lines.push("Respond with ONLY a JSON object — no markdown, no commentary.".to_string());
     lines.push(String::new());
@@ -62,10 +61,7 @@ pub fn build_routing_prompt(event: &RouterEvent, agents: &[AgentCapability]) -> 
     lines.push(r#"{"status":"routed","agent_type":"<agent_type exactly as listed>","entity_key":"<entity key>","reasoning":"<brief explanation>"}"#.to_string());
     lines.push(String::new());
     lines.push("If no agent can handle this event:".to_string());
-    lines.push(
-        r#"{"status":"unroutable","reasoning":"<explanation of why no agent matches>"}"#
-            .to_string(),
-    );
+    lines.push(r#"{"status":"unroutable","reasoning":"<explanation of why no agent matches>"}"#.to_string());
 
     lines.join("\n")
 }
@@ -79,19 +75,12 @@ mod tests {
     }
 
     fn pr_actor() -> AgentCapability {
-        AgentCapability::new(
-            "PrActor",
-            ["code_review", "security_analysis"],
-            "actors.pr.>",
-        )
+        AgentCapability::new("PrActor", ["code_review", "security_analysis"], "actors.pr.>")
     }
 
     #[test]
     fn prompt_contains_event_type() {
-        let event = make_event(
-            "trogon.events.github.pull_request",
-            r#"{"action":"opened"}"#,
-        );
+        let event = make_event("trogon.events.github.pull_request", r#"{"action":"opened"}"#);
         let prompt = build_routing_prompt(&event, &[pr_actor()]);
         assert!(prompt.contains("github.pull_request"));
     }
@@ -135,13 +124,7 @@ mod tests {
         agent.metadata = serde_json::json!({"team": "security", "region": "us-east-1"});
         let event = make_event("trogon.events.github.push", "{}");
         let prompt = build_routing_prompt(&event, &[agent]);
-        assert!(
-            prompt.contains("metadata"),
-            "prompt should include metadata block"
-        );
-        assert!(
-            prompt.contains("us-east-1"),
-            "prompt should include metadata values"
-        );
+        assert!(prompt.contains("metadata"), "prompt should include metadata block");
+        assert!(prompt.contains("us-east-1"), "prompt should include metadata values");
     }
 }

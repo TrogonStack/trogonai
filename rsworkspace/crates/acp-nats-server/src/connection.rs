@@ -148,10 +148,7 @@ pub async fn handle<N, J>(
 }
 
 #[cfg_attr(coverage, coverage(off))]
-async fn run_recv_pump(
-    mut ws_receiver: SplitStream<WebSocket>,
-    mut ws_recv_write: tokio::io::DuplexStream,
-) {
+async fn run_recv_pump(mut ws_receiver: SplitStream<WebSocket>, mut ws_recv_write: tokio::io::DuplexStream) {
     while let Some(Ok(msg)) = ws_receiver.next().await {
         let text = match msg {
             Message::Text(text) => text,
@@ -176,10 +173,7 @@ async fn run_recv_pump(
 }
 
 #[cfg_attr(coverage, coverage(off))]
-async fn run_send_pump(
-    mut ws_sender: SplitSink<WebSocket, Message>,
-    ws_send_read: tokio::io::DuplexStream,
-) {
+async fn run_send_pump(mut ws_sender: SplitSink<WebSocket, Message>, ws_send_read: tokio::io::DuplexStream) {
     let mut reader = tokio::io::BufReader::new(ws_send_read);
     let mut line = String::new();
     loop {

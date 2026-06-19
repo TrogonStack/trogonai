@@ -10,11 +10,7 @@ use testcontainers_modules::{
 use trogon_automations::{RunRecord, RunStatus, RunStore, now_unix};
 
 async fn make_run_store() -> (RunStore, impl Drop) {
-    let container = Nats::default()
-        .with_cmd(["--jetstream"])
-        .start()
-        .await
-        .expect("NATS");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -100,10 +96,7 @@ async fn list_filter_returns_empty_for_unknown_automation() {
         .await
         .unwrap();
 
-    let missing = store
-        .list("acme", Some("auto-MISSING"))
-        .await
-        .expect("list");
+    let missing = store.list("acme", Some("auto-MISSING")).await.expect("list");
     assert!(missing.is_empty());
 }
 
@@ -144,18 +137,9 @@ async fn stats_empty_returns_zeros() {
 #[tokio::test]
 async fn stats_counts_success_and_failed() {
     let (store, _c) = make_run_store().await;
-    store
-        .record(&run("r1", "a", "acme", RunStatus::Success))
-        .await
-        .unwrap();
-    store
-        .record(&run("r2", "a", "acme", RunStatus::Success))
-        .await
-        .unwrap();
-    store
-        .record(&run("r3", "a", "acme", RunStatus::Failed))
-        .await
-        .unwrap();
+    store.record(&run("r1", "a", "acme", RunStatus::Success)).await.unwrap();
+    store.record(&run("r2", "a", "acme", RunStatus::Success)).await.unwrap();
+    store.record(&run("r3", "a", "acme", RunStatus::Failed)).await.unwrap();
 
     let stats = store.stats("acme").await.expect("stats");
     assert_eq!(stats.total, 3);
@@ -166,14 +150,8 @@ async fn stats_counts_success_and_failed() {
 #[tokio::test]
 async fn stats_tenant_isolation() {
     let (store, _c) = make_run_store().await;
-    store
-        .record(&run("r1", "a", "acme", RunStatus::Success))
-        .await
-        .unwrap();
-    store
-        .record(&run("r2", "a", "other", RunStatus::Failed))
-        .await
-        .unwrap();
+    store.record(&run("r1", "a", "acme", RunStatus::Success)).await.unwrap();
+    store.record(&run("r2", "a", "other", RunStatus::Failed)).await.unwrap();
 
     let acme_stats = store.stats("acme").await.expect("acme stats");
     let other_stats = store.stats("other").await.expect("other stats");
@@ -208,10 +186,7 @@ async fn stats_old_run_counts_in_total_but_not_in_7d() {
 
     let stats = store.stats("acme").await.expect("stats");
     assert_eq!(stats.total, 2, "total must include old runs");
-    assert_eq!(
-        stats.successful_7d, 1,
-        "7d count must exclude the 8-day-old run"
-    );
+    assert_eq!(stats.successful_7d, 1, "7d count must exclude the 8-day-old run");
     assert_eq!(stats.failed_7d, 0);
 }
 
@@ -228,10 +203,7 @@ async fn stats_old_failed_run_excluded_from_7d() {
 
     let stats = store.stats("acme").await.expect("stats");
     assert_eq!(stats.total, 1, "total includes old run");
-    assert_eq!(
-        stats.failed_7d, 0,
-        "old failure must not appear in 7d count"
-    );
+    assert_eq!(stats.failed_7d, 0, "old failure must not appear in 7d count");
     assert_eq!(stats.successful_7d, 0);
 }
 
@@ -368,11 +340,7 @@ async fn stats_skips_invalid_json_entries() {
         testcontainers::{ImageExt, runners::AsyncRunner},
     };
 
-    let container = Nats::default()
-        .with_cmd(["--jetstream"])
-        .start()
-        .await
-        .expect("NATS");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -391,12 +359,9 @@ async fn stats_skips_invalid_json_entries() {
     // "$KV.RUNS.{key}". We write garbage bytes using the kv API on the
     // underlying NATS connection.
     let kv = js.get_key_value("RUNS").await.expect("kv bucket");
-    kv.put(
-        "acme.corrupted-run-id",
-        bytes::Bytes::from(b"not valid json".to_vec()),
-    )
-    .await
-    .expect("inject corrupt entry");
+    kv.put("acme.corrupted-run-id", bytes::Bytes::from(b"not valid json".to_vec()))
+        .await
+        .expect("inject corrupt entry");
 
     // stats() must not fail — it should count only the valid run.
     let stats = store
@@ -421,11 +386,7 @@ async fn list_skips_invalid_json_entries() {
         testcontainers::{ImageExt, runners::AsyncRunner},
     };
 
-    let container = Nats::default()
-        .with_cmd(["--jetstream"])
-        .start()
-        .await
-        .expect("NATS");
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.expect("NATS");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
     let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
         .await
@@ -441,12 +402,9 @@ async fn list_skips_invalid_json_entries() {
 
     // Inject two corrupted entries directly into the KV bucket.
     let kv = js.get_key_value("RUNS").await.expect("kv bucket");
-    kv.put(
-        "acme.corrupt-1",
-        bytes::Bytes::from(b"not valid json".to_vec()),
-    )
-    .await
-    .expect("inject corrupt-1");
+    kv.put("acme.corrupt-1", bytes::Bytes::from(b"not valid json".to_vec()))
+        .await
+        .expect("inject corrupt-1");
     kv.put("acme.corrupt-2", bytes::Bytes::from(b"{broken".to_vec()))
         .await
         .expect("inject corrupt-2");

@@ -182,9 +182,12 @@ mod tests {
         let store = MockSubscriptionStore::new();
         // Valid subscription
         store
-            .put("valid-id", bytes::Bytes::from(
-                serde_json::to_vec(&make_sub("valid-id", "transcripts.>", "https://ok.com")).unwrap(),
-            ))
+            .put(
+                "valid-id",
+                bytes::Bytes::from(
+                    serde_json::to_vec(&make_sub("valid-id", "transcripts.>", "https://ok.com")).unwrap(),
+                ),
+            )
             .await
             .unwrap();
         // Corrupt bytes — not valid JSON

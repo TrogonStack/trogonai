@@ -5,8 +5,8 @@
 ///
 /// Subject format: `{prefix}.session.{session_id}.client.{method_suffix}`
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, CreateTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
-    SessionId, SessionNotification, SessionUpdate, TerminalId, WriteTextFileRequest,
+    ContentBlock, ContentChunk, CreateTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest, SessionId,
+    SessionNotification, SessionUpdate, TerminalId, WriteTextFileRequest,
 };
 use futures::future::join_all;
 use std::path::PathBuf;
@@ -47,30 +47,17 @@ fn test_prefix(tag: &str) -> String {
 }
 
 /// Publish a request and wait for a reply (timeout 5s). Returns raw reply bytes.
-async fn nats_request(
-    nats: &async_nats::Client,
-    subject: String,
-    payload: impl Into<bytes::Bytes>,
-) -> bytes::Bytes {
-    let msg = tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request(subject, payload.into()),
-    )
-    .await
-    .expect("request timed out")
-    .expect("NATS request failed");
+async fn nats_request(nats: &async_nats::Client, subject: String, payload: impl Into<bytes::Bytes>) -> bytes::Bytes {
+    let msg = tokio::time::timeout(Duration::from_secs(5), nats.request(subject, payload.into()))
+        .await
+        .expect("request timed out")
+        .expect("NATS request failed");
     msg.payload
 }
 
 /// Publish fire-and-forget (no reply expected).
-async fn nats_publish(
-    nats: &async_nats::Client,
-    subject: String,
-    payload: impl Into<bytes::Bytes>,
-) {
-    nats.publish(subject, payload.into())
-        .await
-        .expect("publish failed");
+async fn nats_publish(nats: &async_nats::Client, subject: String, payload: impl Into<bytes::Bytes>) {
+    nats.publish(subject, payload.into()).await.expect("publish failed");
     nats.flush().await.expect("flush failed");
 }
 
@@ -106,13 +93,8 @@ async fn dispatcher_terminal_create_and_release() {
     let session_id = "sess-create";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -127,10 +109,7 @@ async fn dispatcher_terminal_create_and_release() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Send terminal.create
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
 
@@ -140,10 +119,7 @@ async fn dispatcher_terminal_create_and_release() {
             assert!(!tid.is_empty());
 
             // Send terminal.release
-            let rel = ReleaseTerminalRequest::new(
-                SessionId::from(session_id),
-                TerminalId::new(tid.to_string()),
-            );
+            let rel = ReleaseTerminalRequest::new(SessionId::from(session_id), TerminalId::new(tid.to_string()));
             let subject = format!("{prefix}.session.{session_id}.client.terminal.release");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&rel).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -169,13 +145,8 @@ async fn dispatcher_invalid_json_returns_error() {
     let session_id = "sess-invalid";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -190,8 +161,7 @@ async fn dispatcher_invalid_json_returns_error() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
-            let reply =
-                nats_request(&nats, subject, bytes::Bytes::from_static(b"not-valid-json")).await;
+            let reply = nats_request(&nats, subject, bytes::Bytes::from_static(b"not-valid-json")).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
 
             let code = resp["error"]["code"].as_i64().expect("error.code missing");
@@ -208,9 +178,7 @@ async fn dispatcher_no_reply_subject_does_not_crash() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_no_reply_subject_does_not_crash"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_no_reply_subject_does_not_crash");
             return;
         }
     };
@@ -219,13 +187,8 @@ async fn dispatcher_no_reply_subject_does_not_crash() {
     let session_id = "sess-noreply";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -240,8 +203,7 @@ async fn dispatcher_no_reply_subject_does_not_crash() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Publish terminal.create with no reply subject (nats.publish, not nats.request).
-            let req =
-                CreateTerminalRequest::new(SessionId::from(session_id), "/nonexistent/path.wasm");
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), "/nonexistent/path.wasm");
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             nats_publish(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
 
@@ -273,13 +235,8 @@ async fn dispatcher_session_update_fire_and_forget() {
     let session_id = "sess-update";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -330,13 +287,8 @@ async fn dispatcher_ext_list_sessions() {
     let session_id = "sess-list";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -351,10 +303,7 @@ async fn dispatcher_ext_list_sessions() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Create a terminal so the session appears in the list.
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -391,13 +340,8 @@ async fn dispatcher_ext_list_terminals() {
     let session_id = "sess-terms";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -412,26 +356,20 @@ async fn dispatcher_ext_list_terminals() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Create a terminal.
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             let tid = resp["terminalId"].as_str().expect("terminal_id");
 
             // list_terminals
-            let subject =
-                format!("{prefix}.session.{session_id}.client.ext.runtime.list_terminals");
+            let subject = format!("{prefix}.session.{session_id}.client.ext.runtime.list_terminals");
             let reply = nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             let terminals = resp["terminals"].as_array().expect("terminals array");
             // list_terminals is built manually in dispatcher with snake_case keys.
             assert!(
-                terminals
-                    .iter()
-                    .any(|t| t["terminal_id"].as_str() == Some(tid)),
+                terminals.iter().any(|t| t["terminal_id"].as_str() == Some(tid)),
                 "terminal {tid} not in list: {terminals:?}"
             );
 
@@ -446,9 +384,7 @@ async fn dispatcher_ext_prompt_response_not_supported() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_ext_prompt_response_not_supported"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_ext_prompt_response_not_supported");
             return;
         }
     };
@@ -457,13 +393,8 @@ async fn dispatcher_ext_prompt_response_not_supported() {
     let session_id = "sess-prompt";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -477,8 +408,7 @@ async fn dispatcher_ext_prompt_response_not_supported() {
             ));
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let subject =
-                format!("{prefix}.session.{session_id}.client.ext.session.prompt_response");
+            let subject = format!("{prefix}.session.{session_id}.client.ext.session.prompt_response");
             let reply = nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             let code = resp["error"]["code"].as_i64().expect("error.code");
@@ -495,9 +425,7 @@ async fn dispatcher_unknown_ext_method_returns_not_found() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_unknown_ext_method_returns_not_found"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_unknown_ext_method_returns_not_found");
             return;
         }
     };
@@ -506,13 +434,8 @@ async fn dispatcher_unknown_ext_method_returns_not_found() {
     let session_id = "sess-unknown";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -526,8 +449,7 @@ async fn dispatcher_unknown_ext_method_returns_not_found() {
             ));
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let subject =
-                format!("{prefix}.session.{session_id}.client.ext.runtime.no_such_method");
+            let subject = format!("{prefix}.session.{session_id}.client.ext.runtime.no_such_method");
             let reply = nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             let code = resp["error"]["code"].as_i64().expect("error.code");
@@ -544,9 +466,7 @@ async fn dispatcher_ext_write_stdin_unknown_terminal() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_ext_write_stdin_unknown_terminal"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_ext_write_stdin_unknown_terminal");
             return;
         }
     };
@@ -555,13 +475,8 @@ async fn dispatcher_ext_write_stdin_unknown_terminal() {
     let session_id = "sess-stdin";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -598,9 +513,7 @@ async fn dispatcher_ext_close_stdin_unknown_terminal() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_ext_close_stdin_unknown_terminal"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_ext_close_stdin_unknown_terminal");
             return;
         }
     };
@@ -609,13 +522,8 @@ async fn dispatcher_ext_close_stdin_unknown_terminal() {
     let session_id = "sess-close-stdin";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -657,13 +565,8 @@ async fn dispatcher_shutdown_drains_and_exits() {
     let prefix = test_prefix("shutdown");
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -702,13 +605,8 @@ async fn dispatcher_terminal_output_returns_output() {
     let session_id = "sess-output";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -723,8 +621,7 @@ async fn dispatcher_terminal_output_returns_output() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Create a native terminal: `echo hello`.
-            let req =
-                CreateTerminalRequest::new(session_id, "/bin/echo").args(vec!["hello".to_string()]);
+            let req = CreateTerminalRequest::new(session_id, "/bin/echo").args(vec!["hello".to_string()]);
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -741,10 +638,7 @@ async fn dispatcher_terminal_output_returns_output() {
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             assert!(resp.get("error").is_none(), "output error: {resp}");
             let output = resp["output"].as_str().expect("output field");
-            assert!(
-                output.contains("hello"),
-                "expected 'hello' in output, got: {output:?}"
-            );
+            assert!(output.contains("hello"), "expected 'hello' in output, got: {output:?}");
 
             let _ = shutdown_tx.send(true);
         })
@@ -766,13 +660,8 @@ async fn dispatcher_terminal_kill_stops_process() {
     let session_id = "sess-kill";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -787,8 +676,7 @@ async fn dispatcher_terminal_kill_stops_process() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Create a long-running native terminal: `sleep 30`.
-            let req =
-                CreateTerminalRequest::new(session_id, "/bin/sleep").args(vec!["30".to_string()]);
+            let req = CreateTerminalRequest::new(session_id, "/bin/sleep").args(vec!["30".to_string()]);
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -813,9 +701,7 @@ async fn dispatcher_terminal_wait_for_exit_returns_status() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_terminal_wait_for_exit_returns_status"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_terminal_wait_for_exit_returns_status");
             return;
         }
     };
@@ -825,13 +711,8 @@ async fn dispatcher_terminal_wait_for_exit_returns_status() {
     let session_id = "sess-wait";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -846,10 +727,7 @@ async fn dispatcher_terminal_wait_for_exit_returns_status() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Create a WASM terminal that exits immediately with code 0.
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -884,9 +762,7 @@ async fn dispatcher_session_request_permission_auto_allow() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_session_request_permission_auto_allow"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_session_request_permission_auto_allow");
             return;
         }
     };
@@ -895,13 +771,8 @@ async fn dispatcher_session_request_permission_auto_allow() {
     let session_id = "sess-perm";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -931,14 +802,10 @@ async fn dispatcher_session_request_permission_auto_allow() {
                     }
                 ]
             });
-            let subject =
-                format!("{prefix}.session.{session_id}.client.session.request_permission");
+            let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
-            assert!(
-                resp.get("error").is_none(),
-                "request_permission error: {resp}"
-            );
+            assert!(resp.get("error").is_none(), "request_permission error: {resp}");
 
             // auto_allow_permissions: true → first option selected.
             // RequestPermissionOutcome is internally tagged: { "outcome": "selected", "optionId": "allow" }
@@ -975,13 +842,8 @@ async fn dispatcher_wasm_end_to_end() {
     let session_id = "sess-e2e";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -996,10 +858,7 @@ async fn dispatcher_wasm_end_to_end() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // 1. Create a WASM terminal via NATS.
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1024,16 +883,10 @@ async fn dispatcher_wasm_end_to_end() {
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             assert!(resp.get("error").is_none(), "terminal output error: {resp}");
             assert!(resp.get("output").is_some(), "output field missing: {resp}");
-            assert!(
-                resp.get("truncated").is_some(),
-                "truncated field missing: {resp}"
-            );
+            assert!(resp.get("truncated").is_some(), "truncated field missing: {resp}");
 
             // 4. Release the terminal.
-            let rel = ReleaseTerminalRequest::new(
-                SessionId::from(session_id),
-                TerminalId::new(tid.clone()),
-            );
+            let rel = ReleaseTerminalRequest::new(SessionId::from(session_id), TerminalId::new(tid.clone()));
             let subject = format!("{prefix}.session.{session_id}.client.terminal.release");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&rel).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1058,13 +911,8 @@ async fn dispatcher_concurrent_requests() {
     let prefix = test_prefix("concurrent");
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1082,11 +930,9 @@ async fn dispatcher_concurrent_requests() {
             let futs: Vec<_> = (0..10)
                 .map(|i| {
                     let nats = nats.clone();
-                    let subject =
-                        format!("{prefix}.session.sess-{i}.client.ext.runtime.list_sessions");
+                    let subject = format!("{prefix}.session.sess-{i}.client.ext.runtime.list_sessions");
                     async move {
-                        let reply =
-                            nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
+                        let reply = nats_request(&nats, subject, bytes::Bytes::from_static(b"{}")).await;
                         let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
                         resp.get("sessions").is_some()
                     }
@@ -1095,10 +941,7 @@ async fn dispatcher_concurrent_requests() {
 
             let results = join_all(futs).await;
             let all_ok = results.iter().all(|&ok| ok);
-            assert!(
-                all_ok,
-                "not all concurrent requests returned a sessions list"
-            );
+            assert!(all_ok, "not all concurrent requests returned a sessions list");
 
             // Also fire 5 fs.write requests concurrently.
             let write_futs: Vec<_> = (0..5)
@@ -1113,8 +956,7 @@ async fn dispatcher_concurrent_requests() {
                     );
                     let subject = format!("{prefix}.session.{sid}.client.fs.write_text_file");
                     async move {
-                        let reply =
-                            nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
+                        let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
                         let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
                         resp.get("error").is_none()
                     }
@@ -1147,13 +989,8 @@ async fn dispatcher_shutdown_drains_in_flight_task() {
     let session_id = "sess-drain";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1169,10 +1006,7 @@ async fn dispatcher_shutdown_drains_in_flight_task() {
 
             // Send a terminal.create request WITHOUT awaiting the reply — it will
             // be in-flight when we send the shutdown signal.
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             // Publish without waiting for a reply so the task is dispatched but
             // we don't block here.
@@ -1206,13 +1040,8 @@ async fn dispatcher_fs_write_read_roundtrip() {
     let session_id = "sess-fs";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1238,8 +1067,7 @@ async fn dispatcher_fs_write_read_roundtrip() {
             assert!(resp.get("error").is_none(), "write error: {resp}");
 
             // Read it back.
-            let read_req =
-                ReadTextFileRequest::new(SessionId::from(session_id), PathBuf::from("hello.txt"));
+            let read_req = ReadTextFileRequest::new(SessionId::from(session_id), PathBuf::from("hello.txt"));
             let subject = format!("{prefix}.session.{session_id}.client.fs.read_text_file");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&read_req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1267,13 +1095,8 @@ async fn dispatcher_ext_write_stdin_happy_path() {
     let session_id = "sess-stdin-ok";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1341,13 +1164,8 @@ async fn dispatcher_ext_close_stdin_happy_path() {
     let session_id = "sess-close-ok";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1375,16 +1193,14 @@ async fn dispatcher_ext_close_stdin_happy_path() {
                 "data": b"world\n".to_vec()
             });
             let subject = format!("{prefix}.session.{session_id}.client.ext.terminal.write_stdin");
-            let reply =
-                nats_request(&nats, subject, serde_json::to_vec(&write_payload).unwrap()).await;
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&write_payload).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             assert!(resp.get("error").is_none(), "write_stdin error: {resp}");
 
             // Close stdin — sends EOF; `cat` will exit.
             let close_payload = serde_json::json!({ "terminal_id": tid });
             let subject = format!("{prefix}.session.{session_id}.client.ext.terminal.close_stdin");
-            let reply =
-                nats_request(&nats, subject, serde_json::to_vec(&close_payload).unwrap()).await;
+            let reply = nats_request(&nats, subject, serde_json::to_vec(&close_payload).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             assert!(resp.get("error").is_none(), "close_stdin error: {resp}");
 
@@ -1420,7 +1236,9 @@ async fn dispatcher_session_request_permission_auto_deny_returns_cancelled() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!("NATS_TEST_URL not set — skipping dispatcher_session_request_permission_auto_deny_returns_cancelled");
+            eprintln!(
+                "NATS_TEST_URL not set — skipping dispatcher_session_request_permission_auto_deny_returns_cancelled"
+            );
             return;
         }
     };
@@ -1456,14 +1274,10 @@ async fn dispatcher_session_request_permission_auto_deny_returns_cancelled() {
                     { "optionId": "allow", "name": "Allow", "kind": "allow_once" }
                 ]
             });
-            let subject =
-                format!("{prefix}.session.{session_id}.client.session.request_permission");
+            let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
-            assert!(
-                resp.get("error").is_none(),
-                "request_permission error: {resp}"
-            );
+            assert!(resp.get("error").is_none(), "request_permission error: {resp}");
 
             // auto_allow_permissions: false → cancelled outcome.
             let outcome = &resp["outcome"];
@@ -1484,9 +1298,7 @@ async fn dispatcher_wasm_only_rejects_native_terminal() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_wasm_only_rejects_native_terminal"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_wasm_only_rejects_native_terminal");
             return;
         }
     };
@@ -1515,8 +1327,7 @@ async fn dispatcher_wasm_only_rejects_native_terminal() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Try to spawn a native process — must be rejected.
-            let req =
-                CreateTerminalRequest::new(session_id, "/bin/echo").args(vec!["hello".to_string()]);
+            let req = CreateTerminalRequest::new(session_id, "/bin/echo").args(vec!["hello".to_string()]);
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1542,9 +1353,7 @@ async fn dispatcher_native_terminal_nonzero_exit_code() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_native_terminal_nonzero_exit_code"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_native_terminal_nonzero_exit_code");
             return;
         }
     };
@@ -1553,13 +1362,8 @@ async fn dispatcher_native_terminal_nonzero_exit_code() {
     let session_id = "sess-nonzero";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1588,11 +1392,7 @@ async fn dispatcher_native_terminal_nonzero_exit_code() {
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             assert!(resp.get("error").is_none(), "wait_for_exit error: {resp}");
             let exit_code = resp["exitCode"].as_u64();
-            assert_eq!(
-                exit_code,
-                Some(1),
-                "expected exit code 1 from /bin/false, got: {resp}"
-            );
+            assert_eq!(exit_code, Some(1), "expected exit code 1 from /bin/false, got: {resp}");
 
             let _ = shutdown_tx.send(true);
         })
@@ -1636,8 +1436,7 @@ async fn dispatcher_wait_for_exit_timeout_kills_hung_process() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Spawn a process that will never exit on its own.
-            let req =
-                CreateTerminalRequest::new(session_id, "/bin/sleep").args(vec!["60".to_string()]);
+            let req = CreateTerminalRequest::new(session_id, "/bin/sleep").args(vec!["60".to_string()]);
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1676,9 +1475,7 @@ async fn dispatcher_wasm_stdout_content_is_captured() {
     let nats_url = match nats_url() {
         Some(u) => u,
         None => {
-            eprintln!(
-                "NATS_TEST_URL not set — skipping dispatcher_wasm_stdout_content_is_captured"
-            );
+            eprintln!("NATS_TEST_URL not set — skipping dispatcher_wasm_stdout_content_is_captured");
             return;
         }
     };
@@ -1708,13 +1505,8 @@ async fn dispatcher_wasm_stdout_content_is_captured() {
     std::fs::write(&wasm_path, wasm_bytes).expect("write wasm");
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1729,10 +1521,7 @@ async fn dispatcher_wasm_stdout_content_is_captured() {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Create a WASM terminal that writes to stdout.
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1779,13 +1568,8 @@ async fn dispatcher_write_stdin_to_wasm_terminal_returns_error() {
     let session_id = "sess-wasm-stdin-err";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();
@@ -1809,10 +1593,7 @@ async fn dispatcher_write_stdin_to_wasm_terminal_returns_error() {
             let wasm_path = tmp.path().join("wasm_stdin_err.wasm");
             std::fs::write(&wasm_path, wasm_bytes).expect("write wasm");
 
-            let req = CreateTerminalRequest::new(
-                SessionId::from(session_id),
-                wasm_path.to_str().unwrap(),
-            );
+            let req = CreateTerminalRequest::new(SessionId::from(session_id), wasm_path.to_str().unwrap());
             let subject = format!("{prefix}.session.{session_id}.client.terminal.create");
             let reply = nats_request(&nats, subject, serde_json::to_vec(&req).unwrap()).await;
             let resp: serde_json::Value = serde_json::from_slice(&reply).unwrap();
@@ -1858,13 +1639,8 @@ async fn dispatcher_malformed_subject_ignored() {
     let session_id = "sess-malformed";
 
     let nats = async_nats::connect(&nats_url).await.expect("connect");
-    let runtime = Rc::new(
-        WasmRuntime::with_nats(
-            &dispatcher_config(tmp.path().to_path_buf()),
-            Some(nats.clone()),
-        )
-        .unwrap(),
-    );
+    let runtime =
+        Rc::new(WasmRuntime::with_nats(&dispatcher_config(tmp.path().to_path_buf()), Some(nats.clone())).unwrap());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let local = tokio::task::LocalSet::new();

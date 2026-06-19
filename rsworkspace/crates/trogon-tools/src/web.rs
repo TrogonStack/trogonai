@@ -31,8 +31,7 @@ fn resolve_search_config(ctx: &ToolContext) -> Result<(String, String), String> 
     match api_key {
         Some(key) => Ok((key, endpoint)),
         None => Err(
-            "Error: web_search is not configured. Set WEB_SEARCH_API_KEY or SERPER_API_KEY on the runner."
-                .to_string(),
+            "Error: web_search is not configured. Set WEB_SEARCH_API_KEY or SERPER_API_KEY on the runner.".to_string(),
         ),
     }
 }
@@ -227,20 +226,15 @@ pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
     #[cfg(not(test))]
     if std::env::var_os("TROGON_ALLOW_LOCAL_FETCH").is_none() {
         if is_ssrf_blocked(url) {
-            return "Error: requests to private, loopback, or link-local addresses are not permitted"
-                .to_string();
+            return "Error: requests to private, loopback, or link-local addresses are not permitted".to_string();
         }
         // B4: a public hostname can resolve via DNS to a private/loopback/link-local
         // IP (e.g. metadata endpoints). Reject before connecting.
         if host_resolves_to_blocked(url).await {
-            return "Error: host resolves to a private, loopback, or link-local address"
-                .to_string();
+            return "Error: host resolves to a private, loopback, or link-local address".to_string();
         }
     }
-    let raw = input
-        .get("raw")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let raw = input.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // B4: reqwest follows redirects by default, so a vetted public URL could
     // redirect to `http://169.254.169.254/…` and bypass the host check. Use a
@@ -470,11 +464,7 @@ mod tests {
     #[tokio::test]
     async fn web_search_missing_query_returns_error() {
         let server = MockServer::start();
-        let result = web_search(
-            &ctx_with_search(&server.url("/search"), "test-key"),
-            &json!({}),
-        )
-        .await;
+        let result = web_search(&ctx_with_search(&server.url("/search"), "test-key"), &json!({})).await;
         assert!(result.contains("missing required parameter 'query'"), "got: {result}");
     }
 

@@ -42,10 +42,7 @@ impl HttpClient for reqwest::Client {
         auth_token: &str,
         query: Vec<(String, String)>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, String>> + Send + '_>> {
-        let ref_params: Vec<(&str, &str)> = query
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let ref_params: Vec<(&str, &str)> = query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let builder = reqwest::Client::get(self, url)
             .header("Authorization", auth_token.to_string())
             .query(&ref_params);
@@ -165,8 +162,8 @@ impl<H: HttpClient> SplitClient<H> {
             });
         }
 
-        let parsed: TreatmentResponse = serde_json::from_str(&resp.body)
-            .map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
+        let parsed: TreatmentResponse =
+            serde_json::from_str(&resp.body).map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
         debug!(flag, key, treatment = %parsed.treatment, "Treatment evaluated");
         Ok(parsed.treatment)
     }
@@ -210,11 +207,7 @@ impl<H: HttpClient> SplitClient<H> {
             .map_err(SplitError::Http)?;
 
         if resp.status < 200 || resp.status >= 300 {
-            warn!(
-                key,
-                status = resp.status,
-                "Evaluator returned error for get-treatments"
-            );
+            warn!(key, status = resp.status, "Evaluator returned error for get-treatments");
             return Err(SplitError::EvaluatorError {
                 status: resp.status,
                 body: resp.body,
@@ -222,8 +215,8 @@ impl<H: HttpClient> SplitClient<H> {
         }
 
         // Response shape: { "FLAG_1": { "treatment": "on" }, "FLAG_2": { "treatment": "off" } }
-        let raw: HashMap<String, TreatmentResponse> = serde_json::from_str(&resp.body)
-            .map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
+        let raw: HashMap<String, TreatmentResponse> =
+            serde_json::from_str(&resp.body).map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
         Ok(raw.into_iter().map(|(k, v)| (k, v.treatment)).collect())
     }
 
@@ -278,13 +271,10 @@ impl<H: HttpClient> SplitClient<H> {
             });
         }
 
-        let parsed: TreatmentWithConfigResponse = serde_json::from_str(&resp.body)
-            .map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
+        let parsed: TreatmentWithConfigResponse =
+            serde_json::from_str(&resp.body).map_err(|e| SplitError::UnexpectedResponse(e.to_string()))?;
 
-        let config = parsed
-            .config
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok());
+        let config = parsed.config.as_deref().and_then(|s| serde_json::from_str(s).ok());
 
         Ok(TreatmentWithConfig {
             treatment: parsed.treatment,
@@ -439,10 +429,7 @@ pub mod mock {
 
         /// Enqueue a successful response.
         pub fn enqueue_ok(self, status: u16, body: impl Into<String>) -> Self {
-            self.queue
-                .lock()
-                .unwrap()
-                .push_back(Ok((status, body.into())));
+            self.queue.lock().unwrap().push_back(Ok((status, body.into())));
             self
         }
 
@@ -500,8 +487,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_get_treatment_happy_path() {
-        let mock_http =
-            MockHttpClient::new().enqueue_ok(200, r#"{"splitName":"flag","treatment":"on"}"#);
+        let mock_http = MockHttpClient::new().enqueue_ok(200, r#"{"splitName":"flag","treatment":"on"}"#);
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
         let t = client.get_treatment("u", "flag", None).await.unwrap();
         assert_eq!(t, "on");
@@ -512,10 +498,7 @@ mod tests {
         let mock_http = MockHttpClient::new().enqueue_ok(500, "internal error");
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
         let result = client.get_treatment("u", "flag", None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 500, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 500, .. })));
     }
 
     #[tokio::test]
@@ -568,36 +551,24 @@ mod tests {
         let mock_http = MockHttpClient::new().enqueue_ok(400, "bad request");
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
         let result = client.track("u", "user", "purchase", None, None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 400, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 400, .. })));
     }
 
     #[tokio::test]
     async fn mock_get_treatments_happy_path() {
-        let mock_http = MockHttpClient::new().enqueue_ok(
-            200,
-            r#"{"flag_a":{"treatment":"on"},"flag_b":{"treatment":"off"}}"#,
-        );
+        let mock_http =
+            MockHttpClient::new().enqueue_ok(200, r#"{"flag_a":{"treatment":"on"},"flag_b":{"treatment":"off"}}"#);
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
-        let map = client
-            .get_treatments("u", &["flag_a", "flag_b"], None)
-            .await
-            .unwrap();
+        let map = client.get_treatments("u", &["flag_a", "flag_b"], None).await.unwrap();
         assert_eq!(map.get("flag_a").map(String::as_str), Some("on"));
         assert_eq!(map.get("flag_b").map(String::as_str), Some("off"));
     }
 
     #[tokio::test]
     async fn mock_get_treatment_with_config_parses_json_config() {
-        let mock_http = MockHttpClient::new()
-            .enqueue_ok(200, r#"{"treatment":"on","config":"{\"color\":\"blue\"}"}"#);
+        let mock_http = MockHttpClient::new().enqueue_ok(200, r#"{"treatment":"on","config":"{\"color\":\"blue\"}"}"#);
         let client = SplitClient::new_with(make_config("http://unused"), mock_http);
-        let result = client
-            .get_treatment_with_config("u", "flag", None)
-            .await
-            .unwrap();
+        let result = client.get_treatment_with_config("u", "flag", None).await.unwrap();
         assert_eq!(result.treatment, "on");
         assert_eq!(result.config.as_ref().unwrap()["color"], "blue");
     }
@@ -619,10 +590,7 @@ mod tests {
         });
 
         let client = make_client(&server.base_url());
-        let t = client
-            .get_treatment("user-123", "my_flag", None)
-            .await
-            .unwrap();
+        let t = client.get_treatment("user-123", "my_flag", None).await.unwrap();
         assert_eq!(t, "on");
     }
 
@@ -633,15 +601,11 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param("split-name", "my_flag");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "off" }));
+            then.status(200).json_body(serde_json::json!({ "treatment": "off" }));
         });
 
         let client = make_client(&server.base_url());
-        let t = client
-            .get_treatment("user-456", "my_flag", None)
-            .await
-            .unwrap();
+        let t = client.get_treatment("user-456", "my_flag", None).await.unwrap();
         assert_eq!(t, "off");
     }
 
@@ -649,10 +613,8 @@ mod tests {
     async fn get_treatment_returns_custom_variant() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "blue" }));
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
+            then.status(200).json_body(serde_json::json!({ "treatment": "blue" }));
         });
 
         let client = make_client(&server.base_url());
@@ -667,8 +629,7 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .header("authorization", "test-token");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
@@ -683,8 +644,7 @@ mod tests {
             when.method(httpmock::Method::GET)
                 .path("/client/get-treatment")
                 .query_param_exists("attributes");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
+            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
@@ -698,34 +658,26 @@ mod tests {
     async fn get_treatment_returns_err_on_500() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
             then.status(500).body("internal error");
         });
 
         let client = make_client(&server.base_url());
         let result = client.get_treatment("u", "f", None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 500, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 500, .. })));
     }
 
     #[tokio::test]
     async fn get_treatment_returns_err_on_401() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
             then.status(401).body("unauthorized");
         });
 
         let client = make_client(&server.base_url());
         let result = client.get_treatment("u", "f", None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 401, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 401, .. })));
     }
 
     // ── get_treatment_or_control ──────────────────────────────────────────────
@@ -734,10 +686,8 @@ mod tests {
     async fn get_treatment_or_control_returns_treatment_on_success() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
+            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&server.base_url());
@@ -757,8 +707,7 @@ mod tests {
     async fn get_treatment_or_control_returns_control_on_500() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
             then.status(500).body("oops");
         });
 
@@ -783,10 +732,7 @@ mod tests {
         });
 
         let client = make_client(&server.base_url());
-        let map = client
-            .get_treatments("u", &["flag_a", "flag_b"], None)
-            .await
-            .unwrap();
+        let map = client.get_treatments("u", &["flag_a", "flag_b"], None).await.unwrap();
         assert_eq!(map.get("flag_a").map(String::as_str), Some("on"));
         assert_eq!(map.get("flag_b").map(String::as_str), Some("off"));
     }
@@ -795,17 +741,13 @@ mod tests {
     async fn get_treatments_returns_err_on_non_200() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatments");
+            when.method(httpmock::Method::GET).path("/client/get-treatments");
             then.status(503).body("unavailable");
         });
 
         let client = make_client(&server.base_url());
         let result = client.get_treatments("u", &["f"], None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 503, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 503, .. })));
     }
 
     // ── get_treatment_with_config ─────────────────────────────────────────────
@@ -823,10 +765,7 @@ mod tests {
         });
 
         let client = make_client(&server.base_url());
-        let result = client
-            .get_treatment_with_config("u", "f", None)
-            .await
-            .unwrap();
+        let result = client.get_treatment_with_config("u", "f", None).await.unwrap();
         assert_eq!(result.treatment, "on");
         let cfg = result.config.unwrap();
         assert_eq!(cfg["color"], "blue");
@@ -846,10 +785,7 @@ mod tests {
         });
 
         let client = make_client(&server.base_url());
-        let result = client
-            .get_treatment_with_config("u", "f", None)
-            .await
-            .unwrap();
+        let result = client.get_treatment_with_config("u", "f", None).await.unwrap();
         assert_eq!(result.treatment, "off");
         assert!(result.config.is_none());
     }
@@ -865,10 +801,7 @@ mod tests {
 
         let client = make_client(&server.base_url());
         let result = client.get_treatment_with_config("u", "f", None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 404, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 404, .. })));
     }
 
     // ── track ─────────────────────────────────────────────────────────────────
@@ -904,10 +837,7 @@ mod tests {
         });
 
         let client = make_client(&server.base_url());
-        client
-            .track("u", "user", "purchase", Some(99.99), None)
-            .await
-            .unwrap();
+        client.track("u", "user", "purchase", Some(99.99), None).await.unwrap();
         mock.assert_async().await;
     }
 
@@ -924,10 +854,7 @@ mod tests {
         let client = make_client(&server.base_url());
         let mut props = HashMap::new();
         props.insert("sku".to_string(), Value::String("ABC-123".to_string()));
-        client
-            .track("u", "user", "view", None, Some(&props))
-            .await
-            .unwrap();
+        client.track("u", "user", "view", None, Some(&props)).await.unwrap();
         mock.assert_async().await;
     }
 
@@ -941,10 +868,7 @@ mod tests {
 
         let client = make_client(&server.base_url());
         let result = client.track("u", "user", "ev", None, None).await;
-        assert!(matches!(
-            result,
-            Err(SplitError::EvaluatorError { status: 400, .. })
-        ));
+        assert!(matches!(result, Err(SplitError::EvaluatorError { status: 400, .. })));
     }
 
     // ── is_healthy ────────────────────────────────────────────────────────────
@@ -953,8 +877,7 @@ mod tests {
     async fn is_healthy_returns_true_on_200() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/admin/healthcheck");
+            when.method(httpmock::Method::GET).path("/admin/healthcheck");
             then.status(200);
         });
 
@@ -966,8 +889,7 @@ mod tests {
     async fn is_healthy_returns_false_on_500() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/admin/healthcheck");
+            when.method(httpmock::Method::GET).path("/admin/healthcheck");
             then.status(500);
         });
 
@@ -1016,10 +938,7 @@ mod tests {
         });
 
         let client = make_client(&server.base_url());
-        let result = client
-            .get_treatment_with_config("u", "my_flag", None)
-            .await
-            .unwrap();
+        let result = client.get_treatment_with_config("u", "my_flag", None).await.unwrap();
         assert_eq!(result.treatment, "on");
         assert!(
             result.config.is_none(),
@@ -1033,10 +952,8 @@ mod tests {
     async fn trailing_slash_in_url_is_stripped() {
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET)
-                .path("/client/get-treatment");
-            then.status(200)
-                .json_body(serde_json::json!({ "treatment": "on" }));
+            when.method(httpmock::Method::GET).path("/client/get-treatment");
+            then.status(200).json_body(serde_json::json!({ "treatment": "on" }));
         });
 
         let client = make_client(&format!("{}/", server.base_url()));

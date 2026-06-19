@@ -30,11 +30,7 @@ use crate::tools::{ToolDef, slack};
 /// Run the incident-response agent from a raw incident.io webhook payload.
 ///
 /// Always handles the event — returns `Some(Ok)` on success, `Some(Err)` on failure.
-pub async fn handle(
-    agent: &AgentLoop,
-    nats_subject: &str,
-    payload: &[u8],
-) -> Option<Result<String, String>> {
+pub async fn handle(agent: &AgentLoop, nats_subject: &str, payload: &[u8]) -> Option<Result<String, String>> {
     let event: Value = match serde_json::from_slice(payload) {
         Ok(v) => v,
         Err(e) => return Some(Err(format!("JSON parse error: {e}"))),
@@ -86,10 +82,7 @@ pub async fn handle(
 
     let tools = incident_tools();
 
-    let mem_path = agent
-        .memory_path
-        .as_deref()
-        .unwrap_or(super::DEFAULT_MEMORY_PATH);
+    let mem_path = agent.memory_path.as_deref().unwrap_or(super::DEFAULT_MEMORY_PATH);
     let memory = match (&agent.memory_owner, &agent.memory_repo) {
         (Some(owner), Some(repo)) => fetch_memory(agent, owner, repo, mem_path).await,
         _ => None,
@@ -120,10 +113,7 @@ mod tests {
         let tools = incident_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"send_slack_message"), "slack tool missing");
-        assert!(
-            names.contains(&"read_slack_channel"),
-            "read channel tool missing"
-        );
+        assert!(names.contains(&"read_slack_channel"), "read channel tool missing");
     }
 
     fn make_agent() -> AgentLoop {
@@ -175,9 +165,7 @@ mod tests {
 
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("incident handled"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("incident handled")])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -218,9 +206,7 @@ mod tests {
 
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("resolution noted"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("resolution noted")])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -261,9 +247,7 @@ mod tests {
 
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("handled"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("handled")])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -338,9 +322,7 @@ mod tests {
 
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("handled"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("handled")])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -381,9 +363,7 @@ mod tests {
 
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("status noted"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("status noted")])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -475,9 +455,9 @@ mod tests {
             ..Default::default()
         });
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("incident handled with memory"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn(
+                "incident handled with memory",
+            )])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
@@ -506,11 +486,7 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
-        assert!(
-            matches!(result, Some(Ok(_))),
-            "expected Ok, got: {:?}",
-            result
-        );
+        assert!(matches!(result, Some(Ok(_))), "expected Ok, got: {:?}", result);
     }
 
     #[tokio::test]
@@ -533,9 +509,9 @@ mod tests {
         });
         let tool_context: Arc<dyn crate::tools::AgentConfig> = cfg.clone();
         let agent = AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![
-                end_turn("handled with custom memory"),
-            ])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn(
+                "handled with custom memory",
+            )])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(MockToolDispatcher::new("ok")),
@@ -565,14 +541,13 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
-        assert!(
-            matches!(result, Some(Ok(_))),
-            "expected Ok, got: {:?}",
-            result
-        );
+        assert!(matches!(result, Some(Ok(_))), "expected Ok, got: {:?}", result);
         // Verify the custom path was forwarded to the config layer's fetch call.
         let url = cfg.last_fetched_url().expect("fetch_github_contents was not called");
-        assert!(url.contains("custom/runbook.md"), "URL {url:?} does not contain the custom path");
+        assert!(
+            url.contains("custom/runbook.md"),
+            "URL {url:?} does not contain the custom path"
+        );
     }
 
     #[tokio::test]
@@ -583,7 +558,10 @@ mod tests {
         use crate::tools::mock::{MockAgentConfig, MockToolDispatcher};
         use std::sync::Arc;
 
-        let tool_ctx = Arc::new(MockAgentConfig { github_contents: None, ..Default::default() });
+        let tool_ctx = Arc::new(MockAgentConfig {
+            github_contents: None,
+            ..Default::default()
+        });
         let agent = AgentLoop {
             anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn("ok")])),
             model: "test".to_string(),
@@ -609,9 +587,6 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&payload).unwrap();
         let result = handle(&agent, "incidentio.incident.created", &bytes).await;
-        assert!(
-            matches!(result, Some(Ok(_))),
-            "expected Ok even without memory"
-        );
+        assert!(matches!(result, Some(Ok(_))), "expected Ok even without memory");
     }
 }

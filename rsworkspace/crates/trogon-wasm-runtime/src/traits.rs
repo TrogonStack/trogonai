@@ -1,9 +1,8 @@
 use agent_client_protocol::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
-    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, TerminalOutputRequest, TerminalOutputResponse,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use std::io;
 use std::path::{Path, PathBuf};
@@ -141,9 +140,7 @@ pub trait WasmExecutor<N: NatsBroker + Send + Sync>: Clone + 'static {
     fn run(
         &self,
         config: WasmRunConfig<N>,
-    ) -> impl std::future::Future<
-        Output = Result<agent_client_protocol::TerminalExitStatus, anyhow::Error>,
-    >;
+    ) -> impl std::future::Future<Output = Result<agent_client_protocol::TerminalExitStatus, anyhow::Error>>;
 }
 
 // ── NatsBroker trait ──────────────────────────────────────────────────────────
@@ -168,15 +165,13 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
     fn subscribe(
         &self,
         subject: &str,
-    ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>>
-           + Send;
+    ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>> + Send;
 
     fn queue_subscribe(
         &self,
         subject: &str,
         queue_group: &str,
-    ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>>
-           + Send;
+    ) -> impl std::future::Future<Output = Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>>> + Send;
 
     fn publish(
         &self,
@@ -189,9 +184,7 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
         &self,
         subject: impl Into<String> + Send,
         payload: bytes::Bytes,
-    ) -> impl std::future::Future<
-        Output = Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>>,
-    > + Send;
+    ) -> impl std::future::Future<Output = Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>>> + Send;
 
     /// Returns the NATS server's maximum message payload size in bytes.
     ///
@@ -207,10 +200,7 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
 impl NatsBroker for async_nats::Client {
     type Sub = async_nats::Subscriber;
 
-    async fn subscribe(
-        &self,
-        subject: &str,
-    ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+    async fn subscribe(&self, subject: &str) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
         self.subscribe(subject.to_string())
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
@@ -272,10 +262,7 @@ pub trait Fs: Clone + 'static {
     fn remove_file(&self, path: &Path) -> impl std::future::Future<Output = io::Result<()>>;
 
     /// Returns all immediate child directories of `path`.
-    fn list_subdirs(
-        &self,
-        path: &Path,
-    ) -> impl std::future::Future<Output = io::Result<Vec<PathBuf>>>;
+    fn list_subdirs(&self, path: &Path) -> impl std::future::Future<Output = io::Result<Vec<PathBuf>>>;
 }
 
 // ── TokioFs ───────────────────────────────────────────────────────────────────

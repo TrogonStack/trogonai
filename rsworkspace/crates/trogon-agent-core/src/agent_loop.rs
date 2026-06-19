@@ -19,8 +19,7 @@ use tracing::{debug, info, warn};
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
 pub use trogon_tools::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
-    ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver, ToolResult,
 };
 
 /// A single block in the Anthropic `system` array.
@@ -123,9 +122,7 @@ impl AnthropicHttpClient for reqwest::Client {
             };
 
             if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
-                let retry_after = capped_retry_after(
-                    resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
-                );
+                let retry_after = capped_retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
                 warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                 tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                 attempt += 1;
@@ -345,9 +342,8 @@ impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
                         Ok(r) => r,
                     };
                     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
-                        let retry_after = capped_retry_after(
-                            resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
-                        );
+                        let retry_after =
+                            capped_retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
                         warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                         tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                         attempt += 1;
@@ -392,9 +388,9 @@ impl AnthropicStreamingClient for NoopStreamingClient {
             "event: message_stop\n",
             "data: {\"type\":\"message_stop\"}\n\n",
         );
-        Box::pin(futures_util::stream::once(std::future::ready(Ok(
-            Bytes::from_static(sse.as_bytes()),
-        ))))
+        Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(
+            sse.as_bytes(),
+        )))))
     }
 }
 
@@ -503,8 +499,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 messages: &messages,
             };
 
-            let mut body =
-                serde_json::to_value(&request).expect("request serialization is infallible");
+            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
             if let Some(budget) = self.thinking_budget
                 && budget > 0
             {
@@ -604,8 +599,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 messages: &messages,
             };
 
-            let mut body =
-                serde_json::to_value(&request).expect("request serialization is infallible");
+            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
             if let Some(budget) = self.thinking_budget
                 && budget > 0
             {
@@ -679,8 +673,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         system_prompt: Option<&str>,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
         mut steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
-    ) -> Result<Vec<Message>, AgentError>
-    {
+    ) -> Result<Vec<Message>, AgentError> {
         let mut messages = initial_messages;
 
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
@@ -740,8 +733,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 messages: &messages,
             };
 
-            let mut body =
-                serde_json::to_value(&request).expect("request serialization is infallible");
+            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
             if let Some(budget) = self.thinking_budget
                 && budget > 0
             {
@@ -808,7 +800,12 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                     let id = cb["id"].as_str().unwrap_or("").to_string();
                                     let name = cb["name"].as_str().unwrap_or("").to_string();
                                     let parent_tool_use_id = cb["parent_tool_use_id"].as_str().map(String::from);
-                                    Some(ContentBlockBuilder::ToolUse { id, name, input_buf: String::new(), parent_tool_use_id })
+                                    Some(ContentBlockBuilder::ToolUse {
+                                        id,
+                                        name,
+                                        input_buf: String::new(),
+                                        parent_tool_use_id,
+                                    })
                                 }
                                 _ => None,
                             };
@@ -821,16 +818,17 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                     (Some("text_delta"), ContentBlockBuilder::Text(t)) => {
                                         if let Some(text) = delta["text"].as_str() {
                                             t.push_str(text);
-                                            let _ = event_tx
-                                                .send(AgentEvent::TextDelta { text: text.to_string() })
-                                                .await;
+                                            let _ =
+                                                event_tx.send(AgentEvent::TextDelta { text: text.to_string() }).await;
                                         }
                                     }
                                     (Some("thinking_delta"), ContentBlockBuilder::Thinking { text, .. }) => {
                                         if let Some(thinking) = delta["thinking"].as_str() {
                                             text.push_str(thinking);
                                             let _ = event_tx
-                                                .send(AgentEvent::ThinkingDelta { text: thinking.to_string() })
+                                                .send(AgentEvent::ThinkingDelta {
+                                                    text: thinking.to_string(),
+                                                })
                                                 .await;
                                         }
                                     }
@@ -852,10 +850,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             }
                         }
                         "message_delta" => {
-                            stop_reason = data["delta"]["stop_reason"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
+                            stop_reason = data["delta"]["stop_reason"].as_str().unwrap_or("").to_string();
                             turn_output = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
                         }
                         _ => {}
@@ -868,13 +863,24 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 .into_iter()
                 .filter_map(|opt| match opt? {
                     ContentBlockBuilder::Text(t) => Some(ContentBlock::Text { text: t }),
-                    ContentBlockBuilder::Thinking { text, signature } => {
-                        Some(ContentBlock::Thinking { thinking: text, signature })
-                    }
-                    ContentBlockBuilder::ToolUse { id, name, input_buf, parent_tool_use_id } => {
-                        let input = serde_json::from_str(&input_buf)
-                            .unwrap_or(serde_json::Value::Object(Default::default()));
-                        Some(ContentBlock::ToolUse { id, name, input, parent_tool_use_id })
+                    ContentBlockBuilder::Thinking { text, signature } => Some(ContentBlock::Thinking {
+                        thinking: text,
+                        signature,
+                    }),
+                    ContentBlockBuilder::ToolUse {
+                        id,
+                        name,
+                        input_buf,
+                        parent_tool_use_id,
+                    } => {
+                        let input =
+                            serde_json::from_str(&input_buf).unwrap_or(serde_json::Value::Object(Default::default()));
+                        Some(ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input,
+                            parent_tool_use_id,
+                        })
                     }
                 })
                 .collect();
@@ -946,13 +952,14 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 ),
                             })
                             .await;
-                        warn!(repeat = repeat_count, "loop detected — identical tool calls repeated; halting turn");
+                        warn!(
+                            repeat = repeat_count,
+                            "loop detected — identical tool calls repeated; halting turn"
+                        );
                         return Ok(messages);
                     }
                     used_tools = true;
-                    let results = self
-                        .execute_tools_streaming(&response_content, &event_tx)
-                        .await;
+                    let results = self.execute_tools_streaming(&response_content, &event_tx).await;
                     if !results.is_empty() {
                         let _ = event_tx
                             .send(AgentEvent::ToolBatchFinished { count: results.len() })
@@ -973,10 +980,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             }
         }
 
-        warn!(
-            max = self.max_iterations,
-            "Streaming chat reached max iterations"
-        );
+        warn!(max = self.max_iterations, "Streaming chat reached max iterations");
         Err(AgentError::MaxIterationsReached)
     }
 
@@ -989,7 +993,13 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         let tool_uses: Vec<(String, String, serde_json::Value, Option<String>)> = content
             .iter()
             .filter_map(|b| {
-                if let ContentBlock::ToolUse { id, name, input, parent_tool_use_id } = b {
+                if let ContentBlock::ToolUse {
+                    id,
+                    name,
+                    input,
+                    parent_tool_use_id,
+                } = b
+                {
                     Some((id.clone(), name.clone(), input.clone(), parent_tool_use_id.clone()))
                 } else {
                     None
@@ -1007,9 +1017,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             while i < tool_uses.len() {
                 if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
                     let start = i;
-                    while i < tool_uses.len()
-                        && is_parallel_safe_read_only_tool(&tool_uses[i].1)
-                    {
+                    while i < tool_uses.len() && is_parallel_safe_read_only_tool(&tool_uses[i].1) {
                         i += 1;
                     }
                     let batch = &tool_uses[start..i];
@@ -1067,7 +1075,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                     })
                                     .await;
 
-                                ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                                ToolResult {
+                                    tool_use_id: id,
+                                    content: output,
+                                    blocks: vec![],
+                                }
                             }
                         })
                         .collect();
@@ -1101,7 +1113,9 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             None => true,
                         };
                         if !allowed {
-                            format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
+                            format!(
+                                "Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"
+                            )
                         } else if let Some((_, original, client)) =
                             self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
                         {
@@ -1139,7 +1153,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         })
                         .await;
 
-                    results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
+                    results.push(ToolResult {
+                        tool_use_id: id,
+                        content: output,
+                        blocks: vec![],
+                    });
                 }
             }
             results
@@ -1166,14 +1184,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             .await;
 
                         let output = if name == "ask_user" {
-                            let question =
-                                input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                            let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
                             match &elicitation_provider {
                                 Some(provider) => match provider.elicit(question).await {
                                     Some(answer) => answer,
-                                    None => {
-                                        "The user declined or cancelled the request.".to_string()
-                                    }
+                                    None => "The user declined or cancelled the request.".to_string(),
                                 },
                                 None => "ask_user tool is not available in this context.".to_string(),
                             }
@@ -1206,7 +1221,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             })
                             .await;
 
-                        ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                        ToolResult {
+                            tool_use_id: id,
+                            content: output,
+                            blocks: vec![],
+                        }
                     }
                 })
                 .collect();
@@ -1235,9 +1254,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             while i < tool_uses.len() {
                 if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
                     let start = i;
-                    while i < tool_uses.len()
-                        && is_parallel_safe_read_only_tool(&tool_uses[i].1)
-                    {
+                    while i < tool_uses.len() && is_parallel_safe_read_only_tool(&tool_uses[i].1) {
                         i += 1;
                     }
                     let batch = &tool_uses[start..i];
@@ -1275,7 +1292,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                     output
                                 };
 
-                                ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                                ToolResult {
+                                    tool_use_id: id,
+                                    content: output,
+                                    blocks: vec![],
+                                }
                             }
                         })
                         .collect();
@@ -1300,7 +1321,9 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             None => true,
                         };
                         if !allowed {
-                            format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
+                            format!(
+                                "Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"
+                            )
                         } else if let Some((_, original, client)) =
                             self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
                         {
@@ -1322,7 +1345,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         output
                     };
 
-                    results.push(ToolResult { tool_use_id: id, content: output, blocks: vec![] });
+                    results.push(ToolResult {
+                        tool_use_id: id,
+                        content: output,
+                        blocks: vec![],
+                    });
                 }
             }
             results
@@ -1339,14 +1366,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         debug!(tool = %name, "Executing tool (parallel)");
 
                         let output = if name == "ask_user" {
-                            let question =
-                                input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                            let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
                             match &elicitation_provider {
                                 Some(provider) => match provider.elicit(question).await {
                                     Some(answer) => answer,
-                                    None => {
-                                        "The user declined or cancelled the request.".to_string()
-                                    }
+                                    None => "The user declined or cancelled the request.".to_string(),
                                 },
                                 None => "ask_user tool is not available in this context.".to_string(),
                             }
@@ -1370,7 +1394,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             output
                         };
 
-                        ToolResult { tool_use_id: id, content: output, blocks: vec![] }
+                        ToolResult {
+                            tool_use_id: id,
+                            content: output,
+                            blocks: vec![],
+                        }
                     }
                 })
                 .collect();
@@ -1384,14 +1412,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
 fn is_parallel_safe_read_only_tool(name: &str) -> bool {
     matches!(
         name,
-        "read_file"
-            | "list_dir"
-            | "glob"
-            | "search_files"
-            | "git_status"
-            | "git_diff"
-            | "git_log"
-            | "fetch_url"
+        "read_file" | "list_dir" | "glob" | "search_files" | "git_status" | "git_diff" | "git_log" | "fetch_url"
     )
 }
 
@@ -1430,7 +1451,8 @@ impl SseParser {
             }
 
             if !data.is_empty()
-                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&data)
+            {
                 events.push((event_type, v));
             }
         }
@@ -1441,7 +1463,10 @@ impl SseParser {
 /// Accumulator for a single content block during SSE streaming.
 enum ContentBlockBuilder {
     Text(String),
-    Thinking { text: String, signature: Option<String> },
+    Thinking {
+        text: String,
+        signature: Option<String>,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -1543,7 +1568,9 @@ mod tests {
     #[allow(dead_code)]
     impl MockAnthropicClient {
         fn with_response(json: impl Into<String>) -> Self {
-            Self { response_json: json.into() }
+            Self {
+                response_json: json.into(),
+            }
         }
     }
 
@@ -1555,8 +1582,8 @@ mod tests {
             _extra_headers: &'a [(String, String)],
             _body: &'a Value,
         ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a {
-            let resp: AnthropicResponse = serde_json::from_str(&self.response_json)
-                .expect("test fixture must be valid JSON");
+            let resp: AnthropicResponse =
+                serde_json::from_str(&self.response_json).expect("test fixture must be valid JSON");
             async move { Ok(resp) }
         }
     }
@@ -1598,7 +1625,12 @@ mod tests {
             parent_tool_use_id: None,
         };
         // Same name+input, different id and surrounding text → identical signature.
-        let a = vec![ContentBlock::Text { text: "let me read".into() }, tu("id1", "read_file", "x")];
+        let a = vec![
+            ContentBlock::Text {
+                text: "let me read".into(),
+            },
+            tu("id1", "read_file", "x"),
+        ];
         let b = vec![tu("id2", "read_file", "x")];
         assert_eq!(tool_call_signature(&a), tool_call_signature(&b));
         // Different input → different signature.
@@ -1626,18 +1658,18 @@ mod tests {
 
     #[test]
     fn agent_error_display() {
-        assert!(
-            AgentError::MaxIterationsReached
-                .to_string()
-                .contains("max iterations")
-        );
+        assert!(AgentError::MaxIterationsReached.to_string().contains("max iterations"));
         assert!(
             AgentError::UnexpectedStopReason("pause".to_string())
                 .to_string()
                 .contains("pause")
         );
         assert!(AgentError::MaxTokens.to_string().contains("max_tokens"));
-        assert!(AgentError::Http(HttpError("connection refused".into())).to_string().contains("HTTP error"));
+        assert!(
+            AgentError::Http(HttpError("connection refused".into()))
+                .to_string()
+                .contains("HTTP error")
+        );
     }
 
     #[test]
@@ -1677,9 +1709,7 @@ mod tests {
         };
         let body = serde_json::to_value(&req).unwrap();
 
-        let sys_arr = body["system"]
-            .as_array()
-            .expect("system should be an array");
+        let sys_arr = body["system"].as_array().expect("system should be an array");
         assert_eq!(sys_arr.len(), 1);
         assert_eq!(sys_arr[0]["type"], "text");
         assert_eq!(sys_arr[0]["text"], text);
@@ -1731,10 +1761,7 @@ mod tests {
             last.cache_control = Some(json!({"type": "ephemeral"}));
         }
 
-        assert_eq!(
-            cached_tools[0].cache_control,
-            Some(json!({"type": "ephemeral"}))
-        );
+        assert_eq!(cached_tools[0].cache_control, Some(json!({"type": "ephemeral"})));
     }
 
     /// When the tool list is empty no panic occurs and no cache_control is set.
@@ -1914,7 +1941,9 @@ event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,
 event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
 event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":1}}\n\n\
 event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
-                Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(sse)))))
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(
+                    sse,
+                )))))
             }
         }
 
@@ -2040,10 +2069,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             messages: &[],
         };
         let body = serde_json::to_value(&req).unwrap();
-        assert!(
-            body.get("system").is_none(),
-            "system key should be absent when None"
-        );
+        assert!(body.get("system").is_none(), "system key should be absent when None");
     }
 
     // ── ElicitationProvider / ask_user ────────────────────────────────────────
@@ -2086,8 +2112,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     #[tokio::test]
     async fn ask_user_with_provider_returning_none_uses_declined_message() {
         let mut agent = make_test_agent();
-        agent.elicitation_provider =
-            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+        agent.elicitation_provider = Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
 
         let (tx, _rx) = tokio::sync::mpsc::channel(32);
         let content = vec![ContentBlock::ToolUse {
@@ -2204,8 +2229,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     #[tokio::test]
     async fn execute_tools_ask_user_with_provider_returning_none() {
         let mut agent = make_test_agent();
-        agent.elicitation_provider =
-            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+        agent.elicitation_provider = Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
         let content = vec![ContentBlock::ToolUse {
             id: "u2".to_string(),
             name: "ask_user".to_string(),
@@ -2289,11 +2313,12 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                     "event: message_stop\n",
                     "data: {\"type\":\"message_stop\"}\n\n",
                 ));
-                let stream = futures_util::stream::once(ready(Ok::<Bytes, reqwest::Error>(chunk1)))
-                    .chain(futures_util::stream::once(async move {
+                let stream = futures_util::stream::once(ready(Ok::<Bytes, reqwest::Error>(chunk1))).chain(
+                    futures_util::stream::once(async move {
                         sleep(Duration::from_millis(100)).await;
                         Ok::<Bytes, reqwest::Error>(chunk2)
-                    }));
+                    }),
+                );
                 Box::pin(stream)
             }
         }
@@ -2325,14 +2350,18 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
     #[test]
     fn agent_event_text_delta_is_constructible_and_cloneable() {
-        let ev = AgentEvent::TextDelta { text: "hello".to_string() };
+        let ev = AgentEvent::TextDelta {
+            text: "hello".to_string(),
+        };
         let cloned = ev.clone();
         assert!(matches!(cloned, AgentEvent::TextDelta { text } if text == "hello"));
     }
 
     #[test]
     fn agent_event_thinking_delta_is_constructible_and_cloneable() {
-        let ev = AgentEvent::ThinkingDelta { text: "reasoning...".to_string() };
+        let ev = AgentEvent::ThinkingDelta {
+            text: "reasoning...".to_string(),
+        };
         let cloned = ev.clone();
         assert!(matches!(cloned, AgentEvent::ThinkingDelta { text } if text == "reasoning..."));
     }
@@ -2348,7 +2377,12 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         };
         let cloned = ev.clone();
         match cloned {
-            AgentEvent::ToolCallStarted { id, name, input: inp, parent_tool_use_id } => {
+            AgentEvent::ToolCallStarted {
+                id,
+                name,
+                input: inp,
+                parent_tool_use_id,
+            } => {
                 assert_eq!(id, "call-1");
                 assert_eq!(name, "bash");
                 assert_eq!(inp, input);
@@ -2368,7 +2402,10 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         };
         assert!(matches!(
             ev,
-            AgentEvent::ToolCallStarted { parent_tool_use_id: None, .. }
+            AgentEvent::ToolCallStarted {
+                parent_tool_use_id: None,
+                ..
+            }
         ));
     }
 
@@ -2382,7 +2419,12 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         };
         let cloned = ev.clone();
         match cloned {
-            AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+            AgentEvent::ToolCallFinished {
+                id,
+                output,
+                exit_code,
+                signal,
+            } => {
                 assert_eq!(id, "call-2");
                 assert_eq!(output, "result text");
                 assert_eq!(exit_code, Some(0));
@@ -2408,7 +2450,9 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
     #[test]
     fn agent_event_system_status_is_constructible_and_cloneable() {
-        let ev = AgentEvent::SystemStatus { message: "overloaded".to_string() };
+        let ev = AgentEvent::SystemStatus {
+            message: "overloaded".to_string(),
+        };
         let cloned = ev.clone();
         assert!(matches!(cloned, AgentEvent::SystemStatus { message } if message == "overloaded"));
     }
@@ -2455,7 +2499,9 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                 exit_code: None,
                 signal: None,
             },
-            AgentEvent::SystemStatus { message: "m".to_string() },
+            AgentEvent::SystemStatus {
+                message: "m".to_string(),
+            },
             AgentEvent::UsageSummary {
                 input_tokens: 0,
                 output_tokens: 0,
@@ -2561,15 +2607,23 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         }];
         let results = agent.execute_tools_streaming(&content, &tx).await;
         assert_eq!(results.len(), 1);
-        assert!(results[0].content.contains("Unknown tool"), "got: {}", results[0].content);
+        assert!(
+            results[0].content.contains("Unknown tool"),
+            "got: {}",
+            results[0].content
+        );
 
         let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         assert!(
-            events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == "t1")),
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == "t1")),
             "ToolCallStarted missing: {events:?}"
         );
         assert!(
-            events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == "t1")),
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == "t1")),
             "ToolCallFinished missing: {events:?}"
         );
     }
@@ -2626,11 +2680,15 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         for id in ["t1", "t2"] {
             assert!(
-                events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id: eid, .. } if eid == id)),
+                events
+                    .iter()
+                    .any(|e| matches!(e, AgentEvent::ToolCallStarted { id: eid, .. } if eid == id)),
                 "ToolCallStarted missing for {id}: {events:?}"
             );
             assert!(
-                events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id: eid, .. } if eid == id)),
+                events
+                    .iter()
+                    .any(|e| matches!(e, AgentEvent::ToolCallFinished { id: eid, .. } if eid == id)),
                 "ToolCallFinished missing for {id}: {events:?}"
             );
         }
@@ -2658,8 +2716,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
         let counter = Arc::new(AtomicUsize::new(0));
         let mut agent = make_test_agent();
-        agent.permission_checker =
-            Some(Arc::new(CheckCounter(Arc::clone(&counter))) as Arc<dyn PermissionChecker>);
+        agent.permission_checker = Some(Arc::new(CheckCounter(Arc::clone(&counter))) as Arc<dyn PermissionChecker>);
 
         let content = vec![
             ContentBlock::ToolUse {
@@ -2699,7 +2756,9 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     async fn execute_tools_skips_non_tool_use_blocks() {
         let agent = make_test_agent();
         let content = vec![
-            ContentBlock::Text { text: "ignore me".to_string() },
+            ContentBlock::Text {
+                text: "ignore me".to_string(),
+            },
             ContentBlock::ToolUse {
                 id: "t1".to_string(),
                 name: "my_tool".to_string(),
@@ -2718,7 +2777,9 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let agent = make_test_agent();
         let (tx, _rx) = tokio::sync::mpsc::channel(32);
         let content = vec![
-            ContentBlock::Text { text: "ignore me".to_string() },
+            ContentBlock::Text {
+                text: "ignore me".to_string(),
+            },
             ContentBlock::ToolUse {
                 id: "t1".to_string(),
                 name: "my_tool".to_string(),

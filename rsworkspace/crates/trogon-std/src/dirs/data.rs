@@ -34,10 +34,7 @@ mod tests {
         let mut dirs = FixedDirs::new();
         dirs.set(DirKind::Data, "/data");
 
-        assert_eq!(
-            data_path(&dirs, "myapp"),
-            Some(PathBuf::from("/data/myapp"))
-        );
+        assert_eq!(data_path(&dirs, "myapp"), Some(PathBuf::from("/data/myapp")));
         assert_eq!(data_path(&FixedDirs::new(), "myapp"), None);
     }
 }

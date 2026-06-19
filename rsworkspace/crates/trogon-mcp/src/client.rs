@@ -582,8 +582,7 @@ mod resource_tests {
     async fn resources_list_returns_resource_definitions() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .body_contains("resources/list");
+            when.method(httpmock::Method::POST).body_contains("resources/list");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(json!({
@@ -638,10 +637,7 @@ mod resource_tests {
         });
 
         let err = client(&server).resources_list().await.unwrap_err();
-        assert!(
-            err.contains("MCP resources/list deserialize error"),
-            "got: {err}"
-        );
+        assert!(err.contains("MCP resources/list deserialize error"), "got: {err}");
     }
 
     #[tokio::test]
@@ -695,10 +691,7 @@ mod resource_tests {
                 .json_body(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid params"}}));
         });
 
-        let err = client(&server)
-            .resources_read("file:///missing")
-            .await
-            .unwrap_err();
+        let err = client(&server).resources_read("file:///missing").await.unwrap_err();
         assert!(err.contains("MCP resources/read error"), "got: {err}");
     }
 
@@ -716,9 +709,6 @@ mod resource_tests {
             .resources_read("file:///project/README.md")
             .await
             .unwrap_err();
-        assert!(
-            err.contains("MCP resources/read deserialize error"),
-            "got: {err}"
-        );
+        assert!(err.contains("MCP resources/read deserialize error"), "got: {err}");
     }
 }

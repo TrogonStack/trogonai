@@ -64,17 +64,13 @@ impl EnvironmentStore {
 impl EnvironmentRepository for EnvironmentStore {
     fn list(
         &self,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Environment>, String>> + Send + '_>> {
         Box::pin(async move { self.list().await })
     }
     fn get<'a>(
         &'a self,
         id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Environment>, String>> + Send + 'a>> {
         Box::pin(async move { self.get(id).await })
     }
     fn put<'a>(

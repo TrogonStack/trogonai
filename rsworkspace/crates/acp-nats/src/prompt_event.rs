@@ -120,9 +120,7 @@ mod tests {
 
     #[test]
     fn prompt_event_text_delta_tag() {
-        let e = PromptEvent::TextDelta {
-            text: "hi".to_string(),
-        };
+        let e = PromptEvent::TextDelta { text: "hi".to_string() };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "text_delta");
         assert_eq!(v["text"], "hi");
@@ -184,9 +182,7 @@ mod tests {
         // Roundtrip
         let json = serde_json::to_string(&e).unwrap();
         let e2: PromptEvent = serde_json::from_str(&json).unwrap();
-        assert!(
-            matches!(e2, PromptEvent::SystemStatus { message } if message == "rate_limit_warning")
-        );
+        assert!(matches!(e2, PromptEvent::SystemStatus { message } if message == "rate_limit_warning"));
     }
 
     #[test]
@@ -209,10 +205,8 @@ mod tests {
         };
         let json = serde_json::to_string(&e).unwrap();
         let e2: PromptEvent = serde_json::from_str(&json).unwrap();
-        assert!(
-            matches!(e2, PromptEvent::ModeChanged { ref mode, ref model }
-                if mode == "plan" && model == "claude-sonnet-4-6")
-        );
+        assert!(matches!(e2, PromptEvent::ModeChanged { ref mode, ref model }
+                if mode == "plan" && model == "claude-sonnet-4-6"));
     }
 
     #[test]

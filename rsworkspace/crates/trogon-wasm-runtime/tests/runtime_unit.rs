@@ -4,16 +4,16 @@
 /// They verify session management, file I/O routing, and native terminal
 /// creation logic using `MockFs` and `MockProcessSpawner`.
 use agent_client_protocol::{
-    CreateTerminalRequest, ReadTextFileRequest, SessionId, TerminalExitStatus,
-    WaitForTerminalExitRequest, WriteTextFileRequest,
+    CreateTerminalRequest, ReadTextFileRequest, SessionId, TerminalExitStatus, WaitForTerminalExitRequest,
+    WriteTextFileRequest,
 };
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use trogon_wasm_runtime::traits::{
-    ChildProcessHandle, Clock, Fs, IdGenerator, NatsBroker, ProcessSpawner, SyncFs, TaskLimiter,
-    WasmExecutor, WasmRunConfig,
+    ChildProcessHandle, Clock, Fs, IdGenerator, NatsBroker, ProcessSpawner, SyncFs, TaskLimiter, WasmExecutor,
+    WasmRunConfig,
 };
 use trogon_wasm_runtime::{Config, FileMetadata, WasmRuntime};
 
@@ -26,10 +26,7 @@ struct MockNatsBroker;
 impl NatsBroker for MockNatsBroker {
     type Sub = futures::stream::Empty<async_nats::Message>;
 
-    async fn subscribe(
-        &self,
-        _subject: &str,
-    ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+    async fn subscribe(&self, _subject: &str) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
         Ok(futures::stream::empty())
     }
 
@@ -111,10 +108,7 @@ impl Fs for MockFs {
     }
 
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
-        self.files
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), data.to_vec());
+        self.files.lock().unwrap().insert(path.to_path_buf(), data.to_vec());
         Ok(())
     }
 
@@ -131,20 +125,14 @@ impl Fs for MockFs {
 
     async fn read_to_string(&self, path: &Path) -> io::Result<String> {
         let files = self.files.lock().unwrap();
-        let data = files.get(path).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("file not found: {}", path.display()),
-            )
-        })?;
+        let data = files
+            .get(path)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("file not found: {}", path.display())))?;
         String::from_utf8(data.clone()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
-        self.files
-            .lock()
-            .unwrap()
-            .retain(|p, _| !p.starts_with(path));
+        self.files.lock().unwrap().retain(|p, _| !p.starts_with(path));
         self.dirs.lock().unwrap().retain(|p| !p.starts_with(path));
         Ok(())
     }
@@ -156,11 +144,7 @@ impl Fs for MockFs {
 
     async fn list_subdirs(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         let dirs = self.dirs.lock().unwrap();
-        let result = dirs
-            .iter()
-            .filter(|p| p.parent() == Some(path))
-            .cloned()
-            .collect();
+        let result = dirs.iter().filter(|p| p.parent() == Some(path)).cloned().collect();
         Ok(result)
     }
 }
@@ -308,11 +292,7 @@ impl MockWasmExecutor {
 
 impl<N: NatsBroker + Send + Sync> WasmExecutor<N> for MockWasmExecutor {
     async fn run(&self, config: WasmRunConfig<N>) -> Result<TerminalExitStatus, anyhow::Error> {
-        config
-            .output_buf
-            .lock()
-            .unwrap()
-            .extend_from_slice(&self.stdout);
+        config.output_buf.lock().unwrap().extend_from_slice(&self.stdout);
         Ok(TerminalExitStatus::new().exit_code(Some(self.exit_code as u32)))
     }
 }
@@ -425,10 +405,7 @@ impl SyncFs for MockSyncFs {
         files
             .get(path)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
-            .and_then(|b| {
-                String::from_utf8(b.clone())
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-            })
+            .and_then(|b| String::from_utf8(b.clone()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)))
     }
 
     fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
@@ -436,10 +413,7 @@ impl SyncFs for MockSyncFs {
     }
 
     fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
-        self.files
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), data.to_vec());
+        self.files.lock().unwrap().insert(path.to_path_buf(), data.to_vec());
         Ok(())
     }
 }
@@ -498,11 +472,7 @@ async fn write_and_read_file_uses_mock_fs() {
     )
     .unwrap();
 
-    let write_req = WriteTextFileRequest::new(
-        SessionId::from(SESSION),
-        PathBuf::from("/hello.txt"),
-        "Hello, mock!",
-    );
+    let write_req = WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/hello.txt"), "Hello, mock!");
     runtime
         .handle_write_text_file(SESSION, write_req)
         .await
@@ -539,15 +509,11 @@ async fn ensure_session_dir_creates_in_mock_fs() {
     .unwrap();
 
     // Trigger session dir creation via a write.
-    let req =
-        WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/any.txt"), "data");
+    let req = WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/any.txt"), "data");
     runtime.handle_write_text_file(SESSION, req).await.unwrap();
 
     let session_dir = root.join(SESSION);
-    assert!(
-        fs.dir_exists(&session_dir),
-        "session dir should exist in MockFs"
-    );
+    assert!(fs.dir_exists(&session_dir), "session dir should exist in MockFs");
 }
 
 #[tokio::test]
@@ -584,11 +550,7 @@ async fn path_traversal_rejected_without_touching_fs() {
     )
     .unwrap();
 
-    let req = WriteTextFileRequest::new(
-        SessionId::from(SESSION),
-        PathBuf::from("/../escape.txt"),
-        "bad",
-    );
+    let req = WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/../escape.txt"), "bad");
     let result = runtime.handle_write_text_file(SESSION, req).await;
     assert!(result.is_err(), "path traversal should be rejected");
     // Nothing should have been written to MockFs.
@@ -692,10 +654,7 @@ async fn wasm_only_rejects_native_without_touching_spawner() {
         .run_until(async {
             let req = CreateTerminalRequest::new(SessionId::from(SESSION), "/bin/echo");
             let result = runtime.handle_create_terminal(SESSION, req).await;
-            assert!(
-                result.is_err(),
-                "native command should be rejected in wasm_only mode"
-            );
+            assert!(result.is_err(), "native command should be rejected in wasm_only mode");
             assert!(
                 spawner.spawned.lock().unwrap().is_empty(),
                 "spawner should not be called when command is rejected"
@@ -731,16 +690,11 @@ async fn wasm_terminal_output_uses_mock_executor() {
                 .expect("WASM terminal creation should succeed");
 
             let terminal_id = resp.terminal_id.clone();
-            assert!(
-                !terminal_id.0.as_ref().is_empty(),
-                "terminal_id should not be empty"
-            );
+            assert!(!terminal_id.0.as_ref().is_empty(), "terminal_id should not be empty");
 
             // Wait for the mock executor to complete.
-            let wait_req = WaitForTerminalExitRequest::new(
-                agent_client_protocol::SessionId::from(SESSION),
-                terminal_id.clone(),
-            );
+            let wait_req =
+                WaitForTerminalExitRequest::new(agent_client_protocol::SessionId::from(SESSION), terminal_id.clone());
             let exit_resp = runtime
                 .handle_wait_for_terminal_exit(wait_req)
                 .await
@@ -793,20 +747,14 @@ async fn wasm_terminal_nonzero_exit_is_captured() {
                 .await
                 .expect("WASM terminal creation should succeed");
 
-            let wait_req = WaitForTerminalExitRequest::new(
-                agent_client_protocol::SessionId::from(SESSION),
-                resp.terminal_id,
-            );
+            let wait_req =
+                WaitForTerminalExitRequest::new(agent_client_protocol::SessionId::from(SESSION), resp.terminal_id);
             let exit_resp = runtime
                 .handle_wait_for_terminal_exit(wait_req)
                 .await
                 .expect("wait should succeed");
 
-            assert_eq!(
-                exit_resp.exit_status.exit_code,
-                Some(42),
-                "exit code should be 42"
-            );
+            assert_eq!(exit_resp.exit_status.exit_code, Some(42), "exit code should be 42");
         })
         .await;
 }
@@ -832,11 +780,7 @@ async fn mock_clock_controls_idle_timeout() {
     .unwrap();
 
     // Trigger session creation via a write.
-    let req = WriteTextFileRequest::new(
-        SessionId::from(SESSION),
-        PathBuf::from("/probe.txt"),
-        "data",
-    );
+    let req = WriteTextFileRequest::new(SessionId::from(SESSION), PathBuf::from("/probe.txt"), "data");
     runtime.handle_write_text_file(SESSION, req).await.unwrap();
     assert_eq!(runtime.list_sessions(), vec![SESSION.to_string()]);
 
@@ -844,9 +788,7 @@ async fn mock_clock_controls_idle_timeout() {
     clock.advance(std::time::Duration::from_secs(7200));
 
     let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async { runtime.cleanup_idle_sessions() })
-        .await;
+    local.run_until(async { runtime.cleanup_idle_sessions() }).await;
 
     assert!(
         runtime.list_sessions().is_empty(),

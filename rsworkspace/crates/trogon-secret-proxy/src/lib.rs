@@ -31,6 +31,4 @@ pub mod worker;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod mocks;
 
-pub use traits::{
-    HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient,
-};
+pub use traits::{HttpClient, HttpResponse, JetStreamConsumerClient, JetStreamPublisher, JsMsg, NatsClient};

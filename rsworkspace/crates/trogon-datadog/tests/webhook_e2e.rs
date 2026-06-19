@@ -95,7 +95,8 @@ async fn webhook_alert_triggered_returns_200_and_published_to_nats() {
     let (_container, nats_port) = start_nats().await;
     let http_port = next_port();
     let secret = "test-secret";
-    let body = br#"{"alert_transition":"Triggered","monitor_name":"High error rate","title":"[Triggered] High error rate"}"#;
+    let body =
+        br#"{"alert_transition":"Triggered","monitor_name":"High error rate","title":"[Triggered] High error rate"}"#;
 
     let nats = spawn_server(nats_port, http_port, Some(secret)).await;
     let mut sub = nats.subscribe("datadog.alert").await.expect("subscribe");
@@ -129,10 +130,7 @@ async fn webhook_alert_recovered_publishes_to_correct_subject() {
     let body = br#"{"alert_transition":"Recovered","monitor_name":"High error rate"}"#;
 
     let nats = spawn_server(nats_port, http_port, None).await;
-    let mut sub = nats
-        .subscribe("datadog.alert.recovered")
-        .await
-        .expect("subscribe");
+    let mut sub = nats.subscribe("datadog.alert.recovered").await.expect("subscribe");
 
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{http_port}/webhook"))
@@ -298,14 +296,8 @@ async fn webhook_sets_nats_headers() {
         .expect("subscriber closed");
 
     let headers = msg.headers.expect("no headers");
-    assert_eq!(
-        headers.get("X-Datadog-Event-Type").map(|v| v.as_str()),
-        Some("alert")
-    );
-    assert_eq!(
-        headers.get("DD-Request-ID").map(|v| v.as_str()),
-        Some("req-abc-123")
-    );
+    assert_eq!(headers.get("X-Datadog-Event-Type").map(|v| v.as_str()), Some("alert"));
+    assert_eq!(headers.get("DD-Request-ID").map(|v| v.as_str()), Some("req-abc-123"));
 }
 
 /// When the DATADOG JetStream stream is deleted, the server returns 500
@@ -443,11 +435,7 @@ async fn webhook_github_style_signature_prefix_is_rejected() {
         .await
         .expect("HTTP request failed");
 
-    assert_eq!(
-        resp.status(),
-        401,
-        "sha256= prefixed signature must be rejected"
-    );
+    assert_eq!(resp.status(), 401, "sha256= prefixed signature must be rejected");
 }
 
 /// Custom subject prefix via DATADOG_SUBJECT_PREFIX env var.

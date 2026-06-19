@@ -40,12 +40,7 @@ async fn connect_nats(port: u16) -> async_nats::Client {
 /// Spawns a fake wasm-runtime terminal that creates a terminal, ACKs every
 /// write_stdin, and answers EVERY output poll WITHOUT an exit marker — so the
 /// command appears to run forever and the bash tool hits its timeout.
-fn spawn_hanging_terminal(
-    nats: async_nats::Client,
-    base: String,
-    ext_base: String,
-    tid: &'static str,
-) {
+fn spawn_hanging_terminal(nats: async_nats::Client, base: String, ext_base: String, tid: &'static str) {
     // terminal.create → return a terminal id (so terminal_id gets persisted)
     {
         let nats = nats.clone();
@@ -55,9 +50,7 @@ fn spawn_hanging_terminal(
             while let Some(msg) = sub.next().await {
                 let resp = CreateTerminalResponse::new(TerminalId::new(tid));
                 if let Some(reply) = msg.reply {
-                    let _ = nats
-                        .publish(reply, serde_json::to_vec(&resp).unwrap().into())
-                        .await;
+                    let _ = nats.publish(reply, serde_json::to_vec(&resp).unwrap().into()).await;
                 }
             }
         });
@@ -125,14 +118,9 @@ async fn bash_timeout_clears_terminal_id_to_avoid_poisoning_later_commands() {
 
     // The command "runs forever" (the responder never emits the exit marker), so
     // the tool must hit its timeout.
-    let result = tool
-        .call_tool("bash", &json!({"command": "sleep 999"}))
-        .await;
+    let result = tool.call_tool("bash", &json!({"command": "sleep 999"})).await;
     assert!(result.is_err(), "command must time out, got: {result:?}");
-    assert!(
-        result.unwrap_err().contains("timeout"),
-        "error must be a timeout"
-    );
+    assert!(result.unwrap_err().contains("timeout"), "error must be a timeout");
 
     // The terminal was created (terminal_id was persisted). On timeout it MUST be
     // cleared so the next bash call creates a fresh terminal instead of queueing

@@ -104,11 +104,7 @@ pub async fn register_webhook(
     register_with_http(http_client, TELEGRAM_API_BASE, config).await
 }
 
-async fn register_with_http<H>(
-    http: &H,
-    api_base: &str,
-    config: &TelegramSourceConfig,
-) -> Result<(), RegistrationError>
+async fn register_with_http<H>(http: &H, api_base: &str, config: &TelegramSourceConfig) -> Result<(), RegistrationError>
 where
     H: HttpPost,
     RegistrationError: From<H::Error> + From<<H::Response as HttpResponse>::Error>,
@@ -138,11 +134,7 @@ where
     Ok(())
 }
 
-async fn set_webhook<H>(
-    http: &H,
-    api_base: &str,
-    request: &SetWebhook,
-) -> Result<SetWebhookResponse, RegistrationError>
+async fn set_webhook<H>(http: &H, api_base: &str, request: &SetWebhook) -> Result<SetWebhookResponse, RegistrationError>
 where
     H: HttpPost,
     RegistrationError: From<H::Error> + From<<H::Response as HttpResponse>::Error>,
@@ -153,7 +145,10 @@ where
         secret_token: &request.webhook_secret,
     };
 
-    let response = http.post_json(&endpoint, &request_body).await.map_err(RegistrationError::from)?;
+    let response = http
+        .post_json(&endpoint, &request_body)
+        .await
+        .map_err(RegistrationError::from)?;
     let status = response.status();
     let body = response
         .json::<TelegramResponse>()
@@ -340,9 +335,7 @@ mod tests {
         config.registration = None;
         let http = FakeHttpPost::default();
 
-        register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap();
+        register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap();
 
         assert!(http.requests().await.is_empty());
     }
@@ -361,9 +354,7 @@ mod tests {
         let config = test_config();
         let http = FakeHttpPost::default();
 
-        register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap();
+        register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap();
 
         let requests = http.requests().await;
         assert_eq!(requests.len(), 1);
@@ -391,9 +382,7 @@ mod tests {
         )))
         .await;
 
-        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap_err();
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap_err();
 
         assert_eq!(
             err.to_string(),
@@ -409,9 +398,7 @@ mod tests {
         http.respond_with(Ok(FakeHttpResponse::json(StatusCode::OK, json!({ "ok": false }))))
             .await;
 
-        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap_err();
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap_err();
 
         assert_eq!(
             err.to_string(),
@@ -425,9 +412,7 @@ mod tests {
         let http = FakeHttpPost::default();
         http.respond_with(Err(FakeHttpError::new("network down"))).await;
 
-        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap_err();
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap_err();
 
         assert_eq!(
             err.to_string(),
@@ -441,9 +426,7 @@ mod tests {
         let http = FakeHttpPost::default();
         http.respond_with(Ok(FakeHttpResponse::decode_error("not json"))).await;
 
-        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap_err();
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap_err();
 
         assert_eq!(
             err.to_string(),
@@ -461,9 +444,7 @@ mod tests {
         )))
         .await;
 
-        let err = register_with_http(&http, TELEGRAM_API_BASE, &config)
-            .await
-            .unwrap_err();
+        let err = register_with_http(&http, TELEGRAM_API_BASE, &config).await.unwrap_err();
 
         assert!(err.to_string().contains("missing field `ok`"));
     }

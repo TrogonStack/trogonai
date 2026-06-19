@@ -1,8 +1,6 @@
 use async_nats::jetstream::{
     self, ErrorCode,
-    context::{
-        CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind,
-    },
+    context::{CreateKeyValueError, CreateKeyValueErrorKind, CreateStreamError, CreateStreamErrorKind},
     kv, stream,
 };
 use bytes::Bytes;
@@ -61,10 +59,7 @@ pub trait StateStore: Send + Sync + Clone + 'static {
 
     /// Load the current state for `key`. Returns `None` if this is the first
     /// event for the entity.
-    fn load(
-        &self,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<StateEntry>, Self::LoadError>> + Send;
+    fn load(&self, key: &str) -> impl Future<Output = Result<Option<StateEntry>, Self::LoadError>> + Send;
 
     /// Persist `value` for `key`.
     ///
@@ -132,9 +127,7 @@ impl StateStore for kv::Store {
 fn is_create_conflict(error: &kv::CreateError) -> bool {
     // async-nats surfaces this as a wrong-last-sequence JetStream error.
     let msg = error.to_string().to_lowercase();
-    msg.contains("wrong last")
-        || msg.contains("already exists")
-        || msg.contains("expected sequence")
+    msg.contains("wrong last") || msg.contains("already exists") || msg.contains("expected sequence")
 }
 
 /// An `update` fails with "wrong last sequence" when the revision we read is stale.
@@ -160,10 +153,7 @@ pub async fn provision_state(js: &jetstream::Context) -> Result<kv::Store, Strin
         .await
     {
         Ok(store) => Ok(store),
-        Err(e) if is_bucket_already_exists(&e) => js
-            .get_key_value(BUCKET_NAME)
-            .await
-            .map_err(|e| e.to_string()),
+        Err(e) if is_bucket_already_exists(&e) => js.get_key_value(BUCKET_NAME).await.map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -253,23 +243,13 @@ pub mod mock {
                 return Err(MockLoadError("injected load error".to_string()));
             }
             drop(load_err);
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(key)
-                .map(|(v, rev)| StateEntry {
-                    value: v.clone(),
-                    revision: *rev,
-                }))
+            Ok(self.data.lock().unwrap().get(key).map(|(v, rev)| StateEntry {
+                value: v.clone(),
+                revision: *rev,
+            }))
         }
 
-        async fn save(
-            &self,
-            key: &str,
-            value: Bytes,
-            _revision: Option<u64>,
-        ) -> Result<u64, SaveError> {
+        async fn save(&self, key: &str, value: Bytes, _revision: Option<u64>) -> Result<u64, SaveError> {
             let mut save_err = self.next_save_other_error.lock().unwrap();
             if *save_err {
                 *save_err = false;
@@ -349,10 +329,7 @@ mod tests {
     #[tokio::test]
     async fn mock_delete_removes_entry() {
         let store = MockStateStore::new();
-        store
-            .save("k", Bytes::from_static(b"v"), None)
-            .await
-            .unwrap();
+        store.save("k", Bytes::from_static(b"v"), None).await.unwrap();
         store.delete("k").await.unwrap();
         assert!(store.load("k").await.unwrap().is_none());
     }
@@ -360,14 +337,8 @@ mod tests {
     #[tokio::test]
     async fn mock_snapshot_reflects_saved_state() {
         let store = MockStateStore::new();
-        store
-            .save("a", Bytes::from_static(b"1"), None)
-            .await
-            .unwrap();
-        store
-            .save("b", Bytes::from_static(b"2"), None)
-            .await
-            .unwrap();
+        store.save("a", Bytes::from_static(b"1"), None).await.unwrap();
+        store.save("b", Bytes::from_static(b"2"), None).await.unwrap();
         let snap = store.snapshot();
         assert_eq!(snap.len(), 2);
         assert_eq!(snap["a"], Bytes::from_static(b"1"));

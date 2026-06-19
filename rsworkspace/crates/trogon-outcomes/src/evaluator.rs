@@ -2,7 +2,7 @@ use trogon_transcript::TranscriptEntry;
 
 use crate::{
     provider::EvaluationProvider,
-    store::{ResultClient, RubricClient, OutcomesStore},
+    store::{OutcomesStore, ResultClient, RubricClient},
     types::{EvaluationResult, OutcomesError, Rubric},
 };
 
@@ -48,7 +48,10 @@ impl<P: EvaluationProvider, S: OutcomesStore> Evaluator<P, S> {
 
         let mut results = Vec::new();
         for rubric in &rubrics {
-            match self.evaluate_one(actor_type, actor_key, session_id, transcript, rubric).await {
+            match self
+                .evaluate_one(actor_type, actor_key, session_id, transcript, rubric)
+                .await
+            {
                 Ok(result) => {
                     self.results.put(&result).await?;
                     results.push(result);
@@ -80,11 +83,7 @@ impl<P: EvaluationProvider, S: OutcomesStore> Evaluator<P, S> {
         ))
     }
 
-    async fn resolve_rubrics(
-        &self,
-        actor_type: &str,
-        rubric_ids: &[String],
-    ) -> Result<Vec<Rubric>, OutcomesError> {
+    async fn resolve_rubrics(&self, actor_type: &str, rubric_ids: &[String]) -> Result<Vec<Rubric>, OutcomesError> {
         if rubric_ids.is_empty() {
             // Apply all rubrics that match this actor type.
             let all = self.rubrics.list().await?;
@@ -111,8 +110,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::store::mock::MockOutcomesStore;
     use crate::store::RubricClient;
+    use crate::store::mock::MockOutcomesStore;
     use crate::types::{Criterion, CriterionScore, now_ms};
     use trogon_transcript::entry::Role;
 
@@ -148,8 +147,7 @@ mod tests {
             &'a self,
             _rubric: &'a Rubric,
             _transcript: &'a [TranscriptEntry],
-        ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a
-        {
+        ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a {
             let scores = self.scores.lock().unwrap().clone();
             let reasoning = self.reasoning.lock().unwrap().clone();
             let err = self.error.lock().unwrap().clone();
@@ -168,7 +166,11 @@ mod tests {
             id,
             "Test Rubric",
             "desc",
-            vec![Criterion { name: "quality".into(), description: "Is it good?".into(), weight: 1.0 }],
+            vec![Criterion {
+                name: "quality".into(),
+                description: "Is it good?".into(),
+                weight: 1.0,
+            }],
         );
         if let Some(f) = actor_filter {
             r = r.with_actor_type_filter(f);
@@ -177,7 +179,11 @@ mod tests {
     }
 
     fn good_scores() -> Vec<CriterionScore> {
-        vec![CriterionScore { criterion: "quality".into(), score: 0.9, reasoning: "good".into() }]
+        vec![CriterionScore {
+            criterion: "quality".into(),
+            score: 0.9,
+            reasoning: "good".into(),
+        }]
     }
 
     fn sample_transcript() -> Vec<TranscriptEntry> {
@@ -229,10 +235,7 @@ mod tests {
         let ev = Evaluator::new(provider, rubric_store, result_store);
 
         let results = ev
-            .evaluate_session(
-                "pr", "repo/1", "sess-1", &sample_transcript(),
-                &["r1".to_string()],
-            )
+            .evaluate_session("pr", "repo/1", "sess-1", &sample_transcript(), &["r1".to_string()])
             .await
             .unwrap();
 
@@ -260,7 +263,10 @@ mod tests {
 
         let results = ev
             .evaluate_session(
-                "pr", "repo/1", "sess-1", &sample_transcript(),
+                "pr",
+                "repo/1",
+                "sess-1",
+                &sample_transcript(),
                 &["nonexistent".to_string()],
             )
             .await
@@ -306,8 +312,7 @@ mod tests {
                 &'a self,
                 rubric: &'a Rubric,
                 _transcript: &'a [TranscriptEntry],
-            ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a
-            {
+            ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a {
                 let should_fail = self.fail_ids.lock().unwrap().contains(&rubric.id);
                 let scores = self.scores.clone();
                 async move {
@@ -373,29 +378,17 @@ mod tests {
             type DeleteError = std::convert::Infallible;
             type KeysError = std::convert::Infallible;
 
-            fn put(
-                &self,
-                _key: &str,
-                _value: Bytes,
-            ) -> impl Future<Output = Result<u64, PutErr>> + Send {
+            fn put(&self, _key: &str, _value: Bytes) -> impl Future<Output = Result<u64, PutErr>> + Send {
                 async { Err(PutErr) }
             }
-            fn get(
-                &self,
-                key: &str,
-            ) -> impl Future<Output = Result<Option<Bytes>, std::convert::Infallible>> + Send {
+            fn get(&self, key: &str) -> impl Future<Output = Result<Option<Bytes>, std::convert::Infallible>> + Send {
                 let inner = self.inner.clone();
                 async move { inner.get(key).await }
             }
-            fn delete(
-                &self,
-                _key: &str,
-            ) -> impl Future<Output = Result<(), std::convert::Infallible>> + Send {
+            fn delete(&self, _key: &str) -> impl Future<Output = Result<(), std::convert::Infallible>> + Send {
                 async { Ok(()) }
             }
-            fn keys(
-                &self,
-            ) -> impl Future<Output = Result<Vec<String>, std::convert::Infallible>> + Send {
+            fn keys(&self) -> impl Future<Output = Result<Vec<String>, std::convert::Infallible>> + Send {
                 let inner = self.inner.clone();
                 async move { inner.keys().await }
             }
@@ -406,7 +399,9 @@ mod tests {
         let rubric_client = RubricClient::new(inner.clone());
         rubric_client.put(&rubric("r1", None)).await.unwrap();
         let rubric_store = ReadOnlyStore { inner: inner.clone() };
-        let result_store = ReadOnlyStore { inner: MockOutcomesStore::new() };
+        let result_store = ReadOnlyStore {
+            inner: MockOutcomesStore::new(),
+        };
 
         let provider = MockEvaluationProvider::returning(good_scores(), "ok");
         let ev = Evaluator::new(provider, rubric_store, result_store);
@@ -425,10 +420,7 @@ mod tests {
         let provider = MockEvaluationProvider::returning(vec![], "");
         let ev = Evaluator::new(provider, rubric_store, result_store);
 
-        let results = ev
-            .evaluate_session("pr", "repo/1", "sess-1", &[], &[])
-            .await
-            .unwrap();
+        let results = ev.evaluate_session("pr", "repo/1", "sess-1", &[], &[]).await.unwrap();
 
         assert!(results.is_empty());
     }

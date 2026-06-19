@@ -4,10 +4,7 @@ use std::time::Duration;
 use crate::config::DatadogConfig;
 use crate::signature;
 use async_nats::jetstream::stream;
-use axum::{
-    Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get,
-    routing::post,
-};
+use axum::{Router, body::Bytes, extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post};
 use std::net::SocketAddr;
 use tracing::{info, instrument, warn};
 use trogon_nats::jetstream::{JetStreamContext, JetStreamPublisher};
@@ -40,10 +37,7 @@ pub async fn serve(
     serve_impl(config, NatsJetStreamClient::new(jetstream::new(nats))).await
 }
 
-async fn serve_impl<J>(
-    config: DatadogConfig,
-    js: J,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+async fn serve_impl<J>(config: DatadogConfig, js: J) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     J: JetStreamPublisher + JetStreamContext + Clone + Send + Sync + 'static,
     <J as JetStreamContext>::Error: 'static,
@@ -129,18 +123,12 @@ pub(crate) fn event_type(body: &[u8]) -> String {
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_webhook<J>(
-    State(state): State<AppState<J>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode
+async fn handle_webhook<J>(State(state): State<AppState<J>>, headers: HeaderMap, body: Bytes) -> StatusCode
 where
     J: JetStreamPublisher + Clone + Send + Sync + 'static,
 {
     if let Some(secret) = &state.webhook_secret {
-        let sig = headers
-            .get("x-datadog-signature")
-            .and_then(|v| v.to_str().ok());
+        let sig = headers.get("x-datadog-signature").and_then(|v| v.to_str().ok());
 
         match sig {
             Some(sig) if signature::verify(secret, &body, sig) => {}
@@ -173,30 +161,21 @@ where
     nats_headers.insert("X-Datadog-Event-Type", ev_type.as_str());
     nats_headers.insert("DD-Request-ID", request_id.as_str());
 
-    match state
-        .js
-        .publish_with_headers(subject.clone(), nats_headers, body)
-        .await
-    {
-        Ok(ack_future) => {
-            match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
-                Ok(Ok(_)) => {
-                    info!("Published Datadog event to NATS");
-                    StatusCode::OK
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "NATS ack failed");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
-                Err(_) => {
-                    warn!(
-                        ack_timeout_ms = state.ack_timeout.as_millis(),
-                        "NATS ack timed out"
-                    );
-                    StatusCode::INTERNAL_SERVER_ERROR
-                }
+    match state.js.publish_with_headers(subject.clone(), nats_headers, body).await {
+        Ok(ack_future) => match tokio::time::timeout(state.ack_timeout, ack_future.into_future()).await {
+            Ok(Ok(_)) => {
+                info!("Published Datadog event to NATS");
+                StatusCode::OK
             }
-        }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NATS ack failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Err(_) => {
+                warn!(ack_timeout_ms = state.ack_timeout.as_millis(), "NATS ack timed out");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        },
         Err(e) => {
             warn!(error = %e, "Failed to publish Datadog event to NATS");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -215,18 +194,12 @@ mod tests {
 
     #[test]
     fn retriggered_maps_to_alert() {
-        assert_eq!(
-            event_type(br#"{"alert_transition":"Re-Triggered"}"#),
-            "alert"
-        );
+        assert_eq!(event_type(br#"{"alert_transition":"Re-Triggered"}"#), "alert");
     }
 
     #[test]
     fn recovered_maps_to_alert_recovered() {
-        assert_eq!(
-            event_type(br#"{"alert_transition":"Recovered"}"#),
-            "alert.recovered"
-        );
+        assert_eq!(event_type(br#"{"alert_transition":"Recovered"}"#), "alert.recovered");
     }
 
     #[test]
@@ -328,20 +301,14 @@ mod tests {
         let body = br#"{"alert_transition":"Triggered","monitor_name":"cpu"}"#;
         let sig = compute_sig(TEST_SECRET, body);
 
-        let resp = app
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(&sig))).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         let msgs = publisher.published_messages();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].subject, "datadog.alert");
         assert_eq!(
-            msgs[0]
-                .headers
-                .get("X-Datadog-Event-Type")
-                .map(|v| v.as_str()),
+            msgs[0].headers.get("X-Datadog-Event-Type").map(|v| v.as_str()),
             Some("alert")
         );
     }
@@ -352,25 +319,16 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = br#"{"alert_transition":"Recovered"}"#;
         let sig = compute_sig(TEST_SECRET, body);
-        let resp = app
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(&sig))).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            publisher.published_subjects(),
-            vec!["datadog.alert.recovered"]
-        );
+        assert_eq!(publisher.published_subjects(), vec!["datadog.alert.recovered"]);
     }
 
     #[tokio::test]
     async fn invalid_signature_returns_401_and_does_not_publish() {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
-        let resp = app
-            .oneshot(webhook_request(b"{}", Some("deadbeef")))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(b"{}", Some("deadbeef"))).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
     }
@@ -413,10 +371,7 @@ mod tests {
         let app = mock_app(publisher.clone());
         let body = b"{}";
         let sig = compute_sig(TEST_SECRET, body);
-        let resp = app
-            .oneshot(webhook_request(body, Some(&sig)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, Some(&sig))).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -541,9 +496,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 

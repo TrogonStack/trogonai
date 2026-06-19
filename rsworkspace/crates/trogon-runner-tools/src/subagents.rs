@@ -92,12 +92,8 @@ pub fn parse_subagent(content: &str, source: PathBuf) -> Option<SubagentDef> {
 /// project (`<cwd>/.claude/agents`); project overrides user on a name clash.
 /// Sorted by name.
 pub fn load_subagents(cwd: &Path) -> Vec<SubagentDef> {
-    let mut by_name: std::collections::HashMap<String, SubagentDef> =
-        std::collections::HashMap::new();
-    for dir in [
-        expand_tilde("~/.config/trogon/agents"),
-        cwd.join(".claude/agents"),
-    ] {
+    let mut by_name: std::collections::HashMap<String, SubagentDef> = std::collections::HashMap::new();
+    for dir in [expand_tilde("~/.config/trogon/agents"), cwd.join(".claude/agents")] {
         for def in read_dir_defs(&dir) {
             by_name.insert(def.name.clone(), def);
         }

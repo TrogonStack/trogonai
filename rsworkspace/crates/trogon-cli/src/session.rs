@@ -22,12 +22,7 @@ pub struct CompactResult {
     pub tokens_after: usize,
 }
 
-async fn ext_method<N: NatsClient>(
-    nats: &N,
-    prefix: &str,
-    method: &str,
-    params: Value,
-) -> anyhow::Result<Value> {
+async fn ext_method<N: NatsClient>(nats: &N, prefix: &str, method: &str, params: Value) -> anyhow::Result<Value> {
     let params_raw = serde_json::value::RawValue::from_string(params.to_string())
         .map_err(|e| anyhow::anyhow!("invalid ext params: {e}"))?;
     let req = ExtRequest::new(method, params_raw.into());
@@ -42,7 +37,10 @@ async fn ext_method<N: NatsClient>(
     // New discriminated envelope: {"result": <body>} | {"error": {code,message,...}}
     if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
         if let Some(err) = env.get("error") {
-            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("ext method error");
+            let msg = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("ext method error");
             return Err(anyhow::anyhow!("{msg}"));
         }
         if let Some(result) = env.get("result") {
@@ -127,10 +125,7 @@ pub trait Session: Send + Sync + 'static {
     fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_;
 
     /// Replace session history (`session/import` ext method).
-    fn import_history(
-        &self,
-        messages_json: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+    fn import_history(&self, messages_json: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
@@ -726,19 +721,15 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn import_history(
-        &self,
-        messages_json: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+    fn import_history(&self, messages_json: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
         let nats = &self.nats;
         let messages_json = messages_json.to_string();
         async move {
-            let params = serde_json::from_str::<Value>(&format!(
-                r#"{{"sessionId":"{session_id}","messages":{messages_json}}}"#
-            ))
-            .map_err(|e| anyhow::anyhow!("invalid session/import params: {e}"))?;
+            let params =
+                serde_json::from_str::<Value>(&format!(r#"{{"sessionId":"{session_id}","messages":{messages_json}}}"#))
+                    .map_err(|e| anyhow::anyhow!("invalid session/import params: {e}"))?;
             ext_method(nats, &prefix, "session/import", params).await?;
             Ok(())
         }
@@ -1801,8 +1792,9 @@ mod tests {
     async fn compact_surfaces_runner_error_message() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         // Runner replies with a discriminated error envelope.
         let error_reply = serde_json::json!({

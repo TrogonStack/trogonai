@@ -50,16 +50,25 @@ mod tests {
 
     #[test]
     fn key_with_space_is_rejected() {
-        assert!(matches!(LeaseKey::new("bad key"), Err(LeaseConfigError::InvalidKeyName(_))));
+        assert!(matches!(
+            LeaseKey::new("bad key"),
+            Err(LeaseConfigError::InvalidKeyName(_))
+        ));
     }
 
     #[test]
     fn key_with_nats_wildcard_is_rejected() {
-        assert!(matches!(LeaseKey::new("bad*key"), Err(LeaseConfigError::InvalidKeyName(_))));
+        assert!(matches!(
+            LeaseKey::new("bad*key"),
+            Err(LeaseConfigError::InvalidKeyName(_))
+        ));
     }
 
     #[test]
     fn key_with_at_sign_is_rejected() {
-        assert!(matches!(LeaseKey::new("user@host"), Err(LeaseConfigError::InvalidKeyName(_))));
+        assert!(matches!(
+            LeaseKey::new("user@host"),
+            Err(LeaseConfigError::InvalidKeyName(_))
+        ));
     }
 }

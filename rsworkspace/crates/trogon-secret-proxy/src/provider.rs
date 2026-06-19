@@ -42,10 +42,7 @@ mod tests {
     fn known_providers() {
         assert_eq!(base_url("anthropic"), Some("https://api.anthropic.com"));
         assert_eq!(base_url("openai"), Some("https://api.openai.com"));
-        assert_eq!(
-            base_url("gemini"),
-            Some("https://generativelanguage.googleapis.com")
-        );
+        assert_eq!(base_url("gemini"), Some("https://generativelanguage.googleapis.com"));
         assert_eq!(base_url("cohere"), Some("https://api.cohere.ai"));
         assert_eq!(base_url("mistral"), Some("https://api.mistral.ai"));
         assert_eq!(base_url("xai"), Some("https://api.x.ai"));
@@ -81,16 +78,8 @@ mod tests {
     #[test]
     fn provider_with_leading_or_trailing_whitespace_returns_none() {
         assert_eq!(base_url(" anthropic"), None, "leading space must not match");
-        assert_eq!(
-            base_url("anthropic "),
-            None,
-            "trailing space must not match"
-        );
-        assert_eq!(
-            base_url(" openai "),
-            None,
-            "surrounding spaces must not match"
-        );
+        assert_eq!(base_url("anthropic "), None, "trailing space must not match");
+        assert_eq!(base_url(" openai "), None, "surrounding spaces must not match");
         assert_eq!(base_url("\tanthropic"), None, "leading tab must not match");
     }
 

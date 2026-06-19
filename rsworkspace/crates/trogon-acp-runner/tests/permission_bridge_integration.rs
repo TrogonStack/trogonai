@@ -7,19 +7,15 @@
 //!   cargo test -p trogon-acp-runner --test permission_bridge_integration
 
 use acp_nats::acp_prefix::AcpPrefix;
-use agent_client_protocol::{
-    RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome,
-};
+use agent_client_protocol::{RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt as _;
 use testcontainers_modules::nats::Nats;
-use testcontainers_modules::testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::oneshot;
-use trogon_acp_runner::{
-    NatsSessionStore, PermissionReq, SessionState, SessionStore,
-};
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
+use trogon_acp_runner::{NatsSessionStore, PermissionReq, SessionState, SessionStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -67,9 +63,9 @@ fn response_bytes(outcome: RequestPermissionOutcome) -> Bytes {
 }
 
 fn selected(id: &'static str) -> Bytes {
-    response_bytes(RequestPermissionOutcome::Selected(
-        SelectedPermissionOutcome::new(id.to_string()),
-    ))
+    response_bytes(RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+        id.to_string(),
+    )))
 }
 
 fn cancelled() -> Bytes {

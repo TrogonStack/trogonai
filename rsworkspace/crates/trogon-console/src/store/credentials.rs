@@ -34,20 +34,12 @@ impl CredentialStore {
             .await
             .map_err(|e| e.to_string())?;
 
-        Ok(Self {
-            creds_kv,
-            vaults_kv,
-        })
+        Ok(Self { creds_kv, vaults_kv })
     }
 
     // Vault operations
     pub async fn get_or_create_vault(&self, env_id: &str) -> Result<CredentialVault, String> {
-        if let Some(bytes) = self
-            .vaults_kv
-            .get(env_id)
-            .await
-            .map_err(|e| e.to_string())?
-        {
+        if let Some(bytes) = self.vaults_kv.get(env_id).await.map_err(|e| e.to_string())? {
             return serde_json::from_slice::<CredentialVault>(&bytes).map_err(|e| e.to_string());
         }
         let vault = CredentialVault {
@@ -64,12 +56,7 @@ impl CredentialStore {
     }
 
     pub async fn get_vault(&self, env_id: &str) -> Result<Option<CredentialVault>, String> {
-        match self
-            .vaults_kv
-            .get(env_id)
-            .await
-            .map_err(|e| e.to_string())?
-        {
+        match self.vaults_kv.get(env_id).await.map_err(|e| e.to_string())? {
             None => Ok(None),
             Some(bytes) => serde_json::from_slice::<CredentialVault>(&bytes)
                 .map(Some)
@@ -127,34 +114,26 @@ impl CredentialRepository for CredentialStore {
     fn get_or_create_vault<'a>(
         &'a self,
         env_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<CredentialVault, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<CredentialVault, String>> + Send + 'a>> {
         Box::pin(async move { self.get_or_create_vault(env_id).await })
     }
     fn get_vault<'a>(
         &'a self,
         env_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<CredentialVault>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<CredentialVault>, String>> + Send + 'a>> {
         Box::pin(async move { self.get_vault(env_id).await })
     }
     fn list<'a>(
         &'a self,
         env_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<Credential>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Credential>, String>> + Send + 'a>> {
         Box::pin(async move { self.list(env_id).await })
     }
     fn get<'a>(
         &'a self,
         env_id: &'a str,
         cred_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Option<Credential>, String>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Credential>, String>> + Send + 'a>> {
         Box::pin(async move { self.get(env_id, cred_id).await })
     }
     fn put<'a>(

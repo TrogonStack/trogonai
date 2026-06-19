@@ -193,7 +193,8 @@ mod tests {
         let resolved = resolve_nats(&section, &NatsArgs::default());
         assert!(
             matches!(resolved.auth, NatsAuth::NKey(ref k) if k == "SUANQQX"),
-            "expected NKey auth, got {:?}", resolved.auth
+            "expected NKey auth, got {:?}",
+            resolved.auth
         );
     }
 
@@ -214,7 +215,8 @@ mod tests {
         let resolved = resolve_nats(&section, &overrides);
         assert!(
             matches!(resolved.auth, NatsAuth::NKey(ref k) if k == "override-nkey"),
-            "expected NKey override, got {:?}", resolved.auth
+            "expected NKey override, got {:?}",
+            resolved.auth
         );
     }
 
@@ -232,7 +234,8 @@ mod tests {
         assert!(
             matches!(resolved.auth, NatsAuth::UserPassword { ref user, ref password }
                 if user == "alice" && password == "secret"),
-            "expected UserPassword auth, got {:?}", resolved.auth
+            "expected UserPassword auth, got {:?}",
+            resolved.auth
         );
     }
 
@@ -255,7 +258,8 @@ mod tests {
         assert!(
             matches!(resolved.auth, NatsAuth::UserPassword { ref user, ref password }
                 if user == "bob" && password == "pass123"),
-            "expected UserPassword override, got {:?}", resolved.auth
+            "expected UserPassword override, got {:?}",
+            resolved.auth
         );
     }
 
@@ -272,7 +276,8 @@ mod tests {
         let resolved = resolve_nats(&section, &NatsArgs::default());
         assert!(
             matches!(resolved.auth, NatsAuth::None),
-            "expected NatsAuth::None, got {:?}", resolved.auth
+            "expected NatsAuth::None, got {:?}",
+            resolved.auth
         );
     }
 
@@ -293,7 +298,8 @@ mod tests {
         let resolved = resolve_nats(&section, &overrides);
         assert!(
             matches!(resolved.auth, NatsAuth::Token(ref t) if t == "section-token"),
-            "empty string override must fall back to section value, got {:?}", resolved.auth
+            "empty string override must fall back to section value, got {:?}",
+            resolved.auth
         );
     }
 
@@ -328,7 +334,8 @@ mod tests {
         let resolved = resolve_nats(&section, &NatsArgs::default());
         assert!(
             matches!(resolved.auth, NatsAuth::Credentials(_)),
-            "creds must win when multiple auth methods are set, got {:?}", resolved.auth
+            "creds must win when multiple auth methods are set, got {:?}",
+            resolved.auth
         );
     }
 }

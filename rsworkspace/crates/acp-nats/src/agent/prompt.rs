@@ -1,6 +1,6 @@
 use agent_client_protocol::{
-    ContentBlock, EmbeddedResourceResource, Error, ErrorCode, PromptRequest, PromptResponse,
-    SessionNotification, StopReason,
+    ContentBlock, EmbeddedResourceResource, Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification,
+    StopReason,
 };
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
@@ -30,9 +30,7 @@ fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
     blocks
         .iter()
         .filter_map(|b| match b {
-            ContentBlock::Text(t) => Some(UserContentBlock::Text {
-                text: t.text.clone(),
-            }),
+            ContentBlock::Text(t) => Some(UserContentBlock::Text { text: t.text.clone() }),
             ContentBlock::Image(img) => {
                 if let Some(url) = &img.uri {
                     Some(UserContentBlock::ImageUrl { url: url.clone() })
@@ -48,18 +46,14 @@ fn content_blocks_to_user(blocks: &[ContentBlock]) -> Vec<UserContentBlock> {
                 name: rl.name.clone(),
             }),
             ContentBlock::Resource(er) => match &er.resource {
-                EmbeddedResourceResource::TextResourceContents(t) => {
-                    Some(UserContentBlock::Context {
-                        uri: t.uri.clone(),
-                        text: t.text.clone(),
-                    })
-                }
-                EmbeddedResourceResource::BlobResourceContents(b) => {
-                    Some(UserContentBlock::Image {
-                        data: b.blob.clone(),
-                        mime_type: b.mime_type.clone().unwrap_or_default(),
-                    })
-                }
+                EmbeddedResourceResource::TextResourceContents(t) => Some(UserContentBlock::Context {
+                    uri: t.uri.clone(),
+                    text: t.text.clone(),
+                }),
+                EmbeddedResourceResource::BlobResourceContents(b) => Some(UserContentBlock::Image {
+                    data: b.blob.clone(),
+                    mime_type: b.mime_type.clone().unwrap_or_default(),
+                }),
                 _ => None,
             },
             _ => None,
@@ -121,17 +115,13 @@ where
     // Subscribe BEFORE publishing — prevents losing the first event if the runner responds instantly.
     let mut notifications_sub = bridge
         .nats
-        .subscribe(session::agent::UpdateSubject::new(
-            prefix, session_id, req_id,
-        ))
+        .subscribe(session::agent::UpdateSubject::new(prefix, session_id, req_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
     let mut response_sub = bridge
         .nats
-        .subscribe(session::agent::PromptResponseSubject::new(
-            prefix, session_id, req_id,
-        ))
+        .subscribe(session::agent::PromptResponseSubject::new(prefix, session_id, req_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe: {e}")))?;
 
@@ -139,12 +129,7 @@ where
         .nats
         .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
         .await
-        .map_err(|e| {
-            Error::new(
-                ErrorCode::InternalError.into(),
-                format!("subscribe cancelled: {e}"),
-            )
-        })?;
+        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe cancelled: {e}")))?;
 
     let _prompt_payload = PromptPayload {
         req_id: req_id.to_string(),

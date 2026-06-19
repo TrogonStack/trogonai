@@ -26,8 +26,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use trogon_acp_runner::{
-    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent,
-    agent_runner::mock::MockAgentRunner,
+    GatewayConfig, NatsSessionStore, SessionState, SessionStore, TrogonAgent, agent_runner::mock::MockAgentRunner,
     session_notifier::mock::MockSessionNotifier as AcpMockNotifier,
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message as AgentMessage};
@@ -83,25 +82,23 @@ fn start_agent(store: NatsSessionStore, nats: async_nats::Client, prefix: &str) 
     let (_, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix, |fut| {
         tokio::task::spawn_local(fut);
     });
-    tokio::task::spawn_local(async move { io_task.await.ok(); });
+    tokio::task::spawn_local(async move {
+        io_task.await.ok();
+    });
 }
 
 async fn nats_req(nats: &async_nats::Client, subject: &str, payload: Bytes) -> serde_json::Value {
-    let reply = tokio::time::timeout(
-        Duration::from_secs(5),
-        nats.request(subject.to_string(), payload),
-    )
-    .await
-    .expect("NATS request timed out")
-    .expect("NATS request failed");
+    let reply = tokio::time::timeout(Duration::from_secs(5), nats.request(subject.to_string(), payload))
+        .await
+        .expect("NATS request timed out")
+        .expect("NATS request failed");
     serde_json::from_slice(&reply.payload).expect("response is not valid JSON")
 }
 
 // ── Test 1: Session lifecycle ─────────────────────────────────────────────────
 
 async fn test_session_new_and_list(nats: &async_nats::Client, js: &jetstream::Context) -> bool {
-    const LABEL: &str =
-        "Session lifecycle — new_session persists session; list_sessions returns valid response";
+    const LABEL: &str = "Session lifecycle — new_session persists session; list_sessions returns valid response";
     let id = uid();
     let prefix = format!("live.nokey.sl.{id}");
 
@@ -115,7 +112,10 @@ async fn test_session_new_and_list(nats: &async_nats::Client, js: &jetstream::Co
     let sid = match new_resp["sessionId"].as_str() {
         Some(s) => s.to_string(),
         None => {
-            ko(LABEL, &format!("sessionId missing from new_session response: {new_resp}"));
+            ko(
+                LABEL,
+                &format!("sessionId missing from new_session response: {new_resp}"),
+            );
             return false;
         }
     };
@@ -143,7 +143,10 @@ async fn test_session_new_and_list(nats: &async_nats::Client, js: &jetstream::Co
     let list_resp = nats_req(nats, &format!("{prefix}.agent.session.list"), list_payload).await;
     match list_resp["sessions"].as_array() {
         None => {
-            ko(LABEL, &format!("sessions field missing from list_sessions response: {list_resp}"));
+            ko(
+                LABEL,
+                &format!("sessions field missing from list_sessions response: {list_resp}"),
+            );
             false
         }
         Some(arr) => {
@@ -163,8 +166,7 @@ async fn test_session_new_and_list(nats: &async_nats::Client, js: &jetstream::Co
 // ── Test 2: CrossRunnerSwitcher (export + import + migration) ─────────────────
 
 async fn test_cross_runner_switcher(nats: &async_nats::Client, js: &jetstream::Context) -> bool {
-    const LABEL: &str =
-        "CrossRunnerSwitcher — session/export + session/import + migration between two local agents";
+    const LABEL: &str = "CrossRunnerSwitcher — session/export + session/import + migration between two local agents";
     let id = uid();
     let src_prefix = format!("live.nokey.src.{id}");
     let dst_prefix = format!("live.nokey.dst.{id}");
@@ -194,15 +196,13 @@ async fn test_cross_runner_switcher(nats: &async_nats::Client, js: &jetstream::C
     // Registry: "live-dst-model" → dst_prefix
     let registry = Registry::new(MockRegistryStore::new());
     let mut dst_cap = AgentCapability::new("live-dst-runner", ["chat"], "agents.dst.>");
-    dst_cap.metadata =
-        serde_json::json!({ "models": ["live-dst-model"], "acp_prefix": dst_prefix });
+    dst_cap.metadata = serde_json::json!({ "models": ["live-dst-model"], "acp_prefix": dst_prefix });
     if let Err(e) = registry.register(&dst_cap).await {
         ko(LABEL, &format!("registry.register failed: {e}"));
         return false;
     }
 
-    let mut switcher =
-        CrossRunnerSwitcher::new(nats.clone(), make_nats_config(&src_prefix), registry);
+    let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_nats_config(&src_prefix), registry);
 
     let result = switcher
         .switch_model(&src_prefix, &src_session_id, "live-dst-model", "/tmp")

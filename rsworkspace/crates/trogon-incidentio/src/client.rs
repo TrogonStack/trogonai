@@ -190,11 +190,7 @@ impl<H: HttpClient> IncidentioClient<H> {
 
         let resp = self
             .http
-            .post_json(
-                &format!("{}/incidents", self.base_url),
-                &self.api_token,
-                body,
-            )
+            .post_json(&format!("{}/incidents", self.base_url), &self.api_token, body)
             .await
             .map_err(IncidentioError)?;
 
@@ -205,8 +201,7 @@ impl<H: HttpClient> IncidentioClient<H> {
             )));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&resp.body).map_err(|e| IncidentioError(e.to_string()))?;
+        let json: serde_json::Value = serde_json::from_str(&resp.body).map_err(|e| IncidentioError(e.to_string()))?;
         serde_json::from_value(json["incident"].clone())
             .map_err(|e| IncidentioError(format!("Failed to parse incident: {e}")))
     }
@@ -239,11 +234,7 @@ impl<H: HttpClient> IncidentioClient<H> {
 
         let resp = self
             .http
-            .post_json(
-                &format!("{}/incident_updates", self.base_url),
-                &self.api_token,
-                body,
-            )
+            .post_json(&format!("{}/incident_updates", self.base_url), &self.api_token, body)
             .await
             .map_err(IncidentioError)?;
 
@@ -267,10 +258,7 @@ impl<H: HttpClient> IncidentioClient<H> {
     pub async fn get_incident(&self, incident_id: &str) -> Result<Incident, IncidentioError> {
         let resp = self
             .http
-            .get(
-                &format!("{}/incidents/{}", self.base_url, incident_id),
-                &self.api_token,
-            )
+            .get(&format!("{}/incidents/{}", self.base_url, incident_id), &self.api_token)
             .await
             .map_err(IncidentioError)?;
 
@@ -281,8 +269,7 @@ impl<H: HttpClient> IncidentioClient<H> {
             )));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&resp.body).map_err(|e| IncidentioError(e.to_string()))?;
+        let json: serde_json::Value = serde_json::from_str(&resp.body).map_err(|e| IncidentioError(e.to_string()))?;
         serde_json::from_value(json["incident"].clone())
             .map_err(|e| IncidentioError(format!("Failed to parse incident: {e}")))
     }
@@ -387,11 +374,7 @@ mod tests {
     }
 
     fn make_client(mock: MockHttpClient) -> IncidentioClient<MockHttpClient> {
-        IncidentioClient::with_http_client(
-            mock,
-            "test-token".to_string(),
-            "http://mock".to_string(),
-        )
+        IncidentioClient::with_http_client(mock, "test-token".to_string(), "http://mock".to_string())
     }
 
     #[tokio::test]
@@ -399,10 +382,7 @@ mod tests {
         let mock = MockHttpClient::new();
         mock.enqueue_ok(201, incident_json("inc-01", "CPU spike"));
         let client = make_client(mock);
-        let inc = client
-            .create_incident("CPU spike", None, None, None)
-            .await
-            .unwrap();
+        let inc = client.create_incident("CPU spike", None, None, None).await.unwrap();
         assert_eq!(inc.id, "inc-01");
         assert_eq!(inc.status, "triage");
     }
@@ -424,15 +404,9 @@ mod tests {
         // Here we confirm the call was made (transport layer is responsible for auth header).
         let mock = MockHttpClient::new();
         mock.enqueue_ok(201, incident_json("inc-01", "test"));
-        let client = IncidentioClient::with_http_client(
-            mock.clone(),
-            "my-secret-token".to_string(),
-            "http://mock".to_string(),
-        );
-        client
-            .create_incident("test", None, None, None)
-            .await
-            .unwrap();
+        let client =
+            IncidentioClient::with_http_client(mock.clone(), "my-secret-token".to_string(), "http://mock".to_string());
+        client.create_incident("test", None, None, None).await.unwrap();
         let calls = mock.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].method, "POST");
@@ -443,10 +417,7 @@ mod tests {
         let mock = MockHttpClient::new();
         mock.enqueue_ok(200, r#"{"incident_update": {}}"#);
         let client = make_client(mock);
-        client
-            .post_update("inc-01", "all clear", None, None)
-            .await
-            .unwrap();
+        client.post_update("inc-01", "all clear", None, None).await.unwrap();
     }
 
     #[tokio::test]
@@ -535,10 +506,7 @@ mod tests {
             .unwrap();
         let calls = mock.calls.lock().unwrap();
         let body = calls[0].body.as_ref().unwrap();
-        assert!(
-            body.get("summary").is_none(),
-            "summary must be absent when None"
-        );
+        assert!(body.get("summary").is_none(), "summary must be absent when None");
         assert!(
             body.get("severity_id").is_none(),
             "severity_id must be absent when None"
@@ -570,10 +538,7 @@ mod tests {
             .unwrap();
         let calls = mock.calls.lock().unwrap();
         let body = calls[0].body.as_ref().unwrap();
-        assert!(
-            body.get("new_status").is_none(),
-            "new_status must be absent when None"
-        );
+        assert!(body.get("new_status").is_none(), "new_status must be absent when None");
         assert!(
             body.get("new_severity_id").is_none(),
             "new_severity_id must be absent when None"

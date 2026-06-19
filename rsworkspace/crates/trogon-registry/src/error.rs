@@ -87,16 +87,11 @@ mod tests {
 
     #[test]
     fn display_serialization() {
-        assert!(
-            format!("{}", RegistryError::Serialization(json_err())).contains("serialization error")
-        );
+        assert!(format!("{}", RegistryError::Serialization(json_err())).contains("serialization error"));
     }
 
     #[test]
     fn display_deserialization() {
-        assert!(
-            format!("{}", RegistryError::Deserialization(json_err()))
-                .contains("deserialization error")
-        );
+        assert!(format!("{}", RegistryError::Deserialization(json_err())).contains("deserialization error"));
     }
 }

@@ -17,12 +17,10 @@ use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tower::ServiceExt as _;
-use trogon_nats::NatsToken;
-use trogon_nats::jetstream::{
-    ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge,
-};
 use trogon_gateway::source::linear::config::{LinearConfig, LinearWebhookSecret};
 use trogon_gateway::source::linear::{provision, router};
+use trogon_nats::NatsToken;
+use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge};
 use trogon_std::NonZeroDuration;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -94,9 +92,7 @@ async fn setup() -> TestFixture {
 
     let js_client = NatsJetStreamClient::new(js);
     let config = test_config();
-    provision(&js_client, &config)
-        .await
-        .expect("stream provision failed");
+    provision(&js_client, &config).await.expect("stream provision failed");
 
     let publisher = ClaimCheckPublisher::new(
         js_client,
@@ -324,11 +320,7 @@ async fn webhook_id_is_set_as_nats_msg_id() {
     .unwrap();
     let sig = compute_sig(TEST_SECRET, &body);
 
-    let mut sub = fixture
-        .nats
-        .subscribe("linear.Comment.update")
-        .await
-        .unwrap();
+    let mut sub = fixture.nats.subscribe("linear.Comment.update").await.unwrap();
 
     let resp = fixture
         .app

@@ -70,8 +70,12 @@ fn discriminate_envelope(env: serde_json::Value) -> Result<ExtResponse> {
 
     // New envelope: {"result": <body>}
     if let Some(result_val) = env.get("result") {
-        let raw = serde_json::value::RawValue::from_string(result_val.to_string())
-            .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("Invalid ext response body: {e}")))?;
+        let raw = serde_json::value::RawValue::from_string(result_val.to_string()).map_err(|e| {
+            Error::new(
+                ErrorCode::InternalError.into(),
+                format!("Invalid ext response body: {e}"),
+            )
+        })?;
         return Ok(ExtResponse::new(raw.into()));
     }
 
@@ -122,7 +126,10 @@ mod tests {
         );
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
-        let err = bridge.ext_method(ExtRequest::new("my_method", params.into())).await.unwrap_err();
+        let err = bridge
+            .ext_method(ExtRequest::new("my_method", params.into()))
+            .await
+            .unwrap_err();
 
         assert_eq!(err.code, ErrorCode::Other(-32001));
         assert_eq!(err.message, "runner failed");
@@ -138,7 +145,10 @@ mod tests {
         );
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
-        let err = bridge.ext_method(ExtRequest::new("my_method", params.into())).await.unwrap_err();
+        let err = bridge
+            .ext_method(ExtRequest::new("my_method", params.into()))
+            .await
+            .unwrap_err();
 
         assert_eq!(err.code, ErrorCode::InternalError); // -32603 default
         assert_eq!(err.message, "oops");
@@ -170,7 +180,10 @@ mod tests {
         );
 
         let params = RawValue::from_string("{}".to_string()).unwrap();
-        let err = bridge.ext_method(ExtRequest::new("my_method", params.into())).await.unwrap_err();
+        let err = bridge
+            .ext_method(ExtRequest::new("my_method", params.into()))
+            .await
+            .unwrap_err();
 
         assert_eq!(err.code, ErrorCode::InternalError);
         assert_eq!(err.message, "old error");

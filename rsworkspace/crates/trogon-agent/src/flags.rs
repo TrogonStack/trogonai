@@ -76,26 +76,11 @@ mod tests {
     #[test]
     fn flag_names_are_correct() {
         assert_eq!(AgentFlag::PrReviewEnabled.name(), "agent_pr_review_enabled");
-        assert_eq!(
-            AgentFlag::CommentHandlerEnabled.name(),
-            "agent_comment_handler_enabled"
-        );
-        assert_eq!(
-            AgentFlag::PushHandlerEnabled.name(),
-            "agent_push_handler_enabled"
-        );
-        assert_eq!(
-            AgentFlag::CiHandlerEnabled.name(),
-            "agent_ci_handler_enabled"
-        );
-        assert_eq!(
-            AgentFlag::IssueTriageEnabled.name(),
-            "agent_issue_triage_enabled"
-        );
-        assert_eq!(
-            AgentFlag::AlertHandlerEnabled.name(),
-            "agent_alert_handler_enabled"
-        );
+        assert_eq!(AgentFlag::CommentHandlerEnabled.name(), "agent_comment_handler_enabled");
+        assert_eq!(AgentFlag::PushHandlerEnabled.name(), "agent_push_handler_enabled");
+        assert_eq!(AgentFlag::CiHandlerEnabled.name(), "agent_ci_handler_enabled");
+        assert_eq!(AgentFlag::IssueTriageEnabled.name(), "agent_issue_triage_enabled");
+        assert_eq!(AgentFlag::AlertHandlerEnabled.name(), "agent_alert_handler_enabled");
         assert_eq!(AgentFlag::MemoryEnabled.name(), "agent_memory_enabled");
         assert_eq!(AgentFlag::McpEnabled.name(), "agent_mcp_enabled");
         assert_eq!(

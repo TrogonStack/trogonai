@@ -37,8 +37,8 @@ mod multi_runner;
 
 use std::sync::Arc;
 
-use acp_nats::{AcpPrefix, Bridge, Config};
 use acp_nats::jetstream::provision::provision_streams;
+use acp_nats::{AcpPrefix, Bridge, Config};
 use agent_client_protocol::{
     AgentSideConnection, Client, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionRequest, SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
@@ -50,7 +50,9 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::info;
 
 use acp_nats_agent::AgentSideNatsConnection;
-use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionStore, TrogonAgent};
+use trogon_acp_runner::{
+    GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionStore, TrogonAgent,
+};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 use trogon_nats::NatsConfig;
@@ -68,11 +70,9 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Config from environment ───────────────────────────────────────────────
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let acp_prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let proxy_url =
-        std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
     let model = std::env::var("AGENT_MODEL").unwrap_or_else(|_| "claude-opus-4-6".to_string());
     let max_iterations: u32 = std::env::var("AGENT_MAX_ITERATIONS")
@@ -135,9 +135,7 @@ async fn main() -> anyhow::Result<()> {
         streaming_client: None,
     };
 
-    let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
-        .ok()
-        .and_then(|v| v.parse().ok());
+    let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS").ok().and_then(|v| v.parse().ok());
     if let Some(budget) = thinking_budget {
         agent_loop.thinking_budget = Some(budget);
     }
@@ -168,10 +166,9 @@ async fn main() -> anyhow::Result<()> {
         None,
         gateway_config.clone(),
     );
-    let (_, runner_io_task) =
-        AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix_typed.clone(), |fut| {
-            tokio::task::spawn_local(fut);
-        });
+    let (_, runner_io_task) = AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix_typed.clone(), |fut| {
+        tokio::task::spawn_local(fut);
+    });
 
     // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
 
@@ -394,7 +391,11 @@ fn parse_exit_plan_mode_outcome(outcome: RequestPermissionOutcome) -> (bool, Opt
     match outcome {
         RequestPermissionOutcome::Selected(sel) => {
             let id = sel.option_id.0.as_ref();
-            if id == "plan" { (false, None) } else { (true, Some(id.to_string())) }
+            if id == "plan" {
+                (false, None)
+            } else {
+                (true, Some(id.to_string()))
+            }
         }
         _ => (false, None),
     }
@@ -477,11 +478,7 @@ async fn handle_permission_request<S: SessionStore>(
 
     // ── Standard tool permission request ──────────────────────────────────────
     let options = vec![
-        PermissionOption::new(
-            "allow_always",
-            "Always Allow",
-            PermissionOptionKind::AllowAlways,
-        ),
+        PermissionOption::new("allow_always", "Always Allow", PermissionOptionKind::AllowAlways),
         PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
         PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
     ];
@@ -533,10 +530,7 @@ mod tests {
         unsafe { std::env::set_var("SUDO_UID", "1000") };
         let result = allow_bypass();
         unsafe { std::env::remove_var("SUDO_UID") };
-        assert!(
-            !result,
-            "allow_bypass must return false when SUDO_UID is set"
-        );
+        assert!(!result, "allow_bypass must return false when SUDO_UID is set");
     }
 
     #[test]
@@ -546,10 +540,7 @@ mod tests {
         unsafe { std::env::set_var("SUDO_USER", "jorge") };
         let result = allow_bypass();
         unsafe { std::env::remove_var("SUDO_USER") };
-        assert!(
-            !result,
-            "allow_bypass must return false when SUDO_USER is set"
-        );
+        assert!(!result, "allow_bypass must return false when SUDO_USER is set");
     }
 
     // ── exit_plan_mode_options ──────────────────────────────────────────────────

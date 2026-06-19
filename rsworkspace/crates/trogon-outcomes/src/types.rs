@@ -275,8 +275,7 @@ mod tests {
 
     #[test]
     fn rubric_matches_actor_type_with_filter() {
-        let rubric =
-            Rubric::new("r", "name", "desc", vec![]).with_actor_type_filter("pr");
+        let rubric = Rubric::new("r", "name", "desc", vec![]).with_actor_type_filter("pr");
         assert!(rubric.matches_actor_type("pr"));
         assert!(!rubric.matches_actor_type("issue"));
     }

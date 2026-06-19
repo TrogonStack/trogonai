@@ -80,16 +80,10 @@ impl AutomationStore {
     /// Fetch a single automation by tenant + id.  Returns `None` if not found.
     pub async fn get(&self, tenant_id: &str, id: &str) -> Result<Option<Automation>, StoreError> {
         let key = kv_key(tenant_id, id);
-        match self
-            .kv
-            .get(&key)
-            .await
-            .map_err(|e| StoreError(e.to_string()))?
-        {
+        match self.kv.get(&key).await.map_err(|e| StoreError(e.to_string()))? {
             None => Ok(None),
             Some(bytes) => {
-                let a = serde_json::from_slice::<Automation>(&bytes)
-                    .map_err(|e| StoreError(e.to_string()))?;
+                let a = serde_json::from_slice::<Automation>(&bytes).map_err(|e| StoreError(e.to_string()))?;
                 Ok(Some(a))
             }
         }
@@ -98,21 +92,14 @@ impl AutomationStore {
     /// Delete an automation by tenant + id.
     pub async fn delete(&self, tenant_id: &str, id: &str) -> Result<(), StoreError> {
         let key = kv_key(tenant_id, id);
-        self.kv
-            .delete(&key)
-            .await
-            .map_err(|e| StoreError(e.to_string()))?;
+        self.kv.delete(&key).await.map_err(|e| StoreError(e.to_string()))?;
         Ok(())
     }
 
     /// Return all automations belonging to `tenant_id`.
     pub async fn list(&self, tenant_id: &str) -> Result<Vec<Automation>, StoreError> {
         let prefix = format!("{tenant_id}.");
-        let mut keys = self
-            .kv
-            .keys()
-            .await
-            .map_err(|e| StoreError(e.to_string()))?;
+        let mut keys = self.kv.keys().await.map_err(|e| StoreError(e.to_string()))?;
         let mut result = Vec::new();
         while let Some(key) = keys.next().await {
             let key = key.map_err(|e| StoreError(e.to_string()))?;
@@ -136,8 +123,7 @@ impl AutomationStore {
     /// The runner filters items by `automation.tenant_id`.
     pub async fn watch(
         &self,
-    ) -> Result<futures_util::stream::BoxStream<'static, (String, Option<Automation>)>, StoreError>
-    {
+    ) -> Result<futures_util::stream::BoxStream<'static, (String, Option<Automation>)>, StoreError> {
         let watcher = self
             .kv
             .watch_with_history(">")
@@ -295,8 +281,7 @@ pub mod mock {
             &'a self,
             tenant_id: &'a str,
             id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             let key = format!("{tenant_id}.{id}");
             Box::pin(async move { Ok(data.lock().unwrap().get(&key).cloned()) })
@@ -318,8 +303,7 @@ pub mod mock {
         fn list<'a>(
             &'a self,
             tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             let prefix = format!("{tenant_id}.");
             Box::pin(async move {
@@ -337,8 +321,7 @@ pub mod mock {
             tenant_id: &'a str,
             nats_subject: &'a str,
             payload: &'a serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             let prefix = format!("{tenant_id}.");
             let nats_subject = nats_subject.to_string();
@@ -349,9 +332,7 @@ pub mod mock {
                     .iter()
                     .filter(|(k, _)| k.starts_with(&prefix))
                     .map(|(_, v)| v.clone())
-                    .filter(|a| {
-                        a.enabled && crate::trigger::matches(&a.trigger, &nats_subject, &payload)
-                    })
+                    .filter(|a| a.enabled && crate::trigger::matches(&a.trigger, &nats_subject, &payload))
                     .collect())
             })
         }
@@ -384,8 +365,7 @@ pub mod error_mock {
             &'a self,
             _tenant_id: &'a str,
             _id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Automation>, StoreError>> + Send + 'a>> {
             Box::pin(async move { Err(StoreError("injected get error".into())) })
         }
 
@@ -400,8 +380,7 @@ pub mod error_mock {
         fn list<'a>(
             &'a self,
             _tenant_id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
             Box::pin(async move { Err(StoreError("injected list error".into())) })
         }
 
@@ -410,8 +389,7 @@ pub mod error_mock {
             _tenant_id: &'a str,
             _nats_subject: &'a str,
             _payload: &'a serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<Automation>, StoreError>> + Send + 'a>> {
             Box::pin(async move { Err(StoreError("injected matching error".into())) })
         }
     }

@@ -7,9 +7,9 @@ use async_nats::jetstream;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
+use trogon_acp_runner::egress::{EgressAction, EgressRule};
 use trogon_acp_runner::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 use trogon_acp_runner::{EgressPolicy, NatsSessionStore, SessionState, SessionStore};
-use trogon_acp_runner::egress::{EgressAction, EgressRule};
 
 async fn setup() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
     let container: ContainerAsync<Nats> = Nats::default()
@@ -221,18 +221,12 @@ async fn load_corrupted_json_returns_error() {
         })
         .await
         .unwrap();
-    kv.put(
-        "sess-corrupt-1",
-        bytes::Bytes::from(b"not valid json at all".to_vec()),
-    )
-    .await
-    .unwrap();
+    kv.put("sess-corrupt-1", bytes::Bytes::from(b"not valid json at all".to_vec()))
+        .await
+        .unwrap();
 
     let result = store.load("sess-corrupt-1").await;
-    assert!(
-        result.is_err(),
-        "loading corrupted session data must return an error"
-    );
+    assert!(result.is_err(), "loading corrupted session data must return an error");
     let err_msg = result.unwrap_err().to_string();
     assert!(
         !err_msg.is_empty(),
@@ -256,10 +250,7 @@ async fn load_empty_bytes_returns_error() {
     kv.put("sess-empty-1", bytes::Bytes::new()).await.unwrap();
 
     let result = store.load("sess-empty-1").await;
-    assert!(
-        result.is_err(),
-        "loading empty session bytes must return an error"
-    );
+    assert!(result.is_err(), "loading empty session bytes must return an error");
 }
 
 /// If the KV bucket contains valid JSON but for a completely different type,
@@ -277,18 +268,12 @@ async fn load_wrong_json_type_returns_error() {
         .await
         .unwrap();
     // Valid JSON but not a SessionState object — it's a string
-    kv.put(
-        "sess-wrong-1",
-        bytes::Bytes::from(b"\"just a string\"".to_vec()),
-    )
-    .await
-    .unwrap();
+    kv.put("sess-wrong-1", bytes::Bytes::from(b"\"just a string\"".to_vec()))
+        .await
+        .unwrap();
 
     let result = store.load("sess-wrong-1").await;
-    assert!(
-        result.is_err(),
-        "loading wrong JSON type must return an error"
-    );
+    assert!(result.is_err(), "loading wrong JSON type must return an error");
 }
 
 // ── new fields: tool_policies, egress_policy, audit_log ──────────────────────

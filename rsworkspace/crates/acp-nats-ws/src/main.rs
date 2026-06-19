@@ -11,8 +11,13 @@ use upgrade::{ConnectionRequest, UpgradeState};
 
 #[cfg(not(coverage))]
 use {
-    acp_nats::nats, clap::Parser, std::net::SocketAddr,
-    std::sync::Arc, tracing::error, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    acp_nats::nats,
+    clap::Parser,
+    std::net::SocketAddr,
+    std::sync::Arc,
+    tracing::error,
+    trogon_std::env::SystemEnv,
+    trogon_std::fs::SystemFs,
     trogon_telemetry::{ResourceAttribute, ServiceName},
     upgrade::RegistryExtension,
 };
@@ -70,7 +75,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )
                 }),
             )
-            .route("/ws/{agent_type}", axum::routing::get(upgrade::handle_with_agent_type::<trogon_registry::KvStore>))
+            .route(
+                "/ws/{agent_type}",
+                axum::routing::get(upgrade::handle_with_agent_type::<trogon_registry::KvStore>),
+            )
             .layer(axum::extract::Extension(registry_ext))
             .with_state(state),
     );
@@ -227,9 +235,7 @@ mod tests {
 
     impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
         type PublishError = trogon_nats::mocks::MockError;
-        type AckFuture = std::future::Ready<
-            Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>,
-        >;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
 
         async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
             &self,
@@ -237,9 +243,7 @@ mod tests {
             headers: async_nats::HeaderMap,
             payload: bytes::Bytes,
         ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publisher
-                .publish_with_headers(subject, headers, payload)
-                .await
+            self.publisher.publish_with_headers(subject, headers, payload).await
         }
     }
 
@@ -308,8 +312,7 @@ mod tests {
         let (mut ws_stream, _) = connect_async(ws_url).await.unwrap();
 
         // Send initialize request
-        let req =
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
         ws_stream.send(Message::Text(req.into())).await.unwrap();
 
         // Await response
@@ -386,8 +389,7 @@ mod tests {
         let ws_url = format!("ws://{}/ws", addr);
         let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
 
-        let req =
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
         ws_stream.send(Message::Text(req.into())).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -453,10 +455,7 @@ mod tests {
 
         // Invalid UTF-8 sequence — exercises the warn path in run_recv_pump
         let invalid_utf8: Vec<u8> = vec![0xFF, 0xFE, 0x80, 0x00];
-        ws_stream
-            .send(Message::Binary(invalid_utf8.into()))
-            .await
-            .unwrap();
+        ws_stream.send(Message::Binary(invalid_utf8.into())).await.unwrap();
 
         // Pump continues; give it a moment then shut down cleanly
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -486,12 +485,7 @@ mod tests {
 
         drop(conn_tx);
 
-        let result = tokio::task::spawn_blocking(move || handle.join())
-            .await
-            .unwrap();
-        assert!(
-            result.is_ok(),
-            "start_connection_thread handle must join cleanly"
-        );
+        let result = tokio::task::spawn_blocking(move || handle.join()).await.unwrap();
+        assert!(result.is_ok(), "start_connection_thread handle must join cleanly");
     }
 }

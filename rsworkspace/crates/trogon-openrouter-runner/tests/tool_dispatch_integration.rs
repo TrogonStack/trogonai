@@ -18,8 +18,7 @@ use agent_client_protocol::{
     SetSessionConfigOptionRequest, SetSessionModelRequest,
 };
 use trogon_openrouter_runner::{
-    AssembledToolCall, MockOpenRouterHttpClient, MockSessionNotifier, OpenRouterAgent,
-    OpenRouterEvent,
+    AssembledToolCall, MockOpenRouterHttpClient, MockSessionNotifier, OpenRouterAgent, OpenRouterEvent,
 };
 use trogon_tools;
 
@@ -30,7 +29,9 @@ fn or_env_lock() -> &'static Mutex<()> {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-fn make_agent(http: Arc<MockOpenRouterHttpClient>) -> OpenRouterAgent<Arc<MockOpenRouterHttpClient>, MockSessionNotifier> {
+fn make_agent(
+    http: Arc<MockOpenRouterHttpClient>,
+) -> OpenRouterAgent<Arc<MockOpenRouterHttpClient>, MockSessionNotifier> {
     OpenRouterAgent::with_deps(MockSessionNotifier::new(), "test-model", "test-key", http)
 }
 
@@ -43,17 +44,35 @@ fn push_tool_then_done(http: &MockOpenRouterHttpClient, tool_name: &str, args: &
             arguments: args.to_string(),
         }],
     }]);
-    http.push_response(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+    http.push_response(vec![OpenRouterEvent::TextDelta {
+        text: "done".to_string(),
+    }]);
 }
 
 /// Create a real git repo in `dir` with one commit.
 fn init_git_repo(dir: &std::path::Path) {
     Command::new("git").args(["init"]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["config", "user.name", "T"]).current_dir(dir).output().unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "t@t.com"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "T"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
     std::fs::write(dir.join("init.txt"), "init").unwrap();
-    Command::new("git").args(["add", "."]).current_dir(dir).output().unwrap();
-    Command::new("git").args(["commit", "-m", "initial"]).current_dir(dir).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -90,7 +109,10 @@ async fn or_glob_tool_returns_matching_files() {
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
             let second = &calls[1];
-            let tool_msg = second.messages.iter().find(|m| m.role == "tool")
+            let tool_msg = second
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second API call must include a tool-role message with tool result");
             assert!(
                 tool_msg.content.contains("needle.rs"),
@@ -131,12 +153,12 @@ async fn or_git_status_tool_returns_output() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
-            assert!(
-                !tool_msg.content.is_empty(),
-                "git_status result must be non-empty"
-            );
+            assert!(!tool_msg.content.is_empty(), "git_status result must be non-empty");
             // Must not be "Unknown tool" — confirms dispatch reached real tool
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -179,7 +201,10 @@ async fn or_git_diff_tool_returns_output() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -226,7 +251,10 @@ async fn or_git_log_tool_returns_commits() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -246,7 +274,11 @@ async fn or_git_log_tool_returns_commits() {
 #[tokio::test]
 async fn or_search_files_tool_returns_matches() {
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(dir.path().join("haystack.txt"), "the quick brown fox\njumps over the lazy dog\n").unwrap();
+    std::fs::write(
+        dir.path().join("haystack.txt"),
+        "the quick brown fox\njumps over the lazy dog\n",
+    )
+    .unwrap();
 
     let http = Arc::new(MockOpenRouterHttpClient::new());
     push_tool_then_done(
@@ -277,7 +309,10 @@ async fn or_search_files_tool_returns_matches() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -325,7 +360,10 @@ async fn or_fetch_url_link_local_blocked_by_egress_policy() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool-role message");
             assert!(
                 tool_msg.content.contains("blocked by egress policy"),
@@ -368,7 +406,10 @@ async fn or_todo_write_dispatched_returns_ok() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -397,7 +438,9 @@ async fn or_file_tool_after_import_uses_new_session_cwd() {
         }],
     }]);
     // Second call: done
-    http.push_response(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+    http.push_response(vec![OpenRouterEvent::TextDelta {
+        text: "done".to_string(),
+    }]);
 
     let agent = make_agent(Arc::clone(&http));
     tokio::task::LocalSet::new()
@@ -433,7 +476,10 @@ async fn or_file_tool_after_import_uses_new_session_cwd() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
             assert!(
                 tool_msg.content.contains("cross-runner-content"),
@@ -550,11 +596,7 @@ async fn or_disabled_tool_absent_from_wire_tools_array() {
 
             // Disable glob tool
             agent
-                .set_session_config_option(SetSessionConfigOptionRequest::new(
-                    sid.clone(),
-                    "glob",
-                    "disabled",
-                ))
+                .set_session_config_option(SetSessionConfigOptionRequest::new(sid.clone(), "glob", "disabled"))
                 .await
                 .unwrap();
 
@@ -664,9 +706,7 @@ async fn or_meta_system_prompt_and_trogon_md_both_in_system_message() {
             let mut meta = serde_json::Map::new();
             meta.insert("systemPrompt".to_string(), serde_json::json!("or-meta-rules: use JSON"));
             let sess = agent
-                .new_session(
-                    NewSessionRequest::new(PathBuf::from(dir.path())).meta(meta),
-                )
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())).meta(meta))
                 .await
                 .unwrap();
 
@@ -715,11 +755,7 @@ async fn or_notebook_edit_tool_dispatched_via_wire_format() {
             "execution_count": null
         }]
     });
-    std::fs::write(
-        dir.path().join("nb.ipynb"),
-        serde_json::to_string(&notebook).unwrap(),
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&notebook).unwrap()).unwrap();
 
     let http = Arc::new(MockOpenRouterHttpClient::new());
     push_tool_then_done(
@@ -750,7 +786,10 @@ async fn or_notebook_edit_tool_dispatched_via_wire_format() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second API call must include a tool-role message");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -806,7 +845,10 @@ async fn or_write_file_tool_dispatched_via_wire_format() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second API call must include a tool-role message");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -816,10 +858,7 @@ async fn or_write_file_tool_dispatched_via_wire_format() {
 
             let on_disk = std::fs::read_to_string(dir.path().join("output.rs"))
                 .expect("write_file must create output.rs on disk");
-            assert!(
-                on_disk.contains("fn main()"),
-                "file content must match; got: {on_disk}"
-            );
+            assert!(on_disk.contains("fn main()"), "file content must match; got: {on_disk}");
         })
         .await;
 }
@@ -862,7 +901,10 @@ async fn or_str_replace_tool_dispatched_via_wire_format() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second API call must include a tool-role message");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -932,7 +974,10 @@ async fn or_str_replace_replace_all_tool_def_and_dispatch() {
             );
 
             let calls = http.calls.lock().unwrap();
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second API call must include a tool-role message");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -994,7 +1039,10 @@ async fn or_multi_edit_tool_def_and_dispatch() {
             );
 
             let calls = http.calls.lock().unwrap();
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second API call must include a tool-role message");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -1020,7 +1068,9 @@ async fn or_multi_edit_tool_def_and_dispatch() {
 #[tokio::test]
 async fn or_fork_inherits_disabled_tool_excluded_from_wire() {
     let http = Arc::new(MockOpenRouterHttpClient::new());
-    http.push_response(vec![OpenRouterEvent::TextDelta { text: "fork ok".to_string() }]);
+    http.push_response(vec![OpenRouterEvent::TextDelta {
+        text: "fork ok".to_string(),
+    }]);
 
     let agent = make_agent(Arc::clone(&http));
     tokio::task::LocalSet::new()
@@ -1129,15 +1179,22 @@ async fn or_write_file_tool_creates_file_on_disk() {
                 .await
                 .unwrap();
 
-            let written = std::fs::read_to_string(dir.path().join("out.txt"))
-                .expect("write_file must create the file");
+            let written = std::fs::read_to_string(dir.path().join("out.txt")).expect("write_file must create the file");
             assert!(
                 written.contains("or-write-sentinel-999"),
                 "written content must match; got: {written}"
             );
             let calls = http.calls.lock().unwrap();
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message must exist");
-            assert!(!tool_msg.content.contains("Unknown tool"), "write_file must be dispatched; got: {}", tool_msg.content);
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
+                .expect("tool message must exist");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "write_file must be dispatched; got: {}",
+                tool_msg.content
+            );
         })
         .await;
 }
@@ -1164,7 +1221,11 @@ async fn or_list_dir_tool_returns_directory_listing() {
                 .unwrap();
 
             let calls = http.calls.lock().unwrap();
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message");
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
+                .expect("tool message");
             assert!(
                 tool_msg.content.contains("beta.rs"),
                 "list_dir must include 'beta.rs'; got: {}",
@@ -1201,10 +1262,21 @@ async fn or_str_replace_tool_modifies_file_on_disk() {
                 .unwrap();
 
             let content = std::fs::read_to_string(dir.path().join("edit.rs")).unwrap();
-            assert!(content.contains("replaced"), "str_replace must have applied; got: {content}");
+            assert!(
+                content.contains("replaced"),
+                "str_replace must have applied; got: {content}"
+            );
             let calls = http.calls.lock().unwrap();
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message");
-            assert!(!tool_msg.content.contains("Unknown tool"), "str_replace must be dispatched; got: {}", tool_msg.content);
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
+                .expect("tool message");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "str_replace must be dispatched; got: {}",
+                tool_msg.content
+            );
         })
         .await;
 }
@@ -1228,18 +1300,15 @@ async fn or_ext_method_list_children_returns_empty_array() {
             let sid = sess.session_id;
 
             let params: Arc<serde_json::value::RawValue> =
-                serde_json::value::RawValue::from_string(
-                    serde_json::json!({ "sessionId": sid }).to_string(),
-                )
-                .unwrap()
-                .into();
+                serde_json::value::RawValue::from_string(serde_json::json!({ "sessionId": sid }).to_string())
+                    .unwrap()
+                    .into();
             let resp = agent
                 .ext_method(ExtRequest::new("session/list_children", params))
                 .await
                 .expect("session/list_children must not error on OpenRouter runner");
 
-            let val: serde_json::Value =
-                serde_json::from_str(resp.0.get()).expect("response must be valid JSON");
+            let val: serde_json::Value = serde_json::from_str(resp.0.get()).expect("response must be valid JSON");
             let children = val["children"]
                 .as_array()
                 .unwrap_or_else(|| panic!("session/list_children must return {{\"children\":[...]}}; got: {val}"));
@@ -1283,10 +1352,8 @@ async fn or_notebook_edit_tool_updates_cell_on_disk() {
                 .await
                 .unwrap();
 
-            let nb_after: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap(),
-            )
-            .unwrap();
+            let nb_after: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap()).unwrap();
             let source = &nb_after["cells"][0]["source"];
             let src = if let Some(s) = source.as_str() {
                 s.to_string()
@@ -1297,8 +1364,16 @@ async fn or_notebook_edit_tool_updates_cell_on_disk() {
             };
             assert!(src.contains("new"), "notebook_edit must update cell; got: {src}");
             let calls = http.calls.lock().unwrap();
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message");
-            assert!(!tool_msg.content.contains("Unknown tool"), "notebook_edit must be dispatched; got: {}", tool_msg.content);
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
+                .expect("tool message");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "notebook_edit must be dispatched; got: {}",
+                tool_msg.content
+            );
         })
         .await;
 }
@@ -1327,10 +1402,7 @@ async fn or_no_crash_when_trogon_md_absent_from_session_directory() {
                 .unwrap();
 
             let result = agent
-                .prompt(PromptRequest::new(
-                    sess.session_id,
-                    vec![ContentBlock::from("hello")],
-                ))
+                .prompt(PromptRequest::new(sess.session_id, vec![ContentBlock::from("hello")]))
                 .await
                 .expect("prompt must not error when TROGON.md is absent");
 
@@ -1380,8 +1452,7 @@ async fn or_programming_tool_chain_read_str_replace_git_diff() {
         calls: vec![AssembledToolCall {
             id: "c-sr".to_string(),
             name: "str_replace".to_string(),
-            arguments: r#"{"path":"src.rs","old_str":"old_function","new_str":"new_function"}"#
-                .to_string(),
+            arguments: r#"{"path":"src.rs","old_str":"old_function","new_str":"new_function"}"#.to_string(),
         }],
     }]);
     // Call 3: git_diff tool_use (LLM wants to inspect the diff).
@@ -1515,9 +1586,7 @@ async fn or_web_search_tool_def_present_and_dispatch_works() {
     }
 
     assert!(
-        trogon_tools::all_tool_defs()
-            .iter()
-            .any(|d| d.name == "web_search"),
+        trogon_tools::all_tool_defs().iter().any(|d| d.name == "web_search"),
         "web_search must be in all_tool_defs"
     );
 
@@ -1550,7 +1619,10 @@ async fn or_web_search_tool_def_present_and_dispatch_works() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool-role message");
             assert!(
                 !tool_msg.content.contains("Unknown tool"),
@@ -1610,7 +1682,10 @@ async fn or_web_search_missing_config_returns_clear_error() {
 
             let calls = http.calls.lock().unwrap();
             assert_eq!(calls.len(), 2);
-            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
                 .expect("second call must have tool result");
             assert!(
                 tool_msg.content.contains("not configured"),

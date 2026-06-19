@@ -101,11 +101,7 @@ mod tests {
         let caps = expected_runner_capabilities("xai").unwrap();
         assert_eq!(
             RunnerCapability::to_strings(caps),
-            vec![
-                "chat".to_string(),
-                "explore".to_string(),
-                "plan".to_string(),
-            ]
+            vec!["chat".to_string(), "explore".to_string(), "plan".to_string(),]
         );
     }
 }

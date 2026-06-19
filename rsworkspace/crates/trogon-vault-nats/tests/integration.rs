@@ -16,9 +16,7 @@ use testcontainers_modules::{
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_vault::{ApiKeyToken, VaultStore};
-use trogon_vault_nats::{
-    AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket,
-};
+use trogon_vault_nats::{AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -116,10 +114,7 @@ async fn rotate_updates_current_and_preserves_previous_in_slot() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // resolve() returns the current key
-    assert_eq!(
-        vault.resolve(&token).await.unwrap(),
-        Some("sk-ant-v2".to_string())
-    );
+    assert_eq!(vault.resolve(&token).await.unwrap(), Some("sk-ant-v2".to_string()));
 
     // slot() exposes both current and previous for fallback-on-401
     let (current, previous) = vault.slot(&token).expect("slot must exist");
@@ -130,9 +125,9 @@ async fn rotate_updates_current_and_preserves_previous_in_slot() {
 #[tokio::test]
 async fn named_vaults_are_isolated() {
     let (js, _c) = start_nats().await;
-    let prod    = make_vault(&js, "prod").await;
+    let prod = make_vault(&js, "prod").await;
     let staging = make_vault(&js, "staging").await;
-    let token   = tok("tok_anthropic_prod_abc123");
+    let token = tok("tok_anthropic_prod_abc123");
 
     prod.store(&token, "sk-prod-key").await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -140,10 +135,7 @@ async fn named_vaults_are_isolated() {
     // The same token in staging must be unknown
     assert_eq!(staging.resolve(&token).await.unwrap(), None);
     // The prod vault sees its own key
-    assert_eq!(
-        prod.resolve(&token).await.unwrap(),
-        Some("sk-prod-key".to_string())
-    );
+    assert_eq!(prod.resolve(&token).await.unwrap(), Some("sk-prod-key".to_string()));
 }
 
 #[tokio::test]
@@ -217,10 +209,7 @@ async fn store_overwrites_existing_value() {
     vault.store(&token, "sk-ant-v2").await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    assert_eq!(
-        vault.resolve(&token).await.unwrap(),
-        Some("sk-ant-v2".to_string())
-    );
+    assert_eq!(vault.resolve(&token).await.unwrap(), Some("sk-ant-v2".to_string()));
 }
 
 #[tokio::test]
@@ -229,11 +218,7 @@ async fn audit_events_published_for_store_resolve_revoke() {
 
     // Subscribe on core NATS before creating the stream so we don't miss any messages.
     // JetStream publish also delivers to matching core NATS subscribers.
-    let mut sub = js
-        .client()
-        .subscribe("vault.audit.>")
-        .await
-        .expect("subscribe");
+    let mut sub = js.client().subscribe("vault.audit.>").await.expect("subscribe");
 
     ensure_audit_stream(&js).await.expect("audit stream");
 

@@ -57,11 +57,7 @@ pub struct ChatAppState<R: SessionRepository> {
 /// Sends the conversation history to `trogon-compactor` via NATS request-reply.
 /// Returns the original messages unchanged if the compactor is unavailable.
 #[cfg_attr(coverage, coverage(off))]
-async fn compact_messages(
-    nats: &async_nats::Client,
-    messages: Vec<Message>,
-    session_id: &str,
-) -> Vec<Message> {
+async fn compact_messages(nats: &async_nats::Client, messages: Vec<Message>, session_id: &str) -> Vec<Message> {
     #[derive(serde::Serialize)]
     struct CompactReq<'a> {
         messages: &'a [Message],
@@ -80,10 +76,7 @@ async fn compact_messages(
     let Ok(payload) = serde_json::to_vec(&CompactReq { messages: &messages }) else {
         return messages;
     };
-    let reply = match nats
-        .request("trogon.compactor.compact", payload.into())
-        .await
-    {
+    let reply = match nats.request("trogon.compactor.compact", payload.into()).await {
         Ok(r) => r,
         Err(e) => {
             warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
@@ -143,12 +136,11 @@ pub(crate) fn epoch_to_iso8601(secs: u64) -> String {
     let mut year = 1970u64;
     let mut remaining = days;
     loop {
-        let dy =
-            if (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400) {
-                366
-            } else {
-                365
-            };
+        let dy = if (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400) {
+            366
+        } else {
+            365
+        };
         if remaining < dy {
             break;
         }
@@ -178,10 +170,7 @@ pub(crate) fn epoch_to_iso8601(secs: u64) -> String {
         remaining -= dim;
         month += 1;
     }
-    format!(
-        "{year:04}-{month:02}-{:02}T{h:02}:{m:02}:{s:02}Z",
-        remaining + 1
-    )
+    format!("{year:04}-{month:02}-{:02}T{h:02}:{m:02}:{s:02}Z", remaining + 1)
 }
 
 // ── Response types ─────────────────────────────────────────────────────────────
@@ -265,10 +254,7 @@ pub struct SendMessageResponse {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn list_sessions<R: SessionRepository>(
-    headers: HeaderMap,
-    State(state): State<ChatAppState<R>>,
-) -> Response {
+async fn list_sessions<R: SessionRepository>(headers: HeaderMap, State(state): State<ChatAppState<R>>) -> Response {
     let tid = match tenant_id(&headers) {
         Ok(t) => t,
         Err(r) => return r,
@@ -311,11 +297,7 @@ async fn create_session<R: SessionRepository>(
     };
     match state.session_store.put(&session).await {
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Ok(()) => (
-            StatusCode::CREATED,
-            axum::Json(SessionSummary::from(&session)),
-        )
-            .into_response(),
+        Ok(()) => (StatusCode::CREATED, axum::Json(SessionSummary::from(&session))).into_response(),
     }
 }
 
@@ -420,16 +402,11 @@ async fn send_message<R: SessionRepository>(
     let tools: Vec<_> = if session.tools.is_empty() {
         all
     } else {
-        all.into_iter()
-            .filter(|t| session.tools.contains(&t.name))
-            .collect()
+        all.into_iter().filter(|t| session.tools.contains(&t.name)).collect()
     };
 
     // Resolve the effective agent: override model if the session specifies one.
-    let effective_model = session
-        .model
-        .clone()
-        .unwrap_or_else(|| state.agent.model.clone());
+    let effective_model = session.model.clone().unwrap_or_else(|| state.agent.model.clone());
     let temp_agent;
     let agent: &AgentLoop = if effective_model == state.agent.model {
         &state.agent
@@ -505,7 +482,7 @@ async fn send_message<R: SessionRepository>(
                 .fold((0u64, 0u64), |(i, o), u| {
                     (i + u.input_tokens as u64, o + u.output_tokens as u64)
                 });
-            session.total_input_tokens  += turn_input;
+            session.total_input_tokens += turn_input;
             session.total_output_tokens += turn_output;
             let message_count = updated_messages.len();
             session.messages = updated_messages;
@@ -515,9 +492,7 @@ async fn send_message<R: SessionRepository>(
             // Legacy sessions with started_at_secs == 0 are skipped to avoid
             // reporting a nonsensical ~55-year duration.
             if session.started_at_secs > 0 {
-                session.duration_ms = now_secs
-                    .saturating_sub(session.started_at_secs)
-                    .saturating_mul(1000);
+                session.duration_ms = now_secs.saturating_sub(session.started_at_secs).saturating_mul(1000);
             }
 
             if let Err(e) = state.session_store.put(&session).await {
@@ -529,7 +504,7 @@ async fn send_message<R: SessionRepository>(
                 axum::Json(SendMessageResponse {
                     content: text,
                     message_count,
-                    input_tokens:  turn_input,
+                    input_tokens: turn_input,
                     output_tokens: turn_output,
                 }),
             )
@@ -582,10 +557,7 @@ impl From<AgentPromise> for PromiseView {
 /// Useful for operators to identify stuck promises without direct NATS CLI
 /// access. Only returns Running promises; terminal ones (Resolved,
 /// PermanentFailed) are cleaned up by KV TTL and not returned.
-async fn list_promises<R: SessionRepository>(
-    State(state): State<ChatAppState<R>>,
-    headers: HeaderMap,
-) -> Response {
+async fn list_promises<R: SessionRepository>(State(state): State<ChatAppState<R>>, headers: HeaderMap) -> Response {
     let tenant_id = match tenant_id(&headers) {
         Ok(t) => t,
         Err(r) => return r,
@@ -600,20 +572,14 @@ async fn list_promises<R: SessionRepository>(
             let views: Vec<PromiseView> = promises.into_iter().map(PromiseView::from).collect();
             axum::Json(views).into_response()
         }
-        Ok(Err(e)) => err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("promise store error: {e}"),
-        ),
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("promise store error: {e}")),
         Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "promise store timed out"),
     }
 }
 
 pub fn router<R: SessionRepository>(state: ChatAppState<R>) -> Router {
     Router::new()
-        .route(
-            "/sessions",
-            get(list_sessions::<R>).post(create_session::<R>),
-        )
+        .route("/sessions", get(list_sessions::<R>).post(create_session::<R>))
         .route(
             "/sessions/{id}",
             get(get_session::<R>)
@@ -682,10 +648,7 @@ mod tests {
         // HTTP header values can contain empty strings; treat them as missing.
         let mut headers = HeaderMap::new();
         headers.insert("x-tenant-id", "".parse().unwrap());
-        assert!(
-            tenant_id(&headers).is_err(),
-            "empty X-Tenant-Id must be rejected"
-        );
+        assert!(tenant_id(&headers).is_err(), "empty X-Tenant-Id must be rejected");
     }
 
     // ── epoch_to_iso8601 ──────────────────────────────────────────────────────
@@ -825,8 +788,8 @@ mod tests {
             "updated_at": "2025-01-01T00:00:00Z"
         }"#;
 
-        let session: ChatSession = serde_json::from_str(json)
-            .expect("ChatSession must deserialize even when 'model' field is absent");
+        let session: ChatSession =
+            serde_json::from_str(json).expect("ChatSession must deserialize even when 'model' field is absent");
 
         assert_eq!(session.id, "sess-1");
         assert!(
@@ -852,8 +815,8 @@ mod tests {
             "updated_at": "2025-01-01T00:00:00Z"
         }"#;
 
-        let session: ChatSession = serde_json::from_str(json)
-            .expect("ChatSession must deserialize even when token fields are absent");
+        let session: ChatSession =
+            serde_json::from_str(json).expect("ChatSession must deserialize even when token fields are absent");
 
         assert_eq!(
             session.total_input_tokens, 0,
@@ -866,7 +829,6 @@ mod tests {
     }
 
     // ── Handler tests ─────────────────────────────────────────────────────────
-
 
     fn make_mock_agent(responses: Vec<serde_json::Value>) -> Arc<AgentLoop> {
         use crate::agent_loop::mock::SequencedMockAnthropicClient;
@@ -981,9 +943,7 @@ mod tests {
         let app = mock_app(MockSessionStore::new());
         let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json, serde_json::json!([]));
     }
@@ -997,9 +957,7 @@ mod tests {
         let app = mock_app(store);
         let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json.as_array().unwrap().len(), 2);
     }
@@ -1044,9 +1002,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["name"], "My Session");
         assert_eq!(json["tenant_id"], "acme");
@@ -1065,9 +1021,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["name"], "New Agent");
     }
@@ -1084,9 +1038,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["total_input_tokens"], 0);
         assert_eq!(json["total_output_tokens"], 0);
@@ -1109,10 +1061,7 @@ mod tests {
     #[tokio::test]
     async fn get_session_returns_404_when_not_found() {
         let app = mock_app(MockSessionStore::new());
-        let resp = app
-            .oneshot(get_req("/sessions/does-not-exist", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/sessions/does-not-exist", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
@@ -1123,14 +1072,9 @@ mod tests {
         s.messages = vec![Message::user_text("hi")];
         store.insert(s);
         let app = mock_app(store);
-        let resp = app
-            .oneshot(get_req("/sessions/sess-1", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/sessions/sess-1", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["id"], "sess-1");
         assert_eq!(json["messages"].as_array().unwrap().len(), 1);
@@ -1144,14 +1088,9 @@ mod tests {
         s.total_output_tokens = 33;
         store.insert(s);
         let app = mock_app(store);
-        let resp = app
-            .oneshot(get_req("/sessions/sess-tok", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/sessions/sess-tok", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["total_input_tokens"], 99);
         assert_eq!(json["total_output_tokens"], 33);
@@ -1200,9 +1139,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["model"], "claude-opus-4-6");
         assert_eq!(
@@ -1221,17 +1158,12 @@ mod tests {
             .uri("/sessions/sess-3")
             .header("x-tenant-id", "acme")
             .header("content-type", "application/json")
-            .body(Body::from(
-                r#"{"tools":["post_pr_comment","send_slack_message"]}"#,
-            ))
+            .body(Body::from(r#"{"tools":["post_pr_comment","send_slack_message"]}"#))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let snap = store.snapshot();
-        assert_eq!(
-            snap["acme.sess-3"].tools,
-            vec!["post_pr_comment", "send_slack_message"]
-        );
+        assert_eq!(snap["acme.sess-3"].tools, vec!["post_pr_comment", "send_slack_message"]);
     }
 
     #[tokio::test]
@@ -1249,10 +1181,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let snap = store.snapshot();
-        assert_eq!(
-            snap["acme.sess-4"].memory_path.as_deref(),
-            Some(".trogon/memory.md")
-        );
+        assert_eq!(snap["acme.sess-4"].memory_path.as_deref(), Some(".trogon/memory.md"));
     }
 
     #[tokio::test]
@@ -1295,12 +1224,16 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["total_input_tokens"], 55, "update_session must not reset token totals");
-        assert_eq!(json["total_output_tokens"], 22, "update_session must not reset token totals");
+        assert_eq!(
+            json["total_input_tokens"], 55,
+            "update_session must not reset token totals"
+        );
+        assert_eq!(
+            json["total_output_tokens"], 22,
+            "update_session must not reset token totals"
+        );
     }
 
     #[tokio::test]
@@ -1317,9 +1250,7 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["name"], "Updated");
         let snap = store.snapshot();
@@ -1427,14 +1358,9 @@ mod tests {
     async fn list_promises_empty_returns_empty_array() {
         let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
         let app = mock_app_with_promise_store(MockSessionStore::new(), ps);
-        let resp = app
-            .oneshot(get_req("/admin/promises", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json, serde_json::json!([]));
     }
@@ -1444,14 +1370,9 @@ mod tests {
         let ps = Arc::new(crate::promise_store::mock::MockPromiseStore::new());
         ps.insert_promise(make_running_promise("p1", "acme"));
         let app = mock_app_with_promise_store(MockSessionStore::new(), Arc::clone(&ps) as _);
-        let resp = app
-            .oneshot(get_req("/admin/promises", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = json.as_array().unwrap();
         assert_eq!(arr.len(), 1);
@@ -1463,10 +1384,7 @@ mod tests {
         assert_eq!(view["recovery_count"], 1);
         assert_eq!(view["checkpoint_degraded"], false);
         // messages and system_prompt must NOT appear in the response.
-        assert!(
-            view.get("messages").is_none(),
-            "messages must be excluded from view"
-        );
+        assert!(view.get("messages").is_none(), "messages must be excluded from view");
         assert!(
             view.get("system_prompt").is_none(),
             "system_prompt must be excluded from view"
@@ -1494,10 +1412,7 @@ mod tests {
             MockSessionStore::new(),
             Arc::clone(&ps) as Arc<dyn crate::promise_store::PromiseRepository>,
         );
-        let resp = app
-            .oneshot(get_req("/admin/promises", "acme"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(get_req("/admin/promises", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -1536,10 +1451,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_store_error_returns_500() {
-        let resp = error_app()
-            .oneshot(get_req("/sessions", "acme"))
-            .await
-            .unwrap();
+        let resp = error_app().oneshot(get_req("/sessions", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -1558,10 +1470,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_session_store_error_returns_500() {
-        let resp = error_app()
-            .oneshot(get_req("/sessions/any-id", "acme"))
-            .await
-            .unwrap();
+        let resp = error_app().oneshot(get_req("/sessions/any-id", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -1662,9 +1571,7 @@ mod tests {
         let resp = app.oneshot(send_msg_req("sess-1", "hello")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["input_tokens"], 10, "input_tokens must match usage field");
         assert_eq!(json["output_tokens"], 5, "output_tokens must match usage field");
@@ -1675,10 +1582,7 @@ mod tests {
         let store = MockSessionStore::new();
         store.insert(sample_session("sess-2", "acme"));
 
-        let agent = make_mock_agent(vec![
-            llm_response("turn 1", 10, 5),
-            llm_response("turn 2", 20, 8),
-        ]);
+        let agent = make_mock_agent(vec![llm_response("turn 1", 10, 5), llm_response("turn 2", 20, 8)]);
         let app = mock_app_with_agent(store.clone(), agent);
 
         let resp1 = app.clone().oneshot(send_msg_req("sess-2", "first")).await.unwrap();
@@ -1686,9 +1590,7 @@ mod tests {
 
         let resp2 = app.oneshot(send_msg_req("sess-2", "second")).await.unwrap();
         assert_eq!(resp2.status(), StatusCode::OK);
-        let body2 = axum::body::to_bytes(resp2.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body2 = axum::body::to_bytes(resp2.into_body(), usize::MAX).await.unwrap();
         let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
         assert_eq!(json2["input_tokens"], 20);
         assert_eq!(json2["output_tokens"], 8);
@@ -1720,9 +1622,7 @@ mod tests {
         let resp = app.oneshot(send_msg_req("sess-3", "hello")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["input_tokens"], 0, "input_tokens must be 0 when usage is absent");
         assert_eq!(json["output_tokens"], 0, "output_tokens must be 0 when usage is absent");
@@ -1745,9 +1645,7 @@ mod tests {
         let resp = app.oneshot(get_req("/sessions", "acme")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let summary = &json.as_array().unwrap()[0];
         assert_eq!(summary["total_input_tokens"], 42);

@@ -75,11 +75,7 @@ async fn agent_loop_end_turn_returns_text() {
 
     let agent = make_agent(&server.base_url());
     let result = agent
-        .run(
-            vec![Message::user_text("Review this PR")],
-            &no_tools(),
-            None,
-        )
+        .run(vec![Message::user_text("Review this PR")], &no_tools(), None)
         .await;
 
     assert!(result.is_ok());
@@ -92,8 +88,7 @@ async fn agent_loop_end_turn_joins_multiple_text_blocks() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -143,8 +138,7 @@ async fn agent_loop_tool_use_then_end_turn() {
 
     // Fallback: any POST → tool_use (first request, no tool_result yet).
     let first = server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -165,10 +159,7 @@ async fn agent_loop_tool_use_then_end_turn() {
     )];
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("go")], &tools, None)
-        .await
-        .unwrap();
+    let result = agent.run(vec![Message::user_text("go")], &tools, None).await.unwrap();
 
     assert_eq!(result, "Done after tool.");
     first.assert_hits_async(1).await;
@@ -182,8 +173,7 @@ async fn agent_loop_max_iterations_reached() {
 
     // Always respond with tool_use so the loop never ends naturally.
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -229,9 +219,7 @@ async fn agent_loop_max_iterations_reached() {
         elicitation_provider: None,
     };
 
-    let result = agent
-        .run(vec![Message::user_text("loop")], &no_tools(), None)
-        .await;
+    let result = agent.run(vec![Message::user_text("loop")], &no_tools(), None).await;
     assert!(matches!(result, Err(AgentError::MaxIterationsReached)));
 }
 
@@ -241,8 +229,7 @@ async fn agent_loop_unexpected_stop_reason() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -252,9 +239,7 @@ async fn agent_loop_unexpected_stop_reason() {
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("hi")], &no_tools(), None)
-        .await;
+    let result = agent.run(vec![Message::user_text("hi")], &no_tools(), None).await;
     assert!(matches!(result, Err(AgentError::UnexpectedStopReason(r)) if r == "stop_sequence"));
 }
 
@@ -264,17 +249,14 @@ async fn agent_loop_http_error_on_bad_response() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(500)
             .header("content-type", "text/plain")
             .body("internal server error");
     });
 
     let agent = make_agent(&server.base_url());
-    let result = agent
-        .run(vec![Message::user_text("hi")], &no_tools(), None)
-        .await;
+    let result = agent.run(vec![Message::user_text("hi")], &no_tools(), None).await;
     assert!(matches!(result, Err(AgentError::Http(_))));
 }
 
@@ -337,8 +319,7 @@ async fn run_chat_returns_text_and_history() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -364,8 +345,7 @@ async fn run_chat_extends_prior_history() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -385,10 +365,7 @@ async fn run_chat_extends_prior_history() {
     ];
 
     let agent = make_agent(&server.base_url());
-    let (text, history) = agent
-        .run_chat(prior_history, &no_tools(), None)
-        .await
-        .unwrap();
+    let (text, history) = agent.run_chat(prior_history, &no_tools(), None).await.unwrap();
 
     assert_eq!(text, "Berlin.");
     // 3 prior + 1 new assistant = 4.
@@ -415,8 +392,7 @@ async fn run_chat_includes_tool_exchange_in_history() {
     });
 
     let first = server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -455,8 +431,7 @@ async fn run_chat_max_iterations_reached() {
     let server = MockServer::start_async().await;
 
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST)
-            .path("/anthropic/v1/messages");
+        when.method(httpmock::Method::POST).path("/anthropic/v1/messages");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({

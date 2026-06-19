@@ -53,10 +53,7 @@ async fn spawn_agent_tool_returns_responder_output() {
 
     let tool = SpawnAgentTool::new(nats, prefix, "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({"prompt": "find all rust files"}),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({"prompt": "find all rust files"}))
         .await
         .unwrap();
 
@@ -73,13 +70,9 @@ async fn spawn_agent_tool_forwards_agent_and_prompt_in_payload() {
 
     let nats_clone = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_clone
-            .subscribe(format!("{prefix}.spawn"))
-            .await
-            .unwrap();
+        let mut sub = nats_clone.subscribe(format!("{prefix}.spawn")).await.unwrap();
         if let Some(msg) = sub.next().await {
-            let body: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let echo = serde_json::to_string(&body).unwrap();
             if let Some(reply) = msg.reply {
                 nats_clone.publish(reply, echo.into()).await.unwrap();
@@ -112,13 +105,9 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
 
     let nats_clone = nats.clone();
     tokio::spawn(async move {
-        let mut sub = nats_clone
-            .subscribe(format!("{prefix}.spawn"))
-            .await
-            .unwrap();
+        let mut sub = nats_clone.subscribe(format!("{prefix}.spawn")).await.unwrap();
         if let Some(msg) = sub.next().await {
-            let body: serde_json::Value =
-                serde_json::from_slice(&msg.payload).unwrap_or_default();
+            let body: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
             let echo = serde_json::to_string(&body).unwrap();
             if let Some(reply) = msg.reply {
                 nats_clone.publish(reply, echo.into()).await.unwrap();
@@ -130,10 +119,7 @@ async fn spawn_agent_tool_includes_session_id_in_payload() {
 
     let tool = SpawnAgentTool::new(nats, prefix, session_id);
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({"prompt": "list rust files"}),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({"prompt": "list rust files"}))
         .await
         .unwrap();
 
@@ -166,10 +152,7 @@ async fn spawn_agent_tool_times_out_when_no_responder() {
 
     let tool = SpawnAgentTool::new(nats, prefix, "");
     let result = tool
-        .call_tool(
-            "spawn_agent",
-            &serde_json::json!({"prompt": "anything"}),
-        )
+        .call_tool("spawn_agent", &serde_json::json!({"prompt": "anything"}))
         .await;
 
     assert!(result.is_err(), "must fail when no responder is present");

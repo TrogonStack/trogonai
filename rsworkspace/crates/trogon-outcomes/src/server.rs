@@ -55,7 +55,10 @@ async fn serve_impl<S: OutcomesStore>(
     };
 
     let app = Router::new()
-        .route("/rubrics", post(handle_create_rubric::<S>).get(handle_list_rubrics::<S>))
+        .route(
+            "/rubrics",
+            post(handle_create_rubric::<S>).get(handle_list_rubrics::<S>),
+        )
         .route(
             "/rubrics/{id}",
             get(handle_get_rubric::<S>).delete(handle_delete_rubric::<S>),
@@ -115,9 +118,7 @@ async fn handle_create_rubric<S: OutcomesStore>(
     }
 }
 
-async fn handle_list_rubrics<S: OutcomesStore>(
-    State(state): State<AppState<S>>,
-) -> (StatusCode, Json<Vec<Rubric>>) {
+async fn handle_list_rubrics<S: OutcomesStore>(State(state): State<AppState<S>>) -> (StatusCode, Json<Vec<Rubric>>) {
     match state.rubrics.list().await {
         Ok(rubrics) => (StatusCode::OK, Json(rubrics)),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(vec![])),
@@ -160,10 +161,10 @@ async fn handle_list_results<S: OutcomesStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::mock::MockOutcomesStore;
     use axum::body::Body;
     use axum::http::Request;
     use axum::routing::delete;
-    use crate::store::mock::MockOutcomesStore;
     use tower::util::ServiceExt as _;
 
     fn make_app() -> Router {
@@ -175,13 +176,11 @@ mod tests {
         Router::new()
             .route(
                 "/rubrics",
-                post(handle_create_rubric::<MockOutcomesStore>)
-                    .get(handle_list_rubrics::<MockOutcomesStore>),
+                post(handle_create_rubric::<MockOutcomesStore>).get(handle_list_rubrics::<MockOutcomesStore>),
             )
             .route(
                 "/rubrics/{id}",
-                get(handle_get_rubric::<MockOutcomesStore>)
-                    .delete(handle_delete_rubric::<MockOutcomesStore>),
+                get(handle_get_rubric::<MockOutcomesStore>).delete(handle_delete_rubric::<MockOutcomesStore>),
             )
             .route(
                 "/evaluations/{session_id}",
@@ -270,8 +269,7 @@ mod tests {
         let app = Router::new()
             .route(
                 "/rubrics",
-                post(handle_create_rubric::<MockOutcomesStore>)
-                    .get(handle_list_rubrics::<MockOutcomesStore>),
+                post(handle_create_rubric::<MockOutcomesStore>).get(handle_list_rubrics::<MockOutcomesStore>),
             )
             .with_state(state);
 
@@ -321,10 +319,7 @@ mod tests {
         client.put(&Rubric::new("r1", "R1", "d", vec![])).await.unwrap();
 
         let app = Router::new()
-            .route(
-                "/rubrics/{id}",
-                delete(handle_delete_rubric::<MockOutcomesStore>),
-            )
+            .route("/rubrics/{id}", delete(handle_delete_rubric::<MockOutcomesStore>))
             .with_state(state);
 
         let resp = app
@@ -350,15 +345,26 @@ mod tests {
             results: ResultClient::new(store.clone()),
         };
 
-        let rubric = Rubric::new("r1", "R", "d", vec![Criterion {
-            name: "q".into(), description: "d".into(), weight: 1.0
-        }]);
+        let rubric = Rubric::new(
+            "r1",
+            "R",
+            "d",
+            vec![Criterion {
+                name: "q".into(),
+                description: "d".into(),
+                weight: 1.0,
+            }],
+        );
         let result = EvaluationResult::compute(
             &rubric,
             "sess-1",
             "pr",
             "repo/1",
-            vec![CriterionScore { criterion: "q".into(), score: 0.9, reasoning: "good".into() }],
+            vec![CriterionScore {
+                criterion: "q".into(),
+                score: 0.9,
+                reasoning: "good".into(),
+            }],
             "overall ok",
         );
         ResultClient::new(store).put(&result).await.unwrap();

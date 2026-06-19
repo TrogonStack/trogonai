@@ -41,15 +41,11 @@ pub trait IncidentRepository: Clone + Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
 
     #[allow(clippy::type_complexity)]
-    fn get<'a>(
-        &'a self,
-        id: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>>;
+    fn get<'a>(&'a self, id: &'a str)
+    -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>>;
 
     #[allow(clippy::type_complexity)]
-    fn list<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>>;
+    fn list<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>>;
 }
 
 /// NATS KV-backed store for incident state.
@@ -86,12 +82,7 @@ impl IncidentStore {
     ///
     /// Returns `None` when the incident has not been seen yet.
     pub async fn get(&self, incident_id: &str) -> Result<Option<Vec<u8>>, StoreError> {
-        match self
-            .kv
-            .get(incident_id)
-            .await
-            .map_err(|e| StoreError(e.to_string()))?
-        {
+        match self.kv.get(incident_id).await.map_err(|e| StoreError(e.to_string()))? {
             None => Ok(None),
             Some(bytes) => Ok(Some(bytes.to_vec())),
         }
@@ -102,21 +93,12 @@ impl IncidentStore {
     /// Iterates over all keys in the KV bucket and returns the latest value for
     /// each incident.  Keys with no value (deleted entries) are skipped.
     pub async fn list(&self) -> Result<Vec<Vec<u8>>, StoreError> {
-        let mut keys = self
-            .kv
-            .keys()
-            .await
-            .map_err(|e| StoreError(e.to_string()))?;
+        let mut keys = self.kv.keys().await.map_err(|e| StoreError(e.to_string()))?;
 
         let mut results = Vec::new();
         while let Some(key) = keys.next().await {
             let key = key.map_err(|e| StoreError(e.to_string()))?;
-            if let Some(bytes) = self
-                .kv
-                .get(&key)
-                .await
-                .map_err(|e| StoreError(e.to_string()))?
-            {
+            if let Some(bytes) = self.kv.get(&key).await.map_err(|e| StoreError(e.to_string()))? {
                 results.push(bytes.to_vec());
             }
         }
@@ -140,9 +122,7 @@ impl IncidentRepository for IncidentStore {
         Box::pin(async move { self.get(id).await })
     }
 
-    fn list<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>> {
+    fn list<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>> {
         Box::pin(async move { self.list().await })
     }
 }
@@ -186,16 +166,13 @@ pub mod mock {
         fn get<'a>(
             &'a self,
             id: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>>
-        {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             let id = id.to_string();
             Box::pin(async move { Ok(data.lock().unwrap().get(&id).cloned()) })
         }
 
-        fn list<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>> {
+        fn list<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, StoreError>> + Send + 'a>> {
             let data = Arc::clone(&self.data);
             Box::pin(async move { Ok(data.lock().unwrap().values().cloned().collect()) })
         }
@@ -215,9 +192,7 @@ mod tests {
             .await
             .expect("Docker must be running for store tests");
         let port = container.get_host_port_ipv4(4222).await.unwrap();
-        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
-            .await
-            .unwrap();
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap();
         let js = async_nats::jetstream::new(nats);
         let store = IncidentStore::open(&js).await.unwrap();
         (container, store)
@@ -273,9 +248,7 @@ mod tests {
             .await
             .expect("Docker must be running for store tests");
         let port = container.get_host_port_ipv4(4222).await.unwrap();
-        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
-            .await
-            .unwrap();
+        let nats = async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap();
         let js = async_nats::jetstream::new(nats);
 
         let store1 = IncidentStore::open(&js).await.unwrap();

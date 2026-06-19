@@ -65,9 +65,7 @@ pub fn run_connection_thread<N, J>(
         .expect("failed to create per-connection runtime");
 
     let local = tokio::task::LocalSet::new();
-    rt.block_on(local.run_until(process_connections(
-        conn_rx, nats_client, js_client, config,
-    )));
+    rt.block_on(local.run_until(process_connections(conn_rx, nats_client, js_client, config)));
 
     // run_until returns once its future completes, but sub-tasks
     // spawned by connection handlers (pumps, AgentSideConnection
