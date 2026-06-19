@@ -26,10 +26,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, AckKind, consumer::AckPolicy, consumer::DeliverPolicy, consumer::pull};
+use async_nats::jetstream::{
+    self, AckKind, consumer::AckPolicy, consumer::DeliverPolicy, consumer::pull,
+};
 use futures_util::StreamExt;
 use tracing::{error, info, warn};
-use trogon_automations::{AutomationRepository, AutomationStore, RunRecord, RunRepository, RunStatus, RunStore};
+use trogon_automations::{
+    AutomationRepository, AutomationStore, RunRecord, RunRepository, RunStatus, RunStore,
+};
 
 use crate::agent_loop::{AgentLoop, ReqwestAnthropicClient};
 use crate::chat_api::{ChatAppState, router as chat_router};
@@ -135,11 +139,12 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     let (mcp_tool_defs, mcp_dispatch) = init_mcp_servers(&http_client, &cfg.mcp_servers).await;
 
-    let anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient> = Arc::new(ReqwestAnthropicClient::new(
-        http_client.clone(),
-        cfg.proxy_url.clone(),
-        cfg.anthropic_token.clone(),
-    ));
+    let anthropic_client: Arc<dyn crate::agent_loop::AnthropicClient> =
+        Arc::new(ReqwestAnthropicClient::new(
+            http_client.clone(),
+            cfg.proxy_url.clone(),
+            cfg.anthropic_token.clone(),
+        ));
 
     let tool_dispatcher: Arc<dyn crate::tools::ToolDispatcher> =
         Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx)));
@@ -283,7 +288,8 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
         };
         let api_port = cfg.api_port;
         tokio::spawn(async move {
-            let combined = trogon_automations::api::router(auto_state).merge(chat_router(chat_state));
+            let combined =
+                trogon_automations::api::router(auto_state).merge(chat_router(chat_state));
             match tokio::net::TcpListener::bind(("0.0.0.0", api_port)).await {
                 Err(e) => tracing::error!(port = api_port, error = %e, "Failed to bind API"),
                 Ok(listener) => {
@@ -304,9 +310,27 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     // Ensure all required JetStream streams exist before binding consumers.
     // This removes the hard startup-order dependency on trogon-github, trogon-linear,
     // and trogon-cron — the agent creates streams idempotently if they are absent.
-    ensure_stream(&js, github_stream_name, &["github.>"], Duration::from_secs(7 * 86_400)).await?;
-    ensure_stream(&js, linear_stream_name, &["linear.>"], Duration::from_secs(7 * 86_400)).await?;
-    ensure_stream(&js, cron_stream_name, &["cron.>"], Duration::from_secs(86_400)).await?;
+    ensure_stream(
+        &js,
+        github_stream_name,
+        &["github.>"],
+        Duration::from_secs(7 * 86_400),
+    )
+    .await?;
+    ensure_stream(
+        &js,
+        linear_stream_name,
+        &["linear.>"],
+        Duration::from_secs(7 * 86_400),
+    )
+    .await?;
+    ensure_stream(
+        &js,
+        cron_stream_name,
+        &["cron.>"],
+        Duration::from_secs(86_400),
+    )
+    .await?;
     ensure_stream(
         &js,
         datadog_stream_name,
@@ -315,13 +339,29 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
     )
     .await?;
 
-    let mut pr_messages = bind_consumer(&js, github_stream_name, GITHUB_CONSUMER, "github.pull_request").await?;
-    let mut comment_messages = bind_consumer(&js, github_stream_name, COMMENT_CONSUMER, "github.issue_comment").await?;
-    let mut push_messages = bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
-    let mut ci_messages = bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
-    let mut issue_messages = bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
+    let mut pr_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        GITHUB_CONSUMER,
+        "github.pull_request",
+    )
+    .await?;
+    let mut comment_messages = bind_consumer(
+        &js,
+        github_stream_name,
+        COMMENT_CONSUMER,
+        "github.issue_comment",
+    )
+    .await?;
+    let mut push_messages =
+        bind_consumer(&js, github_stream_name, PUSH_CONSUMER, "github.push").await?;
+    let mut ci_messages =
+        bind_consumer(&js, github_stream_name, CI_CONSUMER, "github.check_run").await?;
+    let mut issue_messages =
+        bind_consumer(&js, linear_stream_name, LINEAR_CONSUMER, "linear.Issue.>").await?;
     let mut cron_messages = bind_consumer(&js, cron_stream_name, CRON_CONSUMER, "cron.>").await?;
-    let mut datadog_messages = bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
+    let mut datadog_messages =
+        bind_consumer(&js, datadog_stream_name, DATADOG_CONSUMER, "datadog.>").await?;
 
     // incident.io stream is optional: when `incidentio_stream_name` is `None` the runner
     // skips both stream creation and consumer binding so no incidentio events are processed.
@@ -331,7 +371,13 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
             None
         }
         Some(name) => {
-            ensure_stream(&js, name, &["incidentio.>"], Duration::from_secs(7 * 86_400)).await?;
+            ensure_stream(
+                &js,
+                name,
+                &["incidentio.>"],
+                Duration::from_secs(7 * 86_400),
+            )
+            .await?;
             Some(bind_consumer(&js, name, INCIDENTIO_CONSUMER, "incidentio.>").await?)
         }
     };
@@ -383,14 +429,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await {
                                         info!(flag = "agent_pr_review_enabled", "PR handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     let is_merged = pv["action"].as_str() == Some("closed")
                                         && pv["pull_request"]["merged"].as_bool() == Some(true);
                                     if is_merged {
@@ -410,8 +460,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack PR message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "PR",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -449,14 +510,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::CommentHandlerEnabled).await {
                                         info!(flag = "agent_comment_handler_enabled", "Comment handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::comment_added::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Comment-added done"),
                                         Some(Err(e)) => error!(error = %e, "Comment-added error"),
@@ -466,8 +531,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack comment message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "comment",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -505,14 +581,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::PushHandlerEnabled).await {
                                         info!(flag = "agent_push_handler_enabled", "Push handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::push_to_branch::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Push-to-branch done"),
                                         Some(Err(e)) => error!(error = %e, "Push-to-branch error"),
@@ -522,8 +602,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack push message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "push",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -561,14 +652,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await {
                                         info!(flag = "agent_ci_handler_enabled", "CI handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::ci_completed::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "CI-completed done"),
                                         Some(Err(e)) => error!(error = %e, "CI-completed error"),
@@ -578,8 +673,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack CI message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "CI",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -617,14 +723,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::IssueTriageEnabled).await {
                                         info!(flag = "agent_issue_triage_enabled", "Issue triage handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", subject, &pv, false).await else { break 'handler; };
                                     match handlers::issue_triage::handle(&agent, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Issue triage done"),
                                         Some(Err(e)) => error!(error = %e, "Issue triage error"),
@@ -634,8 +744,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack issue message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "issue",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -673,14 +794,24 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 info!(subject = %nats_subject, "Cron tick with no matching automations — skipping");
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack cron message"); }
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &automation_promise_ids,
+                                "cron",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -718,14 +849,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::AlertHandlerEnabled).await {
                                         info!(flag = "agent_alert_handler_enabled", "Alert handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv, false).await else { break 'handler; };
                                     match handlers::alert_triggered::handle(&agent, &nats_subject, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "Datadog alert handled"),
                                         Some(Err(e)) => error!(error = %e, "Datadog alert handler error"),
@@ -735,8 +870,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack Datadog message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "Datadog",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -779,14 +925,18 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                                     vec![]
                                 }
                             };
-                            let heartbeat = spawn_heartbeat(msg.clone());
+                            let _heartbeat = spawn_heartbeat(msg.clone());
+                            let automation_promise_ids: Vec<String> = autos
+                                .iter()
+                                .map(|a| format!("{promise_id_prefix}.{}", a.id))
+                                .collect();
                             if autos.is_empty() {
                                 'handler: {
                                     if !agent.is_flag_enabled(&crate::flags::AgentFlag::IncidentioHandlerEnabled).await {
                                         info!(flag = "agent_incidentio_handler_enabled", "incident.io handler disabled by feature flag — skipping");
                                         break 'handler;
                                     }
-                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv).await else { break 'handler; };
+                                    let Some(agent) = prepare_agent_with_promise(&agent, &promise_store, &tenant_id, &promise_id_prefix, "", &nats_subject, &pv, false).await else { break 'handler; };
                                     match handlers::incident_declared::handle(&agent, &nats_subject, &msg.payload).await {
                                         Some(Ok(o)) => info!(output = %o, "incident.io event handled"),
                                         Some(Err(e)) => error!(error = %e, "incident.io handler error"),
@@ -796,8 +946,19 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
                             } else {
                                 dispatch_automations(&agent, &run_store, &promise_store, &promise_id_prefix, autos, &nats_subject, &msg.payload, skill_loader.clone()).await;
                             }
-                            heartbeat.abort();
-                            if let Err(e) = msg.ack().await { warn!(error = %e, "Failed to ack incident.io message"); }
+                            let ack_promise_ids = if automation_promise_ids.is_empty() {
+                                vec![promise_id_prefix.clone()]
+                            } else {
+                                automation_promise_ids
+                            };
+                            ack_nats_message_if_appropriate(
+                                &msg,
+                                &promise_store,
+                                &tenant_id,
+                                &ack_promise_ids,
+                                "incident.io",
+                            )
+                            .await;
                         });
                     }
                 }
@@ -869,6 +1030,7 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 /// returns early for both without executing any LLM call. `Failed` promises ARE
 /// CAS-claimed: their failure may have been transient (e.g. HTTP error) and NATS
 /// redelivery is a legitimate retry opportunity.
+#[allow(clippy::too_many_arguments)]
 async fn prepare_agent_with_promise(
     agent: &Arc<AgentLoop>,
     promise_store: &Arc<dyn PromiseRepository>,
@@ -877,6 +1039,7 @@ async fn prepare_agent_with_promise(
     automation_id: &str,
     nats_subject: &str,
     trigger: &serde_json::Value,
+    from_recovery: bool,
 ) -> Option<Arc<AgentLoop>> {
     let wid = worker_id();
     let get_result = match tokio::time::timeout(
@@ -893,7 +1056,8 @@ async fn prepare_agent_with_promise(
     };
     match get_result {
         Ok(Some((existing, rev))) => {
-            if existing.status == PromiseStatus::Running || existing.status == PromiseStatus::Failed {
+            if existing.status == PromiseStatus::Running || existing.status == PromiseStatus::Failed
+            {
                 // CAS-claim: take ownership so no other worker runs this
                 // promise concurrently. `Running` promises are claimed on both
                 // the normal NATS dispatch path and startup recovery.
@@ -918,7 +1082,9 @@ async fn prepare_agent_with_promise(
                 // Only `Running` promises are counted; `Failed` promises are
                 // managed by NATS delivery limits and are not affected.
                 const MAX_RECOVERY_ATTEMPTS: u32 = 5;
-                if existing.status == PromiseStatus::Running && existing.recovery_count >= MAX_RECOVERY_ATTEMPTS {
+                if existing.status == PromiseStatus::Running
+                    && existing.recovery_count >= MAX_RECOVERY_ATTEMPTS
+                {
                     warn!(
                         promise_id = %promise_id,
                         recovery_count = existing.recovery_count,
@@ -947,9 +1113,10 @@ async fn prepare_agent_with_promise(
                 claimed.status = PromiseStatus::Running; // re-activate so list_running finds it if we crash mid-run
                 claimed.worker_id = wid.clone();
                 claimed.claimed_at = trogon_automations::now_unix();
-                // Increment recovery_count for Running re-claims so the guard
-                // above terminates infinite startup-recovery cycles.
-                if existing.status == PromiseStatus::Running {
+                // Increment recovery_count only on startup-recovery re-claims so
+                // the guard above terminates infinite recovery cycles without
+                // consuming the budget on normal NATS redelivery.
+                if from_recovery && existing.status == PromiseStatus::Running {
                     claimed.recovery_count = existing.recovery_count.saturating_add(1);
                 }
                 let claim_result = match tokio::time::timeout(
@@ -1034,7 +1201,12 @@ async fn prepare_agent_with_promise(
                 checkpoint_degraded: false,
                 failure_reason: None,
             };
-            match tokio::time::timeout(crate::agent_loop::NATS_KV_TIMEOUT, promise_store.put_promise(&promise)).await {
+            match tokio::time::timeout(
+                crate::agent_loop::NATS_KV_TIMEOUT,
+                promise_store.put_promise(&promise),
+            )
+            .await
+            {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
                     warn!(promise_id = %promise_id, error = %e, "Failed to create promise — run will proceed without durability")
@@ -1102,7 +1274,9 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             if attempt > 0 {
                 tokio::time::sleep(LIST_RUNNING_RETRY_DELAY).await;
             }
-            match tokio::time::timeout(LIST_RUNNING_TIMEOUT, promise_store.list_running(tenant_id)).await {
+            match tokio::time::timeout(LIST_RUNNING_TIMEOUT, promise_store.list_running(tenant_id))
+                .await
+            {
                 Ok(Ok(p)) => {
                     found = Some(p);
                     break;
@@ -1110,7 +1284,10 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 Ok(Err(e)) => {
                     warn!(error = %e, attempt, "Startup recovery: failed to list running promises")
                 }
-                Err(_) => warn!(attempt, "Startup recovery: list_running timed out after 2 min"),
+                Err(_) => warn!(
+                    attempt,
+                    "Startup recovery: list_running timed out after 2 min"
+                ),
             }
         }
         match found {
@@ -1135,7 +1312,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 
     // Recover the most recently active first (those closest to completion
     // are most likely to succeed quickly).
-    stale.sort_by(|a, b| b.claimed_at.cmp(&a.claimed_at));
+    stale.sort_by_key(|r| std::cmp::Reverse(r.claimed_at));
 
     // No hard cap: recovery runs in a background task so it doesn't block
     // fresh event processing. Warn when the backlog is large so operators
@@ -1250,10 +1427,14 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             if promise.automation_id.is_empty() {
                 let flag_enabled = match promise.nats_subject.as_str() {
                     s if s.starts_with("github.pull_request") => {
-                        agent.is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled).await
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::PrReviewEnabled)
+                            .await
                     }
                     s if s.starts_with("github.check_run") => {
-                        agent.is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled).await
+                        agent
+                            .is_flag_enabled(&crate::flags::AgentFlag::CiHandlerEnabled)
+                            .await
                     }
                     s if s.starts_with("github.push") => {
                         agent
@@ -1305,7 +1486,9 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 "Startup recovery: resuming stale promise"
             );
 
-            let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger).unwrap_or_default().into();
+            let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
+                .unwrap_or_default()
+                .into();
 
             let Some(agent) = prepare_agent_with_promise(
                 &agent,
@@ -1315,6 +1498,7 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 &promise.automation_id,
                 &promise.nats_subject,
                 &promise.trigger,
+                true,
             )
             .await
             else {
@@ -1374,7 +1558,12 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                             current.failure_reason = Some(reason.to_string());
                             match tokio::time::timeout(
                                 crate::agent_loop::NATS_KV_TIMEOUT,
-                                promise_store.update_promise(&tenant_id, &promise.id, &current, rev),
+                                promise_store.update_promise(
+                                    &tenant_id,
+                                    &promise.id,
+                                    &current,
+                                    rev,
+                                ),
                             )
                             .await
                             {
@@ -1406,7 +1595,9 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 // Safety: perm_fail_reason == None only when auto_opt == Some(enabled).
                 if let Some(auto) = auto_opt {
                     let skill_content = match &skill_loader {
-                        Some(loader) if !auto.skill_ids.is_empty() => loader.load(&auto.skill_ids).await,
+                        Some(loader) if !auto.skill_ids.is_empty() => {
+                            loader.load(&auto.skill_ids).await
+                        }
                         _ => None,
                     };
                     let started_at = trogon_automations::now_unix();
@@ -1446,7 +1637,8 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 // so no per-arm flag check is needed here.
                 match promise.nats_subject.as_str() {
                     s if s.starts_with("github.pull_request") => {
-                        let pv: serde_json::Value = serde_json::from_slice(&payload).unwrap_or_default();
+                        let pv: serde_json::Value =
+                            serde_json::from_slice(&payload).unwrap_or_default();
                         let is_merged = pv["action"].as_str() == Some("closed")
                             && pv["pull_request"]["merged"].as_bool() == Some(true);
                         if is_merged {
@@ -1468,10 +1660,16 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         handlers::issue_triage::handle(&agent, &payload).await;
                     }
                     s if s.starts_with("datadog.") => {
-                        handlers::alert_triggered::handle(&agent, &promise.nats_subject, &payload).await;
+                        handlers::alert_triggered::handle(&agent, &promise.nats_subject, &payload)
+                            .await;
                     }
                     s if s.starts_with("incidentio.") => {
-                        handlers::incident_declared::handle(&agent, &promise.nats_subject, &payload).await;
+                        handlers::incident_declared::handle(
+                            &agent,
+                            &promise.nats_subject,
+                            &payload,
+                        )
+                        .await;
                     }
                     other => {
                         // The subject is no longer handled by any built-in dispatcher
@@ -1494,7 +1692,12 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                                 current.status = PromiseStatus::PermanentFailed;
                                 match tokio::time::timeout(
                                     crate::agent_loop::NATS_KV_TIMEOUT,
-                                    promise_store.update_promise(&tenant_id, &promise.id, &current, rev),
+                                    promise_store.update_promise(
+                                        &tenant_id,
+                                        &promise.id,
+                                        &current,
+                                        rev,
+                                    ),
                                 )
                                 .await
                                 {
@@ -1561,8 +1764,13 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
             };
 
             for (promise, agent) in std::mem::take(&mut auto_store_backlog) {
-                let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger).unwrap_or_default().into();
-                let auto_opt = autos.iter().find(|a| a.id == promise.automation_id).cloned();
+                let payload: bytes::Bytes = serde_json::to_vec(&promise.trigger)
+                    .unwrap_or_default()
+                    .into();
+                let auto_opt = autos
+                    .iter()
+                    .find(|a| a.id == promise.automation_id)
+                    .cloned();
                 let perm_fail_reason: Option<&str> = match &auto_opt {
                     Some(a) if !a.enabled => Some("automation is disabled"),
                     None => Some("automation no longer exists"),
@@ -1584,7 +1792,12 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                         current.failure_reason = Some(reason.to_string());
                         let _ = tokio::time::timeout(
                             crate::agent_loop::NATS_KV_TIMEOUT,
-                            promise_store.update_promise(&tenant_id, &promise.id, &current, rev),
+                            promise_store.update_promise(
+                                &tenant_id,
+                                &promise.id,
+                                &current,
+                                rev,
+                            ),
                         )
                         .await;
                     }
@@ -1592,7 +1805,9 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
                 }
                 if let Some(auto) = auto_opt {
                     let skill_content = match &skill_loader {
-                        Some(loader) if !auto.skill_ids.is_empty() => loader.load(&auto.skill_ids).await,
+                        Some(loader) if !auto.skill_ids.is_empty() => {
+                            loader.load(&auto.skill_ids).await
+                        }
                         _ => None,
                     };
                     let started_at = trogon_automations::now_unix();
@@ -1632,11 +1847,26 @@ async fn recover_stale_promises<A: AutomationRepository, R: RunRepository>(
 /// Spawn a background task that sends [`AckKind::Progress`] every 15 seconds
 /// to prevent JetStream from redelivering the message while the agent is active.
 ///
-/// The returned handle **must** be aborted once processing finishes so the task
-/// stops sending progress acks after the message has been explicitly acked.
-fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+/// The returned guard aborts the heartbeat on drop (including panic/early return).
+struct HeartbeatGuard(tokio::task::JoinHandle<()>);
+
+impl HeartbeatGuard {
+    #[cfg(test)]
+    fn is_finished(&self) -> bool {
+        self.0.is_finished()
+    }
+}
+
+impl Drop for HeartbeatGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> HeartbeatGuard {
+    HeartbeatGuard(tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
         interval.tick().await; // skip immediate first tick
         loop {
             interval.tick().await;
@@ -1644,7 +1874,48 @@ fn spawn_heartbeat(msg: async_nats::jetstream::Message) -> tokio::task::JoinHand
                 break;
             }
         }
-    })
+    }))
+}
+
+/// True when the NATS message should be acked. Returns false if any checked
+/// promise is in transient `Failed` state so JetStream can redeliver.
+async fn should_ack_nats_message(
+    promise_store: &Arc<dyn PromiseRepository>,
+    tenant_id: &str,
+    promise_ids: &[String],
+) -> bool {
+    for pid in promise_ids {
+        match tokio::time::timeout(
+            crate::agent_loop::NATS_KV_TIMEOUT,
+            promise_store.get_promise(tenant_id, pid),
+        )
+        .await
+        {
+            Ok(Ok(Some((p, _)))) if p.status == PromiseStatus::Failed => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
+/// Ack the JetStream message unless a checked promise is transiently `Failed`.
+async fn ack_nats_message_if_appropriate(
+    msg: &async_nats::jetstream::Message,
+    promise_store: &Arc<dyn PromiseRepository>,
+    tenant_id: &str,
+    promise_ids: &[String],
+    log_context: &str,
+) {
+    if should_ack_nats_message(promise_store, tenant_id, promise_ids).await {
+        if let Err(e) = msg.ack().await {
+            warn!(error = %e, "Failed to ack {log_context} message");
+        }
+    } else {
+        info!(
+            promise_ids = ?promise_ids,
+            "Deferring ack — transient Failed promise allows NATS redelivery"
+        );
+    }
 }
 
 /// Spawn one task per automation and wait for all to finish.
@@ -1689,6 +1960,7 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
                     &auto.id,
                     &subject,
                     &trigger,
+                    false,
                 )
                 .await
                 else {
@@ -1703,14 +1975,22 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
                 // Load skill content from the console KV store if the automation
                 // has skill IDs configured and a loader is available.
                 let skill_content = match &skill_loader {
-                    Some(loader) if !auto.skill_ids.is_empty() => loader.load(&auto.skill_ids).await,
+                    Some(loader) if !auto.skill_ids.is_empty() => {
+                        loader.load(&auto.skill_ids).await
+                    }
                     _ => None,
                 };
 
                 info!(automation = %auto.name, "Running automation");
                 let started_at = trogon_automations::now_unix();
-                let result =
-                    handlers::run_automation(&agent, &auto, &subject, &payload, skill_content.as_deref()).await;
+                let result = handlers::run_automation(
+                    &agent,
+                    &auto,
+                    &subject,
+                    &payload,
+                    skill_content.as_deref(),
+                )
+                .await;
                 let finished_at = trogon_automations::now_unix();
 
                 let (status, output) = match &result {
@@ -1760,13 +2040,16 @@ pub(crate) async fn dispatch_automations<R: RunRepository>(
 /// (Ctrl+C in development). On non-Unix platforms only SIGINT is handled.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]
     {
-        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
         tokio::select! {
             _ = ctrl_c => {}
             _ = terminate.recv() => {}
@@ -1780,7 +2063,10 @@ async fn shutdown_signal() {
 pub async fn init_mcp_servers(
     http_client: &reqwest::Client,
     servers: &[McpServerConfig],
-) -> (Vec<ToolDef>, Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>) {
+) -> (
+    Vec<ToolDef>,
+    Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
+) {
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
 
@@ -1799,7 +2085,11 @@ pub async fn init_mcp_servers(
             Ok(tools) => {
                 info!(server = %server.name, count = tools.len(), "MCP tools loaded");
                 for tool in tools {
-                    let prefixed = format!("mcp__{}__{}", sanitize_name(&server.name), sanitize_name(&tool.name));
+                    let prefixed = format!(
+                        "mcp__{}__{}",
+                        sanitize_name(&server.name),
+                        sanitize_name(&tool.name)
+                    );
                     tool_defs.push(ToolDef {
                         name: prefixed.clone(),
                         description: tool.description.clone(),
@@ -1821,7 +2111,13 @@ pub async fn init_mcp_servers(
 
 pub(crate) fn sanitize_name(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -1849,7 +2145,9 @@ async fn ensure_stream(
                 tracing::debug!(stream = stream_name, error = %e, "Stream exists with different config — using as-is");
                 Ok(())
             } else {
-                Err(RunnerError::JetStream(format!("ensure stream {stream_name}: {e}")))
+                Err(RunnerError::JetStream(format!(
+                    "ensure stream {stream_name}: {e}"
+                )))
             }
         }
     }
@@ -1862,7 +2160,10 @@ async fn bind_consumer(
     filter_subject: &str,
 ) -> Result<
     impl futures_util::Stream<
-        Item = Result<jetstream::Message, async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>>,
+        Item = Result<
+            jetstream::Message,
+            async_nats::error::Error<jetstream::consumer::pull::MessagesErrorKind>,
+        >,
     >,
     RunnerError,
 > {
@@ -2022,11 +2323,17 @@ mod tests {
                 &'a self,
                 _tenant_id: &'a str,
                 _flag: &'a dyn trogon_splitio::flags::FeatureFlag,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>
+            {
                 Box::pin(async { false })
             }
         }
-        let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "tok_test", "", ""));
+        let tool_ctx = Arc::new(ToolContext::for_test(
+            "http://127.0.0.1:1",
+            "tok_test",
+            "",
+            "",
+        ));
         Arc::new(crate::agent_loop::AgentLoop {
             anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
             model: "test".to_string(),
@@ -2079,7 +2386,8 @@ mod tests {
         let agent = make_agent_mock(vec![end_turn_json(), end_turn_json()]);
         let automations = vec![make_automation("auto-1"), make_automation("auto-2")];
         let payload = bytes::Bytes::from_static(b"{}");
-        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
 
         dispatch_automations(
             &agent,
@@ -2102,7 +2410,8 @@ mod tests {
         let rs = make_mock_run_store();
         let agent = make_agent_mock(vec![]);
         let payload = bytes::Bytes::from_static(b"{}");
-        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
 
         dispatch_automations(
             &agent,
@@ -2132,7 +2441,8 @@ mod tests {
         let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::clone(&mock_client) as Arc<dyn crate::agent_loop::AnthropicClient>,
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -2160,7 +2470,8 @@ mod tests {
         auto.skill_ids = vec!["skill-pr-review".to_string()];
 
         let payload = bytes::Bytes::from_static(b"{}");
-        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
 
         dispatch_automations(
             &agent,
@@ -2200,7 +2511,8 @@ mod tests {
         let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::clone(&mock_client) as Arc<dyn crate::agent_loop::AnthropicClient>,
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -2228,7 +2540,8 @@ mod tests {
         let auto = make_automation("no-skills");
 
         let payload = bytes::Bytes::from_static(b"{}");
-        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
 
         dispatch_automations(
             &agent,
@@ -2262,7 +2575,8 @@ mod tests {
         let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::clone(&mock_client) as Arc<dyn crate::agent_loop::AnthropicClient>,
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -2286,7 +2600,8 @@ mod tests {
         auto.skill_ids = vec!["skill-x".to_string()];
 
         let payload = bytes::Bytes::from_static(b"{}");
-        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
 
         dispatch_automations(
             &agent,
@@ -2323,7 +2638,8 @@ mod tests {
         let mock_client = Arc::new(SequencedMockAnthropicClient::new(vec![end_turn_json()]));
         let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::clone(&mock_client) as Arc<dyn crate::agent_loop::AnthropicClient>,
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -2350,7 +2666,8 @@ mod tests {
         auto_store.put(&auto).await.expect("put automation");
 
         // Create a stale Running promise pointing to that automation.
-        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> = Arc::new(MockPromiseStore::new());
+        let promise_store: Arc<dyn crate::promise_store::PromiseRepository> =
+            Arc::new(MockPromiseStore::new());
         let mut promise = make_stale_promise("prom-skill-recovery");
         promise.tenant_id = agent.tenant_id.clone();
         promise.automation_id = auto.id.clone();
@@ -2417,7 +2734,8 @@ mod tests {
     async fn init_mcp_servers_skips_server_that_fails_initialize() {
         let server = httpmock::MockServer::start_async().await;
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            when.method(httpmock::Method::POST)
+                .body_contains("\"initialize\"");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({
@@ -2433,7 +2751,10 @@ mod tests {
         let http_client = reqwest::Client::new();
         let (tools, dispatch) = super::init_mcp_servers(&http_client, &cfg).await;
 
-        assert!(tools.is_empty(), "no tools expected when server fails to initialize");
+        assert!(
+            tools.is_empty(),
+            "no tools expected when server fails to initialize"
+        );
         assert!(dispatch.is_empty(), "no dispatch entries expected");
     }
 
@@ -2451,7 +2772,8 @@ mod tests {
                 }));
         });
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).body_contains("tools/list");
+            when.method(httpmock::Method::POST)
+                .body_contains("tools/list");
             then.status(500);
         });
 
@@ -2480,7 +2802,10 @@ mod tests {
         store
     }
 
-    fn sample_promise(id: &str, status: crate::promise_store::PromiseStatus) -> crate::promise_store::AgentPromise {
+    fn sample_promise(
+        id: &str,
+        status: crate::promise_store::PromiseStatus,
+    ) -> crate::promise_store::AgentPromise {
         crate::promise_store::AgentPromise {
             id: id.to_string(),
             tenant_id: "acme".to_string(),
@@ -2515,6 +2840,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2536,7 +2862,10 @@ mod tests {
     async fn prepare_agent_claims_running_promise() {
         use crate::promise_store::PromiseRepository;
 
-        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Running));
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Running,
+        ));
         let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
@@ -2547,6 +2876,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2554,7 +2884,10 @@ mod tests {
 
         // worker_id must have been updated (CAS claim happened).
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
-        assert_ne!(p.worker_id, "old-worker", "worker_id must be updated by the CAS claim");
+        assert_ne!(
+            p.worker_id, "old-worker",
+            "worker_id must be updated by the CAS claim"
+        );
     }
 
     /// A `Resolved` promise means the run already completed. The function must
@@ -2562,7 +2895,10 @@ mod tests {
     /// avoiding duplicate LLM calls and tool side-effects.
     #[tokio::test]
     async fn prepare_agent_returns_none_for_resolved_promise() {
-        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Resolved));
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Resolved,
+        ));
         let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
@@ -2573,6 +2909,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2588,9 +2925,10 @@ mod tests {
     #[tokio::test]
     async fn prepare_agent_returns_none_on_cas_claim_conflict() {
         let store = Arc::new(crate::promise_store::mock::CasConflictOnceStore::new());
-        store
-            .inner
-            .insert_promise(sample_promise("p1", crate::promise_store::PromiseStatus::Running));
+        store.inner.insert_promise(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Running,
+        ));
         let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
@@ -2601,6 +2939,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2630,6 +2969,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2646,7 +2986,10 @@ mod tests {
     async fn prepare_agent_claims_failed_promise_for_retry() {
         use crate::promise_store::PromiseRepository;
 
-        let store = make_store_with(sample_promise("p1", crate::promise_store::PromiseStatus::Failed));
+        let store = make_store_with(sample_promise(
+            "p1",
+            crate::promise_store::PromiseStatus::Failed,
+        ));
         let agent = make_agent_mock(vec![]);
 
         let result = super::prepare_agent_with_promise(
@@ -2657,6 +3000,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2672,7 +3016,10 @@ mod tests {
             crate::promise_store::PromiseStatus::Running,
             "Failed promise must be reset to Running on re-claim"
         );
-        assert_ne!(p.worker_id, "old-worker", "worker_id must be updated by the re-claim");
+        assert_ne!(
+            p.worker_id, "old-worker",
+            "worker_id must be updated by the re-claim"
+        );
     }
 
     // ── prepare_agent timeout / error paths ───────────────────────────────────
@@ -2693,7 +3040,16 @@ mod tests {
         let trigger = serde_json::json!({});
 
         let (result, _) = tokio::join!(
-            super::prepare_agent_with_promise(&agent, &store_arc, "acme", "p1", "", "github.pull_request", &trigger,),
+            super::prepare_agent_with_promise(
+                &agent,
+                &store_arc,
+                "acme",
+                "p1",
+                "",
+                "github.pull_request",
+                &trigger,
+                false,
+            ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
@@ -2718,13 +3074,24 @@ mod tests {
         use std::time::Duration;
 
         let store = Arc::new(HangingUpdateStore::new());
-        store.inner.insert_promise(sample_promise("p1", PromiseStatus::Running));
+        store
+            .inner
+            .insert_promise(sample_promise("p1", PromiseStatus::Running));
         let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
         let agent = make_agent_mock(vec![]);
         let trigger = serde_json::json!({});
 
         let (result, _) = tokio::join!(
-            super::prepare_agent_with_promise(&agent, &store_arc, "acme", "p1", "", "github.pull_request", &trigger,),
+            super::prepare_agent_with_promise(
+                &agent,
+                &store_arc,
+                "acme",
+                "p1",
+                "",
+                "github.pull_request",
+                &trigger,
+                false,
+            ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
@@ -2772,10 +3139,14 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
-        assert!(result.is_none(), "must return None when recovery limit is reached");
+        assert!(
+            result.is_none(),
+            "must return None when recovery limit is reached"
+        );
 
         let (p, _) = store.get_promise("acme", "p-stuck").await.unwrap().unwrap();
         assert_eq!(
@@ -2785,7 +3156,7 @@ mod tests {
         );
     }
 
-    /// Each time a `Running` promise is re-claimed (startup recovery), its
+    /// Each time a `Running` promise is re-claimed during startup recovery,
     /// `recovery_count` must increment so the cycling guard above can fire.
     #[tokio::test]
     async fn prepare_agent_running_reclaim_increments_recovery_count() {
@@ -2805,13 +3176,67 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            true,
         )
         .await;
 
         let (p, _) = store.get_promise("acme", "p-rc").await.unwrap().unwrap();
         assert_eq!(
             p.recovery_count, 1,
-            "recovery_count must be incremented on Running re-claim"
+            "recovery_count must be incremented on startup-recovery re-claim"
+        );
+    }
+
+    /// Normal NATS redelivery must not consume the startup-recovery budget.
+    #[tokio::test]
+    async fn prepare_agent_nats_redelivery_does_not_increment_recovery_count() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(sample_promise("p-redeliver", PromiseStatus::Running));
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let agent = make_agent_mock(vec![]);
+
+        super::prepare_agent_with_promise(
+            &agent,
+            &store_arc,
+            "acme",
+            "p-redeliver",
+            "",
+            "github.pull_request",
+            &serde_json::json!({}),
+            false,
+        )
+        .await;
+
+        let (p, _) = store
+            .get_promise("acme", "p-redeliver")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            p.recovery_count, 0,
+            "normal NATS dispatch/redelivery must not increment recovery_count"
+        );
+    }
+
+    #[tokio::test]
+    async fn should_ack_nats_message_false_when_promise_failed() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{PromiseRepository, PromiseStatus};
+
+        let store = Arc::new(MockPromiseStore::new());
+        store.insert_promise(sample_promise("p-failed", PromiseStatus::Failed));
+        let store_arc = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+
+        assert!(
+            !super::should_ack_nats_message(&store_arc, "acme", &["p-failed".to_string()]).await,
+            "transient Failed promise must defer ack for NATS redelivery"
+        );
+        assert!(
+            super::should_ack_nats_message(&store_arc, "acme", &["p-missing".to_string()]).await,
+            "missing promise must still ack"
         );
     }
 
@@ -2839,6 +3264,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2877,6 +3303,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -2911,7 +3338,16 @@ mod tests {
         let trigger = serde_json::json!({});
 
         let (result, _) = tokio::join!(
-            super::prepare_agent_with_promise(&agent, &store_arc, "acme", "p-new", "", "github.pull_request", &trigger,),
+            super::prepare_agent_with_promise(
+                &agent,
+                &store_arc,
+                "acme",
+                "p-new",
+                "",
+                "github.pull_request",
+                &trigger,
+                false,
+            ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
@@ -2947,7 +3383,14 @@ mod tests {
         let agent = make_agent_mock(vec![]);
 
         let (handle, _) = tokio::join!(
-            super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None,),
+            super::recover_stale_promises(
+                &agent,
+                &promise_store,
+                &auto_store,
+                &run_store,
+                "acme",
+                None,
+            ),
             tokio::time::advance(crate::agent_loop::NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
 
@@ -2968,7 +3411,15 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(ErrorListRunningStore::new());
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None).await;
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await;
 
         assert!(
             handle.is_none(),
@@ -3016,7 +3467,12 @@ mod tests {
                 &'a self,
                 p: &'a crate::promise_store::AgentPromise,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 self.inner.put_promise(p)
             }
@@ -3027,7 +3483,12 @@ mod tests {
                 p: &'a crate::promise_store::AgentPromise,
                 rev: u64,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 self.inner.update_promise(t, id, p, rev)
             }
@@ -3038,8 +3499,12 @@ mod tests {
                 ck: &'a str,
             ) -> std::pin::Pin<
                 Box<
-                    dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                        + Send
+                    dyn std::future::Future<
+                            Output = Result<
+                                Option<String>,
+                                crate::promise_store::PromiseStoreError,
+                            >,
+                        > + Send
                         + 'a,
                 >,
             > {
@@ -3052,7 +3517,12 @@ mod tests {
                 ck: &'a str,
                 r: &'a str,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), crate::promise_store::PromiseStoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 self.inner.put_tool_result(t, id, ck, r)
             }
@@ -3092,19 +3562,27 @@ mod tests {
         inner.insert_promise(p);
         let store_for_assert = inner.clone();
 
-        let promise_store: Arc<dyn PromiseRepository> = Arc::new(FailOnceThenSucceedListRunningStore {
-            called: Arc::new(AtomicBool::new(false)),
-            inner,
-        });
+        let promise_store: Arc<dyn PromiseRepository> =
+            Arc::new(FailOnceThenSucceedListRunningStore {
+                called: Arc::new(AtomicBool::new(false)),
+                inner,
+            });
 
         let auto_store = Arc::new(EmptyAutomationStore);
         let run_store = Arc::new(ErrorRecordRunStore);
         let agent = make_agent_mock(vec![]);
 
         // Tokio auto-advance skips the 15 s LIST_RUNNING_RETRY_DELAY.
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when second list_running succeeds");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when second list_running succeeds");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3131,7 +3609,15 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::new(MockPromiseStore::new());
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None).await;
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await;
 
         assert!(
             handle.is_none(),
@@ -3172,7 +3658,15 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None).await;
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await;
 
         assert!(
             handle.is_none(),
@@ -3196,9 +3690,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3231,9 +3732,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3267,9 +3775,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         // Must not panic — the error is logged and the loop continues.
         handle.await.expect("recovery task must not panic");
@@ -3291,9 +3806,16 @@ mod tests {
         // AlwaysOffFlagClient — all feature flags return false.
         let agent = make_agent_off();
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3328,9 +3850,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3361,9 +3890,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3409,9 +3945,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         // Advance the mock clock past NATS_KV_TIMEOUT to fire the re-fetch
         // timeout inside the spawned task.
@@ -3462,9 +4005,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3473,13 +4023,19 @@ mod tests {
             .values()
             .filter(|(p, _)| p.status == PromiseStatus::PermanentFailed)
             .count();
-        let still_running = all.values().filter(|(p, _)| p.status == PromiseStatus::Running).count();
+        let still_running = all
+            .values()
+            .filter(|(p, _)| p.status == PromiseStatus::Running)
+            .count();
 
         assert_eq!(
             permanent_failed, 11,
             "all 11 stale promises must be processed (no cap); got {permanent_failed}"
         );
-        assert_eq!(still_running, 0, "no promises must remain Running; got {still_running}");
+        assert_eq!(
+            still_running, 0,
+            "no promises must remain Running; got {still_running}"
+        );
     }
 
     /// When a stale promise has a non-empty `automation_id` but the automation
@@ -3507,9 +4063,16 @@ mod tests {
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3596,9 +4159,14 @@ mod tests {
         .await;
 
         let snapshot = promise_store.snapshot_promises();
-        assert_eq!(snapshot.len(), 2, "two automations must produce two distinct promises");
+        assert_eq!(
+            snapshot.len(),
+            2,
+            "two automations must produce two distinct promises"
+        );
 
-        let ids: std::collections::HashSet<String> = snapshot.values().map(|(p, _)| p.id.clone()).collect();
+        let ids: std::collections::HashSet<String> =
+            snapshot.values().map(|(p, _)| p.id.clone()).collect();
         assert_eq!(ids.len(), 2, "promise IDs must be distinct");
 
         // Each promise ID must encode the automation ID.
@@ -3628,7 +4196,11 @@ mod tests {
                 &'a self,
                 _body: serde_json::Value,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                        + Send
+                        + 'a,
+                >,
             > {
                 panic!("intentional panic from PanicClient");
             }
@@ -3684,7 +4256,8 @@ mod tests {
 
         // initialize succeeds.
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+            when.method(httpmock::Method::POST)
+                .body_contains("\"initialize\"");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({
@@ -3700,7 +4273,8 @@ mod tests {
         // list_tools returns 200 but with a `result` that is a plain string,
         // not the expected `{ tools: [...] }` object → deserialization error.
         server.mock(|when, then| {
-            when.method(httpmock::Method::POST).body_contains("tools/list");
+            when.method(httpmock::Method::POST)
+                .body_contains("tools/list");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(serde_json::json!({
@@ -3741,7 +4315,11 @@ mod tests {
             &'a self,
             _automation: &'a trogon_automations::Automation,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             Box::pin(async { Ok(()) })
         }
@@ -3753,7 +4331,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Option<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -3766,7 +4347,11 @@ mod tests {
             _tenant_id: &'a str,
             _id: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             Box::pin(async { Ok(()) })
         }
@@ -3777,12 +4362,19 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Vec<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
         > {
-            Box::pin(async { Err(trogon_automations::store::StoreError("injected list error".to_string())) })
+            Box::pin(async {
+                Err(trogon_automations::store::StoreError(
+                    "injected list error".to_string(),
+                ))
+            })
         }
 
         fn matching<'a>(
@@ -3793,7 +4385,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Vec<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -3836,7 +4431,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -3848,7 +4448,12 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             if promise.status == crate::promise_store::PromiseStatus::PermanentFailed {
                 return Box::pin(async {
@@ -3857,7 +4462,8 @@ mod tests {
                     ))
                 });
             }
-            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            self.inner
+                .update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -3867,8 +4473,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -3882,9 +4489,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -3928,9 +4541,16 @@ mod tests {
         let auto_store = Arc::new(ErrorListAutomationStore);
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3971,9 +4591,16 @@ mod tests {
 
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -3996,7 +4623,8 @@ mod tests {
     ///
     /// Uses a paused clock so the 30 s `AUTO_RETRY_DELAY` is skipped instantly.
     #[tokio::test(start_paused = true)]
-    async fn recover_automation_list_error_backlog_retried_and_marks_permanent_failed_when_disabled() {
+    async fn recover_automation_list_error_backlog_retried_and_marks_permanent_failed_when_disabled()
+     {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -4012,7 +4640,12 @@ mod tests {
                 &'a self,
                 _: &'a trogon_automations::Automation,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 Box::pin(async { Ok(()) })
             }
@@ -4038,7 +4671,12 @@ mod tests {
                 _: &'a str,
                 _: &'a str,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 Box::pin(async { Ok(()) })
             }
@@ -4048,7 +4686,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
                         > + Send
                         + 'a,
                 >,
@@ -4089,7 +4730,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
                         > + Send
                         + 'a,
                 >,
@@ -4118,9 +4762,16 @@ mod tests {
         // backlog retry loop) and returns the JoinHandle.  The tokio auto-
         // advance feature will skip the 30 s AUTO_RETRY_DELAY when no tasks
         // can make progress.
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -4135,7 +4786,11 @@ mod tests {
             "promise must be PermanentFailed after backlog retry finds disabled automation"
         );
         assert!(
-            p_after.failure_reason.as_deref().unwrap_or("").contains("disabled"),
+            p_after
+                .failure_reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("disabled"),
             "failure_reason must mention the automation is disabled; got: {:?}",
             p_after.failure_reason
         );
@@ -4166,7 +4821,12 @@ mod tests {
                 &'a self,
                 _: &'a trogon_automations::Automation,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 Box::pin(async { Ok(()) })
             }
@@ -4192,7 +4852,12 @@ mod tests {
                 _: &'a str,
                 _: &'a str,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 Box::pin(async { Ok(()) })
             }
@@ -4202,7 +4867,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
                         > + Send
                         + 'a,
                 >,
@@ -4243,7 +4911,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
                         > + Send
                         + 'a,
                 >,
@@ -4295,9 +4966,16 @@ mod tests {
         });
 
         // Auto-advance handles the 30 s AUTO_RETRY_DELAY inside the spawned task.
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -4348,9 +5026,16 @@ mod tests {
         let (auto_store, run_store) = make_mock_stores();
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -4387,9 +5072,16 @@ mod tests {
         let (auto_store, run_store) = make_mock_stores();
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -4421,7 +5113,11 @@ mod tests {
             &'a self,
             _run: &'a trogon_automations::RunRecord,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             Box::pin(async {
                 Err(trogon_automations::store::StoreError(
@@ -4437,7 +5133,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Vec<trogon_automations::RunRecord>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Vec<trogon_automations::RunRecord>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -4451,7 +5150,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<trogon_automations::RunStats, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            trogon_automations::RunStats,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -4561,10 +5263,16 @@ mod tests {
         store.insert_promise(p);
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -4609,7 +5317,11 @@ mod tests {
             &'a self,
             run: &'a trogon_automations::RunRecord,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             self.records.lock().unwrap().push(run.clone());
             Box::pin(async { Ok(()) })
@@ -4622,7 +5334,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Vec<trogon_automations::RunRecord>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Vec<trogon_automations::RunRecord>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -4636,7 +5351,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<trogon_automations::RunStats, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            trogon_automations::RunStats,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -4682,7 +5400,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -4694,7 +5417,12 @@ mod tests {
             _promise: &'a crate::promise_store::AgentPromise,
             _revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             Box::pin(async {
                 Err(crate::promise_store::PromiseStoreError(
@@ -4710,8 +5438,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -4725,9 +5454,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -4788,7 +5523,9 @@ mod tests {
                     + 'a,
             >,
         > {
-            let n = self.get_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let n = self
+                .get_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n >= self.none_from_call {
                 return Box::pin(async { Ok(None) });
             }
@@ -4799,7 +5536,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -4811,9 +5553,15 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            self.inner
+                .update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -4823,8 +5571,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -4838,9 +5587,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -4908,7 +5663,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -4920,15 +5680,24 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            let n = self.update_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let n = self
+                .update_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n >= self.hang_from_call {
                 return Box::pin(async {
-                    std::future::pending::<Result<u64, crate::promise_store::PromiseStoreError>>().await
+                    std::future::pending::<Result<u64, crate::promise_store::PromiseStoreError>>()
+                        .await
                 });
             }
-            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            self.inner
+                .update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -4938,8 +5707,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -4953,9 +5723,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -4989,7 +5765,11 @@ mod tests {
             &'a self,
             _: &'a trogon_automations::Automation,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             Box::pin(async { Ok(()) })
         }
@@ -5001,7 +5781,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Option<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Option<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -5014,7 +5797,11 @@ mod tests {
             _: &'a str,
             _: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             Box::pin(async { Ok(()) })
         }
@@ -5025,7 +5812,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Vec<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -5041,7 +5831,10 @@ mod tests {
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                        Output = Result<
+                            Vec<trogon_automations::Automation>,
+                            trogon_automations::store::StoreError,
+                        >,
                     > + Send
                     + 'a,
             >,
@@ -5081,10 +5874,16 @@ mod tests {
         let (auto_store, _) = make_mock_stores();
         auto_store.put(&auto).await.expect("put automation");
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -5215,9 +6014,16 @@ mod tests {
         let run_store = Arc::new(CapturingRunStore::new());
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle");
 
         handle.await.expect("recovery task must not panic");
 
@@ -5255,9 +6061,16 @@ mod tests {
         let run_store = Arc::new(CapturingRunStore::new());
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle");
 
         handle.await.expect("recovery task must not panic");
 
@@ -5301,9 +6114,16 @@ mod tests {
         // Pause the clock AFTER all in-memory setup (no NATS containers to worry about).
         tokio::time::pause();
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle");
 
         // Advance past NATS_KV_TIMEOUT to trigger the update_promise timeout.
         let (join_result, _) = tokio::join!(
@@ -5348,9 +6168,16 @@ mod tests {
 
         tokio::time::pause();
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle");
 
         let (join_result, _) = tokio::join!(
             handle,
@@ -5415,7 +6242,11 @@ mod tests {
                 .await
                 .expect("AutomationStore"),
         );
-        let run_store = Arc::new(trogon_automations::RunStore::open(&js).await.expect("RunStore"));
+        let run_store = Arc::new(
+            trogon_automations::RunStore::open(&js)
+                .await
+                .expect("RunStore"),
+        );
         (promise_store, auto_store, run_store, js, container)
     }
 
@@ -5439,6 +6270,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -5484,10 +6316,14 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
-        assert!(result.is_some(), "must return agent when claiming a Running promise");
+        assert!(
+            result.is_some(),
+            "must return agent when claiming a Running promise"
+        );
 
         // KV must reflect the CAS claim: worker_id must have changed.
         let (claimed, _) = ps
@@ -5529,6 +6365,7 @@ mod tests {
             "",
             "github.pull_request",
             &serde_json::json!({}),
+            false,
         )
         .await;
 
@@ -5607,10 +6444,16 @@ mod tests {
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
         promise_repo.put_promise(&stale).await.unwrap();
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_repo, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("must return a handle when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("must return a handle when stale promises exist");
         handle.await.expect("recovery task must not panic");
 
         let (p, _) = ps
@@ -5661,7 +6504,8 @@ mod tests {
         // Use max_iterations = 2 so the recovered run can make one more call.
         let tool_ctx = Arc::new(ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = Arc::new(crate::agent_loop::AgentLoop {
-            anthropic_client: Arc::clone(&mock_client) as Arc<dyn crate::agent_loop::AnthropicClient>,
+            anthropic_client: Arc::clone(&mock_client)
+                as Arc<dyn crate::agent_loop::AnthropicClient>,
             model: "test".to_string(),
             max_iterations: 2,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -5712,10 +6556,16 @@ mod tests {
         let promise_repo: Arc<dyn PromiseRepository> = ps.clone();
         promise_repo.put_promise(&stale).await.unwrap();
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_repo, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("must return a handle for the stale promise");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("must return a handle for the stale promise");
         handle.await.expect("recovery task must not panic");
 
         // The mock client must have been called exactly once with the checkpoint
@@ -5800,27 +6650,19 @@ mod tests {
             .await
             .expect("AckKind::Progress must succeed on a real JetStream message");
 
+
         // Start the heartbeat task.  The first actual Progress ack from the task
         // is sent after HEARTBEAT_INTERVAL_SECS (15 s); we don't wait that long.
-        // We only verify the task lifecycle: starts running, aborts cleanly.
-        let handle = super::spawn_heartbeat(msg);
+        // We only verify the task lifecycle: starts running, aborts cleanly on drop.
+        let guard = super::spawn_heartbeat(msg);
         assert!(
-            !handle.is_finished(),
+            !guard.is_finished(),
             "heartbeat task must be running immediately after spawn"
         );
 
-        // Abort — simulates the handler completing before the next tick.
-        handle.abort();
-
-        // Join with a short timeout to confirm the task terminates promptly.
-        let outcome = tokio::time::timeout(Duration::from_millis(200), handle)
-            .await
-            .expect("heartbeat task must terminate within 200 ms of abort");
-
-        assert!(
-            outcome.unwrap_err().is_cancelled(),
-            "aborted heartbeat task must return a cancellation JoinError"
-        );
+        // Drop the guard — RAII aborts the heartbeat (also covers panic paths).
+        drop(guard);
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
     // ── CAS race: concurrent claims (real NATS KV) ────────────────────────────
@@ -5895,7 +6737,10 @@ mod tests {
             .unwrap()
             .expect("promise must still exist after the race");
         let winner = if r1.is_ok() { "worker-1" } else { "worker-2" };
-        assert_eq!(final_p.worker_id, winner, "KV must reflect the winning worker's claim");
+        assert_eq!(
+            final_p.worker_id, winner,
+            "KV must reflect the winning worker's claim"
+        );
     }
 
     // ── Batch stale-promise recovery (real NATS KV) ───────────────────────────
@@ -5932,10 +6777,16 @@ mod tests {
             promise_ids.push(pid);
         }
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_repo, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("must return a handle when 3 stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("must return a handle when 3 stale promises exist");
         handle.await.expect("recovery task must not panic");
 
         for pid in &promise_ids {
@@ -6039,10 +6890,16 @@ mod tests {
         stale.nats_subject = "github.push".to_string();
         promise_repo.put_promise(&stale).await.unwrap();
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_repo, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("must return a handle for the orphaned promise");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("must return a handle for the orphaned promise");
         handle.await.expect("recovery task must not panic");
 
         // Promise must be PermanentFailed — retrying would always reach the
@@ -6084,10 +6941,16 @@ mod tests {
         stale.nats_subject = "legacy.event.v1".to_string(); // no handler exists
         promise_repo.put_promise(&stale).await.unwrap();
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_repo, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("must return a handle for the unknown-subject promise");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_repo,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("must return a handle for the unknown-subject promise");
         handle.await.expect("recovery task must not panic");
 
         let (p, _) = ps
@@ -6129,9 +6992,16 @@ mod tests {
         let run_store = Arc::new(ErrorRecordRunStore);
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -6181,7 +7051,12 @@ mod tests {
                 &'a self,
                 _: &'a trogon_automations::Automation,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 Box::pin(async { Ok(()) })
             }
@@ -6208,7 +7083,12 @@ mod tests {
                 _: &'a str,
                 _: &'a str,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), trogon_automations::store::StoreError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<(), trogon_automations::store::StoreError>,
+                        > + Send
+                        + 'a,
+                >,
             > {
                 Box::pin(async { Ok(()) })
             }
@@ -6218,7 +7098,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
                         > + Send
                         + 'a,
                 >,
@@ -6234,7 +7117,10 @@ mod tests {
             ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Vec<trogon_automations::Automation>, trogon_automations::store::StoreError>,
+                            Output = Result<
+                                Vec<trogon_automations::Automation>,
+                                trogon_automations::store::StoreError,
+                            >,
                         > + Send
                         + 'a,
                 >,
@@ -6291,16 +7177,24 @@ mod tests {
         p.automation_id = auto.id.clone();
         p.nats_subject = "github.push".to_string();
         // Seed with a message large enough that appending a tool turn exceeds the limit.
-        p.messages = vec![Message::user_text("a".repeat(crate::agent_loop::CHECKPOINT_MAX_BYTES))];
+        p.messages = vec![Message::user_text(
+            "a".repeat(crate::agent_loop::CHECKPOINT_MAX_BYTES),
+        )];
         store.insert_promise(p);
         let store_for_assert = store.clone();
 
         let promise_store: Arc<dyn PromiseRepository> = Arc::clone(&store) as _;
 
-        let handle =
-            super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, &agent.tenant_id, None)
-                .await
-                .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            &agent.tenant_id,
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -6338,7 +7232,10 @@ mod tests {
     }
 
     impl GetErrorsAfterNthCallStore {
-        fn new(error_from_call: usize, inner: crate::promise_store::mock::MockPromiseStore) -> Self {
+        fn new(
+            error_from_call: usize,
+            inner: crate::promise_store::mock::MockPromiseStore,
+        ) -> Self {
             Self {
                 inner,
                 get_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -6363,7 +7260,9 @@ mod tests {
                     + 'a,
             >,
         > {
-            let n = self.get_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let n = self
+                .get_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n >= self.error_from_call {
                 return Box::pin(async {
                     Err(crate::promise_store::PromiseStoreError(
@@ -6378,7 +7277,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -6390,9 +7294,15 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            self.inner
+                .update_promise(tenant_id, promise_id, promise, revision)
         }
 
         fn get_tool_result<'a>(
@@ -6402,8 +7312,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -6417,9 +7328,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -6465,9 +7382,16 @@ mod tests {
         let run_store = Arc::new(ErrorRecordRunStore);
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -6504,9 +7428,16 @@ mod tests {
         let run_store = Arc::new(ErrorRecordRunStore);
         let agent = make_agent_mock(vec![]);
 
-        let handle = super::recover_stale_promises(&agent, &promise_store, &auto_store, &run_store, "acme", None)
-            .await
-            .expect("spawn handle must be returned when stale promises exist");
+        let handle = super::recover_stale_promises(
+            &agent,
+            &promise_store,
+            &auto_store,
+            &run_store,
+            "acme",
+            None,
+        )
+        .await
+        .expect("spawn handle must be returned when stale promises exist");
 
         handle.await.expect("recovery task must not panic");
 
@@ -6534,7 +7465,10 @@ mod tests {
         let (ps, _, _, js, _c) = make_all_stores_with_promise().await;
 
         // Inject raw invalid JSON bytes directly via the KV bucket.
-        let kv = js.get_key_value(AGENT_PROMISES_BUCKET).await.expect("kv bucket");
+        let kv = js
+            .get_key_value(AGENT_PROMISES_BUCKET)
+            .await
+            .expect("kv bucket");
         kv.put(
             "test.corrupted-p",
             bytes::Bytes::from(b"not valid json at all".to_vec()),
@@ -6557,7 +7491,10 @@ mod tests {
 
         let (ps, _, _, js, _c) = make_all_stores_with_promise().await;
 
-        let kv = js.get_key_value(AGENT_TOOL_RESULTS_BUCKET).await.expect("kv bucket");
+        let kv = js
+            .get_key_value(AGENT_TOOL_RESULTS_BUCKET)
+            .await
+            .expect("kv bucket");
         // 0xFF 0xFE are invalid leading UTF-8 bytes.
         kv.put(
             "test.p-utf8-err.deadbeef01",
@@ -6592,10 +7529,16 @@ mod tests {
         promise_repo.put_promise(&p).await.unwrap();
 
         // Inject a corrupted entry under the same tenant prefix.
-        let kv = js.get_key_value(AGENT_PROMISES_BUCKET).await.expect("kv bucket");
-        kv.put("test.p-corrupt-lr", bytes::Bytes::from(b"{{not json}}".to_vec()))
+        let kv = js
+            .get_key_value(AGENT_PROMISES_BUCKET)
             .await
-            .expect("inject corrupt entry");
+            .expect("kv bucket");
+        kv.put(
+            "test.p-corrupt-lr",
+            bytes::Bytes::from(b"{{not json}}".to_vec()),
+        )
+        .await
+        .expect("inject corrupt entry");
 
         let result = promise_repo.list_running("test").await;
         assert!(
@@ -6628,10 +7571,17 @@ mod tests {
         let id = worker_id();
         // Must contain exactly one `:` separating hostname from pid.
         let parts: Vec<&str> = id.splitn(2, ':').collect();
-        assert_eq!(parts.len(), 2, "worker_id must contain a ':' separator; got: {id}");
+        assert_eq!(
+            parts.len(),
+            2,
+            "worker_id must contain a ':' separator; got: {id}"
+        );
         let hostname = parts[0];
         let pid_str = parts[1];
-        assert!(!hostname.is_empty(), "hostname part must not be empty; got: {id}");
+        assert!(
+            !hostname.is_empty(),
+            "hostname part must not be empty; got: {id}"
+        );
         let pid: u32 = pid_str
             .parse()
             .unwrap_or_else(|_| panic!("PID part must be a valid u32; got: {pid_str}"));

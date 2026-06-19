@@ -1,5 +1,8 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 #![cfg_attr(coverage, allow(dead_code))] // coverage build cfg-excludes `serve`, orphaning its private server helpers
+// Trait impls intentionally return `impl Future + Send` to pin the auto-trait
+// bound; converting to `async fn` would drop the explicit `Send` guarantee.
+#![allow(clippy::manual_async_fn)]
 pub mod config;
 pub mod evaluator;
 pub mod grader_agent;

@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::{ToolContext, fs::resolve_path};
+use crate::{fs::resolve_path, ToolContext};
 
 const MAX_MATCHES: usize = 100;
 const MAX_OUTPUT_BYTES: usize = 32 * 1024;
@@ -10,8 +10,28 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
         Some(p) if !p.is_empty() => p.to_string(),
         _ => return "search_files: 'pattern' is required".to_string(),
     };
-    let search_path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-    let case_insensitive = input.get("case_insensitive").and_then(|v| v.as_bool()).unwrap_or(false);
+    let search_path = input
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let case_insensitive = input
+        .get("case_insensitive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    // Optional file-glob filter restricting which files are searched. Accepts a
+    // single pattern (`"*.rs"`) or an array (`["*.rs", "*.toml"]`). Patterns are
+    // matched against the path relative to the search base; an empty list means
+    // "search every file".
+    let globs: Vec<String> = match input.get("glob") {
+        Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect(),
+        _ => Vec::new(),
+    };
 
     let base = match resolve_path(&ctx.cwd, search_path) {
         Ok(p) => p,
@@ -27,7 +47,24 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
     };
 
     // Walk files respecting .gitignore via the `ignore` crate.
-    let walker = ignore::WalkBuilder::new(&base).hidden(false).git_ignore(true).build();
+    let mut builder = ignore::WalkBuilder::new(&base);
+    builder.hidden(false).git_ignore(true);
+    if !globs.is_empty() {
+        // An `Override` with only whitelist globs yields *only* matching files.
+        let mut ob = ignore::overrides::OverrideBuilder::new(&base);
+        for g in &globs {
+            if let Err(e) = ob.add(g) {
+                return format!("search_files: invalid glob '{g}': {e}");
+            }
+        }
+        match ob.build() {
+            Ok(ov) => {
+                builder.overrides(ov);
+            }
+            Err(e) => return format!("search_files: invalid glob filter: {e}"),
+        }
+    }
+    let walker = builder.build();
 
     let mut output = String::new();
     let mut match_count = 0;
@@ -48,7 +85,10 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
             Err(_) => continue, // skip binary / unreadable files
         };
 
-        let rel = path.strip_prefix(&base).unwrap_or(path).to_string_lossy();
+        let rel = path
+            .strip_prefix(&base)
+            .unwrap_or(path)
+            .to_string_lossy();
 
         for (line_no, line) in content.lines().enumerate() {
             if re.is_match(line) {
@@ -72,7 +112,9 @@ pub(crate) async fn search_files(ctx: &ToolContext, input: &Value) -> String {
     }
 
     if truncated {
-        output.push_str(&format!("\n... ({match_count} matches shown, output truncated)"));
+        output.push_str(&format!(
+            "\n... ({match_count} matches shown, output truncated)"
+        ));
     } else {
         output.push_str(&format!("\n{match_count} match(es)"));
     }
@@ -122,16 +164,13 @@ mod tests {
         fs::write(dir.path().join("a.rs"), "fn Hello() {}\n").unwrap();
 
         let sensitive = search_files(&ctx(&dir), &json!({ "pattern": "hello" })).await;
-        assert!(
-            sensitive.contains("No matches"),
-            "case-sensitive must not match: {sensitive}"
-        );
+        assert!(sensitive.contains("No matches"), "case-sensitive must not match: {sensitive}");
 
-        let insensitive = search_files(&ctx(&dir), &json!({ "pattern": "hello", "case_insensitive": true })).await;
-        assert!(
-            insensitive.contains("a.rs:1:"),
-            "case-insensitive must match: {insensitive}"
-        );
+        let insensitive = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": "hello", "case_insensitive": true }),
+        ).await;
+        assert!(insensitive.contains("a.rs:1:"), "case-insensitive must match: {insensitive}");
     }
 
     #[tokio::test]
@@ -148,7 +187,10 @@ mod tests {
         fs::write(dir.path().join("sub/b.rs"), "let needle = 42;\n").unwrap();
         fs::write(dir.path().join("other.rs"), "no match here\n").unwrap();
 
-        let result = search_files(&ctx(&dir), &json!({ "pattern": "needle", "path": "sub" })).await;
+        let result = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": "needle", "path": "sub" }),
+        ).await;
         assert!(result.contains("b.rs:1:"), "{result}");
         assert!(!result.contains("other.rs"), "must only search in sub/: {result}");
     }
@@ -161,10 +203,7 @@ mod tests {
         let result = search_files(&ctx(&dir), &json!({ "pattern": r"fn \w+\(\)" })).await;
         assert!(result.contains("a.rs:1:"), "must match fn hello(): {result}");
         assert!(result.contains("fn hello()"), "{result}");
-        assert!(
-            !result.contains("let x"),
-            "literal backslashes would not match: {result}"
-        );
+        assert!(!result.contains("let x"), "literal backslashes would not match: {result}");
     }
 
     #[tokio::test]
@@ -177,10 +216,38 @@ mod tests {
             &json!({ "pattern": r"fn hello\(\)", "case_insensitive": true }),
         )
         .await;
-        assert!(
-            result.contains("a.rs:1:"),
-            "case-insensitive regex must match: {result}"
-        );
+        assert!(result.contains("a.rs:1:"), "case-insensitive regex must match: {result}");
+    }
+
+    #[tokio::test]
+    async fn glob_filter_restricts_searched_files() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "let needle = 1;\n").unwrap();
+        fs::write(dir.path().join("b.txt"), "let needle = 2;\n").unwrap();
+
+        let only_rs = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": "needle", "glob": "*.rs" }),
+        )
+        .await;
+        assert!(only_rs.contains("a.rs:1:"), "must match .rs file: {only_rs}");
+        assert!(!only_rs.contains("b.txt"), "glob must exclude .txt: {only_rs}");
+
+        let both = search_files(
+            &ctx(&dir),
+            &json!({ "pattern": "needle", "glob": ["*.rs", "*.txt"] }),
+        )
+        .await;
+        assert!(both.contains("a.rs:1:"), "{both}");
+        assert!(both.contains("b.txt:1:"), "array of globs must include both: {both}");
+    }
+
+    #[tokio::test]
+    async fn invalid_glob_returns_error() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "needle\n").unwrap();
+        let result = search_files(&ctx(&dir), &json!({ "pattern": "needle", "glob": "[" })).await;
+        assert!(result.contains("invalid glob"), "expected glob error: {result}");
     }
 
     #[tokio::test]

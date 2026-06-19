@@ -493,11 +493,10 @@ pub async fn post_pr_review(ctx: &ToolContext<impl HttpClient>, input: &Value) -
         payload["commit_id"] = serde_json::json!(commit_sha);
     }
 
-    if let Some(comments) = input["comments"].as_array() {
-        if !comments.is_empty() {
+    if let Some(comments) = input["comments"].as_array()
+        && !comments.is_empty() {
             payload["comments"] = serde_json::json!(comments);
         }
-    }
 
     let resp = ctx
         .http_client

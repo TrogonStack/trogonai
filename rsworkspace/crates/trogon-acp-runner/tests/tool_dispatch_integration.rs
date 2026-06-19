@@ -25,7 +25,6 @@ use tokio::sync::RwLock;
 use trogon_acp_runner::{GatewayConfig, NatsSessionNotifier, NatsSessionStore, TrogonAgent};
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
-use trogon_tools;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -1292,6 +1291,9 @@ fn acp_env_lock() -> &'static Mutex<()> {
 
 /// Portable `web_search` is registered in trogon-tools and dispatched via ACP wire.
 #[tokio::test]
+// Holds the env-var serialization lock across awaits on purpose: the guard
+// must cover the whole test so concurrent tests can't race WEB_SEARCH_* vars.
+#[allow(clippy::await_holding_lock)]
 async fn acp_web_search_tool_def_present_and_dispatch_works() {
     use httpmock::prelude::*;
 
@@ -1371,6 +1373,9 @@ async fn acp_web_search_tool_def_present_and_dispatch_works() {
 
 /// Missing search credentials must return a clear error through ACP dispatch.
 #[tokio::test]
+// Holds the env-var serialization lock across awaits on purpose: the guard
+// must cover the whole test so concurrent tests can't race WEB_SEARCH_* vars.
+#[allow(clippy::await_holding_lock)]
 async fn acp_web_search_missing_config_returns_clear_error() {
     let _guard = acp_env_lock().lock().unwrap();
     unsafe {

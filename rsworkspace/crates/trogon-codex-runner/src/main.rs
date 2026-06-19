@@ -66,7 +66,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let agent = DefaultCodexAgent::with_nats(nats.clone(), acp_prefix_parsed.clone(), default_model);
+    let agent = DefaultCodexAgent::with_nats(nats.clone(), acp_prefix_parsed.clone(), default_model)
+        .with_compactor(nats.clone());
     let js = trogon_nats::jetstream::NatsJetStreamClient::new(js_ctx);
 
     let local = tokio::task::LocalSet::new();

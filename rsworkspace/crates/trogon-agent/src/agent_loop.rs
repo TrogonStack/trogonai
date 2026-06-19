@@ -73,7 +73,8 @@ impl AnthropicClient for ReqwestAnthropicClient {
     fn complete<'a>(
         &'a self,
         body: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
+    {
         Box::pin(async move {
             // Retry up to 3 times on transient errors. Backoff: 2s → 4s → 8s.
             //
@@ -184,7 +185,10 @@ impl AnthropicClient for ReqwestAnthropicClient {
 /// called — so it never reaches this function. Non-retryable 4xx (400, 401, 403)
 /// return `false`: those indicate a broken request that won't be fixed by retrying.
 fn is_retryable_error(e: &reqwest::Error) -> bool {
-    e.is_connect() || e.is_timeout() || e.is_request() || e.status().map(|s| s.is_server_error()).unwrap_or(false)
+    e.is_connect()
+        || e.is_timeout()
+        || e.is_request()
+        || e.status().map(|s| s.is_server_error()).unwrap_or(false)
 }
 
 /// Converts a `reqwest::Error` (from `error_for_status`) into `AnthropicClientError`.
@@ -192,7 +196,10 @@ fn is_retryable_error(e: &reqwest::Error) -> bool {
 /// 4xx errors (except 429, which is retried before reaching this) are `Permanent`
 /// since retrying the same broken request won't help. Everything else is `Transient`.
 fn reqwest_error_to_anthropic_error(e: reqwest::Error) -> AnthropicClientError {
-    let is_permanent = e.status().map(|s| s.is_client_error() && s != 429).unwrap_or(false);
+    let is_permanent = e
+        .status()
+        .map(|s| s.is_client_error() && s != 429)
+        .unwrap_or(false);
     if is_permanent {
         AnthropicClientError::Permanent(e.to_string())
     } else {
@@ -227,7 +234,8 @@ pub mod mock {
         fn complete<'a>(
             &'a self,
             _body: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
+        {
             let resp = self.response.clone();
             Box::pin(async move { Ok(resp) })
         }
@@ -263,7 +271,8 @@ pub mod mock {
         fn complete<'a>(
             &'a self,
             body: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
+        {
             self.captured.lock().unwrap().push(body);
             let resp = self
                 .responses
@@ -283,7 +292,8 @@ pub mod mock {
         fn complete<'a>(
             &'a self,
             _body: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
+        {
             Box::pin(async move { Err(AnthropicClientError::Transient("simulated error".into())) })
         }
     }
@@ -367,6 +377,29 @@ impl Message {
             usage: None,
         }
     }
+
+    /// True when this is a user turn containing only `tool_result` blocks.
+    pub fn is_tool_result_only(&self) -> bool {
+        self.role == "user"
+            && !self.content.is_empty()
+            && self
+                .content
+                .iter()
+                .all(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    }
+}
+
+/// Index into `messages` where a trimmed slice may safely start.
+///
+/// Anthropic rejects histories that begin with orphan `tool_result` blocks
+/// (no preceding `tool_use`). After a naive cut, skip any leading
+/// tool-result-only user turns.
+fn trim_safe_start(messages: &[Message], naive_drop_count: usize) -> usize {
+    let mut start = naive_drop_count.min(messages.len());
+    while start < messages.len() && messages[start].is_tool_result_only() {
+        start += 1;
+    }
+    start
 }
 
 /// A single block within a message's `content` array.
@@ -376,9 +409,19 @@ pub enum ContentBlock {
     /// Plain text from the model or the user.
     Text { text: String },
     /// Tool invocation requested by the model.
-    ToolUse { id: String, name: String, input: Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
     /// Result returned to the model after executing a tool.
-    ToolResult { tool_use_id: String, content: String },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
+    /// Unrecognized block type from the API (e.g. `thinking`) — ignored.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Pair of tool-use ID and the string result to feed back to the model.
@@ -466,7 +509,11 @@ impl std::fmt::Display for AgentError {
 
 impl std::error::Error for AgentError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        if let Self::Http(e) = self { Some(e) } else { None }
+        if let Self::Http(e) = self {
+            Some(e)
+        } else {
+            None
+        }
     }
 }
 
@@ -631,7 +678,12 @@ async fn write_promise_terminal(
 ) {
     promise.status = status;
     promise.failure_reason = Some(context.to_string());
-    match tokio::time::timeout(NATS_KV_TIMEOUT, store.update_promise(tenant_id, pid, promise, rev)).await {
+    match tokio::time::timeout(
+        NATS_KV_TIMEOUT,
+        store.update_promise(tenant_id, pid, promise, rev),
+    )
+    .await
+    {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
             // CAS conflict — the stored revision is stale. This happens when
@@ -687,7 +739,12 @@ async fn write_promise_terminal(
 /// revision to be lost in the first place. After 5 failures the promise
 /// stays `Running` and will be recovered correctly once NATS comes back
 /// online.
-async fn try_mark_permanent_failed_fresh(store: &dyn PromiseRepository, tenant_id: &str, pid: &str, context: &str) {
+async fn try_mark_permanent_failed_fresh(
+    store: &dyn PromiseRepository,
+    tenant_id: &str,
+    pid: &str,
+    context: &str,
+) {
     for attempt in 0u32..5 {
         if attempt > 0 {
             // Exponential back-off: 2 s, 4 s, 8 s, 16 s.
@@ -748,6 +805,7 @@ fn render_messages_for_summary(messages: &[Message]) -> String {
                     out.push_str(content);
                     out.push_str("\n\n");
                 }
+                ContentBlock::Unknown => {}
             }
         }
     }
@@ -763,7 +821,11 @@ fn render_messages_for_summary(messages: &[Message]) -> String {
 ///
 /// Returns an empty `Vec` on any failure (network error, deserialization
 /// error, empty LLM response) so callers can fall back to plain trimming.
-async fn summarize_dropped_messages(client: &dyn AnthropicClient, model: &str, dropped: &[Message]) -> Vec<Message> {
+async fn summarize_dropped_messages(
+    client: &dyn AnthropicClient,
+    model: &str,
+    dropped: &[Message],
+) -> Vec<Message> {
     let rendered = render_messages_for_summary(dropped);
     if rendered.is_empty() {
         return vec![];
@@ -878,7 +940,12 @@ impl AgentLoop {
             let initial_load = 'load: {
                 let mut last_err = None;
                 for attempt in 0u32..2 {
-                    match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid)).await {
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.get_promise(&self.tenant_id, pid),
+                    )
+                    .await
+                    {
                         Ok(r) => break 'load r,
                         Err(_) => {
                             warn!(
@@ -1007,14 +1074,24 @@ impl AgentLoop {
             && effective_prompt.is_some()
         {
             p.system_prompt = effective_prompt.clone();
-            match tokio::time::timeout(NATS_KV_TIMEOUT, store.update_promise(&self.tenant_id, pid, p, *rev)).await {
+            match tokio::time::timeout(
+                NATS_KV_TIMEOUT,
+                store.update_promise(&self.tenant_id, pid, p, *rev),
+            )
+            .await
+            {
                 Ok(Ok(new_rev)) => *rev = new_rev,
                 Ok(Err(e)) => {
                     // CAS conflict — another write landed between our load
                     // and this write. Reload the current revision and retry
                     // once so the prompt is pinned before the first LLM call.
                     warn!(error = %e, promise_id = %pid, "Pre-pin system prompt CAS conflict — reloading revision and retrying");
-                    match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid)).await {
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.get_promise(&self.tenant_id, pid),
+                    )
+                    .await
+                    {
                         Ok(Ok(Some((_, new_rev)))) => {
                             *rev = new_rev;
                             match tokio::time::timeout(
@@ -1050,7 +1127,12 @@ impl AgentLoop {
                     // the retry writes it. Keep p.system_prompt set regardless
                     // so the first checkpoint persists it if both paths fail.
                     warn!(promise_id = %pid, "NATS KV timeout pre-pinning system prompt — reloading revision and retrying");
-                    match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid)).await {
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.get_promise(&self.tenant_id, pid),
+                    )
+                    .await
+                    {
                         Ok(Ok(Some((reloaded, new_rev)))) => {
                             *rev = new_rev;
                             if reloaded.system_prompt.is_some() {
@@ -1098,6 +1180,9 @@ impl AgentLoop {
         // (either via a checkpoint or a heartbeat). Initialised to now because
         // the promise was just claimed moments ago at the call site.
         let mut last_heartbeat_at = std::time::Instant::now();
+        let mut max_token_continuations = 0u32;
+        const MAX_TOKEN_CONTINUATIONS: u32 = 5;
+        let mut continuation_text = String::new();
 
         for iteration in 0..self.max_iterations {
             debug!(iteration, "Agent loop iteration");
@@ -1110,114 +1195,133 @@ impl AgentLoop {
                 && let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
                 && let Some((ref mut p, ref mut rev)) = checkpoint
             {
-                p.claimed_at = trogon_automations::now_unix();
-                match tokio::time::timeout(NATS_KV_TIMEOUT, store.update_promise(&self.tenant_id, pid, p, *rev)).await {
-                    Ok(Ok(new_rev)) => {
-                        *rev = new_rev;
-                        last_heartbeat_at = std::time::Instant::now();
-                    }
-                    Ok(Err(e)) => {
-                        // CAS conflict — reload the current revision and retry
-                        // the heartbeat write so claimed_at is actually refreshed.
-                        // Without the retry, a single conflict leaves claimed_at
-                        // stale for up to HEARTBEAT_REFRESH_INTERVAL, which can
-                        // accumulate into a false-positive stale detection if
-                        // conflicts occur repeatedly.
-                        warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat CAS conflict — reloading revision and retrying");
-                        match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid)).await {
-                            Ok(Ok(Some((current, new_rev)))) => {
-                                if current.status != crate::promise_store::PromiseStatus::Running {
-                                    // Another worker reached a terminal state — stop
-                                    // to avoid producing duplicate side effects.
-                                    warn!(
-                                        promise_id = %pid,
-                                        status = ?current.status,
-                                        "Promise no longer Running during heartbeat reload — stopping"
-                                    );
+                    p.claimed_at = trogon_automations::now_unix();
+                    match tokio::time::timeout(
+                        NATS_KV_TIMEOUT,
+                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                    )
+                    .await
+                    {
+                        Ok(Ok(new_rev)) => {
+                            *rev = new_rev;
+                            last_heartbeat_at = std::time::Instant::now();
+                        }
+                        Ok(Err(e)) => {
+                            // CAS conflict — reload the current revision and retry
+                            // the heartbeat write so claimed_at is actually refreshed.
+                            // Without the retry, a single conflict leaves claimed_at
+                            // stale for up to HEARTBEAT_REFRESH_INTERVAL, which can
+                            // accumulate into a false-positive stale detection if
+                            // conflicts occur repeatedly.
+                            warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat CAS conflict — reloading revision and retrying");
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.get_promise(&self.tenant_id, pid),
+                            )
+                            .await
+                            {
+                                Ok(Ok(Some((current, new_rev)))) => {
+                                    if current.status
+                                        != crate::promise_store::PromiseStatus::Running
+                                    {
+                                        // Another worker reached a terminal state — stop
+                                        // to avoid producing duplicate side effects.
+                                        warn!(
+                                            promise_id = %pid,
+                                            status = ?current.status,
+                                            "Promise no longer Running during heartbeat reload — stopping"
+                                        );
+                                        return Ok(String::new());
+                                    }
+                                    *rev = new_rev;
+                                    p.claimed_at = trogon_automations::now_unix();
+                                    match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(new_rev2)) => {
+                                            *rev = new_rev2;
+                                            last_heartbeat_at = std::time::Instant::now();
+                                        }
+                                        Ok(Err(e)) => {
+                                            warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat retry failed — claimed_at may become stale")
+                                        }
+                                        Err(_) => {
+                                            warn!(promise_id = %pid, "Pre-LLM heartbeat retry timed out — claimed_at may become stale")
+                                        }
+                                    }
+                                }
+                                Ok(Ok(None)) => {
+                                    warn!(promise_id = %pid, "Promise vanished during heartbeat reload — stopping");
                                     return Ok(String::new());
                                 }
-                                *rev = new_rev;
-                                p.claimed_at = trogon_automations::now_unix();
-                                match tokio::time::timeout(
-                                    NATS_KV_TIMEOUT,
-                                    store.update_promise(&self.tenant_id, pid, p, *rev),
-                                )
-                                .await
-                                {
-                                    Ok(Ok(new_rev2)) => {
-                                        *rev = new_rev2;
-                                        last_heartbeat_at = std::time::Instant::now();
-                                    }
-                                    Ok(Err(e)) => {
-                                        warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat retry failed — claimed_at may become stale")
-                                    }
-                                    Err(_) => {
-                                        warn!(promise_id = %pid, "Pre-LLM heartbeat retry timed out — claimed_at may become stale")
-                                    }
+                                Ok(Err(e)) => {
+                                    warn!(error = %e, promise_id = %pid, "Could not reload revision after heartbeat CAS conflict — claimed_at may become stale")
+                                }
+                                Err(_) => {
+                                    warn!(promise_id = %pid, "KV timeout reloading revision after heartbeat CAS conflict — claimed_at may become stale")
                                 }
                             }
-                            Ok(Ok(None)) => {
-                                warn!(promise_id = %pid, "Promise vanished during heartbeat reload — stopping");
-                                return Ok(String::new());
-                            }
-                            Ok(Err(e)) => {
-                                warn!(error = %e, promise_id = %pid, "Could not reload revision after heartbeat CAS conflict — claimed_at may become stale")
-                            }
-                            Err(_) => {
-                                warn!(promise_id = %pid, "KV timeout reloading revision after heartbeat CAS conflict — claimed_at may become stale")
+                        }
+                        Err(_) => {
+                            // Timeout: write may or may not have landed. Reload
+                            // to get the current revision so future heartbeats
+                            // and the terminal-status write can succeed. Without
+                            // this, the revision stays stale and every subsequent
+                            // write CAS-conflicts, leaving claimed_at frozen.
+                            warn!(promise_id = %pid, "Pre-LLM heartbeat timed out — reloading revision and retrying");
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.get_promise(&self.tenant_id, pid),
+                            )
+                            .await
+                            {
+                                Ok(Ok(Some((current, new_rev)))) => {
+                                    if current.status
+                                        != crate::promise_store::PromiseStatus::Running
+                                    {
+                                        warn!(
+                                            promise_id = %pid,
+                                            status = ?current.status,
+                                            "Promise no longer Running during heartbeat timeout-reload — stopping"
+                                        );
+                                        return Ok(String::new());
+                                    }
+                                    *rev = new_rev;
+                                    p.claimed_at = trogon_automations::now_unix();
+                                    match tokio::time::timeout(
+                                        NATS_KV_TIMEOUT,
+                                        store.update_promise(&self.tenant_id, pid, p, *rev),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(new_rev2)) => {
+                                            *rev = new_rev2;
+                                            last_heartbeat_at = std::time::Instant::now();
+                                        }
+                                        Ok(Err(e)) => {
+                                            warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat timeout retry failed — claimed_at may become stale")
+                                        }
+                                        Err(_) => {
+                                            warn!(promise_id = %pid, "Pre-LLM heartbeat timeout retry also timed out — claimed_at may become stale")
+                                        }
+                                    }
+                                }
+                                Ok(Ok(None)) => {
+                                    warn!(promise_id = %pid, "Promise vanished during heartbeat timeout-reload — stopping");
+                                    return Ok(String::new());
+                                }
+                                Ok(Err(e)) => {
+                                    warn!(error = %e, promise_id = %pid, "Could not reload revision after heartbeat timeout — claimed_at may become stale")
+                                }
+                                Err(_) => {
+                                    warn!(promise_id = %pid, "KV timeout reloading revision after heartbeat timeout — claimed_at may become stale")
+                                }
                             }
                         }
                     }
-                    Err(_) => {
-                        // Timeout: write may or may not have landed. Reload
-                        // to get the current revision so future heartbeats
-                        // and the terminal-status write can succeed. Without
-                        // this, the revision stays stale and every subsequent
-                        // write CAS-conflicts, leaving claimed_at frozen.
-                        warn!(promise_id = %pid, "Pre-LLM heartbeat timed out — reloading revision and retrying");
-                        match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid)).await {
-                            Ok(Ok(Some((current, new_rev)))) => {
-                                if current.status != crate::promise_store::PromiseStatus::Running {
-                                    warn!(
-                                        promise_id = %pid,
-                                        status = ?current.status,
-                                        "Promise no longer Running during heartbeat timeout-reload — stopping"
-                                    );
-                                    return Ok(String::new());
-                                }
-                                *rev = new_rev;
-                                p.claimed_at = trogon_automations::now_unix();
-                                match tokio::time::timeout(
-                                    NATS_KV_TIMEOUT,
-                                    store.update_promise(&self.tenant_id, pid, p, *rev),
-                                )
-                                .await
-                                {
-                                    Ok(Ok(new_rev2)) => {
-                                        *rev = new_rev2;
-                                        last_heartbeat_at = std::time::Instant::now();
-                                    }
-                                    Ok(Err(e)) => {
-                                        warn!(error = %e, promise_id = %pid, "Pre-LLM heartbeat timeout retry failed — claimed_at may become stale")
-                                    }
-                                    Err(_) => {
-                                        warn!(promise_id = %pid, "Pre-LLM heartbeat timeout retry also timed out — claimed_at may become stale")
-                                    }
-                                }
-                            }
-                            Ok(Ok(None)) => {
-                                warn!(promise_id = %pid, "Promise vanished during heartbeat timeout-reload — stopping");
-                                return Ok(String::new());
-                            }
-                            Ok(Err(e)) => {
-                                warn!(error = %e, promise_id = %pid, "Could not reload revision after heartbeat timeout — claimed_at may become stale")
-                            }
-                            Err(_) => {
-                                warn!(promise_id = %pid, "KV timeout reloading revision after heartbeat timeout — claimed_at may become stale")
-                            }
-                        }
-                    }
-                }
             }
 
             // Build the cacheable system block on each iteration (cheap — just wraps a &str).
@@ -1229,7 +1333,8 @@ impl AgentLoop {
                 }]
             });
 
-            let anthropic_messages: Vec<AnthropicMessageRef<'_>> = messages.iter().map(AnthropicMessageRef).collect();
+            let anthropic_messages: Vec<AnthropicMessageRef<'_>> =
+                messages.iter().map(AnthropicMessageRef).collect();
             let request = AnthropicRequest {
                 model: &self.model,
                 max_tokens: 4096,
@@ -1238,7 +1343,8 @@ impl AgentLoop {
                 messages: anthropic_messages,
             };
 
-            let body = serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
+            let body =
+                serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
             let raw = match self.anthropic_client.complete(body).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -1309,7 +1415,9 @@ impl AgentLoop {
                             .await;
                         }
                     }
-                    return Err(AgentError::UnexpectedStopReason(format!("Deserialization error: {e}")));
+                    return Err(AgentError::UnexpectedStopReason(format!(
+                        "Deserialization error: {e}"
+                    )));
                 }
             };
 
@@ -1317,7 +1425,7 @@ impl AgentLoop {
 
             match response.stop_reason.as_str() {
                 "end_turn" => {
-                    let text = response
+                    let mut text = response
                         .content
                         .iter()
                         .filter_map(|b| {
@@ -1329,6 +1437,13 @@ impl AgentLoop {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    if !continuation_text.is_empty() {
+                        if !text.is_empty() {
+                            continuation_text.push('\n');
+                        }
+                        continuation_text.push_str(&text);
+                        text = continuation_text.clone();
+                    }
 
                     info!(iterations = iteration + 1, "Agent completed");
                     if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
@@ -1353,11 +1468,15 @@ impl AgentLoop {
                             if needs_reload {
                                 // Reload and retry once — either the write landed (CAS conflict
                                 // from a concurrent writer) or we need a fresh revision to retry.
-                                match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid))
-                                    .await
+                                match tokio::time::timeout(
+                                    NATS_KV_TIMEOUT,
+                                    store.get_promise(&self.tenant_id, pid),
+                                )
+                                .await
                                 {
                                     Ok(Ok(Some((current, new_rev))))
-                                        if current.status != crate::promise_store::PromiseStatus::Resolved =>
+                                        if current.status
+                                            != crate::promise_store::PromiseStatus::Resolved =>
                                     {
                                         p.status = crate::promise_store::PromiseStatus::Resolved;
                                         *rev = new_rev;
@@ -1389,7 +1508,12 @@ impl AgentLoop {
                         } else {
                             // checkpoint=None (CAS revision lost) — attempt a fresh get+write so
                             // the promise doesn't stay Running and trigger startup recovery re-runs.
-                            match tokio::time::timeout(NATS_KV_TIMEOUT, store.get_promise(&self.tenant_id, pid)).await {
+                            match tokio::time::timeout(
+                                NATS_KV_TIMEOUT,
+                                store.get_promise(&self.tenant_id, pid),
+                            )
+                            .await
+                            {
                                 Ok(Ok(Some((mut p, rev)))) => {
                                     p.status = crate::promise_store::PromiseStatus::Resolved;
                                     match tokio::time::timeout(
@@ -1442,29 +1566,32 @@ impl AgentLoop {
                     const CONTEXT_TOKEN_THRESHOLD: u32 = 150_000;
                     const LIVE_TRIM_KEEP: usize = 4;
                     if input_tokens > CONTEXT_TOKEN_THRESHOLD {
-                        let keep = (messages.len() / 2).max(LIVE_TRIM_KEEP).min(messages.len());
+                        let keep = (messages.len() / 2)
+                            .max(LIVE_TRIM_KEEP)
+                            .min(messages.len());
                         let mut drop_count = messages.len() - keep;
                         // Walk back to a user-role boundary — never start a trimmed
                         // history on an assistant message.
                         while drop_count > 0 && messages[drop_count].role != "user" {
                             drop_count -= 1;
                         }
-                        if drop_count > 0 {
+                        let trim_start = trim_safe_start(&messages, drop_count);
+                        if trim_start > 0 && trim_start < messages.len() {
                             let summary = tokio::time::timeout(
                                 std::time::Duration::from_secs(30),
                                 summarize_dropped_messages(
                                     &*self.anthropic_client,
                                     &self.model,
-                                    &messages[..drop_count],
+                                    &messages[..trim_start],
                                 ),
                             )
                             .await
                             .unwrap_or_default();
                             messages = if summary.is_empty() {
-                                messages[drop_count..].to_vec()
+                                messages[trim_start..].to_vec()
                             } else {
                                 let mut v = summary;
-                                v.extend_from_slice(&messages[drop_count..]);
+                                v.extend_from_slice(&messages[trim_start..]);
                                 v
                             };
                             warn!(
@@ -1499,8 +1626,11 @@ impl AgentLoop {
                             // messages and leave all other fields of `p` untouched —
                             // terminal-status writes (Resolved, PermanentFailed) must
                             // not carry stale or oversized history into KV.
-                            let prev_messages = std::mem::replace(&mut p.messages, messages.clone());
-                            let serialized_len = serde_json::to_vec(p as &_).map(|v| v.len()).unwrap_or(usize::MAX);
+                            let prev_messages =
+                                std::mem::replace(&mut p.messages, messages.clone());
+                            let serialized_len = serde_json::to_vec(p as &_)
+                                .map(|v| v.len())
+                                .unwrap_or(usize::MAX);
                             if serialized_len > CHECKPOINT_MAX_BYTES {
                                 // Before giving up, try trimming the oldest messages so the
                                 // payload fits. Halve the history up to three times (keeping
@@ -1519,9 +1649,15 @@ impl AgentLoop {
                                     if keep >= messages.len() {
                                         continue; // divisor too small to reduce history
                                     }
-                                    p.messages = messages[messages.len() - keep..].to_vec();
-                                    let trimmed_len =
-                                        serde_json::to_vec(p as &_).map(|v| v.len()).unwrap_or(usize::MAX);
+                                    let trim_start =
+                                        trim_safe_start(&messages, messages.len() - keep);
+                                    if trim_start >= messages.len() {
+                                        continue;
+                                    }
+                                    p.messages = messages[trim_start..].to_vec();
+                                    let trimmed_len = serde_json::to_vec(p as &_)
+                                        .map(|v| v.len())
+                                        .unwrap_or(usize::MAX);
                                     if trimmed_len <= CHECKPOINT_MAX_BYTES {
                                         trim_keep = Some(keep);
                                         break;
@@ -1529,7 +1665,8 @@ impl AgentLoop {
                                 }
                                 if let Some(keep) = trim_keep {
                                     let drop_count = messages.len() - keep;
-                                    // p.messages is already the plain trim (messages[drop_count..]).
+                                    let trim_start = trim_safe_start(&messages, drop_count);
+                                    // p.messages is already the plain trim (messages[trim_start..]).
                                     // Attempt to enrich with an LLM-generated summary of the dropped
                                     // messages so a crash-recovered run has semantic context.
                                     // Hard cap: summarization is best-effort —
@@ -1543,17 +1680,18 @@ impl AgentLoop {
                                         summarize_dropped_messages(
                                             &*self.anthropic_client,
                                             &self.model,
-                                            &messages[..drop_count],
+                                            &messages[..trim_start],
                                         ),
                                     )
                                     .await
                                     .unwrap_or_default();
                                     if !summary_pair.is_empty() {
                                         let mut with_summary = summary_pair;
-                                        with_summary.extend_from_slice(&messages[drop_count..]);
+                                        with_summary.extend_from_slice(&messages[trim_start..]);
                                         p.messages = with_summary;
-                                        let summary_len =
-                                            serde_json::to_vec(p as &_).map(|v| v.len()).unwrap_or(usize::MAX);
+                                        let summary_len = serde_json::to_vec(p as &_)
+                                            .map(|v| v.len())
+                                            .unwrap_or(usize::MAX);
                                         if summary_len <= CHECKPOINT_MAX_BYTES {
                                             warn!(
                                                 promise_id = %pid,
@@ -1565,7 +1703,7 @@ impl AgentLoop {
                                             );
                                         } else {
                                             // Summary + kept still over limit — revert to plain trim
-                                            p.messages = messages[drop_count..].to_vec();
+                                            p.messages = messages[trim_start..].to_vec();
                                             warn!(
                                                 promise_id = %pid,
                                                 original_messages = messages.len(),
@@ -1638,7 +1776,12 @@ impl AgentLoop {
                                                     // First write did not land — retry with fresh rev.
                                                     match tokio::time::timeout(
                                                         NATS_KV_TIMEOUT,
-                                                        store.update_promise(&self.tenant_id, pid, p, fresh_rev),
+                                                        store.update_promise(
+                                                            &self.tenant_id,
+                                                            pid,
+                                                            p,
+                                                            fresh_rev,
+                                                        ),
                                                     )
                                                     .await
                                                     {
@@ -1709,7 +1852,9 @@ impl AgentLoop {
                                                 // Slack messages, etc.) for a run that already
                                                 // completed. Return an empty string so the
                                                 // caller's ack path still runs cleanly.
-                                                if current.status != crate::promise_store::PromiseStatus::Running {
+                                                if current.status
+                                                    != crate::promise_store::PromiseStatus::Running
+                                                {
                                                     warn!(
                                                         promise_id = %pid,
                                                         status = ?current.status,
@@ -1774,7 +1919,9 @@ impl AgentLoop {
                                         .await
                                         {
                                             Ok(Ok(Some((current, new_rev)))) => {
-                                                if current.status != crate::promise_store::PromiseStatus::Running {
+                                                if current.status
+                                                    != crate::promise_store::PromiseStatus::Running
+                                                {
                                                     warn!(
                                                         promise_id = %pid,
                                                         status = ?current.status,
@@ -1810,32 +1957,54 @@ impl AgentLoop {
                     }
                 }
                 "max_tokens" => {
-                    // Deterministic: the conversation has exceeded the model's
-                    // context window. The same history always hits max_tokens on
-                    // retry — mark PermanentFailed to stop cycling.
-                    if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
-                        if let Some((ref mut p, ref mut rev)) = checkpoint {
-                            write_promise_terminal(
-                                store.as_ref(),
-                                &self.tenant_id,
-                                pid,
-                                p,
-                                *rev,
-                                crate::promise_store::PromiseStatus::PermanentFailed,
-                                "max_tokens",
-                            )
-                            .await;
-                        } else {
-                            try_mark_permanent_failed_fresh(
-                                store.as_ref(),
-                                &self.tenant_id,
-                                pid,
-                                "max_tokens (checkpoint lost)",
-                            )
-                            .await;
-                        }
+                    // Output hit the per-request `max_tokens` cap — not context-window
+                    // exhaustion (that surfaces as HTTP 400 on the request). Append the
+                    // partial assistant turn and continue generation.
+                    max_token_continuations += 1;
+                    if max_token_continuations > MAX_TOKEN_CONTINUATIONS {
+                        if let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                            && let Some((ref mut p, ref mut rev)) = checkpoint {
+                                write_promise_terminal(
+                                    store.as_ref(),
+                                    &self.tenant_id,
+                                    pid,
+                                    p,
+                                    *rev,
+                                    crate::promise_store::PromiseStatus::Failed,
+                                    "max_tokens continuation limit",
+                                )
+                                .await;
+                            }
+                        return Err(AgentError::UnexpectedStopReason(
+                            "max_tokens continuation limit exceeded".to_string(),
+                        ));
                     }
-                    return Err(AgentError::UnexpectedStopReason("max_tokens".to_string()));
+                    let partial_text: String = response
+                        .content
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !partial_text.is_empty() {
+                        if !continuation_text.is_empty() {
+                            continuation_text.push('\n');
+                        }
+                        continuation_text.push_str(&partial_text);
+                    }
+                    let mut assistant_msg = Message::assistant(response.content);
+                    assistant_msg.usage = response.usage;
+                    messages.push(assistant_msg);
+                    warn!(
+                        continuations = max_token_continuations,
+                        "Model output truncated at max_tokens — continuing generation"
+                    );
+                    continue;
                 }
                 other => {
                     // Unknown stop_reason: treat as transient (`Failed`) so
@@ -1943,7 +2112,8 @@ impl AgentLoop {
                 }]
             });
 
-            let anthropic_messages: Vec<AnthropicMessageRef<'_>> = messages.iter().map(AnthropicMessageRef).collect();
+            let anthropic_messages: Vec<AnthropicMessageRef<'_>> =
+                messages.iter().map(AnthropicMessageRef).collect();
             let request = AnthropicRequest {
                 model: &self.model,
                 max_tokens: 4096,
@@ -1952,10 +2122,16 @@ impl AgentLoop {
                 messages: anthropic_messages,
             };
 
-            let body = serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
-            let raw = self.anthropic_client.complete(body).await.map_err(AgentError::Http)?;
-            let response = serde_json::from_value::<AnthropicResponse>(raw)
-                .map_err(|e| AgentError::UnexpectedStopReason(format!("Deserialization error: {e}")))?;
+            let body =
+                serde_json::to_value(&request).expect("AnthropicRequest is always serializable");
+            let raw = self
+                .anthropic_client
+                .complete(body)
+                .await
+                .map_err(AgentError::Http)?;
+            let response = serde_json::from_value::<AnthropicResponse>(raw).map_err(|e| {
+                AgentError::UnexpectedStopReason(format!("Deserialization error: {e}"))
+            })?;
 
             match response.stop_reason.as_str() {
                 "end_turn" => {
@@ -2104,7 +2280,10 @@ impl AgentLoop {
                             // a fresh tool_use_id for the same call, but the content
                             // hash is identical — meaning Slack/Linear dedup checks
                             // will match the original key and block duplicate effects.
-                            serde_json::Value::String(format!("{pid}.{}", tool_cache_key(name, input))),
+                            serde_json::Value::String(format!(
+                                "{pid}.{}",
+                                tool_cache_key(name, input)
+                            )),
                         );
                     }
                     v
@@ -2114,7 +2293,10 @@ impl AgentLoop {
 
                 // Built-in `ask_user` tool — handled directly, bypasses permission gate.
                 if name == "ask_user" {
-                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                    let question = input
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let answer = match &self.elicitation_provider {
                         Some(provider) => match provider.elicit(question).await {
                             Some(a) => a,
@@ -2130,15 +2312,14 @@ impl AgentLoop {
                 }
 
                 // Permission gate — fires before MCP and built-in tool dispatch.
-                if let Some(checker) = &self.permission_checker {
-                    if !checker.check(id, name, input).await {
+                if let Some(checker) = &self.permission_checker
+                    && !checker.check(id, name, input).await {
                         results.push(ToolResult {
                             tool_use_id: id.clone(),
                             content: format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"),
                         });
                         continue;
                     }
-                }
 
                 // Check MCP dispatch first, then fall back to built-in tools.
                 //
@@ -2171,10 +2352,17 @@ impl AgentLoop {
                 // lets recovery re-execute the tool; the per-tool idempotency
                 // mechanisms (comment marker scan, Linear header, Slack history
                 // check) safely deduplicate if the server did process it.
-                let (output, timed_out) = if let Some((_, original, client)) =
-                    self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+                let (output, timed_out) = if let Some((_, original, client)) = self
+                    .mcp_dispatch
+                    .iter()
+                    .find(|(prefixed, _, _)| prefixed == name)
                 {
-                    match tokio::time::timeout(TOOL_EXECUTION_TIMEOUT, client.call_tool(original, input)).await {
+                    match tokio::time::timeout(
+                        TOOL_EXECUTION_TIMEOUT,
+                        client.call_tool(original, input),
+                    )
+                    .await
+                    {
                         Ok(Ok(out)) => (out, false),
                         Ok(Err(e)) => (format!("Tool error: {e}"), false),
                         Err(_) => {
@@ -2193,8 +2381,11 @@ impl AgentLoop {
                         }
                     }
                 } else {
-                    match tokio::time::timeout(TOOL_EXECUTION_TIMEOUT, self.tool_dispatcher.dispatch(name, &call_input))
-                        .await
+                    match tokio::time::timeout(
+                        TOOL_EXECUTION_TIMEOUT,
+                        self.tool_dispatcher.dispatch(name, &call_input),
+                    )
+                    .await
                     {
                         Ok(output) => (output, false),
                         Err(_) => {
@@ -2219,7 +2410,9 @@ impl AgentLoop {
                 // recovery — when Anthropic re-generates a fresh tool_use_id for
                 // the same call — the cache still matches and the tool is not
                 // re-executed. Skipped for timeout results (see `timed_out`).
-                if !timed_out && let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id) {
+                if !timed_out
+                    && let (Some(store), Some(pid)) = (&self.promise_store, &self.promise_id)
+                {
                     let ck = tool_cache_key(name, input);
                     match tokio::time::timeout(
                         NATS_KV_TIMEOUT,
@@ -2301,8 +2494,55 @@ mod tests {
     }
 
     #[test]
+    fn message_is_tool_result_only_detects_tool_result_user_turn() {
+        let msg = Message::tool_results(vec![ToolResult {
+            tool_use_id: "tu1".to_string(),
+            content: "ok".to_string(),
+        }]);
+        assert!(msg.is_tool_result_only());
+        assert!(!Message::user_text("hello").is_tool_result_only());
+    }
+
+    #[test]
+    fn trim_safe_start_skips_leading_orphan_tool_results() {
+        let messages = vec![
+            Message::user_text("start"),
+            Message::assistant(vec![ContentBlock::ToolUse {
+                id: "tu1".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({}),
+            }]),
+            Message::tool_results(vec![ToolResult {
+                tool_use_id: "tu1".to_string(),
+                content: "file contents".to_string(),
+            }]),
+            Message::assistant(vec![ContentBlock::Text {
+                text: "done".to_string(),
+            }]),
+        ];
+        // Naive cut at index 2 would start on the orphan tool_result user turn.
+        let start = trim_safe_start(&messages, 2);
+        assert_eq!(start, 3, "trim must skip orphan tool_result-only user turn");
+        assert!(
+            !messages[start].is_tool_result_only(),
+            "kept slice must begin on a non-tool_result user turn or assistant turn"
+        );
+    }
+
+    #[test]
+    fn content_block_unknown_deserializes_tolerant() {
+        let raw = serde_json::json!({"type": "thinking", "thinking": "hmm"});
+        let block: ContentBlock = serde_json::from_value(raw).unwrap();
+        assert!(matches!(block, ContentBlock::Unknown));
+    }
+
+    #[test]
     fn agent_error_display() {
-        assert!(AgentError::MaxIterationsReached.to_string().contains("max iterations"));
+        assert!(
+            AgentError::MaxIterationsReached
+                .to_string()
+                .contains("max iterations")
+        );
         assert!(
             AgentError::UnexpectedStopReason("pause".to_string())
                 .to_string()
@@ -2345,7 +2585,9 @@ mod tests {
         };
         let body = serde_json::to_value(&req).unwrap();
 
-        let sys_arr = body["system"].as_array().expect("system should be an array");
+        let sys_arr = body["system"]
+            .as_array()
+            .expect("system should be an array");
         assert_eq!(sys_arr.len(), 1);
         assert_eq!(sys_arr[0]["type"], "text");
         assert_eq!(sys_arr[0]["text"], text);
@@ -2397,7 +2639,10 @@ mod tests {
             last.cache_control = Some(json!({"type": "ephemeral"}));
         }
 
-        assert_eq!(cached_tools[0].cache_control, Some(json!({"type": "ephemeral"})));
+        assert_eq!(
+            cached_tools[0].cache_control,
+            Some(json!({"type": "ephemeral"}))
+        );
     }
 
     /// When the tool list is empty no panic occurs and no cache_control is set.
@@ -2428,7 +2673,10 @@ mod tests {
             messages: vec![],
         };
         let body = serde_json::to_value(&req).unwrap();
-        assert!(body.get("system").is_none(), "system key should be absent when None");
+        assert!(
+            body.get("system").is_none(),
+            "system key should be absent when None"
+        );
     }
 
     // ── is_flag_enabled ───────────────────────────────────────────────────────
@@ -2624,7 +2872,9 @@ mod tests {
             "p1",
         );
 
-        let result = agent.run(vec![Message::user_text("do stuff")], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text("do stuff")], &[], None)
+            .await;
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
@@ -2660,7 +2910,10 @@ mod tests {
         // Pre-populate the tool result cache (simulates tool ran before crash).
         let input = serde_json::json!({"k": "v"});
         let ck = super::tool_cache_key("my_tool", &input);
-        store.put_tool_result("acme", "p1", &ck, "cached output").await.unwrap();
+        store
+            .put_tool_result("acme", "p1", &ck, "cached output")
+            .await
+            .unwrap();
 
         // Anthropic: first call returns tool_use, second returns end_turn.
         let tool_use_resp = serde_json::json!({
@@ -2671,7 +2924,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "all done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
 
         let (dispatcher, call_count) = CountingMockToolDispatcher::new("live result");
 
@@ -2713,7 +2969,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "finished"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
 
         let (dispatcher, call_count) = CountingMockToolDispatcher::new("tool output");
         let store_trait = Arc::clone(&store) as Arc<dyn PromiseRepository>;
@@ -2765,7 +3024,9 @@ mod tests {
             "p1",
         );
 
-        let result = agent.run(vec![Message::user_text("do stuff")], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text("do stuff")], &[], None)
+            .await;
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
@@ -2804,7 +3065,10 @@ mod tests {
         // Pre-populate the tool result that was cached before the Http error.
         let input = serde_json::json!({"k": "v"});
         let ck = super::tool_cache_key("my_tool", &input);
-        store.put_tool_result("acme", "p1", &ck, "cached output").await.unwrap();
+        store
+            .put_tool_result("acme", "p1", &ck, "cached output")
+            .await
+            .unwrap();
 
         // Turn 2 retry: LLM requests the same tool again (same input),
         // then ends cleanly.
@@ -2816,7 +3080,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "recovered"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
 
         let (dispatcher, call_count) = CountingMockToolDispatcher::new("live result");
 
@@ -2927,7 +3194,7 @@ mod tests {
     /// retrying the run — deterministic errors produce the same outcome on every
     /// attempt, so retrying wastes Anthropic credits without any benefit.
     #[tokio::test]
-    async fn max_tokens_stop_reason_marks_promise_permanent_failed() {
+    async fn max_tokens_continues_generation_instead_of_permanent_fail() {
         use crate::promise_store::mock::MockPromiseStore;
         use crate::promise_store::{PromiseRepository, PromiseStatus};
         use crate::tools::mock::MockToolDispatcher;
@@ -2936,13 +3203,19 @@ mod tests {
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("p1"));
 
-        // `max_tokens` is deterministic: the same history will always exhaust
-        // the context window, so the run must be PermanentFailed.
-        let resp = serde_json::json!({
+        // `max_tokens` means the OUTPUT hit the per-request token cap, NOT context
+        // exhaustion. The loop must append the partial assistant turn and CONTINUE
+        // generating (here the continuation finishes with `end_turn`) rather than
+        // PermanentFail, which would silently discard a legitimate long-output run.
+        let truncated = serde_json::json!({
             "stop_reason": "max_tokens",
-            "content": [{"type": "text", "text": "truncated"}]
+            "content": [{"type": "text", "text": "part one"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![resp]));
+        let finished = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "part two"}]
+        });
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![truncated, finished]));
         let dispatcher = Arc::new(MockToolDispatcher::new("should not run"));
 
         let agent = make_durable_agent(
@@ -2954,15 +3227,15 @@ mod tests {
 
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
         assert!(
-            matches!(result, Err(AgentError::UnexpectedStopReason(_))),
-            "expected UnexpectedStopReason error"
+            result.is_ok(),
+            "max_tokens must continue generation and complete, not fail; got: {result:?}"
         );
 
         let (p, _) = store.get_promise("acme", "p1").await.unwrap().unwrap();
-        assert_eq!(
+        assert_ne!(
             p.status,
             PromiseStatus::PermanentFailed,
-            "max_tokens must be PermanentFailed — same history always hits the limit"
+            "max_tokens (output-cap truncation) must NOT PermanentFail the run"
         );
     }
 
@@ -3050,7 +3323,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "done after timeout"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
 
         let agent = make_durable_agent(
             anthropic,
@@ -3106,7 +3382,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("tool result"));
 
         let agent = make_durable_agent(
@@ -3119,7 +3398,9 @@ mod tests {
         // Seed initial messages large enough that `p.messages = messages.clone()`
         // pushes the serialized AgentPromise past CHECKPOINT_MAX_BYTES.
         let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
-        let result = agent.run(vec![Message::user_text(large_text)], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text(large_text)], &[], None)
+            .await;
 
         assert_eq!(
             result.unwrap(),
@@ -3176,7 +3457,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
 
         let agent = make_durable_agent(
@@ -3187,10 +3471,19 @@ mod tests {
         );
 
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
-        assert_eq!(result.unwrap(), "done", "run must complete after CAS conflict reload");
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must complete after CAS conflict reload"
+        );
 
         // Promise must be Resolved in the inner store.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -3252,7 +3545,9 @@ mod tests {
 
         // Initial message large enough to exceed CHECKPOINT_MAX_BYTES alone.
         let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
-        let result = agent.run(vec![Message::user_text(large_text)], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text(large_text)], &[], None)
+            .await;
 
         assert_eq!(result.unwrap(), "done");
 
@@ -3263,7 +3558,10 @@ mod tests {
             !p.messages.is_empty(),
             "checkpoint must be written on turn 2 when trimming drops the large message"
         );
-        assert!(p.iteration > 0, "iteration must advance once checkpoint is written");
+        assert!(
+            p.iteration > 0,
+            "iteration must advance once checkpoint is written"
+        );
         // Terminal write succeeded.
         assert_eq!(
             p.status,
@@ -3300,8 +3598,14 @@ mod tests {
         let input_b = serde_json::json!({"k": "b"});
         let ck_a = super::tool_cache_key("tool_a", &input_a);
         let ck_b = super::tool_cache_key("tool_b", &input_b);
-        store.put_tool_result("acme", "p1", &ck_a, "result_a").await.unwrap();
-        store.put_tool_result("acme", "p1", &ck_b, "result_b").await.unwrap();
+        store
+            .put_tool_result("acme", "p1", &ck_a, "result_a")
+            .await
+            .unwrap();
+        store
+            .put_tool_result("acme", "p1", &ck_b, "result_b")
+            .await
+            .unwrap();
 
         // LLM requests all 3 tools in a single turn, then ends.
         let tool_use_resp = serde_json::json!({
@@ -3316,7 +3620,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "all done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let (dispatcher, call_count) = CountingMockToolDispatcher::new("live");
 
         let agent = make_durable_agent(
@@ -3360,7 +3667,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
 
         let agent = make_durable_agent(
@@ -3422,7 +3732,11 @@ mod tests {
                 &'a self,
                 body: serde_json::Value,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                        + Send
+                        + 'a,
+                >,
             > {
                 self.bodies.lock().unwrap().push(body);
                 let resp = self.response.clone();
@@ -3459,7 +3773,11 @@ mod tests {
         // Caller passes an updated prompt — agent must ignore it and use the
         // one stored in the checkpoint.
         let result = agent
-            .run(vec![], &[], Some("updated prompt — must NOT be used on recovery"))
+            .run(
+                vec![],
+                &[],
+                Some("updated prompt — must NOT be used on recovery"),
+            )
             .await;
         assert_eq!(result.unwrap(), "done");
 
@@ -3502,7 +3820,10 @@ mod tests {
         let key_2 = tool_cache_key("post_comment", &serde_json::json!({"text": "world"}));
         let key_3 = tool_cache_key("create_issue", &serde_json::json!({"text": "hello"}));
         assert_ne!(key_1, key_2, "different inputs must produce different keys");
-        assert_ne!(key_1, key_3, "different tool names must produce different keys");
+        assert_ne!(
+            key_1, key_3,
+            "different tool names must produce different keys"
+        );
     }
 
     // ── is_retryable_error ────────────────────────────────────────────────────
@@ -3515,7 +3836,9 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
-                let response = format!("HTTP/1.1 {status} Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let response = format!(
+                    "HTTP/1.1 {status} Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
                 let _ = stream.write_all(response.as_bytes()).await;
             }
         });
@@ -3564,7 +3887,10 @@ mod tests {
             .await
             .expect_err("connection to freed port must fail");
 
-        assert!(err.is_connect(), "ECONNREFUSED must set is_connect()=true; err={err}");
+        assert!(
+            err.is_connect(),
+            "ECONNREFUSED must set is_connect()=true; err={err}"
+        );
         assert!(
             super::is_retryable_error(&err),
             "connect error must be classified as retryable"
@@ -3614,7 +3940,10 @@ mod tests {
     fn retry_after_delay_returns_parsed_integer_seconds() {
         use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
         let mut headers = HeaderMap::new();
-        headers.insert(HeaderName::from_static("retry-after"), HeaderValue::from_static("30"));
+        headers.insert(
+            HeaderName::from_static("retry-after"),
+            HeaderValue::from_static("30"),
+        );
         assert_eq!(
             super::retry_after_delay(&headers),
             30,
@@ -3629,7 +3958,10 @@ mod tests {
     fn retry_after_delay_returns_60_for_negative_integer() {
         use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
         let mut headers = HeaderMap::new();
-        headers.insert(HeaderName::from_static("retry-after"), HeaderValue::from_static("-30"));
+        headers.insert(
+            HeaderName::from_static("retry-after"),
+            HeaderValue::from_static("-30"),
+        );
         assert_eq!(
             super::retry_after_delay(&headers),
             60,
@@ -3667,7 +3999,11 @@ mod tests {
             &'a self,
             _body: serde_json::Value,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                    + Send
+                    + 'a,
+            >,
         > {
             let e = self.0.clone();
             Box::pin(async move { Err(e) })
@@ -3687,9 +4023,7 @@ mod tests {
         store.insert_promise(make_test_promise("p1"));
 
         let agent = make_durable_agent(
-            Arc::new(FixedErrorClient(AnthropicClientError::Permanent(
-                "400 Bad Request".into(),
-            ))),
+            Arc::new(FixedErrorClient(AnthropicClientError::Permanent("400 Bad Request".into()))),
             Arc::new(MockToolDispatcher::new("unused")),
             Arc::clone(&store) as Arc<dyn PromiseRepository>,
             "p1",
@@ -3718,9 +4052,7 @@ mod tests {
         store.insert_promise(make_test_promise("p1"));
 
         let agent = make_durable_agent(
-            Arc::new(FixedErrorClient(AnthropicClientError::Transient(
-                "500 Internal Server Error".into(),
-            ))),
+            Arc::new(FixedErrorClient(AnthropicClientError::Transient("500 Internal Server Error".into()))),
             Arc::new(MockToolDispatcher::new("unused")),
             Arc::clone(&store) as Arc<dyn PromiseRepository>,
             "p1",
@@ -3762,7 +4094,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "must not reach here"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, unreachable_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            unreachable_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
 
         let agent = make_durable_agent(
@@ -3801,7 +4136,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "finished despite disappeared promise"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
 
         let agent = make_durable_agent(
@@ -3848,7 +4186,10 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "finished despite reload timeout"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("ok"));
 
         let agent = make_durable_agent(
@@ -3973,9 +4314,16 @@ mod tests {
             "p1",
         );
 
-        agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
-        let input = captured.lock().unwrap().take().expect("dispatcher was never called");
+        let input = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("dispatcher was never called");
         let ikey = input["_idempotency_key"]
             .as_str()
             .expect("_idempotency_key must be present in tool input");
@@ -3988,7 +4336,11 @@ mod tests {
 
         // The hash part must be a 64-char lowercase hex SHA-256.
         let hash_part = ikey.trim_start_matches("p1.");
-        assert_eq!(hash_part.len(), 64, "hash must be 64 hex chars; got: {hash_part}");
+        assert_eq!(
+            hash_part.len(),
+            64,
+            "hash must be 64 hex chars; got: {hash_part}"
+        );
         assert!(
             hash_part.chars().all(|c| c.is_ascii_hexdigit()),
             "hash must be lowercase hex; got: {hash_part}"
@@ -4060,7 +4412,12 @@ mod tests {
 
         // Promise was never updated — status is still Running.
         // (checkpoint = None means the terminal Resolved write was also skipped.)
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             crate::promise_store::PromiseStatus::Running,
@@ -4149,7 +4506,11 @@ mod tests {
                 "search",
                 serde_json::json!({"type": "object"}),
             )],
-            mcp_dispatch: vec![("mcp__srv__search".to_string(), "search".to_string(), mcp_client)],
+            mcp_dispatch: vec![(
+                "mcp__srv__search".to_string(),
+                "search".to_string(),
+                mcp_client,
+            )],
             flag_client: Arc::new(AlwaysOnFlagClient),
             tenant_id: "acme".to_string(),
             promise_store: Some(Arc::clone(&store) as Arc<dyn PromiseRepository>),
@@ -4158,9 +4519,16 @@ mod tests {
             elicitation_provider: None,
         };
 
-        agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
-        let input = captured.lock().unwrap().take().expect("MCP client was never called");
+        let input = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("MCP client was never called");
         assert!(
             input.get("_idempotency_key").is_none(),
             "_idempotency_key must NOT be injected into MCP tool input; got: {input}"
@@ -4262,18 +4630,25 @@ mod tests {
             "p1",
         );
 
-        let (result, _) = tokio::join!(agent.run(vec![Message::user_text("go")], &[], None), async {
-            // Fire the first put_tool_result timeout.
-            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)).await;
-            // Fire the retry timeout (HangingPutToolResultStore hangs both calls).
-            tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)).await;
-        },);
+        let (result, _) = tokio::join!(
+            agent.run(vec![Message::user_text("go")], &[], None),
+            async {
+                // Fire the first put_tool_result timeout.
+                tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)).await;
+                // Fire the retry timeout (HangingPutToolResultStore hangs both calls).
+                tokio::time::advance(NATS_KV_TIMEOUT + std::time::Duration::from_millis(1)).await;
+            },
+        );
 
         assert_eq!(result.unwrap(), "done despite put timeout");
 
         // Tool result was NOT persisted — both put_tool_result attempts timed out.
         let ck = tool_cache_key("my_tool", &serde_json::json!({}));
-        let cached = store.inner.get_tool_result("acme", "p1", &ck).await.unwrap();
+        let cached = store
+            .inner
+            .get_tool_result("acme", "p1", &ck)
+            .await
+            .unwrap();
         assert!(
             cached.is_none(),
             "tool result must not be cached when put_tool_result times out"
@@ -4316,7 +4691,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
         assert_eq!(result, "non-durable result");
     }
 
@@ -4351,7 +4729,10 @@ mod tests {
 
         // Pre-cache only the turn-1 tool.
         let ck = tool_cache_key("cached_tool", &serde_json::json!({}));
-        store.put_tool_result("acme", "p1", &ck, "cached output").await.unwrap();
+        store
+            .put_tool_result("acme", "p1", &ck, "cached output")
+            .await
+            .unwrap();
 
         let resp_turn1 = serde_json::json!({
             "stop_reason": "tool_use",
@@ -4434,7 +4815,11 @@ mod tests {
         // Pass explicit initial messages to verify the run starts from them,
         // not from an empty history.
         let result = agent
-            .run(vec![Message::user_text("caller initial message")], &[], None)
+            .run(
+                vec![Message::user_text("caller initial message")],
+                &[],
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(result, "fresh start result");
@@ -4518,7 +4903,10 @@ mod tests {
             "p1",
         );
 
-        let result = agent.run(vec![Message::user_text("initial")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("initial")], &[], None)
+            .await
+            .unwrap();
         assert_eq!(
             result, "fresh run after error",
             "run must start fresh when initial KV read returns an error"
@@ -4549,7 +4937,11 @@ mod tests {
                 &'a self,
                 body: serde_json::Value,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                        + Send
+                        + 'a,
+                >,
             > {
                 self.bodies.lock().unwrap().push(body);
                 let resp = self.response.clone();
@@ -4582,7 +4974,10 @@ mod tests {
             "p1",
         );
 
-        agent.run(vec![], &[], Some("caller fallback prompt")).await.unwrap();
+        agent
+            .run(vec![], &[], Some("caller fallback prompt"))
+            .await
+            .unwrap();
 
         let recorded = bodies.lock().unwrap();
         assert_eq!(recorded.len(), 1);
@@ -4632,10 +5027,19 @@ mod tests {
                 &'a self,
                 body: serde_json::Value,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                        + Send
+                        + 'a,
+                >,
             > {
                 self.calls.lock().unwrap().push(body);
-                let resp = self.responses.lock().unwrap().pop_front().expect("no more responses");
+                let resp = self
+                    .responses
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("no more responses");
                 Box::pin(async move { Ok(resp) })
             }
         }
@@ -4696,7 +5100,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
         assert_eq!(result, "handled error");
 
         // The second Anthropic call must carry the MCP error as the tool result.
@@ -4897,12 +5304,19 @@ mod tests {
             "p1",
         );
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
         assert_eq!(result, "done despite put error");
 
         // Result was not persisted — put failed.
         let ck = tool_cache_key("my_tool", &serde_json::json!({}));
-        let cached = store.inner.get_tool_result("acme", "p1", &ck).await.unwrap();
+        let cached = store
+            .inner
+            .get_tool_result("acme", "p1", &ck)
+            .await
+            .unwrap();
         assert!(
             cached.is_none(),
             "tool result must not be cached when put_tool_result returns an error"
@@ -4946,7 +5360,10 @@ mod tests {
             "p1",
         );
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
         assert_eq!(
             result, "done despite reload error",
             "run must complete normally when CAS reload get_promise returns an error"
@@ -4955,7 +5372,12 @@ mod tests {
         // With Fix #11: reload error keeps the old revision. The inner store never
         // wrote a new revision (the CAS conflict was injected), so the old rev is
         // still valid. The terminal Resolved write therefore succeeds.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -4984,7 +5406,10 @@ mod tests {
     #[test]
     fn retry_after_delay_defaults_to_60_for_http_date() {
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT".parse().unwrap());
+        headers.insert(
+            "retry-after",
+            "Wed, 21 Oct 2015 07:28:00 GMT".parse().unwrap(),
+        );
         assert_eq!(retry_after_delay(&headers), 60);
     }
 
@@ -5013,10 +5438,11 @@ mod tests {
         let store = Arc::new(HangingUpdateStore::new());
         store.inner.insert_promise(make_test_promise("p1"));
 
-        // "max_tokens" is an unrecognised stop_reason that goes directly to the
-        // `write_promise_terminal` path without any prior checkpoint write.
+        // An unrecognised stop_reason goes directly to the `write_promise_terminal`
+        // path (transient Failed) without any prior checkpoint write. (`max_tokens`
+        // no longer terminates here — it now triggers output continuation instead.)
         let bad_resp = serde_json::json!({
-            "stop_reason": "max_tokens",
+            "stop_reason": "stop_sequence",
             "content": [{"type": "text", "text": "truncated"}]
         });
         let anthropic = Arc::new(mock::SequencedMockAnthropicClient::new(vec![bad_resp]));
@@ -5040,7 +5466,12 @@ mod tests {
         );
 
         // update_promise never returned — promise status is still Running.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             crate::promise_store::PromiseStatus::Running,
@@ -5170,7 +5601,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let (text, messages) = agent.run_chat(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let (text, messages) = agent
+            .run_chat(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(text, "all done");
         // [user("go"), assistant(tool_use), user(tool_result), assistant(end_turn)]
@@ -5222,7 +5656,9 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run_chat(vec![Message::user_text("go")], &[], None).await;
+        let result = agent
+            .run_chat(vec![Message::user_text("go")], &[], None)
+            .await;
 
         assert!(
             matches!(result, Err(AgentError::MaxIterationsReached)),
@@ -5273,7 +5709,9 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run_chat(vec![Message::user_text("hello")], &[], None).await;
+        let result = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await;
 
         assert!(
             matches!(result, Err(AgentError::Http(_))),
@@ -5310,7 +5748,9 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run_chat(vec![Message::user_text("hello")], &[], None).await;
+        let result = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await;
 
         match &result {
             Err(AgentError::UnexpectedStopReason(s)) => {
@@ -5355,11 +5795,16 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run_chat(vec![Message::user_text("hello")], &[], None).await;
+        let result = agent
+            .run_chat(vec![Message::user_text("hello")], &[], None)
+            .await;
 
         match &result {
             Err(AgentError::UnexpectedStopReason(s)) => {
-                assert_eq!(s, "max_tokens", "error must contain the original stop_reason; got: {s}");
+                assert_eq!(
+                    s, "max_tokens",
+                    "error must contain the original stop_reason; got: {s}"
+                );
             }
             other => panic!("expected UnexpectedStopReason(\"max_tokens\"), got: {other:?}"),
         }
@@ -5412,7 +5857,12 @@ mod tests {
         );
 
         // update_promise timed out — promise status is still Running.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             crate::promise_store::PromiseStatus::Running,
@@ -5457,7 +5907,12 @@ mod tests {
         );
 
         // CAS conflict on first write → reload + retry → retry succeeds → Resolved.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -5560,7 +6015,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -5572,14 +6032,21 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 // Call 0 is the pre-LLM heartbeat write — let it succeed so these
                 // tests exercise the terminal-write CAS conflict in isolation.
-                return self.inner.update_promise(tenant_id, promise_id, promise, revision);
+                return self
+                    .inner
+                    .update_promise(tenant_id, promise_id, promise, revision);
             }
             if n == 1 {
                 // Call 1 is the terminal (Resolved) write — inject the CAS conflict.
@@ -5607,8 +6074,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -5622,9 +6090,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -5675,7 +6149,12 @@ mod tests {
         );
 
         // update_promise failed → promise never written → still Running
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Running,
@@ -5712,7 +6191,12 @@ mod tests {
             "run must complete even when reload returns Err"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Running,
@@ -5747,9 +6231,18 @@ mod tests {
             agent.run(vec![Message::user_text("go")], &[], None),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
-        assert_eq!(result.unwrap(), "done", "run must complete even when reload times out");
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must complete even when reload times out"
+        );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Running,
@@ -5787,7 +6280,12 @@ mod tests {
         );
 
         // retry write Err → promise status not written by the store (inner never called by update)
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Running,
@@ -5828,7 +6326,12 @@ mod tests {
             "run must complete even when retry write times out"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Running,
@@ -5954,7 +6457,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -5966,13 +6474,20 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             use std::sync::atomic::Ordering;
             let n = self.update_count.fetch_add(1, Ordering::SeqCst);
             match n {
                 0 => match &self.hb_initial {
-                    HbInitial::Succeed => self.inner.update_promise(tenant_id, promise_id, promise, revision),
+                    HbInitial::Succeed => self
+                        .inner
+                        .update_promise(tenant_id, promise_id, promise, revision),
                     HbInitial::CasConflict => Box::pin(async {
                         Err(crate::promise_store::PromiseStoreError(
                             "injected heartbeat CAS conflict".to_string(),
@@ -5981,7 +6496,9 @@ mod tests {
                     HbInitial::Hang => Box::pin(std::future::pending()),
                 },
                 1 => match &self.hb_retry {
-                    HbRetry::Succeed => self.inner.update_promise(tenant_id, promise_id, promise, revision),
+                    HbRetry::Succeed => self
+                        .inner
+                        .update_promise(tenant_id, promise_id, promise, revision),
                     HbRetry::Err_ => Box::pin(async {
                         Err(crate::promise_store::PromiseStoreError(
                             "injected heartbeat retry error".to_string(),
@@ -5990,7 +6507,9 @@ mod tests {
                     HbRetry::Hang => Box::pin(std::future::pending()),
                 },
                 // call 2+ = terminal (Resolved) write and any retries — always delegate
-                _ => self.inner.update_promise(tenant_id, promise_id, promise, revision),
+                _ => self
+                    .inner
+                    .update_promise(tenant_id, promise_id, promise, revision),
             }
         }
 
@@ -6001,8 +6520,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -6016,9 +6536,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -6040,7 +6566,10 @@ mod tests {
     }
 
     /// Helper: build a durable agent backed by a `HeartbeatTestStore`.
-    fn make_hb_agent(anthropic: Arc<dyn AnthropicClient>, store: Arc<HeartbeatTestStore>) -> AgentLoop {
+    fn make_hb_agent(
+        anthropic: Arc<dyn AnthropicClient>,
+        store: Arc<HeartbeatTestStore>,
+    ) -> AgentLoop {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::PromiseRepository;
         use crate::tools::ToolContext;
@@ -6089,7 +6618,12 @@ mod tests {
         let result = agent.run(vec![Message::user_text("go")], &[], None).await;
         assert_eq!(result.unwrap(), "done");
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6158,7 +6692,12 @@ mod tests {
             "run must complete even when heartbeat reload errors"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6187,7 +6726,12 @@ mod tests {
             "run must complete after successful heartbeat retry"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6218,7 +6762,12 @@ mod tests {
 
         // Retry write Err → rev not updated; terminal write at call 2 delegates
         // to inner and uses the original rev — should still succeed.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6301,7 +6850,12 @@ mod tests {
             "run must complete even when heartbeat reload times out"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6336,7 +6890,12 @@ mod tests {
 
         // Retry write timed out → rev not updated from reload; terminal write at
         // call 2 delegates to inner using original rev — should still succeed.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6369,7 +6928,12 @@ mod tests {
             "run must complete after heartbeat timeout → reload → retry"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Resolved,
@@ -6415,7 +6979,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(
             result, "first\nsecond",
@@ -6458,7 +7025,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let (text, _) = agent.run_chat(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let (text, _) = agent
+            .run_chat(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(
             text, "line one\nline two",
@@ -6520,9 +7090,16 @@ mod tests {
             Arc::clone(&store) as Arc<dyn PromiseRepository>,
             "p1",
         );
-        agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
-        let input = captured.lock().unwrap().take().expect("dispatcher was never called");
+        let input = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("dispatcher was never called");
         assert!(
             input.get("_idempotency_key").is_none(),
             "_idempotency_key must NOT be injected into non-object tool input; got: {input}"
@@ -6632,7 +7209,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(
             result, "actual response",
@@ -6666,7 +7246,9 @@ mod tests {
     /// content slice.
     #[test]
     fn message_assistant_has_correct_role_and_content() {
-        let content = vec![ContentBlock::Text { text: "hi".to_string() }];
+        let content = vec![ContentBlock::Text {
+            text: "hi".to_string(),
+        }];
         let msg = Message::assistant(content);
         assert_eq!(msg.role, "assistant");
         assert_eq!(msg.content.len(), 1);
@@ -6723,11 +7305,7 @@ mod tests {
     #[test]
     fn anthropic_message_ref_omits_usage() {
         let mut msg = Message::assistant(vec![ContentBlock::Text { text: "hi".into() }]);
-        msg.usage = Some(Usage {
-            input_tokens: 10,
-            output_tokens: 5,
-            ..Default::default()
-        });
+        msg.usage = Some(Usage { input_tokens: 10, output_tokens: 5, ..Default::default() });
 
         let wire = serde_json::to_string(&AnthropicMessageRef(&msg)).unwrap();
         assert!(
@@ -6815,7 +7393,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(result, "done");
         assert!(
@@ -6887,7 +7468,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
         assert_eq!(result, "done");
 
         let inputs = capturing.captured.lock().unwrap();
@@ -7059,7 +7643,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(result, "done");
 
@@ -7162,7 +7749,11 @@ mod tests {
         };
 
         let (text, _) = agent
-            .run_chat(vec![Message::user_text("hello")], &[], Some("my system prompt"))
+            .run_chat(
+                vec![Message::user_text("hello")],
+                &[],
+                Some("my system prompt"),
+            )
             .await
             .unwrap();
 
@@ -7174,7 +7765,10 @@ mod tests {
             system.is_array(),
             "request must include a system array when system_prompt is Some; got: {body}"
         );
-        assert_eq!(system[0]["type"], "text", "system block must have type=text");
+        assert_eq!(
+            system[0]["type"], "text",
+            "system block must have type=text"
+        );
         assert_eq!(
             system[0]["text"], "my system prompt",
             "system block must carry the supplied prompt text"
@@ -7241,7 +7835,11 @@ mod tests {
         };
 
         let result = agent
-            .run(vec![Message::user_text("hello")], &[], Some("my system prompt"))
+            .run(
+                vec![Message::user_text("hello")],
+                &[],
+                Some("my system prompt"),
+            )
             .await
             .unwrap();
 
@@ -7253,7 +7851,10 @@ mod tests {
             system.is_array(),
             "request must include a system array when system_prompt is Some; got: {body}"
         );
-        assert_eq!(system[0]["type"], "text", "system block must have type=text");
+        assert_eq!(
+            system[0]["type"], "text",
+            "system block must have type=text"
+        );
         assert_eq!(
             system[0]["text"], "my system prompt",
             "system block must carry the supplied prompt text"
@@ -7289,7 +7890,10 @@ mod tests {
         assert_eq!(arr[1], serde_json::json!(42));
 
         // Empty array must round-trip unchanged.
-        assert_eq!(sort_json_keys(&serde_json::json!([])), serde_json::json!([]));
+        assert_eq!(
+            sort_json_keys(&serde_json::json!([])),
+            serde_json::json!([])
+        );
     }
 
     // ── AgentError::Http display ──────────────────────────────────────────────
@@ -7353,7 +7957,10 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("go")], &[], None).await.unwrap();
+        let result = agent
+            .run(vec![Message::user_text("go")], &[], None)
+            .await
+            .unwrap();
 
         assert_eq!(result, "fresh start");
         assert!(
@@ -7432,7 +8039,12 @@ mod tests {
 
         // Promise must still be Running — no terminal write was possible with
         // checkpoint=None.
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::Running,
@@ -7472,7 +8084,12 @@ mod tests {
 
         // Wire promise_store + promise_id just like a durable run would, but
         // use run_chat instead of run.
-        let tool_ctx = Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let tool_ctx = Arc::new(crate::tools::ToolContext::for_test(
+            "http://127.0.0.1:1",
+            "",
+            "",
+            "",
+        ));
         let agent = AgentLoop {
             anthropic_client: anthropic,
             model: "test".to_string(),
@@ -7509,7 +8126,9 @@ mod tests {
     /// Start a minimal raw-TCP HTTP/1.1 server.  Each incoming connection is
     /// served the next `Vec<u8>` from `responses` in FIFO order.
     /// Returns `(base_url, server_task)` — keep the task alive for the test.
-    async fn start_response_server(responses: Vec<Vec<u8>>) -> (String, tokio::task::JoinHandle<()>) {
+    async fn start_response_server(
+        responses: Vec<Vec<u8>>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
         use std::collections::VecDeque;
         use std::sync::{Arc, Mutex};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -7517,7 +8136,8 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let queue: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(responses.into_iter().collect()));
+        let queue: Arc<Mutex<VecDeque<Vec<u8>>>> =
+            Arc::new(Mutex::new(responses.into_iter().collect()));
 
         let handle = tokio::spawn(async move {
             loop {
@@ -7542,11 +8162,13 @@ mod tests {
     }
 
     fn raw_500() -> Vec<u8> {
-        b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_vec()
+        b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            .to_vec()
     }
 
     fn raw_429_retry_after_1() -> Vec<u8> {
-        b"HTTP/1.1 429 Too Many Requests\r\nretry-after: 1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_vec()
+        b"HTTP/1.1 429 Too Many Requests\r\nretry-after: 1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            .to_vec()
     }
 
     fn raw_200_json(body: serde_json::Value) -> Vec<u8> {
@@ -7604,9 +8226,11 @@ mod tests {
         use std::time::Duration;
 
         let ok_body = serde_json::json!({"stop_reason": "end_turn", "content": []});
-        let (base_url, _server) = start_response_server(vec![raw_500(), raw_200_json(ok_body.clone())]).await;
+        let (base_url, _server) =
+            start_response_server(vec![raw_500(), raw_200_json(ok_body.clone())]).await;
 
-        let client = ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
+        let client =
+            ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
 
         let (result, _) = tokio::join!(
             client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
@@ -7615,7 +8239,11 @@ mod tests {
             }
         );
 
-        assert_eq!(result.unwrap(), ok_body, "must return the 200 response after one retry");
+        assert_eq!(
+            result.unwrap(),
+            ok_body,
+            "must return the 200 response after one retry"
+        );
     }
 
     /// Four consecutive 500s — the retry loop exhausts all three retries and
@@ -7624,9 +8252,11 @@ mod tests {
     async fn reqwest_client_exhausts_retries_on_5xx() {
         use std::time::Duration;
 
-        let (base_url, _server) = start_response_server(vec![raw_500(), raw_500(), raw_500(), raw_500()]).await;
+        let (base_url, _server) =
+            start_response_server(vec![raw_500(), raw_500(), raw_500(), raw_500()]).await;
 
-        let client = ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
+        let client =
+            ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
 
         let (result, _) = tokio::join!(
             client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
@@ -7652,9 +8282,11 @@ mod tests {
 
         let ok_body = serde_json::json!({"stop_reason": "end_turn", "content": []});
         let (base_url, _server) =
-            start_response_server(vec![raw_429_retry_after_1(), raw_200_json(ok_body.clone())]).await;
+            start_response_server(vec![raw_429_retry_after_1(), raw_200_json(ok_body.clone())])
+                .await;
 
-        let client = ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
+        let client =
+            ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
 
         let (result, _) = tokio::join!(
             client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
@@ -7684,7 +8316,8 @@ mod tests {
         ])
         .await;
 
-        let client = ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
+        let client =
+            ReqwestAnthropicClient::new(reqwest::Client::new(), base_url, "test-token".to_string());
 
         let (result, _) = tokio::join!(
             client.complete(serde_json::json!({"model": "test", "max_tokens": 1})),
@@ -7724,7 +8357,11 @@ mod tests {
                 &'a self,
                 body: serde_json::Value,
             ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+                Box<
+                    dyn std::future::Future<Output = Result<serde_json::Value, AnthropicClientError>>
+                        + Send
+                        + 'a,
+                >,
             > {
                 self.bodies.lock().unwrap().push(body);
                 Box::pin(async move {
@@ -7826,7 +8463,10 @@ mod tests {
 
         let (ps, _c) = make_real_promise_store().await;
         let store: Arc<dyn PromiseRepository> = ps.clone();
-        store.put_promise(&make_test_promise("p-oversize")).await.unwrap();
+        store
+            .put_promise(&make_test_promise("p-oversize"))
+            .await
+            .unwrap();
 
         let tool_use_resp = serde_json::json!({
             "stop_reason": "tool_use",
@@ -7836,14 +8476,19 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
         let dispatcher = Arc::new(MockToolDispatcher::new("tool result"));
         let agent = make_durable_agent(anthropic, dispatcher, Arc::clone(&store), "p-oversize");
 
         // Initial messages large enough that staging them into the AgentPromise
         // pushes the total serialized size above CHECKPOINT_MAX_BYTES.
         let large_text = "a".repeat(CHECKPOINT_MAX_BYTES + 1);
-        let result = agent.run(vec![Message::user_text(large_text)], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text(large_text)], &[], None)
+            .await;
         assert_eq!(
             result.unwrap(),
             "done",
@@ -7921,9 +8566,18 @@ mod tests {
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "all done"}]
         });
-        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![tool_use_resp, end_turn_resp]));
-        let (dispatcher, call_count) = CountingMockToolDispatcher::new("live result — must not appear");
-        let agent = make_durable_agent(anthropic, Arc::new(dispatcher), Arc::clone(&store), "p-tool-cache");
+        let anthropic = Arc::new(SequencedMockAnthropicClient::new(vec![
+            tool_use_resp,
+            end_turn_resp,
+        ]));
+        let (dispatcher, call_count) =
+            CountingMockToolDispatcher::new("live result — must not appear");
+        let agent = make_durable_agent(
+            anthropic,
+            Arc::new(dispatcher),
+            Arc::clone(&store),
+            "p-tool-cache",
+        );
 
         // Empty initial_messages — run() loads them from the checkpoint.
         let result = agent.run(vec![], &[], None).await;
@@ -7986,7 +8640,10 @@ mod tests {
         // Pre-populate cache for the recovery turn tool call.
         let input = serde_json::json!({"k": "v"});
         let ck = super::tool_cache_key("my_tool", &input);
-        store.put_tool_result("acme", "p1", &ck, "cached_result").await.unwrap();
+        store
+            .put_tool_result("acme", "p1", &ck, "cached_result")
+            .await
+            .unwrap();
 
         let tool_use_resp = || {
             serde_json::json!({
@@ -8080,7 +8737,10 @@ mod tests {
             out.contains("called tool `post_comment`"),
             "ToolUse must render with backtick-quoted name; got: {out}"
         );
-        assert!(out.contains("hi"), "ToolUse must include the input JSON; got: {out}");
+        assert!(
+            out.contains("hi"),
+            "ToolUse must include the input JSON; got: {out}"
+        );
     }
 
     #[test]
@@ -8121,7 +8781,10 @@ mod tests {
         ];
         let out = render_messages_for_summary(&msgs);
         assert!(out.contains("User: first"), "must contain first user msg");
-        assert!(out.contains("Assistant: second"), "must contain assistant msg");
+        assert!(
+            out.contains("Assistant: second"),
+            "must contain assistant msg"
+        );
         assert!(out.contains("User: third"), "must contain third user msg");
         // Each block ends with \n\n — three blocks = three double-newlines.
         assert_eq!(out.matches("\n\n").count(), 3);
@@ -8142,7 +8805,10 @@ mod tests {
         // Empty response queue — panics if LLM is called.
         let client = mock::SequencedMockAnthropicClient::new(vec![]);
         let result = summarize_dropped_messages(&client, "model", &msgs).await;
-        assert!(result.is_empty(), "empty rendered output must return vec![]");
+        assert!(
+            result.is_empty(),
+            "empty rendered output must return vec![]"
+        );
     }
 
     /// When the LLM call returns an error, the function degrades gracefully
@@ -8152,7 +8818,10 @@ mod tests {
         let msgs = vec![Message::user_text("some content")];
         let client = mock::AlwaysErrAnthropicClient;
         let result = summarize_dropped_messages(&client, "model", &msgs).await;
-        assert!(result.is_empty(), "LLM error must degrade gracefully to vec![]");
+        assert!(
+            result.is_empty(),
+            "LLM error must degrade gracefully to vec![]"
+        );
     }
 
     /// When the LLM returns JSON that cannot be deserialized as `AnthropicResponse`,
@@ -8181,7 +8850,11 @@ mod tests {
         });
         let client = mock::SequencedMockAnthropicClient::new(vec![summary_resp]);
         let result = summarize_dropped_messages(&client, "model", &msgs).await;
-        assert_eq!(result.len(), 2, "must return exactly [user_summary, assistant_ack]");
+        assert_eq!(
+            result.len(),
+            2,
+            "must return exactly [user_summary, assistant_ack]"
+        );
         // First message: user role with summary text embedded.
         assert_eq!(result[0].role, "user");
         let first_text = match &result[0].content[0] {
@@ -8216,7 +8889,8 @@ mod tests {
         // If the function retried, the test would advance through the back-off
         // sleeps and complete very slowly. With start_paused it still completes
         // instantly because there are no sleeps to advance past.
-        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "missing-pid", "test").await;
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "missing-pid", "test")
+            .await;
         // Reaching here means the function returned — success.
     }
 
@@ -8229,11 +8903,13 @@ mod tests {
         use crate::promise_store::mock::ErrorGetPromiseStore;
 
         let store = Arc::new(ErrorGetPromiseStore::new());
-        let store_as_repo: Arc<dyn PromiseRepository> = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
 
         // Back-off sleeps: attempt 1→2s, 2→4s, 3→8s, 4→16s  (attempt 0 has no sleep).
         // With start_paused these advance instantly — the whole test completes synchronously.
-        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-err", "test ctx").await;
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-err", "test ctx")
+            .await;
         // Function returns after exhausting retries — no panic.
     }
 
@@ -8246,11 +8922,13 @@ mod tests {
         use crate::promise_store::mock::HangingGetPromiseStore;
 
         let store = Arc::new(HangingGetPromiseStore::new());
-        let store_as_repo: Arc<dyn PromiseRepository> = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
 
         // Each attempt hangs → NATS_KV_TIMEOUT (10s) fires → retry sleep → next attempt.
         // Tokio's paused clock auto-advances all sleeps instantly.
-        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-hang", "test ctx").await;
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-hang", "test ctx")
+            .await;
         // Returns after all 5 attempts time out — no panic.
     }
 
@@ -8263,11 +8941,17 @@ mod tests {
 
         let store = Arc::new(MockPromiseStore::new());
         store.insert_promise(make_test_promise("pid-found"));
-        let store_as_repo: Arc<dyn PromiseRepository> = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
 
-        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-found", "test ctx").await;
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-found", "test ctx")
+            .await;
 
-        let (p, _) = store.get_promise("acme", "pid-found").await.unwrap().unwrap();
+        let (p, _) = store
+            .get_promise("acme", "pid-found")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::PermanentFailed,
@@ -8282,7 +8966,9 @@ mod tests {
     /// Uses `start_paused = true` so the 2-second back-off resolves instantly.
     #[tokio::test(start_paused = true)]
     async fn try_mark_permanent_failed_first_error_second_succeeds_marks_permanent_failed() {
-        use crate::promise_store::{AgentPromise, PromiseEntry, PromiseRepository, PromiseStatus, PromiseStoreError};
+        use crate::promise_store::{
+            AgentPromise, PromiseEntry, PromiseRepository, PromiseStatus, PromiseStoreError,
+        };
         use std::future::Future;
         use std::pin::Pin;
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8298,12 +8984,19 @@ mod tests {
                 &'a self,
                 tenant_id: &'a str,
                 promise_id: &'a str,
-            ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>>
-            {
+            ) -> Pin<
+                Box<
+                    dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>>
+                        + Send
+                        + 'a,
+                >,
+            > {
                 let n = self.get_count.fetch_add(1, Ordering::SeqCst);
                 if n == 0 {
                     return Box::pin(async {
-                        Err(PromiseStoreError("transient KV error on first attempt".to_string()))
+                        Err(PromiseStoreError(
+                            "transient KV error on first attempt".to_string(),
+                        ))
                     });
                 }
                 self.inner.get_promise(tenant_id, promise_id)
@@ -8312,7 +9005,8 @@ mod tests {
             fn put_promise<'a>(
                 &'a self,
                 promise: &'a AgentPromise,
-            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>>
+            {
                 self.inner.put_promise(promise)
             }
 
@@ -8322,8 +9016,10 @@ mod tests {
                 promise_id: &'a str,
                 promise: &'a AgentPromise,
                 revision: u64,
-            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
-                self.inner.update_promise(tenant_id, promise_id, promise, revision)
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>>
+            {
+                self.inner
+                    .update_promise(tenant_id, promise_id, promise, revision)
             }
 
             fn get_tool_result<'a>(
@@ -8331,7 +9027,8 @@ mod tests {
                 tenant_id: &'a str,
                 promise_id: &'a str,
                 cache_key: &'a str,
-            ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
+            ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>>
+            {
                 self.inner.get_tool_result(tenant_id, promise_id, cache_key)
             }
 
@@ -8341,14 +9038,18 @@ mod tests {
                 promise_id: &'a str,
                 cache_key: &'a str,
                 result: &'a str,
-            ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
-                self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>>
+            {
+                self.inner
+                    .put_tool_result(tenant_id, promise_id, cache_key, result)
             }
 
             fn list_running<'a>(
                 &'a self,
                 tenant_id: &'a str,
-            ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
+            ) -> Pin<
+                Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>,
+            > {
                 self.inner.list_running(tenant_id)
             }
         }
@@ -8358,12 +9059,19 @@ mod tests {
             get_count: Arc::new(AtomicUsize::new(0)),
         });
         store.inner.insert_promise(make_test_promise("pid-retry"));
-        let store_as_repo: Arc<dyn PromiseRepository> = Arc::clone(&store) as Arc<dyn PromiseRepository>;
+        let store_as_repo: Arc<dyn PromiseRepository> =
+            Arc::clone(&store) as Arc<dyn PromiseRepository>;
 
         // With start_paused=true the 2-second back-off (attempt 1) resolves instantly.
-        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-retry", "test ctx").await;
+        try_mark_permanent_failed_fresh(store_as_repo.as_ref(), "acme", "pid-retry", "test ctx")
+            .await;
 
-        let (p, _) = store.inner.get_promise("acme", "pid-retry").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "pid-retry")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             p.status,
             PromiseStatus::PermanentFailed,
@@ -8515,7 +9223,12 @@ mod tests {
             &'a self,
             promise: &'a crate::promise_store::AgentPromise,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             self.inner.put_promise(promise)
         }
@@ -8527,7 +9240,12 @@ mod tests {
             promise: &'a crate::promise_store::AgentPromise,
             revision: u64,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<u64, crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<u64, crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
             let mut phase = self.phase.lock().unwrap();
             match &*phase {
@@ -8535,7 +9253,8 @@ mod tests {
                     PrePinInitial::Succeed => {
                         *phase = PrePinPhase::Done;
                         drop(phase);
-                        self.inner.update_promise(tenant_id, promise_id, promise, revision)
+                        self.inner
+                            .update_promise(tenant_id, promise_id, promise, revision)
                     }
                     PrePinInitial::CasConflict => {
                         *phase = PrePinPhase::Reload;
@@ -8562,7 +9281,9 @@ mod tests {
                         let p_id = promise_id.to_string();
                         let p_clone = promise.clone();
                         drop(phase);
-                        Box::pin(async move { inner.update_promise(&t, &p_id, &p_clone, revision).await })
+                        Box::pin(async move {
+                            inner.update_promise(&t, &p_id, &p_clone, revision).await
+                        })
                     }
                     PrePinRetry::Err_ => {
                         *phase = PrePinPhase::Done;
@@ -8583,7 +9304,8 @@ mod tests {
                 // — delegate to inner.
                 PrePinPhase::Done | PrePinPhase::Reload => {
                     drop(phase);
-                    self.inner.update_promise(tenant_id, promise_id, promise, revision)
+                    self.inner
+                        .update_promise(tenant_id, promise_id, promise, revision)
                 }
             }
         }
@@ -8595,8 +9317,9 @@ mod tests {
             cache_key: &'a str,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<Option<String>, crate::promise_store::PromiseStoreError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<Option<String>, crate::promise_store::PromiseStoreError>,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -8610,9 +9333,15 @@ mod tests {
             cache_key: &'a str,
             result: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), crate::promise_store::PromiseStoreError>> + Send + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = Result<(), crate::promise_store::PromiseStoreError>,
+                    > + Send
+                    + 'a,
+            >,
         > {
-            self.inner.put_tool_result(tenant_id, promise_id, cache_key, result)
+            self.inner
+                .put_tool_result(tenant_id, promise_id, cache_key, result)
         }
 
         fn list_running<'a>(
@@ -8633,7 +9362,10 @@ mod tests {
         }
     }
 
-    fn make_pre_pin_agent(anthropic: Arc<dyn AnthropicClient>, store: Arc<PrePinTestStore>) -> AgentLoop {
+    fn make_pre_pin_agent(
+        anthropic: Arc<dyn AnthropicClient>,
+        store: Arc<PrePinTestStore>,
+    ) -> AgentLoop {
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::promise_store::PromiseRepository;
         use crate::tools::ToolContext;
@@ -8674,11 +9406,20 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let result = agent
-            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt"),
+            )
             .await;
         assert_eq!(result.unwrap(), "done");
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
         assert_eq!(
             p.system_prompt.as_deref(),
@@ -8702,11 +9443,20 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let result = agent
-            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt"),
+            )
             .await;
         assert_eq!(result.unwrap(), "done");
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
         assert_eq!(
             p.system_prompt.as_deref(),
@@ -8730,7 +9480,11 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let result = agent
-            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt"),
+            )
             .await;
         assert_eq!(
             result.unwrap(),
@@ -8738,7 +9492,12 @@ mod tests {
             "run must complete even when pre-pin retry fails"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8758,7 +9517,11 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
         assert_eq!(
@@ -8767,7 +9530,12 @@ mod tests {
             "run must complete even when pre-pin retry times out"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8786,11 +9554,24 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let result = agent
-            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt"),
+            )
             .await;
-        assert_eq!(result.unwrap(), "done", "run must complete when reload returns None");
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must complete when reload returns None"
+        );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8809,11 +9590,24 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let result = agent
-            .run(vec![Message::user_text("go")], &[], Some("test system prompt"))
+            .run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt"),
+            )
             .await;
-        assert_eq!(result.unwrap(), "done", "run must complete when reload errors");
+        assert_eq!(
+            result.unwrap(),
+            "done",
+            "run must complete when reload errors"
+        );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8833,7 +9627,11 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
         assert_eq!(
@@ -8842,7 +9640,12 @@ mod tests {
             "run must complete when pre-pin reload times out"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8862,7 +9665,11 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
         assert_eq!(
@@ -8871,7 +9678,12 @@ mod tests {
             "run must complete when write landed before timeout was observed"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8891,12 +9703,21 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
         assert_eq!(result.unwrap(), "done");
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
         assert_eq!(
             p.system_prompt.as_deref(),
@@ -8921,7 +9742,11 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
         assert_eq!(
@@ -8930,7 +9755,12 @@ mod tests {
             "run must complete when retry write errors after initial timeout"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8951,7 +9781,11 @@ mod tests {
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         // Two NATS_KV_TIMEOUT waits fire: initial write + retry write.
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT * 2 + Duration::from_millis(2)),
         );
         assert_eq!(
@@ -8960,7 +9794,12 @@ mod tests {
             "run must complete when both pre-pin writes time out"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -8980,7 +9819,11 @@ mod tests {
 
         let agent = make_pre_pin_agent(end_turn_anthropic(), Arc::clone(&store));
         let (result, _) = tokio::join!(
-            agent.run(vec![Message::user_text("go")], &[], Some("test system prompt")),
+            agent.run(
+                vec![Message::user_text("go")],
+                &[],
+                Some("test system prompt")
+            ),
             tokio::time::advance(NATS_KV_TIMEOUT + Duration::from_millis(1)),
         );
         assert_eq!(
@@ -8989,7 +9832,12 @@ mod tests {
             "run must complete when reload errors after initial timeout"
         );
 
-        let (p, _) = store.inner.get_promise("acme", "p1").await.unwrap().unwrap();
+        let (p, _) = store
+            .inner
+            .get_promise("acme", "p1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(p.status, PromiseStatus::Resolved);
     }
 
@@ -9062,7 +9910,9 @@ mod tests {
         // The summarize call (LLM call 2) hangs for 30 s before timing out.
         // tokio's paused clock auto-advances through the 30-second timeout and
         // any subsequent NATS_KV_TIMEOUT waits without manual clock control.
-        let result = agent.run(vec![Message::user_text(large_text)], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text(large_text)], &[], None)
+            .await;
         assert_eq!(
             result.unwrap(),
             "done",
@@ -9126,7 +9976,8 @@ mod tests {
             end_turn,
         ]));
 
-        let tool_ctx = Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let tool_ctx =
+            Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = AgentLoop {
             anthropic_client: Arc::clone(&anthropic) as Arc<dyn AnthropicClient>,
             model: "test".to_string(),
@@ -9146,7 +9997,9 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("start task")], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text("start task")], &[], None)
+            .await;
 
         assert_eq!(
             result.unwrap(),
@@ -9173,8 +10026,9 @@ mod tests {
             fn complete<'a>(
                 &'a self,
                 _body: serde_json::Value,
-            ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>>
-            {
+            ) -> Pin<
+                Box<dyn Future<Output = Result<serde_json::Value, AnthropicClientError>> + Send + 'a>,
+            > {
                 let n = self.count.fetch_add(1, Ordering::SeqCst);
                 let low = serde_json::json!({
                     "stop_reason": "tool_use",
@@ -9204,7 +10058,8 @@ mod tests {
         }
 
         let count = Arc::new(AtomicUsize::new(0));
-        let tool_ctx = Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
+        let tool_ctx =
+            Arc::new(crate::tools::ToolContext::for_test("http://127.0.0.1:1", "", "", ""));
         let agent = AgentLoop {
             anthropic_client: Arc::new(CallCountClient {
                 count: Arc::clone(&count),
@@ -9226,7 +10081,9 @@ mod tests {
             elicitation_provider: None,
         };
 
-        let result = agent.run(vec![Message::user_text("start task")], &[], None).await;
+        let result = agent
+            .run(vec![Message::user_text("start task")], &[], None)
+            .await;
 
         assert_eq!(
             result.unwrap(),
@@ -9312,9 +10169,9 @@ mod tests {
 
         // The tool_result message in the history must contain the elicitation answer.
         let has_answer = updated.iter().any(|m| {
-            m.content
-                .iter()
-                .any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("Alice")))
+            m.content.iter().any(|b| {
+                matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("Alice"))
+            })
         });
         assert!(
             has_answer,
@@ -9382,7 +10239,9 @@ mod tests {
             then.status(400);
         });
 
-        let resp = reqwest::get(format!("{}/test", server.base_url())).await.unwrap();
+        let resp = reqwest::get(format!("{}/test", server.base_url()))
+            .await
+            .unwrap();
         let err = resp.error_for_status().unwrap_err();
         let result = super::reqwest_error_to_anthropic_error(err);
         assert!(
@@ -9403,7 +10262,9 @@ mod tests {
             then.status(429);
         });
 
-        let resp = reqwest::get(format!("{}/test", server.base_url())).await.unwrap();
+        let resp = reqwest::get(format!("{}/test", server.base_url()))
+            .await
+            .unwrap();
         let err = resp.error_for_status().unwrap_err();
         let result = super::reqwest_error_to_anthropic_error(err);
         assert!(
@@ -9423,7 +10284,9 @@ mod tests {
             then.status(503);
         });
 
-        let resp = reqwest::get(format!("{}/test", server.base_url())).await.unwrap();
+        let resp = reqwest::get(format!("{}/test", server.base_url()))
+            .await
+            .unwrap();
         let err = resp.error_for_status().unwrap_err();
         let result = super::reqwest_error_to_anthropic_error(err);
         assert!(

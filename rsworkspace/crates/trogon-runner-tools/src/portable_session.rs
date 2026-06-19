@@ -521,4 +521,12 @@ mod tests {
         let last = msgs.last().unwrap();
         assert!(matches!(last.content.first(), Some(ContentBlock::Text { text }) if text == "done"));
     }
+
+    #[test]
+    fn truncate_str_does_not_panic_on_multibyte_boundary() {
+        let s = "日本語".repeat(100);
+        let truncated = truncate_str(&s, 50);
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.len() <= 50);
+    }
 }

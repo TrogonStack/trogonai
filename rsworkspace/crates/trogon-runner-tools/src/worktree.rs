@@ -16,6 +16,11 @@ impl TempWorktree {
             .status()
             .await;
     }
+
+    /// Keep the worktree after this handle drops.
+    pub fn keep(mut self) {
+        self.cleaned = true;
+    }
 }
 
 impl Drop for TempWorktree {

@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 //! Integration tests verifying that the OpenRouter runner correctly dispatches
 //! real tool calls (glob, git_status, git_diff, git_log, search_files, fetch_url
 //! egress) via its wire format (ToolCallsReady → dispatch_tool → second API call

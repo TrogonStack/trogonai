@@ -72,6 +72,7 @@ fn state_with_anthropic(api_url: String) -> ServiceState {
         }),
         xai: None,
         openrouter: None,
+        openai: None,
     }
 }
 
@@ -108,6 +109,7 @@ fn state_with_xai(api_url: String) -> ServiceState {
             default_model: "grok-default".into(),
         }),
         openrouter: None,
+        openai: None,
     }
 }
 

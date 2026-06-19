@@ -505,7 +505,11 @@ fn slice_from_offset(s: &str, offset: usize) -> String {
     if offset >= s.len() {
         String::new()
     } else {
-        s[offset..].to_string()
+        let mut start = offset;
+        while start < s.len() && !s.is_char_boundary(start) {
+            start += 1;
+        }
+        s[start..].to_string()
     }
 }
 
@@ -911,6 +915,13 @@ mod tests {
     #[test]
     fn slice_from_offset_returns_empty_when_offset_past_end() {
         assert_eq!(slice_from_offset("hi", 5), "");
+    }
+
+    #[test]
+    fn slice_from_offset_advances_non_char_boundary_offset() {
+        let s = "a日本語bc";
+        // byte 2 falls inside the first CJK character (日)
+        assert_eq!(slice_from_offset(s, 2), "本語bc");
     }
 
     #[test]

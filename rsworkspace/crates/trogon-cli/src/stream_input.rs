@@ -58,6 +58,7 @@ pub enum StreamInputEvent {
 pub(crate) struct LineEditor {
     buf: Vec<u8>,
     priority_mode: bool,
+    paste_mode: bool,
 }
 
 impl LineEditor {
@@ -65,6 +66,7 @@ impl LineEditor {
         Self {
             buf: Vec::new(),
             priority_mode: false,
+            paste_mode: false,
         }
     }
 
@@ -75,6 +77,10 @@ impl LineEditor {
     }
 
     pub(crate) fn feed(&mut self, byte: u8) -> Option<StreamInputEvent> {
+        if self.paste_mode {
+            self.feed_paste_byte(byte);
+            return None;
+        }
         match byte {
             PRIORITY_KEY => {
                 self.priority_mode = true;
@@ -110,6 +116,24 @@ impl LineEditor {
     pub(crate) fn in_priority_mode(&self) -> bool {
         self.priority_mode
     }
+
+    pub(crate) fn set_paste_mode(&mut self, enabled: bool) {
+        self.paste_mode = enabled;
+    }
+
+    fn feed_paste_byte(&mut self, byte: u8) {
+        match byte {
+            b'\r' | b'\n' => self.buf.push(b'\n'),
+            b'\t' => self.buf.push(b'\t'),
+            b if Self::is_printable(b) => self.buf.push(b),
+            _ => {}
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_paste_mode(&self) -> bool {
+        self.paste_mode
+    }
 }
 
 /// Owns the raw-mode reader thread for the duration of a streaming turn. Drop
@@ -127,7 +151,7 @@ impl StreamInputReader {
     /// of input events. Returns `None` if `/dev/tty` can't be opened or put into
     /// raw mode (e.g. not a real terminal) — callers should just skip the feature.
     pub fn start() -> Option<(Self, tokio::sync::mpsc::UnboundedReceiver<StreamInputEvent>)> {
-        let tty = std::fs::OpenOptions::new()
+        let mut tty = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open("/dev/tty")
@@ -154,6 +178,8 @@ impl StreamInputReader {
                 return None;
             }
         }
+        let _ = tty.write_all(b"\x1b[?2004h");
+        let _ = tty.flush();
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let stop = Arc::new(AtomicBool::new(false));
@@ -180,14 +206,22 @@ impl StreamInputReader {
                     None => continue,
                 };
                 if byte == 0x1b {
-                    // Swallow escape/CSI sequences (arrow keys, paste markers) so
-                    // they don't land in the buffer as garbage.
-                    consume_escape(reader_fd);
+                    match read_escape(reader_fd) {
+                        EscapeSequence::BracketedPasteStart => editor.set_paste_mode(true),
+                        EscapeSequence::BracketedPasteEnd => editor.set_paste_mode(false),
+                        EscapeSequence::Other => {}
+                    }
                     continue;
                 }
                 // Echo printable bytes and backspace so the user sees their input.
                 if LineEditor::is_printable(byte) {
                     let _ = tty_out.write_all(&[byte]);
+                    let _ = tty_out.flush();
+                } else if editor.paste_mode && (byte == b'\n' || byte == b'\r') {
+                    let _ = tty_out.write_all(b"\r\n");
+                    let _ = tty_out.flush();
+                } else if editor.paste_mode && byte == b'\t' {
+                    let _ = tty_out.write_all(b"\t");
                     let _ = tty_out.flush();
                 } else if byte == 0x7f || byte == 0x08 {
                     let _ = tty_out.write_all(b"\x08 \x08");
@@ -226,6 +260,8 @@ impl Drop for StreamInputReader {
         }
         // Restore the original terminal settings.
         let fd = self.tty.as_raw_fd();
+        let _ = self.tty.write_all(b"\x1b[?2004l");
+        let _ = self.tty.flush();
         unsafe {
             libc::tcsetattr(fd, libc::TCSANOW, &self.original);
         }
@@ -248,24 +284,40 @@ fn read_byte(fd: i32) -> Option<u8> {
     if n == 1 { Some(buf[0]) } else { None }
 }
 
-/// Discard the remainder of an ESC-introduced sequence (CSI / arrow / paste).
-fn consume_escape(fd: i32) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EscapeSequence {
+    BracketedPasteStart,
+    BracketedPasteEnd,
+    Other,
+}
+
+/// Read the remainder of an ESC-introduced sequence.
+fn read_escape(fd: i32) -> EscapeSequence {
     // ESC alone or ESC [ ... final-byte. Read a few bytes with a short timeout.
     if !poll_readable(fd, 30) {
-        return;
+        return EscapeSequence::Other;
     }
     if read_byte(fd) != Some(b'[') {
-        return;
+        return EscapeSequence::Other;
     }
+    let mut seq = Vec::new();
     loop {
         if !poll_readable(fd, 30) {
             break;
         }
         match read_byte(fd) {
-            Some(b) if b.is_ascii_alphabetic() || b == b'~' => break,
-            Some(_) => continue,
+            Some(b) if b.is_ascii_alphabetic() || b == b'~' => {
+                seq.push(b);
+                break;
+            }
+            Some(b) => seq.push(b),
             None => break,
         }
+    }
+    match seq.as_slice() {
+        b"200~" => EscapeSequence::BracketedPasteStart,
+        b"201~" => EscapeSequence::BracketedPasteEnd,
+        _ => EscapeSequence::Other,
     }
 }
 
@@ -338,6 +390,19 @@ mod tests {
         assert_eq!(
             feed_str(&mut ed, "  spaced  \r"),
             Some(StreamInputEvent::Queued("spaced".into()))
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_newlines_are_buffered_until_submit() {
+        let mut ed = LineEditor::new();
+        ed.set_paste_mode(true);
+        assert!(ed.in_paste_mode());
+        assert_eq!(feed_str(&mut ed, "one\ntwo\nthree"), None);
+        ed.set_paste_mode(false);
+        assert_eq!(
+            ed.feed(b'\r'),
+            Some(StreamInputEvent::Queued("one\ntwo\nthree".into()))
         );
     }
 }

@@ -85,6 +85,11 @@ impl AcpClientSupervisor {
         self.inner.borrow().nats_url.clone()
     }
 
+    /// Shared NATS client used by the REPL session and ACP bridge.
+    pub fn nats(&self) -> async_nats::Client {
+        self.inner.borrow().nats.clone()
+    }
+
     pub fn set_session(&self, session_id: &str) {
         if let Ok(mut st) = self.state.lock() {
             st.session_id = Some(session_id.to_string());

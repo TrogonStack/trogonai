@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 //! Integration tests for granular permissions in OpenRouterAgent.
 //!
 //! Tests verify the full pipeline end-to-end:

@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use reqwest::Client;
 use serde::Deserialize;
@@ -10,6 +11,13 @@ use serde_json::{Value, json};
 use tracing::debug;
 
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Required by the MCP Streamable-HTTP transport on POST requests.
+const MCP_ACCEPT: &str = "application/json, text/event-stream";
+
+const MCP_SESSION_ID_HEADER: &str = "Mcp-Session-Id";
+
+const HTTP_ERROR_BODY_SNIPPET_MAX: usize = 256;
 
 #[cfg_attr(coverage, coverage(off))]
 pub(crate) fn next_id() -> u64 {
@@ -181,6 +189,8 @@ pub struct McpClient {
     /// can never stall the agent loop. `None` falls back to the `reqwest::Client`
     /// default (no timeout).
     timeout: Option<std::time::Duration>,
+    /// Session id returned by the server (Streamable-HTTP `Mcp-Session-Id` header).
+    session_id: Mutex<Option<String>>,
 }
 
 impl McpClient {
@@ -192,6 +202,7 @@ impl McpClient {
             url: url.into(),
             headers: Vec::new(),
             timeout: None,
+            session_id: Mutex::new(None),
         }
     }
 
@@ -204,6 +215,7 @@ impl McpClient {
             url: url.into(),
             headers,
             timeout: None,
+            session_id: Mutex::new(None),
         }
     }
 
@@ -369,19 +381,56 @@ impl McpClient {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn rpc(&self, body: Value) -> Result<Value, String> {
-        let mut req = self.http.post(&self.url).json(&body);
+        let mut req = self
+            .http
+            .post(&self.url)
+            .header(reqwest::header::ACCEPT, MCP_ACCEPT)
+            .json(&body);
         for (name, value) in &self.headers {
             req = req.header(name, value);
+        }
+        if let Ok(guard) = self.session_id.lock()
+            && let Some(session_id) = guard.as_deref()
+        {
+            req = req.header(MCP_SESSION_ID_HEADER, session_id);
         }
         if let Some(timeout) = self.timeout {
             req = req.timeout(timeout);
         }
-        req.send()
+        let resp = req
+            .send()
             .await
-            .map_err(|e| format!("MCP HTTP error: {e}"))?
-            .json::<Value>()
+            .map_err(|e| format!("MCP HTTP error: {e}"))?;
+        if let Some(session_id) = resp
+            .headers()
+            .get(MCP_SESSION_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            && let Ok(mut guard) = self.session_id.lock()
+        {
+            *guard = Some(session_id.to_string());
+        }
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let snippet = truncate_http_body_snippet(&body);
+            return Err(format!("MCP HTTP error: status {status}{snippet}"));
+        }
+        resp.json::<Value>()
             .await
             .map_err(|e| format!("MCP parse error: {e}"))
+    }
+}
+
+fn truncate_http_body_snippet(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let snippet: String = trimmed.chars().take(HTTP_ERROR_BODY_SNIPPET_MAX).collect();
+    if trimmed.chars().count() > HTTP_ERROR_BODY_SNIPPET_MAX {
+        format!(" body: {snippet}…")
+    } else {
+        format!(" body: {snippet}")
     }
 }
 
@@ -565,6 +614,20 @@ mod tests {
     #[test]
     fn safe_url_plain_host_no_path() {
         assert_eq!(safe_url("http://mcp.example.com"), "http://mcp.example.com");
+    }
+
+    #[test]
+    fn truncate_http_body_snippet_empty() {
+        assert_eq!(super::truncate_http_body_snippet(""), "");
+        assert_eq!(super::truncate_http_body_snippet("   \n"), "");
+    }
+
+    #[test]
+    fn truncate_http_body_snippet_limits_length() {
+        let long = "x".repeat(300);
+        let snippet = super::truncate_http_body_snippet(&long);
+        assert!(snippet.starts_with(" body: "));
+        assert!(snippet.ends_with('…'));
     }
 }
 

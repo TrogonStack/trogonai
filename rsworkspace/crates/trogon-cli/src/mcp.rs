@@ -72,6 +72,7 @@ pub struct McpConfig {
 struct ActiveBridge {
     name: String,
     url: String,
+    headers: Vec<(String, String)>,
     /// `Some` for stdio servers (the local stdio→HTTP bridge process); `None` for
     /// direct HTTP servers, which have no local process to tear down.
     bridge: Option<StdioMcpBridge>,
@@ -215,6 +216,7 @@ impl McpManager {
                     bridges.push(ActiveBridge {
                         name: cfg.name.clone(),
                         url: format!("stdio:{}", cfg.command),
+                        headers: Vec::new(),
                         bridge: None,
                     });
                 }
@@ -262,6 +264,7 @@ impl McpManager {
                     bridges.push(ActiveBridge {
                         name: cfg.name.clone(),
                         url: cfg.url.clone(),
+                        headers,
                         bridge: None,
                     });
                 }
@@ -287,7 +290,7 @@ impl McpManager {
                             .servers
                             .iter()
                             .find(|c| c.name == b.name && c.transport.is_remote())
-                            .map(|c| (b.name.clone(), b.url.clone(), c.headers.clone()))
+                            .map(|_| (b.name.clone(), b.url.clone(), b.headers.clone()))
                     })
                     .collect()
             })
@@ -790,6 +793,56 @@ mod tests {
                 "api".to_string(),
                 "https://api.example.com/mcp".to_string(),
                 vec![("Authorization".to_string(), "Bearer t".to_string())],
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn active_connections_use_effective_oauth_headers() {
+        use crate::fs::mock::MockFs;
+        let mut mgr = McpManager {
+            config: McpConfig {
+                servers: vec![McpServerConfig {
+                    name: "api".to_string(),
+                    transport: McpTransport::Http,
+                    command: String::new(),
+                    args: vec![],
+                    env: HashMap::new(),
+                    url: "https://api.example.com/mcp".to_string(),
+                    headers: vec![("X-Static".to_string(), "yes".to_string())],
+                    oauth: true,
+                    timeout_secs: None,
+                }],
+            },
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::default(),
+            oauth_http: reqwest::Client::new(),
+        };
+        mgr.oauth.set(
+            "api",
+            StoredToken {
+                access_token: "oauth-token".into(),
+                refresh_token: None,
+                expires_at: None,
+                token_endpoint: "https://auth.example.com/token".into(),
+                client_id: "client".into(),
+                client_secret: None,
+            },
+        );
+
+        let _ = mgr.spawn_pending(&MockFs::new()).await;
+        mgr.commit_pending("s1");
+
+        assert_eq!(
+            mgr.active_connections("s1"),
+            vec![(
+                "api".to_string(),
+                "https://api.example.com/mcp".to_string(),
+                vec![
+                    ("X-Static".to_string(), "yes".to_string()),
+                    ("Authorization".to_string(), "Bearer oauth-token".to_string()),
+                ],
             )]
         );
     }

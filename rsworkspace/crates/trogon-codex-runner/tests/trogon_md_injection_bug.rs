@@ -1,16 +1,14 @@
-//! Regression test for TROGON.md injection in codex-runner.
+//! Regression test for the TROGON.md injection fix in codex-runner.
 //!
-//! History:
-//!   1. Original bug: `s.first_turn` was consumed before being captured and
-//!      `s.cwd` was never captured, so TROGON.md was never injected.
-//!   2. Double-injection bug: two independent injection paths coexisted — an
-//!      `else if first_turn` match arm AND the `if prepend_trogon` block — so on
-//!      the first turn TROGON.md was prepended TWICE.
+//! The original bug: `s.first_turn` was set to `false` before being captured,
+//! and `s.cwd` was never captured. As a result the `else if first_turn` branch
+//! that calls `load_trogon_md` never ran.
 //!
-//! Current invariant (what this test pins): TROGON.md is injected EXACTLY ONCE on
-//! the first turn, through the single `if prepend_trogon` block, and NOT AT ALL on
-//! subsequent turns. The count assertion below guards against re-introducing a
-//! second injection path — `contains` alone cannot catch duplication.
+//! The fix captures both `ft = s.first_turn` and `cwd = s.cwd.clone()` before
+//! `s.first_turn = false`, and adds the `else if first_turn` arm.
+//!
+//! This test verifies the fix: TROGON.md content MUST appear in the
+//! `input` text sent to the Codex subprocess on the first turn.
 //!
 //! Run with:
 //!   cargo test -p trogon-codex-runner --test trogon_md_injection_bug
@@ -59,7 +57,7 @@ async fn fake_nats() -> async_nats::Client {
     async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
 }
 
-/// TROGON.md content MUST be prepended to the `userInput` sent to the Codex
+/// TROGON.md content MUST be prepended to the turn `input` text sent to the Codex
 /// subprocess on the first turn of a fresh session.
 ///
 /// Verified by setting `MOCK_RECORD_TURN_INPUT_FILE` so the mock binary writes
@@ -69,7 +67,11 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
     let _guard = bin_env_lock().lock().await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(dir.path().join("TROGON.md"), "# Project rules\nAlways use Rust.\n").unwrap();
+    std::fs::write(
+        dir.path().join("TROGON.md"),
+        "# Project rules\nAlways use Rust.\n",
+    )
+    .unwrap();
 
     let record_file = tempfile::NamedTempFile::new().unwrap();
     let record_path = record_file.path().to_str().unwrap().to_string();
@@ -87,7 +89,10 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
                 "o4-mini",
             );
 
-            let new_resp = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+            let new_resp = agent
+                .new_session(NewSessionRequest::new(dir.path()))
+                .await
+                .unwrap();
 
             agent
                 .prompt(PromptRequest::new(
@@ -104,31 +109,28 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
     let recorded = std::fs::read_to_string(&record_path).unwrap_or_default();
     assert!(
         recorded.contains("# Project rules"),
-        "TROGON.md content must be prepended to userInput on first turn; got: {recorded:?}"
+        "TROGON.md content must be prepended to turn input on first turn; got: {recorded:?}"
     );
     assert!(
         recorded.contains("Always use Rust"),
-        "TROGON.md body must appear in subprocess userInput; got: {recorded:?}"
+        "TROGON.md body must appear in subprocess turn input; got: {recorded:?}"
     );
     assert!(
         recorded.contains("first prompt"),
         "original user message must also be present; got: {recorded:?}"
     );
-    // TROGON.md must be injected EXACTLY ONCE. A second injection path (e.g. an
-    // `else if first_turn` arm alongside the `if prepend_trogon` block) would
-    // duplicate it; `contains` passes either way, so we count occurrences of a
-    // marker unique to the TROGON.md body.
-    let header_occurrences = recorded.matches("# Project rules").count();
+    // B1 regression: TROGON.md must be injected EXACTLY ONCE on the first turn.
+    // A `.contains()` check passes even when the content is double-injected, so
+    // assert an occurrence count of 1 on a marker line from the TROGON.md body.
     assert_eq!(
-        header_occurrences, 1,
-        "TROGON.md must be injected exactly once on the first turn, found {header_occurrences} \
-         occurrences (double-injection regression); got: {recorded:?}"
+        recorded.matches("# Project rules").count(),
+        1,
+        "TROGON.md must be injected exactly once on the first turn (B1); got: {recorded:?}"
     );
-    let body_occurrences = recorded.matches("Always use Rust").count();
     assert_eq!(
-        body_occurrences, 1,
-        "TROGON.md body must appear exactly once on the first turn, found {body_occurrences} \
-         occurrences; got: {recorded:?}"
+        recorded.matches("Always use Rust").count(),
+        1,
+        "TROGON.md body must appear exactly once on the first turn (B1); got: {recorded:?}"
     );
 }
 
@@ -136,14 +138,18 @@ async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
 ///
 /// `first_turn` is set to `false` after the first prompt, so subsequent prompts
 /// must send only the raw user message to the subprocess. Verified by running
-/// two prompts and checking that the recorded userInput from the second turn
+/// two prompts and checking that the recorded turn input from the second turn
 /// does not contain TROGON.md content.
 #[tokio::test(flavor = "current_thread")]
 async fn codex_second_turn_does_not_inject_trogon_md() {
     let _guard = bin_env_lock().lock().await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(dir.path().join("TROGON.md"), "# Project rules\nAlways use Rust.\n").unwrap();
+    std::fs::write(
+        dir.path().join("TROGON.md"),
+        "# Project rules\nAlways use Rust.\n",
+    )
+    .unwrap();
 
     let record_file = tempfile::NamedTempFile::new().unwrap();
     let record_path = record_file.path().to_str().unwrap().to_string();
@@ -161,7 +167,10 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
                 "o4-mini",
             );
 
-            let new_resp = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+            let new_resp = agent
+                .new_session(NewSessionRequest::new(dir.path()))
+                .await
+                .unwrap();
             let session_id = new_resp.session_id;
 
             // First prompt: TROGON.md is injected (first_turn = true).
@@ -175,7 +184,7 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
 
             // Second prompt: first_turn = false, TROGON.md must NOT be injected.
             // The mock overwrites the record file each turn/start, so after this
-            // call the file contains only the second turn's userInput.
+            // call the file contains only the second turn's input text.
             agent
                 .prompt(PromptRequest::new(
                     session_id,
@@ -196,10 +205,10 @@ async fn codex_second_turn_does_not_inject_trogon_md() {
     );
     assert!(
         !recorded.contains("Always use Rust"),
-        "TROGON.md body must NOT appear in second turn userInput; got: {recorded:?}"
+        "TROGON.md body must NOT appear in second turn input; got: {recorded:?}"
     );
     assert!(
         recorded.contains("second message"),
-        "second turn userInput must contain the user message; got: {recorded:?}"
+        "second turn input must contain the user message; got: {recorded:?}"
     );
 }

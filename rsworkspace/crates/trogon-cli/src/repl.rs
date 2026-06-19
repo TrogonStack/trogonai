@@ -5,8 +5,15 @@ use crate::app::{
 };
 use crate::fs::Fs;
 use crate::mcp::McpManager;
-use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
-use crate::session_rewind::{RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns};
+use crate::session::{CompactResult, PromptOpts, Session, SessionFactory, StreamEvent};
+use crate::session_rewind::{
+    RewindError, RewindResolution, SessionRewindState, truncate_export_to_turns,
+};
+use crate::session_transcript::{
+    format_history_list, format_import_summary, resolve_export_path, resolve_import_path,
+    write_export_file,
+};
+use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
 use crate::spawn_tracker::SpawnTracker;
 use crate::transcript::SessionTranscriptRecorder;
@@ -34,6 +41,40 @@ use trogon_registry::{Registry, RegistryStore};
 use trogon_tools::fs::{resolve_directory_target, resolve_path};
 
 const HISTORY_PATH: &str = "~/.local/share/trogon/history";
+
+/// A prompt queued for auto-submission (custom slash commands, /review, stream input).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueuedPrompt {
+    text: String,
+    model: Option<String>,
+    allowed_tools: Vec<String>,
+}
+
+impl QueuedPrompt {
+    fn from_text(text: String) -> Self {
+        Self {
+            text,
+            model: None,
+            allowed_tools: Vec::new(),
+        }
+    }
+
+    fn from_dispatch(dispatch: crate::commands::CustomCommandDispatch) -> Self {
+        Self {
+            text: dispatch.prompt,
+            model: dispatch.model,
+            allowed_tools: dispatch.allowed_tools,
+        }
+    }
+
+    fn prompt_opts(&self) -> PromptOpts {
+        crate::commands::prompt_opts_from_dispatch(&crate::commands::CustomCommandDispatch {
+            prompt: self.text.clone(),
+            model: self.model.clone(),
+            allowed_tools: self.allowed_tools.clone(),
+        })
+    }
+}
 
 // ── FileAtHelper ──────────────────────────────────────────────────────────────
 
@@ -563,9 +604,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let mut pending_input: Option<String> = None;
     // Messages typed while a response was streaming. Auto-submitted in order
     // (one per turn) once the current turn finishes.
-    let mut queued_prompts: VecDeque<String> = VecDeque::new();
+    let mut queued_prompts: VecDeque<QueuedPrompt> = VecDeque::new();
     let mut rewind_state = SessionRewindState::default();
     let custom_commands = crate::commands::load_commands(&project_dir);
+    let skills = crate::skills::load_skills(&project_dir);
     let mut spawn_tracker = SpawnTracker::default();
 
     loop {
@@ -580,17 +622,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
-        let (read, from_queue): (rustyline::Result<String>, bool) = match queued_prompts.pop_front() {
-            Some(q) => (Ok(q), true),
-            None => {
-                let prompt = format_mode_prompt(&session_mode);
-                let r = match pending_input.take() {
-                    Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
-                    None => rl.readline(&prompt),
-                };
-                (r, false)
-            }
-        };
+        let (read, from_queue, queued_invocation): (rustyline::Result<String>, bool, Option<QueuedPrompt>) =
+            match queued_prompts.pop_front() {
+                Some(q) => (Ok(q.text.clone()), true, Some(q)),
+                None => {
+                    let prompt = format_mode_prompt(&session_mode);
+                    let r = match pending_input.take() {
+                        Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
+                        None => rl.readline(&prompt),
+                    };
+                    (r, false, None)
+                }
+            };
         match read {
             Ok(raw_line) => {
                 // Apply a Shift+Tab mode change made during readline. The cell was
@@ -980,12 +1023,43 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             Err(RewindError::ListRequested) => println!("{}", rewind_state.list_checkpoints()),
                             Err(e) => eprintln!("error: {e}"),
                         }
+                    } else if cmd == "/export" {
+                        match handle_export_command(&session, arg, &cwd, &fs).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/history" {
+                        match handle_history_command(&session).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/import" {
+                        match handle_import_command(&session, arg, &cwd, &fs).await {
+                            Ok(msg) => {
+                                println!("{msg}");
+                                rewind_state.reset();
+                            }
+                            Err(e) => eprintln!("error: {e}"),
+                        }
                     } else if cmd == "/review" {
                         // Drive the model to review via its shell tools; runs like a
                         // normal prompt on the next loop turn.
-                        queued_prompts.push_back(review_prompt(arg));
+                        queued_prompts.push_back(QueuedPrompt::from_text(review_prompt(arg)));
+                    } else if cmd == "/skill" {
+                        let mut parts = arg.splitn(2, ' ');
+                        let name = parts.next().unwrap_or("").trim();
+                        let skill_args = parts.next().unwrap_or("").trim();
+                        if name.is_empty() {
+                            println!("usage: /skill <name> [args]");
+                        } else if let Some(prompt) = skills.dispatch(name, skill_args) {
+                            queued_prompts.push_back(QueuedPrompt::from_text(prompt));
+                        } else {
+                            println!("unknown skill: {name}");
+                        }
+                    } else if cmd == "/skills" {
+                        println!("{}", crate::skills::format_skills_list(&skills));
                     } else if cmd == "/pr-comments" {
-                        queued_prompts.push_back(pr_comments_prompt(arg));
+                        queued_prompts.push_back(QueuedPrompt::from_text(pr_comments_prompt(arg)));
                     } else if cmd == "/compact" {
                         if !hooks_config.pre_compact.is_empty() {
                             let payload = serde_json::json!({
@@ -1073,6 +1147,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if cmd == "/mcp" {
                         handle_mcp_command(arg, &mut mcp_manager, &fs, &session, &cwd, &mcp_http).await;
+                    } else if cmd == "/recall" {
+                        match client_supervisor.as_ref() {
+                            Some(sup) => {
+                                match crate::memory_recall::handle_recall(&sup.nats(), arg).await {
+                                    Ok(text) => println!("{text}"),
+                                    Err(e) => eprintln!("error: {e}"),
+                                }
+                            }
+                            None => eprintln!("error: /recall requires a NATS connection"),
+                        }
                     } else if cmd == "/memory" {
                         handle_memory_command(arg, &cwd, &fs).await;
                     } else if cmd == "/agents" {
@@ -1164,10 +1248,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             }
                         }
                     } else if let Some(dispatch) = custom_commands.dispatch(cmd, arg) {
-                        if dispatch.model.is_some() || !dispatch.allowed_tools.is_empty() {
-                            eprintln!("note: per-command model/allowed-tools from {} are not applied yet", cmd);
-                        }
-                        queued_prompts.push_back(dispatch.prompt);
+                        queued_prompts.push_back(QueuedPrompt::from_dispatch(dispatch));
                     } else {
                         println!(
                             "{}",
@@ -1180,6 +1261,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 &cwd,
                                 &fs,
                                 Some(&custom_commands),
+                                Some(&skills),
                             )
                         );
                     }
@@ -1214,15 +1296,43 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     expanded.push_str("\n\n");
                     expanded.push_str(&ctx);
                 }
+                let prompt_opts = queued_invocation
+                    .as_ref()
+                    .map(QueuedPrompt::prompt_opts)
+                    .unwrap_or_default();
+                if let Some(inv) = queued_invocation.as_ref()
+                    && let Some(model) = inv.model.as_deref()
+                {
+                    session = apply_dispatch_model_switch(
+                        &mut switcher,
+                        &factory,
+                        session,
+                        &mut prefix,
+                        &mut session_mode,
+                        &mut session_used_tokens,
+                        &mut session_context_size,
+                        &mut compactor_model_sel,
+                        &mut rewind_state,
+                        &mut mcp_manager,
+                        &cwd,
+                        &fs,
+                        &project_dir,
+                        session_name.as_deref(),
+                        skip_permissions,
+                        client_supervisor.as_ref(),
+                        model,
+                    )
+                    .await;
+                }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
-                let prompt_result = match session.prompt(&expanded).await {
+                let prompt_result = match session.prompt_with_opts(&expanded, prompt_opts.clone()).await {
                     Err(e) if e.to_string().contains("not found") => {
                         eprintln!("\x1b[33mwarning: session lost (runner restarted?) — reconnecting...\x1b[0m");
                         match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await
                         {
                             Ok(s) => {
                                 session = s;
-                                session.prompt(&expanded).await
+                                session.prompt_with_opts(&expanded, prompt_opts).await
                             }
                             Err(e2) => {
                                 eprintln!("error: runner unavailable: {e2}\n  Restart trogon to recover.");
@@ -1408,8 +1518,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         // they're likely changing direction. `_input_reader` drops at
                         // the end of this block, restoring the terminal before readline.
                         if !interrupted {
-                            queued_prompts.extend(front_queued);
-                            queued_prompts.extend(queued);
+                            queued_prompts.extend(
+                                front_queued.into_iter().map(QueuedPrompt::from_text),
+                            );
+                            queued_prompts.extend(queued.into_iter().map(QueuedPrompt::from_text));
                         }
                     }
                 }
@@ -1724,8 +1836,89 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 }
             }
         }
+        "resources" => {
+            // MCP-1: surface server-advertised resources (resources/list). Mirrors
+            // `prompts` — only HTTP/SSE servers are reachable from the CLI client;
+            // native stdio servers are owned by the runner subprocess.
+            let conns = mcp.active_connections(session.session_id());
+            if conns.is_empty() {
+                if mcp.active_for_session(session.session_id()).is_empty() {
+                    println!("no active MCP servers");
+                } else {
+                    println!("no active HTTP/SSE MCP servers with CLI-readable resources");
+                }
+                return;
+            }
+            println!("available MCP resources (read with /mcp read <server> <uri>):");
+            let mut any = false;
+            for (name, url, headers) in conns {
+                let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+                if client.initialize().await.is_err() {
+                    continue;
+                }
+                match client.resources_list().await {
+                    Ok(resources) => {
+                        for r in resources {
+                            any = true;
+                            let label = if r.name.is_empty() { &r.uri } else { &r.name };
+                            let mime = if r.mime_type.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" ({})", r.mime_type)
+                            };
+                            println!("  {name}: {label}{mime}");
+                            println!("      {}", r.uri);
+                            if !r.description.is_empty() {
+                                println!("      {}", r.description);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("  {name}: {e}"),
+                }
+            }
+            if !any {
+                println!("  (none advertised)");
+            }
+        }
+        "read" => {
+            // MCP-1: read a single resource by URI (resources/read).
+            let mut rparts = rest.splitn(2, ' ');
+            let server = rparts.next().unwrap_or("").trim();
+            let uri = rparts.next().unwrap_or("").trim();
+            if server.is_empty() || uri.is_empty() {
+                eprintln!("usage: /mcp read <server> <uri>");
+                return;
+            }
+            let Some((_, url, headers)) = mcp
+                .active_connections(session.session_id())
+                .into_iter()
+                .find(|(n, _, _)| n == server)
+            else {
+                eprintln!("no active HTTP/SSE MCP server named `{server}` (see /mcp resources)");
+                return;
+            };
+            let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+            if let Err(e) = client.initialize().await {
+                eprintln!("could not connect to `{server}`: {e}");
+                return;
+            }
+            match client.resources_read(uri).await {
+                Ok(contents) => {
+                    for c in contents {
+                        if let Some(text) = c.text {
+                            println!("{text}");
+                        } else if c.blob.is_some() {
+                            println!("[binary resource {} ({})]", c.uri, c.mime_type);
+                        }
+                    }
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
         other => {
-            eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove, login, import, prompts")
+            eprintln!(
+                "unknown /mcp subcommand `{other}` — try list, add, remove, login, import, prompts, resources, read"
+            )
         }
     }
 }
@@ -2001,6 +2194,93 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     })
 }
 
+/// Apply a custom-command `model` frontmatter override using the same `/model` path.
+/// On failure, prints a warning and returns the original session unchanged.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn apply_dispatch_model_switch<SF, S, SW, F>(
+    switcher: &mut SW,
+    factory: &SF,
+    session: S,
+    prefix: &mut String,
+    session_mode: &mut String,
+    session_used_tokens: &mut u64,
+    session_context_size: &mut u64,
+    compactor_model_sel: &mut Option<String>,
+    rewind_state: &mut SessionRewindState,
+    mcp_manager: &mut McpManager,
+    cwd: &Path,
+    fs: &F,
+    project_dir: &Path,
+    session_name: Option<&str>,
+    skip_permissions: bool,
+    client_supervisor: Option<&Rc<AcpClientSupervisor>>,
+    model: &str,
+) -> S
+where
+    SF: SessionFactory<Sess = S>,
+    S: Session,
+    SW: RunnerSwitcher,
+    F: Fs,
+{
+    let model_id = resolve_model_alias(model.trim());
+    let cwd_str = cwd
+        .canonicalize()
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    match apply_model_switch(switcher, prefix, session.session_id(), &model_id, &cwd_str).await {
+        Ok(outcome) => {
+            if outcome.same_runner {
+                match session.set_model(&model_id).await {
+                    Ok(()) => {
+                        persist_session_index(
+                            fs,
+                            project_dir,
+                            prefix,
+                            session.session_id(),
+                            &model_id,
+                            session_name,
+                        );
+                    }
+                    Err(e) => eprintln!(
+                        "warning: custom command model `{model_id}` could not be set: {e} — using current model"
+                    ),
+                }
+                session
+            } else {
+                let applied = finish_cross_runner_model_switch(
+                    factory,
+                    session,
+                    &outcome,
+                    &model_id,
+                    mcp_manager,
+                    cwd,
+                    fs,
+                    project_dir,
+                    session_name,
+                    skip_permissions,
+                    client_supervisor,
+                    None,
+                )
+                .await;
+                *prefix = applied.prefix;
+                *session_mode = applied.session_mode;
+                *session_used_tokens = 0;
+                *session_context_size = 0;
+                *compactor_model_sel = None;
+                rewind_state.reset();
+                applied.session
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "warning: custom command model `{model_id}` not available: {e} — using current model"
+            );
+            session
+        }
+    }
+}
+
 /// Handle `/compact-model [<model_id>|default]`.
 ///
 /// - No argument   → show current compaction model override (if any)
@@ -2067,6 +2347,41 @@ async fn handle_rewind_command<S: Session>(
     Ok(format!(
         "rewound to turn {target_turn} — conversation continues from that point"
     ))
+}
+
+async fn handle_export_command<S: Session, F: Fs>(
+    session: &S,
+    arg: &str,
+    cwd: &Path,
+    fs: &F,
+) -> Result<String, String> {
+    let json = session.export_history().await.map_err(|e| e.to_string())?;
+    let path = resolve_export_path(arg, session.session_id(), cwd);
+    write_export_file(&path, &json, fs)?;
+    Ok(format!("exported session to {}", path.display()))
+}
+
+async fn handle_history_command<S: Session>(session: &S) -> Result<String, String> {
+    let json = session.export_history().await.map_err(|e| e.to_string())?;
+    format_history_list(&json)
+}
+
+async fn handle_import_command<S: Session, F: Fs>(
+    session: &S,
+    arg: &str,
+    cwd: &Path,
+    fs: &F,
+) -> Result<String, String> {
+    let path = resolve_import_path(arg, cwd)?;
+    let json = fs
+        .read_to_string(&path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let summary = format_import_summary(&json)?;
+    session
+        .import_history(json.trim())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format!("{summary}\nhistory loaded into current session"))
 }
 
 // ── new slash-command helpers ───────────────────────────────────────────────────
@@ -2145,6 +2460,31 @@ fn bug_report_text() -> String {
     )
 }
 
+const BUNDLED_CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+
+/// Most recent version block from the bundled changelog (whole file when small).
+fn bundled_changelog_section() -> &'static str {
+    const MAX_WHOLE_FILE: usize = 800;
+    let trimmed = BUNDLED_CHANGELOG.trim();
+    if trimmed.len() <= MAX_WHOLE_FILE {
+        return trimmed;
+    }
+    let start = trimmed.find("\n## ").map(|i| i + 1).unwrap_or(0);
+    let section = trimmed[start..].trim_start();
+    match section.find("\n## ") {
+        Some(next) => section[..next].trim(),
+        None => section,
+    }
+}
+
+fn release_notes_text() -> String {
+    format!(
+        "trogon {}\n\n{}",
+        env!("CARGO_PKG_VERSION"),
+        bundled_changelog_section(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_slash_command<F: Fs>(
     cmd: &str,
@@ -2155,6 +2495,7 @@ pub fn handle_slash_command<F: Fs>(
     _cwd: &Path,
     fs: &F,
     custom_commands: Option<&crate::commands::CustomCommandRegistry>,
+    skills: Option<&crate::skills::SkillRegistry>,
 ) -> String {
     match cmd {
         "/help" => {
@@ -2178,6 +2519,9 @@ Commands:
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
   {m}/checkpoint{r} [name]  save conversation state at the current turn
   {m}/rewind{r} [name|N]    restore to a checkpoint or back N turns  |  {m}/rewind{r} lists checkpoints
+  {m}/export{r} [path]      write session transcript to JSON (default: ~/.local/share/trogon/exports/)
+  {m}/history{r}            list messages in the current session (read-only)
+  {m}/import{r} <path>      load a previously exported transcript into this session
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
@@ -2185,11 +2529,14 @@ Commands:
   {m}/allowed-tools{r}      show which tools the current mode permits
   {m}/vim{r}                toggle vim / emacs input editing
   {m}/review{r} [pr]        review the current branch or a PR
+  {m}/skill{r} <name> [args] run a local SKILL.md as the next prompt
+  {m}/skills{r}             list discovered SKILL.md files
   {m}/pr-comments{r} [pr]   fetch & triage PR review comments
   {m}/bug{r}                print a bug-report template with build info
   {m}/release-notes{r}      show version / release info
   {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
+  {m}/recall{r} [query]     list entity memories from NATS KV (trogon-memory)
   {m}/agents{r}             list subagent definitions (.claude/agents/)  |  {m}/agents{r} <name> details
   {m}/tasks{r}              list background tasks
   {m}/init{r}               analyze project with AI and generate TROGON.md
@@ -2202,6 +2549,9 @@ Ctrl+C    cancel active response
 Ctrl+D    quit");
             if let Some(registry) = custom_commands {
                 help.push_str(&crate::commands::format_custom_commands_help(registry));
+            }
+            if let Some(registry) = skills {
+                help.push_str(&crate::skills::format_skills_help(registry));
             }
             help
         }
@@ -2247,13 +2597,12 @@ Ctrl+D    quit");
 
         "/memory" => "use /memory in the REPL to list or show TROGON.md hierarchy".to_string(),
 
+        "/recall" => "use /recall in the REPL to list stored entity memories (SESSION_MEMORIES KV)"
+            .to_string(),
+
         "/bug" => bug_report_text(),
 
-        "/release-notes" => format!(
-            "trogon {}\n\nNo release notes are bundled with this build — see your project's \
-             releases / CHANGELOG for version history.",
-            env!("CARGO_PKG_VERSION")
-        ),
+        "/release-notes" => release_notes_text(),
 
         "/login" | "/logout" => "trogon has no interactive login. Authentication uses provider tokens from the \
              environment (ANTHROPIC_TOKEN, XAI_API_KEY, OPENROUTER_API_KEY, …) or the \
@@ -2275,7 +2624,20 @@ Ctrl+D    quit");
              sub-agent to …\". Use /sessions to list sessions on the current runner."
             .to_string(),
 
-        "/rewind" | "/checkpoint" => "use /checkpoint and /rewind in the REPL — they need the live session".to_string(),
+        "/skill" => {
+            "use /skill <name> [args] in the REPL to run a local SKILL.md as the next prompt"
+                .to_string()
+        }
+
+        "/skills" => "use /skills in the REPL to list discovered SKILL.md files".to_string(),
+
+        "/rewind" | "/checkpoint" => {
+            "use /checkpoint and /rewind in the REPL — they need the live session".to_string()
+        }
+
+        "/export" | "/history" | "/import" => {
+            "use /export, /history, and /import in the REPL — they need the live session".to_string()
+        }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
@@ -2673,6 +3035,20 @@ fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
 
 // ── /init helpers ─────────────────────────────────────────────────────────────
 
+const INIT_README_MAX_BYTES: usize = 3000;
+
+fn truncate_init_readme(content: &str) -> String {
+    if content.len() <= INIT_README_MAX_BYTES {
+        content.to_string()
+    } else {
+        let mut end = INIT_README_MAX_BYTES;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…(truncated)", &content[..end])
+    }
+}
+
 fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
     let project_name = root
         .file_name()
@@ -2692,14 +3068,7 @@ fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
         .iter()
         .find_map(|name| {
             fs.read_to_string(&root.join(name)).ok().map(|content| {
-                let truncated = if content.len() > 3000 {
-                    // Slice on a UTF-8 char boundary: `&content[..3000]` panics when
-                    // byte 3000 falls inside a multibyte char in the README.
-                    let boundary = content.floor_char_boundary(3000);
-                    format!("{}…(truncated)", &content[..boundary])
-                } else {
-                    content
-                };
+                let truncated = truncate_init_readme(&content);
                 format!("{name}:\n{truncated}\n")
             })
         })
@@ -3207,7 +3576,7 @@ mod tests {
     #[test]
     fn slash_help_lists_all_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
         assert!(out.contains("/context"));
@@ -3215,6 +3584,9 @@ mod tests {
         assert!(out.contains("/sessions"));
         assert!(out.contains("/resume"));
         assert!(out.contains("/compact"));
+        assert!(out.contains("/export"));
+        assert!(out.contains("/history"));
+        assert!(out.contains("/import"));
         assert!(out.contains("/config"));
         assert!(out.contains("/model"));
         assert!(out.contains("/doctor"));
@@ -3243,9 +3615,54 @@ mod tests {
             Path::new("/tmp"),
             &fs,
             Some(&registry),
+            None,
         );
         assert!(out.contains("/ship"));
         assert!(out.contains("Ship it"));
+    }
+
+    #[test]
+    fn slash_help_lists_skills_when_provided() {
+        let fs = MockFs::new();
+        let registry = crate::skills::SkillRegistry::new([crate::skills::Skill {
+            name: "deploy".into(),
+            description: "Deploy app".into(),
+            body: String::new(),
+            source: PathBuf::from("/x/SKILL.md"),
+        }]);
+        let out = handle_slash_command(
+            "/help",
+            "",
+            0,
+            0,
+            "claude-sonnet-4-6",
+            Path::new("/tmp"),
+            &fs,
+            None,
+            Some(&registry),
+        );
+        assert!(out.contains("deploy"));
+        assert!(out.contains("Deploy app"));
+    }
+
+    #[test]
+    fn skill_dispatch_substitutes_arguments() {
+        let registry = crate::skills::SkillRegistry::new([crate::skills::Skill {
+            name: "echo".into(),
+            description: String::new(),
+            body: "Say: $ARGUMENTS".into(),
+            source: PathBuf::from("/x/SKILL.md"),
+        }]);
+        assert_eq!(
+            registry.dispatch("echo", "hello").as_deref(),
+            Some("Say: hello")
+        );
+    }
+
+    #[test]
+    fn skill_dispatch_unknown_is_none() {
+        let registry = crate::skills::SkillRegistry::default();
+        assert!(registry.dispatch("missing", "x").is_none());
     }
 
     #[test]
@@ -3259,14 +3676,14 @@ mod tests {
             source: PathBuf::from("/x.md"),
         }]);
         assert!(registry.dispatch("/echo", "hi").is_some());
-        let unknown = handle_slash_command("/echo-not-real", "", 0, 0, "m", Path::new("/tmp"), &MockFs::new(), None);
+        let unknown = handle_slash_command("/echo-not-real", "", 0, 0, "m", Path::new("/tmp"), &MockFs::new(), None, None);
         assert!(unknown.contains("unknown command"));
     }
 
     #[test]
     fn slash_cost_no_data_yet() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        let out = handle_slash_command("/cost", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
         assert!(out.contains("no usage data"), "got: {out}");
     }
 
@@ -3281,6 +3698,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
             None,
         );
         assert!(out.contains("25%"), "got: {out}");
@@ -3308,6 +3726,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &MockFs::new(),
+            None,
             None,
         );
         assert_eq!(via_cmd, out);
@@ -3437,24 +3856,25 @@ mod tests {
     }
 
     #[test]
+    fn release_notes_bundles_changelog() {
+        let out = release_notes_text();
+        assert!(out.contains(env!("CARGO_PKG_VERSION")));
+        assert!(
+            !out.to_lowercase().contains("no release notes"),
+            "should bundle changelog, got: {out}"
+        );
+        assert!(
+            out.contains("Cross-runner model switching"),
+            "should include changelog bullet, got: {out}"
+        );
+    }
+
+    #[test]
     fn informational_commands_are_recognised_not_unknown() {
         let fs = MockFs::new();
-        for cmd in [
-            "/login",
-            "/logout",
-            "/ide",
-            "/tasks",
-            "/agents",
-            "/rewind",
-            "/checkpoint",
-            "/release-notes",
-            "/bug",
-        ] {
-            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
-            assert!(
-                !out.contains("unknown command"),
-                "{cmd} should be recognised, got: {out}"
-            );
+        for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/skill", "/skills", "/rewind", "/checkpoint", "/export", "/history", "/import", "/release-notes", "/bug"] {
+            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
+            assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
             assert!(!out.is_empty());
         }
     }
@@ -3462,16 +3882,21 @@ mod tests {
     #[test]
     fn help_lists_new_commands() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
         for c in [
             "/plan",
             "/allowed-tools",
             "/vim",
             "/review",
+            "/skill",
+            "/skills",
             "/pr-comments",
             "/bug",
             "/checkpoint",
             "/rewind",
+            "/export",
+            "/history",
+            "/import",
         ] {
             assert!(out.contains(c), "/help must mention {c}");
         }
@@ -3527,14 +3952,14 @@ mod tests {
     #[test]
     fn slash_unknown_suggests_help() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/nope", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        let out = handle_slash_command("/nope", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
         assert!(out.contains("unknown command") && out.contains("/help"), "got: {out}");
     }
 
     #[test]
     fn slash_model_without_arg_shows_registry_hint() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/model", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        let out = handle_slash_command("/model", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
         assert!(out.contains("registry listing"), "got: {out}");
     }
 
@@ -3549,6 +3974,7 @@ mod tests {
             "claude-sonnet-4-6",
             Path::new("/tmp"),
             &fs,
+            None,
             None,
         );
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
@@ -3567,6 +3993,7 @@ mod tests {
             Path::new("/tmp"),
             &fs,
             None,
+            None,
         );
         let cost_out = handle_slash_command(
             "/cost",
@@ -3576,6 +4003,7 @@ mod tests {
             "claude-haiku-4-5",
             Path::new("/tmp"),
             &fs,
+            None,
             None,
         );
         // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
@@ -3594,6 +4022,7 @@ mod tests {
             Path::new("/tmp"),
             &fs,
             None,
+            None,
         );
         assert!(out.contains("100%"), "got: {out}");
     }
@@ -3601,7 +4030,7 @@ mod tests {
     #[test]
     fn slash_cost_rounds_down() {
         let fs = MockFs::new();
-        let out = handle_slash_command("/cost", "", 1, 3, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None);
+        let out = handle_slash_command("/cost", "", 1, 3, "claude-sonnet-4-6", Path::new("/tmp"), &fs, None, None);
         assert!(out.contains("33%"), "got: {out}");
     }
 
@@ -3687,6 +4116,15 @@ mod tests {
     }
 
     // ── build_init_prompt ─────────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_init_readme_multibyte_boundary_does_not_panic() {
+        let content = format!("a{}", "é".repeat(2000));
+        assert!(content.len() > INIT_README_MAX_BYTES);
+        let out = truncate_init_readme(&content);
+        assert!(out.ends_with("…(truncated)"), "got: {out}");
+        assert!(out.len() <= INIT_README_MAX_BYTES + "…(truncated)".len());
+    }
 
     #[test]
     fn build_init_prompt_contains_required_sections() {
@@ -4140,6 +4578,62 @@ mod tests {
         assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
     }
 
+    #[test]
+    fn queued_prompt_from_dispatch_carries_frontmatter() {
+        let dispatch = crate::commands::CustomCommandDispatch {
+            prompt: "do it".into(),
+            model: Some("claude-opus-4-7".into()),
+            allowed_tools: vec!["Read".into()],
+        };
+        let q = QueuedPrompt::from_dispatch(dispatch);
+        assert_eq!(q.model.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(q.allowed_tools, vec!["Read"]);
+        assert_eq!(q.prompt_opts().tool_allowlist, vec!["read_file"]);
+    }
+
+    #[tokio::test]
+    async fn apply_dispatch_model_switch_same_runner_sets_model() {
+        use crate::session::mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        let factory = MockSessionFactory::new("default");
+        let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
+        let mut prefix = "acp".to_string();
+        let mut session_mode = "default".to_string();
+        let mut session_used_tokens = 0;
+        let mut session_context_size = 0;
+        let mut compactor_model_sel = None;
+        let mut rewind_state = SessionRewindState::default();
+        let mut mcp_manager = McpManager::load(&MockFs::new());
+        let cwd = std::env::temp_dir();
+        let fs = MockFs::new();
+        let project_dir = cwd.clone();
+
+        let updated = apply_dispatch_model_switch(
+            &mut switcher,
+            &factory,
+            session,
+            &mut prefix,
+            &mut session_mode,
+            &mut session_used_tokens,
+            &mut session_context_size,
+            &mut compactor_model_sel,
+            &mut rewind_state,
+            &mut mcp_manager,
+            &cwd,
+            &fs,
+            &project_dir,
+            None,
+            false,
+            None,
+            "claude-opus-4-7",
+        )
+        .await;
+
+        assert_eq!(updated.last_model().as_deref(), Some("claude-opus-4-7"));
+    }
+
     // ── /checkpoint and /rewind ────────────────────────────────────────────────
 
     #[tokio::test]
@@ -4220,5 +4714,57 @@ mod tests {
         assert!(matches!(err, RewindError::ListRequested));
         let listed = rewind_state.list_checkpoints();
         assert!(listed.contains("alpha"));
+    }
+
+    // ── /export, /history, /import ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn export_command_writes_session_export_json() {
+        use crate::session::mock::MockSession;
+
+        let fs = MockFs::new();
+        let session = MockSession::new("sess-export");
+        let payload = r#"[{"role":"user","text":"persist me"}]"#;
+        session.set_exported_history(payload);
+
+        let msg = handle_export_command(&session, "out.json", Path::new("/tmp"), &fs)
+            .await
+            .unwrap();
+        assert!(msg.contains("/tmp/out.json"));
+        let written = fs.read_to_string(Path::new("/tmp/out.json")).unwrap();
+        assert_eq!(written, payload);
+    }
+
+    #[tokio::test]
+    async fn history_command_formats_exported_messages() {
+        use crate::session::mock::MockSession;
+
+        let session = MockSession::new("sess-1");
+        session.set_exported_history(
+            r#"[{"role":"user","text":"hello"},{"role":"assistant","text":"world"}]"#,
+        );
+
+        let out = handle_history_command(&session).await.unwrap();
+        assert!(out.contains("user"));
+        assert!(out.contains("hello"));
+        assert!(out.contains("assistant"));
+        assert!(out.contains("world"));
+    }
+
+    #[tokio::test]
+    async fn import_command_loads_valid_export_and_calls_session_import() {
+        use crate::session::mock::MockSession;
+
+        let fs = MockFs::new();
+        let payload = r#"[{"role":"user","text":"from file"}]"#;
+        fs.write(Path::new("/tmp/import.json"), payload.as_bytes()).unwrap();
+        let session = MockSession::new("sess-1");
+
+        let msg = handle_import_command(&session, "/tmp/import.json", Path::new("/"), &fs)
+            .await
+            .unwrap();
+        assert!(msg.contains("1 messages"));
+        assert!(msg.contains("history loaded"));
+        assert_eq!(session.imported_history(), vec![payload]);
     }
 }

@@ -5,7 +5,7 @@
 //! Trogon ACP permission modes (`default`, `acceptEdits`, `plan`, …) are accepted at the
 //! runner edge and mapped to the coarse knobs the Codex `app-server` exposes (primarily
 //! `approvalPolicy` on `turn/start`). The subprocess runs tools **in-process**; Trogon only
-//! observes `item/updated` / `item/completed` notifications and cannot pre-gate individual
+//! observes `item/started` / `item/completed` notifications and cannot pre-gate individual
 //! tool calls the way [`trogon-runner-tools`] does for acp/xai/openrouter runners.
 //!
 //! Session-level mapping plus refusing modes Trogon cannot honor even coarsely is the only

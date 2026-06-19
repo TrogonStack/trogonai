@@ -22,7 +22,12 @@ pub struct CompactResult {
     pub tokens_after: usize,
 }
 
-async fn ext_method<N: NatsClient>(nats: &N, prefix: &str, method: &str, params: Value) -> anyhow::Result<Value> {
+async fn ext_method<N: NatsClient>(
+    nats: &N,
+    prefix: &str,
+    method: &str,
+    params: Value,
+) -> anyhow::Result<Value> {
     let params_raw = serde_json::value::RawValue::from_string(params.to_string())
         .map_err(|e| anyhow::anyhow!("invalid ext params: {e}"))?;
     let req = ExtRequest::new(method, params_raw.into());
@@ -37,10 +42,7 @@ async fn ext_method<N: NatsClient>(nats: &N, prefix: &str, method: &str, params:
     // New discriminated envelope: {"result": <body>} | {"error": {code,message,...}}
     if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
         if let Some(err) = env.get("error") {
-            let msg = err
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("ext method error");
+            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("ext method error");
             return Err(anyhow::anyhow!("{msg}"));
         }
         if let Some(result) = env.get("result") {
@@ -58,6 +60,50 @@ async fn ext_method<N: NatsClient>(nats: &N, prefix: &str, method: &str, params:
     serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid ext response: {e}"))
 }
 
+async fn forward_prompt_notification(bytes: &[u8], tx: &mpsc::Sender<StreamEvent>) {
+    if let Ok(notif) = serde_json::from_slice::<SessionNotification>(bytes) {
+        match notif.update {
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                if let ContentBlock::Text(t) = chunk.content {
+                    let _ = tx.send(StreamEvent::Text(t.text)).await;
+                }
+            }
+            SessionUpdate::AgentThoughtChunk(_) => {
+                let _ = tx.send(StreamEvent::Thinking).await;
+            }
+            SessionUpdate::ToolCall(tc) => {
+                if let Some(diff) = render_diff(&tc.title, tc.raw_input.as_ref()) {
+                    let _ = tx.send(StreamEvent::ToolCall(tc.title.clone())).await;
+                    let _ = tx.send(StreamEvent::Diff(diff)).await;
+                } else {
+                    let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
+                }
+            }
+            SessionUpdate::ToolCallUpdate(update) => {
+                if let Some(finished) = map_tool_call_update(&update) {
+                    let _ = tx
+                        .send(StreamEvent::ToolFinished {
+                            name: finished.name,
+                            output: finished.output,
+                            exit_code: finished.exit_code,
+                            status: finished.status,
+                        })
+                        .await;
+                }
+            }
+            SessionUpdate::UsageUpdate(u) => {
+                let _ = tx
+                    .send(StreamEvent::Usage {
+                        used_tokens: u.used,
+                        context_size: u.size,
+                    })
+                    .await;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Summary row for `/sessions` and session listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
@@ -71,6 +117,37 @@ pub struct SessionSummary {
 
 // ── Session trait ─────────────────────────────────────────────────────────────
 
+/// Per-prompt options (e.g. custom slash-command frontmatter overrides).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptOpts {
+    /// Turn-scoped tool allow-list sent as prompt `_meta.toolAllowlist`.
+    pub tool_allowlist: Vec<String>,
+    /// Turn-scoped permission rules sent as prompt `_meta.permissionRules`.
+    pub permission_rules: Option<String>,
+}
+
+/// Build an ACP `session/prompt` request, attaching turn-scoped `_meta` when set.
+pub fn build_prompt_request(session_id: &str, text: &str, opts: &PromptOpts) -> PromptRequest {
+    let mut req =
+        PromptRequest::new(session_id.to_string(), vec![ContentBlock::Text(TextContent::new(text))]);
+    let mut meta = serde_json::Map::new();
+    if !opts.tool_allowlist.is_empty() {
+        let arr = opts
+            .tool_allowlist
+            .iter()
+            .map(|t| Value::String(t.clone()))
+            .collect();
+        meta.insert("toolAllowlist".into(), Value::Array(arr));
+    }
+    if let Some(rules) = opts.permission_rules.as_ref().filter(|s| !s.is_empty()) {
+        meta.insert("permissionRules".into(), Value::String(rules.clone()));
+    }
+    if !meta.is_empty() {
+        req = req.meta(meta);
+    }
+    req
+}
+
 /// Abstraction over an ACP session. Allows injecting a mock in tests.
 pub trait Session: Send + Sync + 'static {
     fn session_id(&self) -> &str;
@@ -82,6 +159,15 @@ pub trait Session: Send + Sync + 'static {
         &self,
         text: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_;
+
+    fn prompt_with_opts(
+        &self,
+        text: &str,
+        opts: PromptOpts,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
+        let _ = (text, opts);
+        async { Err(anyhow::anyhow!("prompt_with_opts not implemented")) }
+    }
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 
@@ -125,7 +211,10 @@ pub trait Session: Send + Sync + 'static {
     fn export_history(&self) -> impl std::future::Future<Output = anyhow::Result<String>> + Send + '_;
 
     /// Replace session history (`session/import` ext method).
-    fn import_history(&self, messages_json: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+    fn import_history(
+        &self,
+        messages_json: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
@@ -397,7 +486,14 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         &self,
         text: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
-        // Clone text upfront so the returned future owns it (no captured &str across awaits).
+        self.prompt_with_opts(text, PromptOpts::default())
+    }
+
+    fn prompt_with_opts(
+        &self,
+        text: &str,
+        opts: PromptOpts,
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
         let text = text.to_string();
         let nats = &self.nats;
         let session_id = self.session_id.clone();
@@ -431,7 +527,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .await
                 .map_err(|e| anyhow::anyhow!("subscribe response: {e}"))?;
 
-            let req = PromptRequest::new(session_id, vec![ContentBlock::Text(TextContent::new(&text))]);
+            let req = build_prompt_request(&session_id, &text, &opts);
             let payload = serde_json::to_vec(&req)?;
 
             nats.publish_with_req_id_bytes(prompt_subject, req_id, payload.into())
@@ -476,52 +572,17 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                         // in the same batch), we drain notifications first and don't drop them.
                         bytes = notif_rx.recv() => {
                             let Some(bytes) = bytes else { break };
-                            if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&bytes) {
-                                match notif.update {
-                                    SessionUpdate::AgentMessageChunk(chunk) => {
-                                        if let ContentBlock::Text(t) = chunk.content {
-                                            let _ = tx.send(StreamEvent::Text(t.text)).await;
-                                        }
-                                    }
-                                    SessionUpdate::AgentThoughtChunk(_) => {
-                                        let _ = tx.send(StreamEvent::Thinking).await;
-                                    }
-                                    SessionUpdate::ToolCall(tc) => {
-                                        if let Some(diff) =
-                                            render_diff(&tc.title, tc.raw_input.as_ref())
-                                        {
-                                            let _ = tx.send(StreamEvent::ToolCall(tc.title.clone())).await;
-                                            let _ = tx.send(StreamEvent::Diff(diff)).await;
-                                        } else {
-                                            let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
-                                        }
-                                    }
-                                    SessionUpdate::ToolCallUpdate(update) => {
-                                        if let Some(finished) = map_tool_call_update(&update) {
-                                            let _ = tx
-                                                .send(StreamEvent::ToolFinished {
-                                                    name: finished.name,
-                                                    output: finished.output,
-                                                    exit_code: finished.exit_code,
-                                                    status: finished.status,
-                                                })
-                                                .await;
-                                        }
-                                    }
-                                    SessionUpdate::UsageUpdate(u) => {
-                                        let _ = tx
-                                            .send(StreamEvent::Usage {
-                                                used_tokens: u.used,
-                                                context_size: u.size,
-                                            })
-                                            .await;
-                                    }
-                                    _ => {}
-                                }
-                            }
+                            forward_prompt_notification(&bytes, &tx).await;
                         }
                         bytes = resp_rx.recv() => {
                             let Some(bytes) = bytes else { break };
+                            // Drain any already-buffered trailing notifications (e.g. a
+                            // final UsageUpdate published just before the response)
+                            // BEFORE emitting the terminal event, so a consumer that
+                            // stops reading at Done still observes them.
+                            while let Ok(n) = notif_rx.try_recv() {
+                                forward_prompt_notification(&n, &tx).await;
+                            }
                             if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
                                 // ACP error response serializes as {"code": <int>, "message": "..."}.
                                 // PromptResponse serializes as {"stopReason": "..."}.
@@ -721,15 +782,21 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn import_history(&self, messages_json: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+    fn import_history(
+        &self,
+        messages_json: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
         let nats = &self.nats;
         let messages_json = messages_json.to_string();
         async move {
-            let params =
-                serde_json::from_str::<Value>(&format!(r#"{{"sessionId":"{session_id}","messages":{messages_json}}}"#))
-                    .map_err(|e| anyhow::anyhow!("invalid session/import params: {e}"))?;
+            let messages = serde_json::from_str::<Value>(&messages_json)
+                .map_err(|e| anyhow::anyhow!("invalid session/import messages: {e}"))?;
+            let params = json!({
+                "sessionId": session_id,
+                "messages": messages,
+            });
             ext_method(nats, &prefix, "session/import", params).await?;
             Ok(())
         }
@@ -1002,6 +1069,7 @@ pub mod mock {
         /// Last prompt text passed to `prompt()`. Used in tests to verify the
         /// content of prompts sent to the session (e.g., language detection in /init).
         pub last_prompt_text: Mutex<Option<String>>,
+        pub last_prompt_opts: Mutex<PromptOpts>,
         exported_history: Mutex<String>,
         imported_history: Mutex<Vec<String>>,
         load_session_count: Mutex<u32>,
@@ -1020,6 +1088,7 @@ pub mod mock {
                 compact_error: Mutex::new(None),
                 last_cwd: Mutex::new(None),
                 last_prompt_text: Mutex::new(None),
+                last_prompt_opts: Mutex::new(PromptOpts::default()),
                 exported_history: Mutex::new("[]".to_string()),
                 imported_history: Mutex::new(Vec::new()),
                 load_session_count: Mutex::new(0),
@@ -1092,7 +1161,16 @@ pub mod mock {
             &self,
             text: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
+            self.prompt_with_opts(text, PromptOpts::default())
+        }
+
+        fn prompt_with_opts(
+            &self,
+            text: &str,
+            opts: PromptOpts,
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
             *self.last_prompt_text.lock().unwrap() = Some(text.to_string());
+            *self.last_prompt_opts.lock().unwrap() = opts;
             let events = self
                 .turns
                 .lock()
@@ -1218,6 +1296,14 @@ pub mod mock {
             (**self).prompt(text)
         }
 
+        fn prompt_with_opts(
+            &self,
+            text: &str,
+            opts: PromptOpts,
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
+            (**self).prompt_with_opts(text, opts)
+        }
+
         fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
             (**self).cancel()
         }
@@ -1341,6 +1427,19 @@ mod tests {
         tokio::spawn(async move {
             let _ = tx.send(Bytes::from_static(b"{}")).await;
         });
+    }
+
+    #[test]
+    fn session_import_params_escapes_session_id() {
+        let session_id = r#"sess"quote"#;
+        let messages_json = r#"[{"role":"user","text":"hi"}]"#;
+        let messages: Value = serde_json::from_str(messages_json).unwrap();
+        let params = json!({
+            "sessionId": session_id,
+            "messages": messages,
+        });
+        let roundtrip: Value = serde_json::from_str(&params.to_string()).unwrap();
+        assert_eq!(roundtrip["sessionId"].as_str().unwrap(), session_id);
     }
 
     // ── render_diff ───────────────────────────────────────────────────────────
@@ -1642,6 +1741,64 @@ mod tests {
         assert!(got_done, "expected Done event");
     }
 
+    #[tokio::test]
+    async fn prompt_forwards_trailing_usage_after_done() {
+        let nats = MockNatsClient::new();
+        queue_new_session_setup(&nats, "s1").await;
+
+        let (notif_tx, notif_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        let (reply_tx, reply_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        nats.add_subscription(notif_rx);
+        nats.add_subscription(reply_rx);
+
+        let session = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
+
+        let mut events_rx = session.prompt("hello").await.unwrap();
+
+        // Buffer the trailing UsageUpdate BEFORE the terminal response so the
+        // forwarding loop deterministically drains it before emitting Done.
+        let usage_notif = json!({
+            "sessionId": "s1",
+            "update": {
+                "sessionUpdate": "usage_update",
+                "used": 42,
+                "size": 1000
+            }
+        });
+        notif_tx
+            .send(Bytes::from(serde_json::to_vec(&usage_notif).unwrap()))
+            .await
+            .unwrap();
+
+        let done = json!({"stopReason": "end_turn"});
+        reply_tx
+            .send(Bytes::from(serde_json::to_vec(&done).unwrap()))
+            .await
+            .unwrap();
+
+        let mut got_usage = false;
+        let mut got_done = false;
+        while let Some(ev) = events_rx.recv().await {
+            match ev {
+                StreamEvent::Usage { used_tokens, context_size } => {
+                    assert_eq!(used_tokens, 42);
+                    assert_eq!(context_size, 1000);
+                    got_usage = true;
+                }
+                StreamEvent::Done(r) => {
+                    assert_eq!(r, "end_turn");
+                    got_done = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_usage, "expected trailing Usage event after Done");
+        assert!(got_done, "expected Done event");
+    }
+
     /// CRIT-7: when the runner deregisters (e.g. during long compaction) the prompt
     /// publish succeeds but no response or notification ever arrives. The prompt must
     /// not hang forever — after `prompt_timeout` it emits a StreamEvent::Error so the
@@ -1792,9 +1949,8 @@ mod tests {
     async fn compact_surfaces_runner_error_message() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
-            .await
-            .unwrap();
+        let session =
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
         // Runner replies with a discriminated error envelope.
         let error_reply = serde_json::json!({
@@ -1881,7 +2037,51 @@ mod tests {
 
 #[cfg(test)]
 mod session_init_tests {
-    use super::SessionInit;
+    use super::{build_prompt_request, PromptOpts, SessionInit};
+
+    #[test]
+    fn build_prompt_request_attaches_tool_allowlist_meta() {
+        let req = build_prompt_request(
+            "sess-1",
+            "hello",
+            &PromptOpts {
+                tool_allowlist: vec!["read_file".into(), "bash".into()],
+                permission_rules: None,
+            },
+        );
+        let meta = req.meta.as_ref().expect("meta present");
+        let tools = meta
+            .get("toolAllowlist")
+            .and_then(|v| v.as_array())
+            .expect("toolAllowlist array");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].as_str(), Some("read_file"));
+        assert_eq!(tools[1].as_str(), Some("bash"));
+    }
+
+    #[test]
+    fn build_prompt_request_attaches_permission_rules_meta() {
+        let req = build_prompt_request(
+            "sess-1",
+            "hello",
+            &PromptOpts {
+                tool_allowlist: Vec::new(),
+                permission_rules: Some("allow_commands: git".into()),
+            },
+        );
+        let meta = req.meta.as_ref().expect("meta present");
+        assert_eq!(
+            meta.get("permissionRules").and_then(|v| v.as_str()),
+            Some("allow_commands: git")
+        );
+        assert!(meta.get("toolAllowlist").is_none());
+    }
+
+    #[test]
+    fn build_prompt_request_omits_meta_when_no_tool_allowlist() {
+        let req = build_prompt_request("sess-1", "hello", &PromptOpts::default());
+        assert!(req.meta.is_none());
+    }
 
     #[test]
     fn empty_init_produces_no_meta() {

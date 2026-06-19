@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::md_template::split_frontmatter;
+pub use crate::md_template::substitute_args;
+
 /// A user-defined slash command discovered from markdown on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomCommand {
@@ -17,9 +20,9 @@ pub struct CustomCommand {
     pub description: String,
     /// Prompt template body (after frontmatter).
     pub body: String,
-    /// Optional model override from frontmatter (not applied by the REPL yet).
+    /// Optional model override from frontmatter (applied by the REPL for that invocation).
     pub model: Option<String>,
-    /// Optional tool allow-list from frontmatter (not applied by the REPL yet).
+    /// Optional tool allow-list from frontmatter (applied per turn via prompt `_meta`).
     pub allowed_tools: Vec<String>,
     pub source: PathBuf,
 }
@@ -70,6 +73,52 @@ impl CustomCommandRegistry {
             model: def.model.clone(),
             allowed_tools: def.allowed_tools.clone(),
         })
+    }
+}
+
+/// Map Claude-style custom-command tool names to trogon runner tool ids.
+pub fn normalize_allowed_tools_for_runner(tools: &[String]) -> Vec<String> {
+    tools
+        .iter()
+        .map(|t| {
+            let base = t.split('(').next().unwrap_or(t).trim();
+            trogon_runner_tools::permission_rules::normalize_tool_name(base).to_string()
+        })
+        .collect()
+}
+
+fn command_permission_rules_for_allowed_tools(tools: &[String]) -> Option<String> {
+    let commands: Vec<String> = tools
+        .iter()
+        .filter_map(|tool| {
+            let (base, rest) = tool.split_once('(')?;
+            if trogon_runner_tools::permission_rules::normalize_tool_name(base.trim()) != "bash" {
+                return None;
+            }
+            let command = rest.strip_suffix(')').unwrap_or(rest).trim();
+            if command.is_empty() {
+                return None;
+            }
+            let command = command
+                .strip_suffix(":*")
+                .or_else(|| command.strip_suffix('*'))
+                .unwrap_or(command)
+                .trim();
+            (!command.is_empty()).then(|| command.to_string())
+        })
+        .collect();
+    if commands.is_empty() {
+        None
+    } else {
+        Some(format!("allow_commands: {}", commands.join(", ")))
+    }
+}
+
+/// Per-turn prompt overrides derived from a custom-command dispatch.
+pub fn prompt_opts_from_dispatch(dispatch: &CustomCommandDispatch) -> crate::session::PromptOpts {
+    crate::session::PromptOpts {
+        tool_allowlist: normalize_allowed_tools_for_runner(&dispatch.allowed_tools),
+        permission_rules: command_permission_rules_for_allowed_tools(&dispatch.allowed_tools),
     }
 }
 
@@ -196,34 +245,6 @@ pub fn parse_command_file(content: &str, source: &Path, base: &Path) -> Option<C
     })
 }
 
-fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return Some(("", content));
-    }
-    let rest = trimmed.strip_prefix("---")?;
-    let rest = rest.strip_prefix('\n').or_else(|| rest.strip_prefix("\r\n"))?;
-    let end = rest.find("\n---")?;
-    let (yaml, body) = rest.split_at(end);
-    let body = body.strip_prefix("\n---").unwrap_or(body);
-    let body = body
-        .strip_prefix('\n')
-        .or_else(|| body.strip_prefix("\r\n"))
-        .unwrap_or(body);
-    Some((yaml, body))
-}
-
-/// Replace `$ARGUMENTS` and positional `$1`, `$2`, … in a command template.
-pub fn substitute_args(template: &str, args: &str) -> String {
-    let trimmed = args.trim();
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    let mut out = template.to_string();
-    for i in (1..=parts.len()).rev() {
-        out = out.replace(&format!("${i}"), parts[i - 1]);
-    }
-    out.replace("$ARGUMENTS", trimmed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,16 +293,6 @@ mod tests {
     }
 
     #[test]
-    fn substitute_arguments_and_positional() {
-        assert_eq!(substitute_args("All: $ARGUMENTS", "hello world"), "All: hello world");
-        assert_eq!(
-            substitute_args("First=$1 second=$2 rest=$ARGUMENTS", "a b c d"),
-            "First=a second=b rest=a b c d"
-        );
-        assert_eq!(substitute_args("No args: $1", ""), "No args: $1");
-    }
-
-    #[test]
     fn discovery_finds_project_user_and_namespaced_commands() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path().join("project");
@@ -327,16 +338,9 @@ mod tests {
         let home = tmp.path().join("home");
         fs::create_dir_all(project.join(".claude/commands")).unwrap();
         fs::create_dir_all(home.join(".claude/commands")).unwrap();
-        fs::write(
-            home.join(".claude/commands/dup.md"),
-            "---\ndescription: user\n---\nuser\n",
-        )
-        .unwrap();
-        fs::write(
-            project.join(".claude/commands/dup.md"),
-            "---\ndescription: project\n---\nproject\n",
-        )
-        .unwrap();
+        fs::write(home.join(".claude/commands/dup.md"), "---\ndescription: user\n---\nuser\n").unwrap();
+        fs::write(project.join(".claude/commands/dup.md"), "---\ndescription: project\n---\nproject\n")
+            .unwrap();
 
         let mut by_name = HashMap::new();
         for dir in [home.join(".claude/commands"), project.join(".claude/commands")] {
@@ -361,6 +365,41 @@ mod tests {
         let disp = registry.dispatch("/test", "one two").unwrap();
         assert_eq!(disp.prompt, "Run: one two (one)");
         assert!(registry.dispatch("/nope", "").is_none());
+    }
+
+    #[test]
+    fn normalize_allowed_tools_maps_claude_names() {
+        assert_eq!(
+            normalize_allowed_tools_for_runner(&["Read".into(), "Bash(git:*)".into()]),
+            vec!["read_file", "bash"]
+        );
+    }
+
+    #[test]
+    fn prompt_opts_from_dispatch_normalizes_allowed_tools() {
+        let dispatch = CustomCommandDispatch {
+            prompt: "do it".into(),
+            model: Some("claude-opus-4-7".into()),
+            allowed_tools: vec!["Read".into(), "Bash".into()],
+        };
+        let opts = prompt_opts_from_dispatch(&dispatch);
+        assert_eq!(opts.tool_allowlist, vec!["read_file", "bash"]);
+        assert_eq!(opts.permission_rules, None);
+    }
+
+    #[test]
+    fn command_scoped_bash_allowed_tools_emit_permission_rules() {
+        let dispatch = CustomCommandDispatch {
+            prompt: "commit".into(),
+            model: None,
+            allowed_tools: vec!["Read".into(), "Bash(git:*)".into(), "Bash(cargo test*)".into()],
+        };
+        let opts = prompt_opts_from_dispatch(&dispatch);
+        assert_eq!(opts.tool_allowlist, vec!["read_file", "bash", "bash"]);
+        assert_eq!(
+            opts.permission_rules.as_deref(),
+            Some("allow_commands: git, cargo test")
+        );
     }
 
     #[test]

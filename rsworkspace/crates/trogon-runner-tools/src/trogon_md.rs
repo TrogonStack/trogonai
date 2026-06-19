@@ -9,7 +9,7 @@ pub trait TrogonMdLoading {
     async fn load(&self, cwd: &str) -> Option<String>;
 }
 
-/// Production implementation — reads real files from disk.
+/// Production implementation - reads real files from disk.
 #[derive(Clone)]
 pub struct FsTrogonMdLoader;
 
@@ -23,11 +23,14 @@ impl TrogonMdLoading for FsTrogonMdLoader {
 /// Maximum nesting depth for `@path` imports (cycle/blow-up guard).
 const MAX_IMPORT_DEPTH: usize = 5;
 
-/// Loads and concatenates all `TROGON.md` content relevant to `cwd`.
+/// Memory file names loaded at each level, in precedence order.
+const MEMORY_FILE_NAMES: [&str; 2] = ["TROGON.md", "CLAUDE.md"];
+
+/// Loads and concatenates all `TROGON.md` / `CLAUDE.md` content relevant to `cwd`.
 ///
 /// Concatenation order (most general → most specific):
-/// 1. `~/.config/trogon/TROGON.md` — global user configuration
-/// 2. All `TROGON.md` files found walking up from `cwd` to `/`,
+/// 1. `~/.config/trogon/TROGON.md` or `CLAUDE.md` - global user configuration
+/// 2. All `TROGON.md` / `CLAUDE.md` files found walking up from `cwd` to `/`,
 ///    ordered root-first so child directories can extend or override parents.
 /// 3. Path-scoped rules from `.trogon/rules/*.md` (with optional `globs:`
 ///    frontmatter), appended as a labelled section.
@@ -44,24 +47,27 @@ pub async fn load_trogon_md(cwd: &str) -> Option<String> {
         parts.push(expand_imports(&content, &base, 0, &mut Vec::new()));
     }
 
-    // Collect all candidates walking up from cwd, then reverse to get root-first order.
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    // Collect directories walking up from cwd, then reverse to get root-first order.
+    let mut dirs: Vec<PathBuf> = Vec::new();
     let mut dir = PathBuf::from(cwd);
     loop {
-        candidates.push(dir.join("TROGON.md"));
+        dirs.push(dir.clone());
         if !dir.pop() {
             break;
         }
     }
-    candidates.reverse();
-    for path in candidates {
-        if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            let base = path
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from("."));
-            let mut visited = vec![path.clone()];
-            parts.push(expand_imports(&content, &base, 0, &mut visited));
+    dirs.reverse();
+    for dir in dirs {
+        for name in MEMORY_FILE_NAMES {
+            let path = dir.join(name);
+            if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                let base = path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                let mut visited = vec![path.clone()];
+                parts.push(expand_imports(&content, &base, 0, &mut visited));
+            }
         }
     }
 
@@ -77,12 +83,16 @@ pub async fn load_trogon_md(cwd: &str) -> Option<String> {
     }
 }
 
-/// Returns the global TROGON.md content and its directory (for import resolution).
+/// Returns the global TROGON.md or CLAUDE.md content and its directory (for import resolution).
 async fn load_global() -> Option<(String, PathBuf)> {
     let home = std::env::var("HOME").ok()?;
     let dir = PathBuf::from(home).join(".config/trogon");
-    let content = tokio::fs::read_to_string(dir.join("TROGON.md")).await.ok()?;
-    Some((content, dir))
+    for name in MEMORY_FILE_NAMES {
+        if let Ok(content) = tokio::fs::read_to_string(dir.join(name)).await {
+            return Some((content, dir));
+        }
+    }
+    None
 }
 
 /// Resolve an `@path` import token relative to `base_dir` (`@~/…` → `$HOME/…`).
@@ -233,7 +243,7 @@ fn parse_rule_frontmatter(content: &str) -> (Vec<String>, &str) {
     (globs, body)
 }
 
-/// One layer in the TROGON.md hierarchy (global → repo root → cwd).
+/// One layer in the TROGON.md hierarchy (global -> repo root -> cwd).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrogonMdLayer {
     pub path: PathBuf,
@@ -255,58 +265,65 @@ fn find_git_root(cwd: &Path) -> Option<PathBuf> {
     }
 }
 
-/// List TROGON.md paths from global config through ancestors of `cwd` (root-first).
+/// List TROGON.md / CLAUDE.md paths from global config through ancestors of `cwd` (root-first).
 pub async fn list_trogon_md_hierarchy(cwd: &str) -> Vec<TrogonMdLayer> {
     let mut layers = Vec::new();
 
     if let Ok(home) = std::env::var("HOME") {
-        let path = PathBuf::from(home).join(".config/trogon/TROGON.md");
-        layers.push(TrogonMdLayer {
-            exists: tokio::fs::metadata(&path).await.is_ok(),
-            label: "global".into(),
-            path,
-        });
+        let dir = PathBuf::from(home).join(".config/trogon");
+        for name in MEMORY_FILE_NAMES {
+            let path = dir.join(name);
+            layers.push(TrogonMdLayer {
+                exists: tokio::fs::metadata(&path).await.is_ok(),
+                label: "global".into(),
+                path,
+            });
+        }
     }
 
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut dirs: Vec<PathBuf> = Vec::new();
     let mut dir = PathBuf::from(cwd);
     loop {
-        candidates.push(dir.join("TROGON.md"));
+        dirs.push(dir.clone());
         if !dir.pop() {
             break;
         }
     }
-    candidates.reverse();
+    dirs.reverse();
 
     // Determine the "project root" label: the nearest ancestor containing `.git`,
     // or fall back to `cwd` if no git root is found (preserves previous behaviour).
     let cwd_path = PathBuf::from(cwd);
     let git_root = find_git_root(&cwd_path).unwrap_or_else(|| cwd_path.clone());
 
-    for path in candidates {
-        let dir_path = path.parent().map(PathBuf::from).unwrap_or_default();
+    for dir_path in dirs {
         let label = if dir_path == git_root {
             "project root".into()
         } else {
             format!("ancestor {}", dir_path.display())
         };
-        layers.push(TrogonMdLayer {
-            exists: tokio::fs::metadata(&path).await.is_ok(),
-            label,
-            path,
-        });
+        for name in MEMORY_FILE_NAMES {
+            let path = dir_path.join(name);
+            layers.push(TrogonMdLayer {
+                exists: tokio::fs::metadata(&path).await.is_ok(),
+                label: label.clone(),
+                path,
+            });
+        }
     }
 
     layers
 }
 
-/// Project-local TROGON.md path: nearest existing file walking up from `cwd`, else `cwd/TROGON.md`.
+/// Project-local memory path: nearest existing TROGON.md/CLAUDE.md walking up from `cwd`, else `cwd/TROGON.md`.
 pub fn project_trogon_md_path(cwd: &Path) -> PathBuf {
     let mut dir = cwd.to_path_buf();
     loop {
-        let candidate = dir.join("TROGON.md");
-        if candidate.is_file() {
-            return candidate;
+        for name in MEMORY_FILE_NAMES {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
         }
         if !dir.pop() {
             break;
@@ -362,13 +379,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn loads_claude_md_alias_from_cwd() {
+        let dir = tmp_dir("claude_cwd").await;
+        write(&dir.join("CLAUDE.md"), "claude content").await;
+        let result = load_trogon_md(dir.to_str().unwrap()).await.unwrap();
+        assert!(result.contains("claude content"), "got: {result}");
+    }
+
+    #[tokio::test]
     async fn parent_comes_before_child() {
         let parent = tmp_dir("parent_child_parent").await;
         let child = parent.join("child");
         tokio::fs::create_dir_all(&child).await.unwrap();
 
         write(&parent.join("TROGON.md"), "parent content").await;
-        write(&child.join("TROGON.md"), "child content").await;
+        write(&child.join("CLAUDE.md"), "child content").await;
 
         let result = load_trogon_md(child.to_str().unwrap()).await.unwrap();
         let parent_pos = result.find("parent content").unwrap();
@@ -446,6 +471,31 @@ mod tests {
         let global_pos = content.find("global content").expect("global content missing");
         let local_pos = content.find("local content").expect("local content missing");
         assert!(global_pos < local_pos, "global must come before local, got: {content}");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn global_claude_file_is_loaded_as_alias() {
+        let _guard = home_test_mutex().lock().unwrap();
+
+        let fake_home = tmp_dir("global_claude_home").await;
+        let config_dir = fake_home.join(".config/trogon");
+        tokio::fs::create_dir_all(&config_dir).await.unwrap();
+        write(&config_dir.join("CLAUDE.md"), "global claude content").await;
+
+        let cwd = tmp_dir("global_claude_cwd").await;
+        let orig = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        let result = load_trogon_md(cwd.to_str().unwrap()).await;
+
+        match &orig {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let content = result.expect("must return Some when global CLAUDE.md exists");
+        assert!(content.contains("global claude content"), "got: {content}");
     }
 
     // ── LOW-17: find_git_root returns the git root, not cwd ──────────────────

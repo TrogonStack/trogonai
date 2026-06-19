@@ -130,10 +130,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         });
 
-    if anthropic.is_none() && xai.is_none() && openrouter.is_none() {
+    // OpenAI (codex runner): OpenAI-compatible Chat Completions. Token falls back
+    // to the codex runner's own OPENAI_API_KEY so the same credentials work.
+    let openai = std::env::var("COMPACTOR_OPENAI_TOKEN")
+        .or_else(|_| std::env::var("OPENAI_API_KEY"))
+        .ok()
+        .map(|token| {
+            let base = std::env::var("COMPACTOR_OPENAI_BASE_URL")
+                .or_else(|_| std::env::var("OPENAI_BASE_URL"))
+                .unwrap_or_else(|_| "https://api.openai.com/v1".into());
+            ProviderConfig {
+                api_url: format!("{}/chat/completions", base.trim_end_matches('/')),
+                token,
+                auth_style: AuthStyle::Bearer,
+                default_model: std::env::var("COMPACTOR_OPENAI_MODEL")
+                    .unwrap_or_else(|_| "gpt-4o-mini".into()),
+            }
+        });
+
+    if anthropic.is_none() && xai.is_none() && openrouter.is_none() && openai.is_none() {
         eprintln!(
             "error: no provider token configured — set at least one of ANTHROPIC_TOKEN, \
-             COMPACTOR_XAI_TOKEN, COMPACTOR_OPENROUTER_TOKEN"
+             COMPACTOR_XAI_TOKEN, COMPACTOR_OPENROUTER_TOKEN, COMPACTOR_OPENAI_TOKEN"
         );
         std::process::exit(1);
     }
@@ -156,6 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         anthropic,
         xai,
         openrouter,
+        openai,
     };
 
     service::run(nats, state).await?;

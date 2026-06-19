@@ -1,7 +1,5 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
-#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-
 mod config;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
@@ -19,7 +17,7 @@ use {
 
 #[cfg(not(coverage))]
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     trogon_telemetry::init_logger(
         ServiceName::AcpNatsStdio,
@@ -76,7 +74,7 @@ async fn run_bridge<N, J, W, R>(
     stdout: W,
     stdin: R,
     shutdown_signal: impl std::future::Future<Output = ()>,
-) -> anyhow::Result<()>
+) -> Result<(), Box<dyn std::error::Error>>
 where
     N: acp_nats::RequestClient + acp_nats::PublishClient + acp_nats::FlushClient + acp_nats::SubscribeClient + 'static,
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
@@ -122,7 +120,7 @@ where
                 }
                 Err(e) => {
                     error!(error = %e, "Client task ended with error");
-                    Err(e.into())
+                    Err(Box::new(e) as Box<dyn std::error::Error>)
                 }
             }
         }
@@ -130,7 +128,7 @@ where
             match result {
                 Err(e) => {
                     error!(error = %e, "IO task error");
-                    Err(e.into())
+                    Err(Box::new(e) as Box<dyn std::error::Error>)
                 }
                 Ok(()) => {
                     info!("ACP bridge shutting down (IO closed)");
@@ -271,9 +269,9 @@ mod tests {
     #[cfg_attr(coverage, coverage(off))]
     #[tokio::test]
     async fn e2e_initialize_with_real_nats_returns_protocol_version() {
-        use acp_nats_agent::AgentSideNatsConnection;
         use testcontainers_modules::nats::Nats;
         use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+        use acp_nats_agent::AgentSideNatsConnection;
         use trogon_acp_runner::{NatsSessionNotifier, NatsSessionStore, TrogonAgent};
         use trogon_agent_core::agent_loop::AgentLoop;
         use trogon_agent_core::tools::ToolContext;
@@ -311,11 +309,11 @@ mod tests {
                 max_iterations: 10,
                 thinking_budget: None,
                 tool_context: Arc::new(ToolContext {
-                    web_search_api_key: None,
-                    web_search_endpoint: None,
                     proxy_url: String::new(),
                     cwd: String::new(),
                     http_client: http.clone(),
+                    web_search_api_key: None,
+                    web_search_endpoint: None,
                 }),
                 memory_owner: None,
                 memory_repo: None,
@@ -345,9 +343,7 @@ mod tests {
             let (_, ta_io_task) = AgentSideNatsConnection::new(ta, nats_for_server, prefix, |fut| {
                 tokio::task::spawn_local(fut);
             });
-            rt.block_on(local.run_until(async move {
-                ta_io_task.await.ok();
-            }));
+            rt.block_on(local.run_until(async move { ta_io_task.await.ok(); }));
         });
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -389,12 +385,17 @@ mod tests {
                 )
                 .await
             }))
-            .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string()))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })
         });
 
         // Send initialize request.
         stdin_w
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":0}}\n")
+            .write_all(
+                b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":0}}\n",
+            )
             .await
             .unwrap();
 

@@ -316,7 +316,8 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
                 "properties": {
                     "pattern":          { "type": "string",  "description": "Regular expression pattern (Rust regex syntax)" },
                     "path":             { "type": "string",  "description": "Directory to search in, relative to working directory (default: '.')" },
-                    "case_insensitive": { "type": "boolean", "description": "If true, search is case-insensitive (default: false)" }
+                    "case_insensitive": { "type": "boolean", "description": "If true, search is case-insensitive (default: false)" },
+                    "glob":             { "description": "Optional file glob (e.g. \"*.rs\") or array of globs to restrict which files are searched. Omit to search all files." }
                 },
                 "required": ["pattern"]
             }),

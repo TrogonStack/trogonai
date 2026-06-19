@@ -45,7 +45,7 @@ pub use scope::{CommandSet, GlobSet, NetworkPolicy, OnExceed, Scope, ScopeDecisi
 pub use session_store::{
     AllowedToolsSessionStore, AuditEntry, AuditOutcome, BashJob, NatsSessionStore, SessionState, SessionStore,
     StoredMcpServer, TodoItem, append_audit_entries, filter_tool_defs_by_allowlist, intersect_enabled_tools,
-    is_tool_in_allowlist,
+    is_tool_in_allowlist, turn_tool_allowlist_from_prompt_meta,
 };
 pub use subagents::{SubagentDef, load_subagent, load_subagents, parse_subagent};
 pub use trogon_md::{

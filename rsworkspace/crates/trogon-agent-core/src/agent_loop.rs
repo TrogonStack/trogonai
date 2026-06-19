@@ -19,7 +19,8 @@ use tracing::{debug, info, warn};
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
 pub use trogon_tools::{
-    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver, ToolResult,
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, PostToolObserver,
+    ToolOutput, ToolResult,
 };
 
 /// A single block in the Anthropic `system` array.
@@ -122,7 +123,9 @@ impl AnthropicHttpClient for reqwest::Client {
             };
 
             if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
-                let retry_after = capped_retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
+                let retry_after = capped_retry_after(
+                    resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+                );
                 warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                 tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                 attempt += 1;
@@ -342,8 +345,9 @@ impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
                         Ok(r) => r,
                     };
                     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
-                        let retry_after =
-                            capped_retry_after(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()));
+                        let retry_after = capped_retry_after(
+                            resp.headers().get("retry-after").and_then(|v| v.to_str().ok()),
+                        );
                         warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                         tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                         attempt += 1;
@@ -388,9 +392,9 @@ impl AnthropicStreamingClient for NoopStreamingClient {
             "event: message_stop\n",
             "data: {\"type\":\"message_stop\"}\n\n",
         );
-        Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(
-            sse.as_bytes(),
-        )))))
+        Box::pin(futures_util::stream::once(std::future::ready(Ok(
+            Bytes::from_static(sse.as_bytes()),
+        ))))
     }
 }
 
@@ -499,7 +503,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 messages: &messages,
             };
 
-            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
+            let mut body =
+                serde_json::to_value(&request).expect("request serialization is infallible");
             if let Some(budget) = self.thinking_budget
                 && budget > 0
             {
@@ -599,7 +604,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 messages: &messages,
             };
 
-            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
+            let mut body =
+                serde_json::to_value(&request).expect("request serialization is infallible");
             if let Some(budget) = self.thinking_budget
                 && budget > 0
             {
@@ -673,7 +679,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         system_prompt: Option<&str>,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
         mut steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
-    ) -> Result<Vec<Message>, AgentError> {
+    ) -> Result<Vec<Message>, AgentError>
+    {
         let mut messages = initial_messages;
 
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
@@ -733,7 +740,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 messages: &messages,
             };
 
-            let mut body = serde_json::to_value(&request).expect("request serialization is infallible");
+            let mut body =
+                serde_json::to_value(&request).expect("request serialization is infallible");
             if let Some(budget) = self.thinking_budget
                 && budget > 0
             {
@@ -792,20 +800,12 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             let cb = &data["content_block"];
                             block_builders[idx] = match cb["type"].as_str() {
                                 Some("text") => Some(ContentBlockBuilder::Text(String::new())),
-                                Some("thinking") => Some(ContentBlockBuilder::Thinking {
-                                    text: String::new(),
-                                    signature: cb["signature"].as_str().map(String::from),
-                                }),
+                                Some("thinking") => Some(ContentBlockBuilder::Thinking(String::new())),
                                 Some("tool_use") => {
                                     let id = cb["id"].as_str().unwrap_or("").to_string();
                                     let name = cb["name"].as_str().unwrap_or("").to_string();
                                     let parent_tool_use_id = cb["parent_tool_use_id"].as_str().map(String::from);
-                                    Some(ContentBlockBuilder::ToolUse {
-                                        id,
-                                        name,
-                                        input_buf: String::new(),
-                                        parent_tool_use_id,
-                                    })
+                                    Some(ContentBlockBuilder::ToolUse { id, name, input_buf: String::new(), parent_tool_use_id })
                                 }
                                 _ => None,
                             };
@@ -818,26 +818,17 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                     (Some("text_delta"), ContentBlockBuilder::Text(t)) => {
                                         if let Some(text) = delta["text"].as_str() {
                                             t.push_str(text);
-                                            let _ =
-                                                event_tx.send(AgentEvent::TextDelta { text: text.to_string() }).await;
-                                        }
-                                    }
-                                    (Some("thinking_delta"), ContentBlockBuilder::Thinking { text, .. }) => {
-                                        if let Some(thinking) = delta["thinking"].as_str() {
-                                            text.push_str(thinking);
                                             let _ = event_tx
-                                                .send(AgentEvent::ThinkingDelta {
-                                                    text: thinking.to_string(),
-                                                })
+                                                .send(AgentEvent::TextDelta { text: text.to_string() })
                                                 .await;
                                         }
                                     }
-                                    (Some("signature_delta"), ContentBlockBuilder::Thinking { signature, .. }) => {
-                                        // Anthropic delivers the thinking-block signature here; it
-                                        // must be preserved so the block can be echoed back unchanged
-                                        // on the next tool-use turn (else a 400).
-                                        if let Some(sig) = delta["signature"].as_str() {
-                                            signature.get_or_insert_with(String::new).push_str(sig);
+                                    (Some("thinking_delta"), ContentBlockBuilder::Thinking(t)) => {
+                                        if let Some(thinking) = delta["thinking"].as_str() {
+                                            t.push_str(thinking);
+                                            let _ = event_tx
+                                                .send(AgentEvent::ThinkingDelta { text: thinking.to_string() })
+                                                .await;
                                         }
                                     }
                                     (Some("input_json_delta"), ContentBlockBuilder::ToolUse { input_buf, .. }) => {
@@ -850,7 +841,10 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             }
                         }
                         "message_delta" => {
-                            stop_reason = data["delta"]["stop_reason"].as_str().unwrap_or("").to_string();
+                            stop_reason = data["delta"]["stop_reason"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
                             turn_output = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
                         }
                         _ => {}
@@ -863,24 +857,11 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 .into_iter()
                 .filter_map(|opt| match opt? {
                     ContentBlockBuilder::Text(t) => Some(ContentBlock::Text { text: t }),
-                    ContentBlockBuilder::Thinking { text, signature } => Some(ContentBlock::Thinking {
-                        thinking: text,
-                        signature,
-                    }),
-                    ContentBlockBuilder::ToolUse {
-                        id,
-                        name,
-                        input_buf,
-                        parent_tool_use_id,
-                    } => {
-                        let input =
-                            serde_json::from_str(&input_buf).unwrap_or(serde_json::Value::Object(Default::default()));
-                        Some(ContentBlock::ToolUse {
-                            id,
-                            name,
-                            input,
-                            parent_tool_use_id,
-                        })
+                    ContentBlockBuilder::Thinking(t) => Some(ContentBlock::Thinking { thinking: t }),
+                    ContentBlockBuilder::ToolUse { id, name, input_buf, parent_tool_use_id } => {
+                        let input = serde_json::from_str(&input_buf)
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        Some(ContentBlock::ToolUse { id, name, input, parent_tool_use_id })
                     }
                 })
                 .collect();
@@ -917,6 +898,9 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         .await;
 
                     messages.push(Message::assistant(response_content));
+                    // Steer messages can arrive during the final tool-free turn; surface
+                    // them as user Text blocks so they are not silently discarded.
+                    append_drained_steer(&mut steer_rx, &mut messages);
                     info!(iterations = iteration + 1, "Streaming chat completed");
                     return Ok(messages);
                 }
@@ -930,6 +914,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         })
                         .await;
                     // Text was already emitted incrementally during the SSE parse above.
+                    append_drained_steer(&mut steer_rx, &mut messages);
                     warn!(iteration, "Streaming chat hit max_tokens (context full)");
                     return Err(AgentError::MaxTokens);
                 }
@@ -952,14 +937,13 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 ),
                             })
                             .await;
-                        warn!(
-                            repeat = repeat_count,
-                            "loop detected — identical tool calls repeated; halting turn"
-                        );
+                        warn!(repeat = repeat_count, "loop detected — identical tool calls repeated; halting turn");
                         return Ok(messages);
                     }
                     used_tools = true;
-                    let results = self.execute_tools_streaming(&response_content, &event_tx).await;
+                    let results = self
+                        .execute_tools_streaming(&response_content, &event_tx)
+                        .await;
                     if !results.is_empty() {
                         let _ = event_tx
                             .send(AgentEvent::ToolBatchFinished { count: results.len() })
@@ -967,11 +951,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                     }
                     messages.push(Message::assistant(response_content));
                     let mut tool_results_msg = Message::tool_results(results);
-                    if let Some(ref mut rx) = steer_rx {
-                        while let Ok(text) = rx.try_recv() {
-                            tool_results_msg.content.push(ContentBlock::Text { text });
-                        }
-                    }
+                    append_drained_steer_to_content(&mut steer_rx, &mut tool_results_msg.content);
                     messages.push(tool_results_msg);
                 }
                 other => {
@@ -980,7 +960,10 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             }
         }
 
-        warn!(max = self.max_iterations, "Streaming chat reached max iterations");
+        warn!(
+            max = self.max_iterations,
+            "Streaming chat reached max iterations"
+        );
         Err(AgentError::MaxIterationsReached)
     }
 
@@ -993,13 +976,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         let tool_uses: Vec<(String, String, serde_json::Value, Option<String>)> = content
             .iter()
             .filter_map(|b| {
-                if let ContentBlock::ToolUse {
-                    id,
-                    name,
-                    input,
-                    parent_tool_use_id,
-                } = b
-                {
+                if let ContentBlock::ToolUse { id, name, input, parent_tool_use_id } = b {
                     Some((id.clone(), name.clone(), input.clone(), parent_tool_use_id.clone()))
                 } else {
                     None
@@ -1007,230 +984,150 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             })
             .collect();
 
-        if self.permission_checker.is_some() {
-            // Hybrid path: read-only / auto-allowed tools run concurrently; tools
-            // that may block on the interactive permission gate stay serial.
-            // change_directory updates cwd for subsequent tools in this turn.
-            let mut current_ctx = Arc::clone(&self.tool_context);
-            let mut results = Vec::with_capacity(tool_uses.len());
-            let mut i = 0;
-            while i < tool_uses.len() {
-                if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
-                    let start = i;
-                    while i < tool_uses.len() && is_parallel_safe_read_only_tool(&tool_uses[i].1) {
-                        i += 1;
-                    }
-                    let batch = &tool_uses[start..i];
-                    let futures: Vec<_> = batch
-                        .iter()
-                        .map(|(id, name, input, parent_tool_use_id)| {
-                            let event_tx = event_tx.clone();
-                            let tool_context = Arc::clone(&current_ctx);
-                            let mcp_dispatch = self.mcp_dispatch.clone();
-                            let post_tool_observer = self.post_tool_observer.clone();
-                            let id = id.clone();
-                            let name = name.clone();
-                            let input = input.clone();
-                            let parent_tool_use_id = parent_tool_use_id.clone();
-                            async move {
-                                debug!(tool = %name, "Executing tool (streaming, parallel-safe)");
-
-                                let _ = event_tx
-                                    .send(AgentEvent::ToolCallStarted {
-                                        id: id.clone(),
-                                        name: name.clone(),
-                                        input: input.clone(),
-                                        parent_tool_use_id,
-                                    })
-                                    .await;
-
-                                let output = if let Some((_, original, client)) =
-                                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
-                                {
-                                    match client.call_tool(original, &input).await {
-                                        Ok(out) => out,
-                                        Err(e) => format!("Tool error: {e}"),
-                                    }
-                                } else {
-                                    dispatch_tool(&tool_context, &name, &input).await.display_text()
-                                };
-
-                                let output = if let Some(obs) = &post_tool_observer {
-                                    match obs.observe(&id, &name, &output).await {
-                                        Some(reason) => {
-                                            format!("{output}\n\n[PostToolUse hook] {reason}")
-                                        }
-                                        None => output,
-                                    }
-                                } else {
-                                    output
-                                };
-
-                                let _ = event_tx
-                                    .send(AgentEvent::ToolCallFinished {
-                                        id: id.clone(),
-                                        output: output.clone(),
-                                        exit_code: None,
-                                        signal: None,
-                                    })
-                                    .await;
-
-                                ToolResult {
-                                    tool_use_id: id,
-                                    content: output,
-                                    blocks: vec![],
-                                }
-                            }
-                        })
-                        .collect();
-                    results.extend(futures_util::future::join_all(futures).await);
-                } else {
-                    let (id, name, input, parent_tool_use_id) = tool_uses[i].clone();
+        // Hybrid execution: read-only tools run concurrently; everything else stays
+        // serial so `change_directory` can update cwd for subsequent tools this turn.
+        // Parallel batches snapshot cwd at batch start — siblings in the same batch
+        // do not see a mid-batch `change_directory` (it is never parallel-safe).
+        let mut current_ctx = Arc::clone(&self.tool_context);
+        let mut results = Vec::with_capacity(tool_uses.len());
+        let mut i = 0;
+        while i < tool_uses.len() {
+            if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
+                let start = i;
+                while i < tool_uses.len() && is_parallel_safe_read_only_tool(&tool_uses[i].1) {
                     i += 1;
-                    debug!(tool = %name, "Executing tool (streaming, serial)");
+                }
+                let batch = &tool_uses[start..i];
+                let futures: Vec<_> = batch
+                    .iter()
+                    .map(|(id, name, input, parent_tool_use_id)| {
+                        let event_tx = event_tx.clone();
+                        let tool_context = Arc::clone(&current_ctx);
+                        let mcp_dispatch = self.mcp_dispatch.clone();
+                        let post_tool_observer = self.post_tool_observer.clone();
+                        let id = id.clone();
+                        let name = name.clone();
+                        let input = input.clone();
+                        let parent_tool_use_id = parent_tool_use_id.clone();
+                        async move {
+                            debug!(tool = %name, "Executing tool (streaming, parallel-safe)");
 
-                    let _ = event_tx
-                        .send(AgentEvent::ToolCallStarted {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: input.clone(),
-                            parent_tool_use_id,
-                        })
-                        .await;
+                            let _ = event_tx
+                                .send(AgentEvent::ToolCallStarted {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                    parent_tool_use_id,
+                                })
+                                .await;
 
-                    let output = if name == "ask_user" {
-                        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                        match &self.elicitation_provider {
-                            Some(provider) => match provider.elicit(question).await {
-                                Some(answer) => answer,
-                                None => "The user declined or cancelled the request.".to_string(),
-                            },
-                            None => "ask_user tool is not available in this context.".to_string(),
+                            let mut result = dispatch_builtin_or_mcp(
+                                &tool_context,
+                                &mcp_dispatch,
+                                &name,
+                                &input,
+                                &id,
+                            )
+                            .await;
+                            result = finalize_tool_result(
+                                result,
+                                post_tool_observer.as_ref(),
+                                &id,
+                                &name,
+                            )
+                            .await;
+
+                            let display = tool_result_display_text(&result);
+                            let _ = event_tx
+                                .send(AgentEvent::ToolCallFinished {
+                                    id: id.clone(),
+                                    output: display,
+                                    exit_code: None,
+                                    signal: None,
+                                })
+                                .await;
+
+                            result
                         }
-                    } else {
-                        let allowed = match &self.permission_checker {
-                            Some(checker) => checker.check(&id, &name, &input).await,
-                            None => true,
-                        };
-                        if !allowed {
+                    })
+                    .collect();
+                results.extend(futures_util::future::join_all(futures).await);
+            } else {
+                let (id, name, input, parent_tool_use_id) = tool_uses[i].clone();
+                i += 1;
+                debug!(tool = %name, "Executing tool (streaming, serial)");
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallStarted {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                        parent_tool_use_id,
+                    })
+                    .await;
+
+                let mut result = if name == "ask_user" {
+                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                    match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(answer) => text_tool_result(id.clone(), answer),
+                            None => text_tool_result(
+                                id.clone(),
+                                "The user declined or cancelled the request.".to_string(),
+                            ),
+                        },
+                        None => text_tool_result(
+                            id.clone(),
+                            "ask_user tool is not available in this context.".to_string(),
+                        ),
+                    }
+                } else {
+                    let allowed = match &self.permission_checker {
+                        Some(checker) => checker.check(&id, &name, &input).await,
+                        None => true,
+                    };
+                    if !allowed {
+                        text_tool_result(
+                            id.clone(),
                             format!(
                                 "Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"
-                            )
-                        } else if let Some((_, original, client)) =
-                            self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
-                        {
-                            match client.call_tool(original, &input).await {
-                                Ok(out) => out,
-                                Err(e) => format!("Tool error: {e}"),
-                            }
-                        } else {
-                            dispatch_tool(&current_ctx, &name, &input).await.display_text()
-                        }
-                    };
-
-                    let output = if let Some(obs) = &self.post_tool_observer {
-                        match obs.observe(&id, &name, &output).await {
-                            Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
-                            None => output,
-                        }
+                            ),
+                        )
                     } else {
-                        output
-                    };
-
-                    const CD_PREFIX: &str = "Working directory is now ";
-                    if name == "change_directory"
-                        && let Some(new_path) = output.strip_prefix(CD_PREFIX)
-                    {
-                        current_ctx = Arc::new(current_ctx.with_cwd(new_path));
+                        dispatch_builtin_or_mcp(
+                            &current_ctx,
+                            &self.mcp_dispatch,
+                            &name,
+                            &input,
+                            &id,
+                        )
+                        .await
                     }
+                };
 
-                    let _ = event_tx
-                        .send(AgentEvent::ToolCallFinished {
-                            id: id.clone(),
-                            output: output.clone(),
-                            exit_code: None,
-                            signal: None,
-                        })
-                        .await;
+                result = finalize_tool_result(
+                    result,
+                    self.post_tool_observer.as_ref(),
+                    &id,
+                    &name,
+                )
+                .await;
+                apply_change_directory_cwd(&mut current_ctx, &name, &result);
 
-                    results.push(ToolResult {
-                        tool_use_id: id,
-                        content: output,
-                        blocks: vec![],
-                    });
-                }
+                let display = tool_result_display_text(&result);
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallFinished {
+                        id: id.clone(),
+                        output: display,
+                        exit_code: None,
+                        signal: None,
+                    })
+                    .await;
+
+                results.push(result);
             }
-            results
-        } else {
-            // Parallel path: no interactive gate, run all tools concurrently.
-            let futures: Vec<_> = tool_uses
-                .into_iter()
-                .map(|(id, name, input, parent_tool_use_id)| {
-                    let event_tx = event_tx.clone();
-                    let tool_context = Arc::clone(&self.tool_context);
-                    let mcp_dispatch = self.mcp_dispatch.clone();
-                    let elicitation_provider = self.elicitation_provider.clone();
-                    let post_tool_observer = self.post_tool_observer.clone();
-                    async move {
-                        debug!(tool = %name, "Executing tool (streaming, parallel)");
-
-                        let _ = event_tx
-                            .send(AgentEvent::ToolCallStarted {
-                                id: id.clone(),
-                                name: name.clone(),
-                                input: input.clone(),
-                                parent_tool_use_id,
-                            })
-                            .await;
-
-                        let output = if name == "ask_user" {
-                            let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                            match &elicitation_provider {
-                                Some(provider) => match provider.elicit(question).await {
-                                    Some(answer) => answer,
-                                    None => "The user declined or cancelled the request.".to_string(),
-                                },
-                                None => "ask_user tool is not available in this context.".to_string(),
-                            }
-                        } else if let Some((_, original, client)) =
-                            mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
-                        {
-                            match client.call_tool(original, &input).await {
-                                Ok(out) => out,
-                                Err(e) => format!("Tool error: {e}"),
-                            }
-                        } else {
-                            dispatch_tool(&tool_context, &name, &input).await.display_text()
-                        };
-
-                        let output = if let Some(obs) = &post_tool_observer {
-                            match obs.observe(&id, &name, &output).await {
-                                Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
-                                None => output,
-                            }
-                        } else {
-                            output
-                        };
-
-                        let _ = event_tx
-                            .send(AgentEvent::ToolCallFinished {
-                                id: id.clone(),
-                                output: output.clone(),
-                                exit_code: None,
-                                signal: None,
-                            })
-                            .await;
-
-                        ToolResult {
-                            tool_use_id: id,
-                            content: output,
-                            blocks: vec![],
-                        }
-                    }
-                })
-                .collect();
-            futures_util::future::join_all(futures).await
         }
+        results
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -1246,163 +1143,206 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             })
             .collect();
 
-        if self.permission_checker.is_some() {
-            // Hybrid path: read-only / auto-allowed tools run concurrently; tools
-            // that may block on the interactive permission gate stay serial.
-            let mut results = Vec::with_capacity(tool_uses.len());
-            let mut i = 0;
-            while i < tool_uses.len() {
-                if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
-                    let start = i;
-                    while i < tool_uses.len() && is_parallel_safe_read_only_tool(&tool_uses[i].1) {
-                        i += 1;
-                    }
-                    let batch = &tool_uses[start..i];
-                    let futures: Vec<_> = batch
-                        .iter()
-                        .map(|(id, name, input)| {
-                            let tool_context = Arc::clone(&self.tool_context);
-                            let mcp_dispatch = self.mcp_dispatch.clone();
-                            let post_tool_observer = self.post_tool_observer.clone();
-                            let id = id.clone();
-                            let name = name.clone();
-                            let input = input.clone();
-                            async move {
-                                debug!(tool = %name, "Executing tool (parallel-safe)");
-
-                                let output = if let Some((_, original, client)) =
-                                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
-                                {
-                                    match client.call_tool(original, &input).await {
-                                        Ok(out) => out,
-                                        Err(e) => format!("Tool error: {e}"),
-                                    }
-                                } else {
-                                    dispatch_tool(&tool_context, &name, &input).await.display_text()
-                                };
-
-                                let output = if let Some(obs) = &post_tool_observer {
-                                    match obs.observe(&id, &name, &output).await {
-                                        Some(reason) => {
-                                            format!("{output}\n\n[PostToolUse hook] {reason}")
-                                        }
-                                        None => output,
-                                    }
-                                } else {
-                                    output
-                                };
-
-                                ToolResult {
-                                    tool_use_id: id,
-                                    content: output,
-                                    blocks: vec![],
-                                }
-                            }
-                        })
-                        .collect();
-                    results.extend(futures_util::future::join_all(futures).await);
-                } else {
-                    let (id, name, input) = tool_uses[i].clone();
+        // Same hybrid cwd semantics as `execute_tools_streaming` (see comment there).
+        let mut current_ctx = Arc::clone(&self.tool_context);
+        let mut results = Vec::with_capacity(tool_uses.len());
+        let mut i = 0;
+        while i < tool_uses.len() {
+            if is_parallel_safe_read_only_tool(&tool_uses[i].1) {
+                let start = i;
+                while i < tool_uses.len() && is_parallel_safe_read_only_tool(&tool_uses[i].1) {
                     i += 1;
-                    debug!(tool = %name, "Executing tool (serial)");
+                }
+                let batch = &tool_uses[start..i];
+                let futures: Vec<_> = batch
+                    .iter()
+                    .map(|(id, name, input)| {
+                        let tool_context = Arc::clone(&current_ctx);
+                        let mcp_dispatch = self.mcp_dispatch.clone();
+                        let post_tool_observer = self.post_tool_observer.clone();
+                        let id = id.clone();
+                        let name = name.clone();
+                        let input = input.clone();
+                        async move {
+                            debug!(tool = %name, "Executing tool (parallel-safe)");
 
-                    let output = if name == "ask_user" {
-                        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                        match &self.elicitation_provider {
-                            Some(provider) => match provider.elicit(question).await {
-                                Some(answer) => answer,
-                                None => "The user declined or cancelled the request.".to_string(),
-                            },
-                            None => "ask_user tool is not available in this context.".to_string(),
+                            let result = dispatch_builtin_or_mcp(
+                                &tool_context,
+                                &mcp_dispatch,
+                                &name,
+                                &input,
+                                &id,
+                            )
+                            .await;
+                            finalize_tool_result(
+                                result,
+                                post_tool_observer.as_ref(),
+                                &id,
+                                &name,
+                            )
+                            .await
                         }
-                    } else {
-                        let allowed = match &self.permission_checker {
-                            Some(checker) => checker.check(&id, &name, &input).await,
-                            None => true,
-                        };
-                        if !allowed {
+                    })
+                    .collect();
+                results.extend(futures_util::future::join_all(futures).await);
+            } else {
+                let (id, name, input) = tool_uses[i].clone();
+                i += 1;
+                debug!(tool = %name, "Executing tool (serial)");
+
+                let mut result = if name == "ask_user" {
+                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                    match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(answer) => text_tool_result(id.clone(), answer),
+                            None => text_tool_result(
+                                id.clone(),
+                                "The user declined or cancelled the request.".to_string(),
+                            ),
+                        },
+                        None => text_tool_result(
+                            id.clone(),
+                            "ask_user tool is not available in this context.".to_string(),
+                        ),
+                    }
+                } else {
+                    let allowed = match &self.permission_checker {
+                        Some(checker) => checker.check(&id, &name, &input).await,
+                        None => true,
+                    };
+                    if !allowed {
+                        text_tool_result(
+                            id.clone(),
                             format!(
                                 "Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"
-                            )
-                        } else if let Some((_, original, client)) =
-                            self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
-                        {
-                            match client.call_tool(original, &input).await {
-                                Ok(out) => out,
-                                Err(e) => format!("Tool error: {e}"),
-                            }
-                        } else {
-                            dispatch_tool(&self.tool_context, &name, &input).await.display_text()
-                        }
-                    };
-
-                    let output = if let Some(obs) = &self.post_tool_observer {
-                        match obs.observe(&id, &name, &output).await {
-                            Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
-                            None => output,
-                        }
+                            ),
+                        )
                     } else {
-                        output
-                    };
-
-                    results.push(ToolResult {
-                        tool_use_id: id,
-                        content: output,
-                        blocks: vec![],
-                    });
-                }
-            }
-            results
-        } else {
-            // Parallel path: no interactive gate, run all tools concurrently.
-            let futures: Vec<_> = tool_uses
-                .into_iter()
-                .map(|(id, name, input)| {
-                    let tool_context = Arc::clone(&self.tool_context);
-                    let mcp_dispatch = self.mcp_dispatch.clone();
-                    let elicitation_provider = self.elicitation_provider.clone();
-                    let post_tool_observer = self.post_tool_observer.clone();
-                    async move {
-                        debug!(tool = %name, "Executing tool (parallel)");
-
-                        let output = if name == "ask_user" {
-                            let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                            match &elicitation_provider {
-                                Some(provider) => match provider.elicit(question).await {
-                                    Some(answer) => answer,
-                                    None => "The user declined or cancelled the request.".to_string(),
-                                },
-                                None => "ask_user tool is not available in this context.".to_string(),
-                            }
-                        } else if let Some((_, original, client)) =
-                            mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
-                        {
-                            match client.call_tool(original, &input).await {
-                                Ok(out) => out,
-                                Err(e) => format!("Tool error: {e}"),
-                            }
-                        } else {
-                            dispatch_tool(&tool_context, &name, &input).await.display_text()
-                        };
-
-                        let output = if let Some(obs) = &post_tool_observer {
-                            match obs.observe(&id, &name, &output).await {
-                                Some(reason) => format!("{output}\n\n[PostToolUse hook] {reason}"),
-                                None => output,
-                            }
-                        } else {
-                            output
-                        };
-
-                        ToolResult {
-                            tool_use_id: id,
-                            content: output,
-                            blocks: vec![],
-                        }
+                        dispatch_builtin_or_mcp(
+                            &current_ctx,
+                            &self.mcp_dispatch,
+                            &name,
+                            &input,
+                            &id,
+                        )
+                        .await
                     }
-                })
-                .collect();
-            futures_util::future::join_all(futures).await
+                };
+
+                result = finalize_tool_result(
+                    result,
+                    self.post_tool_observer.as_ref(),
+                    &id,
+                    &name,
+                )
+                .await;
+                apply_change_directory_cwd(&mut current_ctx, &name, &result);
+                results.push(result);
+            }
+        }
+        results
+    }
+}
+
+const CHANGE_DIRECTORY_CWD_PREFIX: &str = "Working directory is now ";
+
+fn text_tool_result(tool_use_id: String, content: String) -> ToolResult {
+    ToolResult {
+        tool_use_id,
+        content,
+        blocks: vec![],
+    }
+}
+
+fn tool_result_display_text(result: &ToolResult) -> String {
+    if !result.content.is_empty() {
+        result.content.clone()
+    } else if !result.blocks.is_empty() {
+        serde_json::to_string(&result.blocks).unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+async fn apply_post_tool_observer(
+    result: &mut ToolResult,
+    observer: &Arc<dyn PostToolObserver>,
+    tool_call_id: &str,
+    tool_name: &str,
+) {
+    let display = tool_result_display_text(result);
+    if let Some(reason) = observer.observe(tool_call_id, tool_name, &display).await {
+        if result.content.is_empty() && !result.blocks.is_empty() {
+            result.content = format!("[PostToolUse hook] {reason}");
+        } else {
+            result.content = format!("{}\n\n[PostToolUse hook] {}", result.content, reason);
+        }
+    }
+}
+
+async fn finalize_tool_result(
+    mut result: ToolResult,
+    post_tool_observer: Option<&Arc<dyn PostToolObserver>>,
+    tool_call_id: &str,
+    tool_name: &str,
+) -> ToolResult {
+    if let Some(obs) = post_tool_observer {
+        apply_post_tool_observer(&mut result, obs, tool_call_id, tool_name).await;
+    }
+    result
+}
+
+fn apply_change_directory_cwd(ctx: &mut Arc<ToolContext>, name: &str, result: &ToolResult) {
+    if name == "change_directory"
+        && let Some(new_path) = result.content.strip_prefix(CHANGE_DIRECTORY_CWD_PREFIX)
+    {
+        *ctx = Arc::new(ctx.with_cwd(new_path));
+    }
+}
+
+async fn dispatch_builtin_or_mcp(
+    ctx: &ToolContext,
+    mcp_dispatch: &[(String, String, Arc<dyn trogon_mcp::McpCallTool>)],
+    name: &str,
+    input: &Value,
+    tool_use_id: &str,
+) -> ToolResult {
+    if let Some((_, original, client)) = mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
+    {
+        let content = match client.call_tool(original, input).await {
+            Ok(out) => out,
+            Err(e) => format!("Tool error: {e}"),
+        };
+        text_tool_result(tool_use_id.to_string(), content)
+    } else {
+        dispatch_tool(ctx, name, input)
+            .await
+            .into_tool_result(tool_use_id.to_string())
+    }
+}
+
+/// Append any pending steer messages from `rx` as user `Text` blocks in `messages`.
+fn append_drained_steer(
+    rx: &mut Option<tokio::sync::mpsc::Receiver<String>>,
+    messages: &mut Vec<Message>,
+) {
+    let mut content = Vec::new();
+    append_drained_steer_to_content(rx, &mut content);
+    if !content.is_empty() {
+        messages.push(Message {
+            role: "user".to_string(),
+            content,
+        });
+    }
+}
+
+fn append_drained_steer_to_content(
+    rx: &mut Option<tokio::sync::mpsc::Receiver<String>>,
+    content: &mut Vec<ContentBlock>,
+) {
+    if let Some(rx) = rx {
+        while let Ok(text) = rx.try_recv() {
+            content.push(ContentBlock::Text { text });
         }
     }
 }
@@ -1412,33 +1352,62 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
 fn is_parallel_safe_read_only_tool(name: &str) -> bool {
     matches!(
         name,
-        "read_file" | "list_dir" | "glob" | "search_files" | "git_status" | "git_diff" | "git_log" | "fetch_url"
+        "read_file"
+            | "list_dir"
+            | "glob"
+            | "search_files"
+            | "git_status"
+            | "git_diff"
+            | "git_log"
+            | "fetch_url"
     )
 }
 
 // ── SSE streaming helpers ─────────────────────────────────────────────────────
 
 /// Incremental SSE parser.  Feed raw bytes and receive parsed `(event_type,
-/// data_json)` pairs.  Handles SSE streams split across multiple network chunks.
+/// data_json)` pairs.  Handles SSE streams split across multiple network chunks
+/// and across UTF-8 code point boundaries.
 struct SseParser {
-    buf: String,
+    raw_buf: Vec<u8>,
+    text_buf: String,
 }
 
 impl SseParser {
     fn new() -> Self {
-        Self { buf: String::new() }
+        Self {
+            raw_buf: Vec::new(),
+            text_buf: String::new(),
+        }
     }
 
     fn feed(&mut self, bytes: &[u8]) -> Vec<(String, serde_json::Value)> {
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return vec![];
-        };
-        self.buf.push_str(text);
+        self.raw_buf.extend_from_slice(bytes);
+
+        loop {
+            match std::str::from_utf8(&self.raw_buf) {
+                Ok(decoded) => {
+                    self.text_buf.push_str(decoded);
+                    self.raw_buf.clear();
+                    break;
+                }
+                Err(e) => {
+                    let valid_up_to = e.valid_up_to();
+                    if valid_up_to == 0 {
+                        // Incomplete UTF-8 sequence at the tail — wait for more bytes.
+                        return vec![];
+                    }
+                    let chunk = std::str::from_utf8(&self.raw_buf[..valid_up_to]).unwrap();
+                    self.text_buf.push_str(chunk);
+                    self.raw_buf.drain(..valid_up_to);
+                }
+            }
+        }
 
         let mut events = Vec::new();
-        while let Some(pos) = self.buf.find("\n\n") {
-            let raw = self.buf[..pos].to_string();
-            self.buf = self.buf[pos + 2..].to_string();
+        while let Some(pos) = self.text_buf.find("\n\n") {
+            let raw = self.text_buf[..pos].to_string();
+            self.text_buf = self.text_buf[pos + 2..].to_string();
 
             let mut event_type = String::new();
             let mut data = String::new();
@@ -1451,8 +1420,7 @@ impl SseParser {
             }
 
             if !data.is_empty()
-                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&data)
-            {
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
                 events.push((event_type, v));
             }
         }
@@ -1463,10 +1431,7 @@ impl SseParser {
 /// Accumulator for a single content block during SSE streaming.
 enum ContentBlockBuilder {
     Text(String),
-    Thinking {
-        text: String,
-        signature: Option<String>,
-    },
+    Thinking(String),
     ToolUse {
         id: String,
         name: String,
@@ -1534,6 +1499,20 @@ mod sse_parser_tests {
         let text = events[0].1["delta"]["text"].as_str().unwrap();
         assert_eq!(text, "Hello");
     }
+
+    #[test]
+    fn multibyte_utf8_split_across_chunks_is_not_dropped() {
+        let payload = "event: ping\ndata: {\"text\":\"你好\"}\n\n";
+        let bytes = payload.as_bytes();
+        // Split inside the second CJK character (3-byte UTF-8 sequence).
+        let split_at = bytes.iter().position(|&b| b == b'\xe5').unwrap() + 1;
+
+        let mut p = SseParser::new();
+        assert!(p.feed(&bytes[..split_at]).is_empty());
+        let events = p.feed(&bytes[split_at..]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1["text"], "你好");
+    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -1554,7 +1533,7 @@ mod tests {
         assert_eq!(capped_retry_after(Some("soon")), MAX_RETRY_WAIT_SECS);
         // Worst-case total retry budget stays under the CLI's 180s prompt timeout.
         const MAX_RETRIES: u64 = 4;
-        assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180);
+        const { assert!(MAX_RETRIES * MAX_RETRY_WAIT_SECS < 180) };
     }
 
     // ── MockAnthropicClient ───────────────────────────────────────────────────
@@ -1568,9 +1547,7 @@ mod tests {
     #[allow(dead_code)]
     impl MockAnthropicClient {
         fn with_response(json: impl Into<String>) -> Self {
-            Self {
-                response_json: json.into(),
-            }
+            Self { response_json: json.into() }
         }
     }
 
@@ -1582,8 +1559,8 @@ mod tests {
             _extra_headers: &'a [(String, String)],
             _body: &'a Value,
         ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a {
-            let resp: AnthropicResponse =
-                serde_json::from_str(&self.response_json).expect("test fixture must be valid JSON");
+            let resp: AnthropicResponse = serde_json::from_str(&self.response_json)
+                .expect("test fixture must be valid JSON");
             async move { Ok(resp) }
         }
     }
@@ -1625,12 +1602,7 @@ mod tests {
             parent_tool_use_id: None,
         };
         // Same name+input, different id and surrounding text → identical signature.
-        let a = vec![
-            ContentBlock::Text {
-                text: "let me read".into(),
-            },
-            tu("id1", "read_file", "x"),
-        ];
+        let a = vec![ContentBlock::Text { text: "let me read".into() }, tu("id1", "read_file", "x")];
         let b = vec![tu("id2", "read_file", "x")];
         assert_eq!(tool_call_signature(&a), tool_call_signature(&b));
         // Different input → different signature.
@@ -1657,19 +1629,120 @@ mod tests {
     }
 
     #[test]
+    fn tool_output_blocks_preserve_rich_blocks_in_tool_result() {
+        let blocks = vec![ContentBlock::Image {
+            source: ImageSource::Base64 {
+                media_type: "image/png".to_string(),
+                data: "abc123".to_string(),
+            },
+        }];
+        let json_blob = serde_json::to_string(&blocks).unwrap();
+        let result = ToolOutput::Blocks(blocks).into_tool_result("img-1".to_string());
+        assert!(!result.blocks.is_empty());
+        assert!(result.content.is_empty());
+        assert_ne!(result.content, json_blob);
+
+        let msg = Message::tool_results(vec![result]);
+        match &msg.content[0] {
+            ContentBlock::ToolResult {
+                blocks,
+                content,
+                tool_use_id,
+                ..
+            } => {
+                assert_eq!(tool_use_id, "img-1");
+                assert!(!blocks.is_empty());
+                assert!(content.is_empty());
+                assert!(matches!(&blocks[0], ContentBlock::Image { .. }));
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tools_change_directory_updates_cwd_for_later_tools() {
+        use crate::tools::ToolContext;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let sub = root.join("subdir");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("marker.txt"), "found").unwrap();
+
+        let http_client = reqwest::Client::new();
+        let mut agent = make_test_agent();
+        agent.tool_context = Arc::new(ToolContext {
+            http_client: http_client.clone(),
+            proxy_url: "http://unused:9999".to_string(),
+            cwd: root.display().to_string(),
+            web_search_api_key: None,
+            web_search_endpoint: None,
+        });
+
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "cd1".to_string(),
+                name: "change_directory".to_string(),
+                input: serde_json::json!({"path": "subdir"}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "rf1".to_string(),
+                name: "read_file".to_string(),
+                input: serde_json::json!({"path": "marker.txt"}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 2);
+        assert!(results[0].content.contains("Working directory is now"));
+        assert!(
+            results[1].content.contains("found"),
+            "read_file after change_directory must resolve relative to new cwd; got: {}",
+            results[1].content
+        );
+    }
+
+    #[test]
+    fn append_drained_steer_surfaces_pending_messages_on_end_turn() {
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send("steer one".to_string()).unwrap();
+        tx.try_send("steer two".to_string()).unwrap();
+        drop(tx);
+
+        let mut messages =
+            vec![Message::assistant(vec![ContentBlock::Text { text: "done".to_string() }])];
+        append_drained_steer(&mut Some(rx), &mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].role, "user");
+        assert!(
+            messages[1]
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Text { text } if text == "steer one"))
+        );
+        assert!(
+            messages[1]
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Text { text } if text == "steer two"))
+        );
+    }
+
+    #[test]
     fn agent_error_display() {
-        assert!(AgentError::MaxIterationsReached.to_string().contains("max iterations"));
+        assert!(
+            AgentError::MaxIterationsReached
+                .to_string()
+                .contains("max iterations")
+        );
         assert!(
             AgentError::UnexpectedStopReason("pause".to_string())
                 .to_string()
                 .contains("pause")
         );
         assert!(AgentError::MaxTokens.to_string().contains("max_tokens"));
-        assert!(
-            AgentError::Http(HttpError("connection refused".into()))
-                .to_string()
-                .contains("HTTP error")
-        );
+        assert!(AgentError::Http(HttpError("connection refused".into())).to_string().contains("HTTP error"));
     }
 
     #[test]
@@ -1709,7 +1782,9 @@ mod tests {
         };
         let body = serde_json::to_value(&req).unwrap();
 
-        let sys_arr = body["system"].as_array().expect("system should be an array");
+        let sys_arr = body["system"]
+            .as_array()
+            .expect("system should be an array");
         assert_eq!(sys_arr.len(), 1);
         assert_eq!(sys_arr[0]["type"], "text");
         assert_eq!(sys_arr[0]["text"], text);
@@ -1761,7 +1836,10 @@ mod tests {
             last.cache_control = Some(json!({"type": "ephemeral"}));
         }
 
-        assert_eq!(cached_tools[0].cache_control, Some(json!({"type": "ephemeral"})));
+        assert_eq!(
+            cached_tools[0].cache_control,
+            Some(json!({"type": "ephemeral"}))
+        );
     }
 
     /// When the tool list is empty no panic occurs and no cache_control is set.
@@ -1941,9 +2019,7 @@ event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,
 event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
 event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":1}}\n\n\
 event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
-                Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(
-                    sse,
-                )))))
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(sse)))))
             }
         }
 
@@ -2006,53 +2082,6 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         );
     }
 
-    /// Anthropic requires `thinking` blocks to be echoed back unchanged — including
-    /// their `signature` — during a tool-use loop, or the next request 400s. The SSE
-    /// parser must capture the `signature_delta` event rather than dropping it.
-    #[tokio::test]
-    async fn run_chat_streaming_preserves_thinking_signature() {
-        struct MockStreamingClient {
-            sse: &'static [u8],
-        }
-        impl AnthropicStreamingClient for MockStreamingClient {
-            fn complete_streaming(
-                &self,
-                _body: serde_json::Value,
-            ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
-                let data = Bytes::from_static(self.sse);
-                Box::pin(futures_util::stream::once(std::future::ready(Ok(data))))
-            }
-        }
-
-        let sse: &'static [u8] = b"\
-event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
-event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n\
-event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"let me reason\"}}\n\n\
-event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG_TEST_abc123\"}}\n\n\
-event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
-event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
-event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n\
-event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
-event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
-event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
-
-        let mut agent = make_test_agent();
-        agent.streaming_client = Some(Arc::new(MockStreamingClient { sse }));
-
-        let (tx, _rx) = tokio::sync::mpsc::channel(32);
-        let messages = agent
-            .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
-            .await
-            .expect("streaming must succeed");
-
-        let json = serde_json::to_string(&messages).unwrap();
-        assert!(
-            json.contains("SIG_TEST_abc123"),
-            "thinking signature must be preserved in the assistant message (Anthropic \
-             400s on tool use if a thinking block is re-sent without its signature); got: {json}"
-        );
-    }
-
     /// When `system_prompt` is `None`, the `"system"` key is absent from the
     /// serialized body (thanks to `skip_serializing_if = "Option::is_none"`).
     #[test]
@@ -2069,7 +2098,10 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             messages: &[],
         };
         let body = serde_json::to_value(&req).unwrap();
-        assert!(body.get("system").is_none(), "system key should be absent when None");
+        assert!(
+            body.get("system").is_none(),
+            "system key should be absent when None"
+        );
     }
 
     // ── ElicitationProvider / ask_user ────────────────────────────────────────
@@ -2112,7 +2144,8 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     #[tokio::test]
     async fn ask_user_with_provider_returning_none_uses_declined_message() {
         let mut agent = make_test_agent();
-        agent.elicitation_provider = Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
 
         let (tx, _rx) = tokio::sync::mpsc::channel(32);
         let content = vec![ContentBlock::ToolUse {
@@ -2229,7 +2262,8 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     #[tokio::test]
     async fn execute_tools_ask_user_with_provider_returning_none() {
         let mut agent = make_test_agent();
-        agent.elicitation_provider = Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
         let content = vec![ContentBlock::ToolUse {
             id: "u2".to_string(),
             name: "ask_user".to_string(),
@@ -2313,12 +2347,11 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                     "event: message_stop\n",
                     "data: {\"type\":\"message_stop\"}\n\n",
                 ));
-                let stream = futures_util::stream::once(ready(Ok::<Bytes, reqwest::Error>(chunk1))).chain(
-                    futures_util::stream::once(async move {
+                let stream = futures_util::stream::once(ready(Ok::<Bytes, reqwest::Error>(chunk1)))
+                    .chain(futures_util::stream::once(async move {
                         sleep(Duration::from_millis(100)).await;
                         Ok::<Bytes, reqwest::Error>(chunk2)
-                    }),
-                );
+                    }));
                 Box::pin(stream)
             }
         }
@@ -2350,18 +2383,14 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
     #[test]
     fn agent_event_text_delta_is_constructible_and_cloneable() {
-        let ev = AgentEvent::TextDelta {
-            text: "hello".to_string(),
-        };
+        let ev = AgentEvent::TextDelta { text: "hello".to_string() };
         let cloned = ev.clone();
         assert!(matches!(cloned, AgentEvent::TextDelta { text } if text == "hello"));
     }
 
     #[test]
     fn agent_event_thinking_delta_is_constructible_and_cloneable() {
-        let ev = AgentEvent::ThinkingDelta {
-            text: "reasoning...".to_string(),
-        };
+        let ev = AgentEvent::ThinkingDelta { text: "reasoning...".to_string() };
         let cloned = ev.clone();
         assert!(matches!(cloned, AgentEvent::ThinkingDelta { text } if text == "reasoning..."));
     }
@@ -2377,12 +2406,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         };
         let cloned = ev.clone();
         match cloned {
-            AgentEvent::ToolCallStarted {
-                id,
-                name,
-                input: inp,
-                parent_tool_use_id,
-            } => {
+            AgentEvent::ToolCallStarted { id, name, input: inp, parent_tool_use_id } => {
                 assert_eq!(id, "call-1");
                 assert_eq!(name, "bash");
                 assert_eq!(inp, input);
@@ -2402,10 +2426,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         };
         assert!(matches!(
             ev,
-            AgentEvent::ToolCallStarted {
-                parent_tool_use_id: None,
-                ..
-            }
+            AgentEvent::ToolCallStarted { parent_tool_use_id: None, .. }
         ));
     }
 
@@ -2419,12 +2440,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         };
         let cloned = ev.clone();
         match cloned {
-            AgentEvent::ToolCallFinished {
-                id,
-                output,
-                exit_code,
-                signal,
-            } => {
+            AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
                 assert_eq!(id, "call-2");
                 assert_eq!(output, "result text");
                 assert_eq!(exit_code, Some(0));
@@ -2450,9 +2466,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
     #[test]
     fn agent_event_system_status_is_constructible_and_cloneable() {
-        let ev = AgentEvent::SystemStatus {
-            message: "overloaded".to_string(),
-        };
+        let ev = AgentEvent::SystemStatus { message: "overloaded".to_string() };
         let cloned = ev.clone();
         assert!(matches!(cloned, AgentEvent::SystemStatus { message } if message == "overloaded"));
     }
@@ -2499,9 +2513,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                 exit_code: None,
                 signal: None,
             },
-            AgentEvent::SystemStatus {
-                message: "m".to_string(),
-            },
+            AgentEvent::SystemStatus { message: "m".to_string() },
             AgentEvent::UsageSummary {
                 input_tokens: 0,
                 output_tokens: 0,
@@ -2607,23 +2619,15 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         }];
         let results = agent.execute_tools_streaming(&content, &tx).await;
         assert_eq!(results.len(), 1);
-        assert!(
-            results[0].content.contains("Unknown tool"),
-            "got: {}",
-            results[0].content
-        );
+        assert!(results[0].content.contains("Unknown tool"), "got: {}", results[0].content);
 
         let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == "t1")),
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == "t1")),
             "ToolCallStarted missing: {events:?}"
         );
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == "t1")),
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == "t1")),
             "ToolCallFinished missing: {events:?}"
         );
     }
@@ -2680,15 +2684,11 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         for id in ["t1", "t2"] {
             assert!(
-                events
-                    .iter()
-                    .any(|e| matches!(e, AgentEvent::ToolCallStarted { id: eid, .. } if eid == id)),
+                events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id: eid, .. } if eid == id)),
                 "ToolCallStarted missing for {id}: {events:?}"
             );
             assert!(
-                events
-                    .iter()
-                    .any(|e| matches!(e, AgentEvent::ToolCallFinished { id: eid, .. } if eid == id)),
+                events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id: eid, .. } if eid == id)),
                 "ToolCallFinished missing for {id}: {events:?}"
             );
         }
@@ -2716,7 +2716,8 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
         let counter = Arc::new(AtomicUsize::new(0));
         let mut agent = make_test_agent();
-        agent.permission_checker = Some(Arc::new(CheckCounter(Arc::clone(&counter))) as Arc<dyn PermissionChecker>);
+        agent.permission_checker =
+            Some(Arc::new(CheckCounter(Arc::clone(&counter))) as Arc<dyn PermissionChecker>);
 
         let content = vec![
             ContentBlock::ToolUse {
@@ -2756,9 +2757,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     async fn execute_tools_skips_non_tool_use_blocks() {
         let agent = make_test_agent();
         let content = vec![
-            ContentBlock::Text {
-                text: "ignore me".to_string(),
-            },
+            ContentBlock::Text { text: "ignore me".to_string() },
             ContentBlock::ToolUse {
                 id: "t1".to_string(),
                 name: "my_tool".to_string(),
@@ -2777,9 +2776,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let agent = make_test_agent();
         let (tx, _rx) = tokio::sync::mpsc::channel(32);
         let content = vec![
-            ContentBlock::Text {
-                text: "ignore me".to_string(),
-            },
+            ContentBlock::Text { text: "ignore me".to_string() },
             ContentBlock::ToolUse {
                 id: "t1".to_string(),
                 name: "my_tool".to_string(),

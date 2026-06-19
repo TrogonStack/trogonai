@@ -276,7 +276,7 @@ pub mod mock {
                     .filter(|r| automation_id.as_deref().is_none_or(|aid| r.automation_id == aid))
                     .cloned()
                     .collect();
-                runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+                runs.sort_by_key(|r| std::cmp::Reverse(r.started_at));
                 Ok(runs)
             })
         }

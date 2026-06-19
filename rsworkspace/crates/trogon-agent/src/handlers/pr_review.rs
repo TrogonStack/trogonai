@@ -55,8 +55,8 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     // SHA-based dedup: skip if we already reviewed this exact commit.
     // Rapid force-pushes each get a different NATS sequence but the same SHA
     // (or a new SHA we don't want to re-review after a crash recovery).
-    if !head_sha.is_empty() {
-        if let Some(store) = &agent.promise_store {
+    if !head_sha.is_empty()
+        && let Some(store) = &agent.promise_store {
             let raw = format!("pr-review-sha.{owner}.{repo}.{head_sha}");
             let dedup_key = format!("{:x}", Sha256::digest(raw.as_bytes()));
             if store
@@ -74,7 +74,6 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
                 .put_tool_result(&agent.tenant_id, "pr-review-sha-dedup", &dedup_key, "done")
                 .await;
         }
-    }
 
     info!(owner, repo, pr_number, head_sha, "Starting PR review agent");
 

@@ -102,6 +102,7 @@ pub struct ServiceState {
     pub anthropic: Option<ProviderConfig>,
     pub xai: Option<ProviderConfig>,
     pub openrouter: Option<ProviderConfig>,
+    pub openai: Option<ProviderConfig>,
 }
 
 impl ServiceState {
@@ -110,6 +111,7 @@ impl ServiceState {
             "anthropic" => self.anthropic.as_ref(),
             "xai" => self.xai.as_ref(),
             "openrouter" => self.openrouter.as_ref(),
+            "openai" => self.openai.as_ref(),
             _ => None,
         }
     }
@@ -189,11 +191,12 @@ async fn handle(state: &ServiceState, payload: &[u8]) -> Result<CompactResponse,
     let compactor = Compactor::with_provider(settings, provider);
 
     let tokens_before = estimate_total_tokens(&req.messages);
-    let (messages, kept_count) = compactor.compact_if_needed_counted(req.messages).await?;
+    let (messages, kept_count, compacted) =
+        compactor.compact_if_needed_counted(req.messages).await?;
     let tokens_after = estimate_total_tokens(&messages);
 
     Ok(CompactResponse {
-        compacted: tokens_after < tokens_before,
+        compacted,
         messages,
         tokens_before,
         tokens_after,
@@ -220,6 +223,7 @@ mod tests {
             }),
             xai: None,
             openrouter: None,
+            openai: None,
         }
     }
 

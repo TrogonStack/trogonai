@@ -66,11 +66,10 @@ impl<S: SubscriptionStore> WebhookRegistry<S> {
 
         let mut subs = Vec::new();
         for key in keys {
-            if let Ok(Some(bytes)) = self.store.get(&key).await {
-                if let Ok(sub) = serde_json::from_slice::<WebhookSubscription>(&bytes) {
+            if let Ok(Some(bytes)) = self.store.get(&key).await
+                && let Ok(sub) = serde_json::from_slice::<WebhookSubscription>(&bytes) {
                     subs.push(sub);
                 }
-            }
         }
         Ok(subs)
     }

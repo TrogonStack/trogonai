@@ -138,15 +138,21 @@ impl JetStreamPublisher for MockJetStreamPublisher {
 
 // ── MockHttpClient ────────────────────────────────────────────────────────────
 
+/// A captured set of HTTP header name/value pairs.
+type HeaderPairs = Vec<(String, String)>;
+/// One queued streaming response: `(status, headers, chunks)`, kept as owned
+/// bytes so the mock stays `Clone` (`StreamingHttpResponse` itself is not).
+type MockStreamResponse = Result<(u16, HeaderPairs, Vec<Vec<u8>>), String>;
+
 /// Canned HTTP response for a specific URL prefix.
 #[derive(Clone)]
 pub struct MockHttpClient {
     responses: Arc<Mutex<VecDeque<HttpResponse>>>,
     /// Streaming responses: stored as (status, headers, chunks) so the struct
     /// remains Clone (StreamingHttpResponse itself is not Clone).
-    streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Vec<u8>>), String>>>>,
+    streaming: Arc<Mutex<VecDeque<MockStreamResponse>>>,
     /// Headers captured from each `send_request` / `send_request_streaming` call.
-    pub captured_headers: Arc<Mutex<Vec<Vec<(String, String)>>>>,
+    pub captured_headers: Arc<Mutex<Vec<HeaderPairs>>>,
 }
 
 impl MockHttpClient {

@@ -294,3 +294,69 @@ async fn initialize_http_timeout_returns_error() {
     let err = c.initialize().await.unwrap_err();
     assert!(err.contains("MCP HTTP error"), "got: {err}");
 }
+
+// ── Streamable-HTTP transport ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn rpc_sets_streamable_http_accept_header() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .header("accept", "application/json, text/event-stream");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{}}}));
+        })
+        .await;
+
+    client(&server)
+        .initialize()
+        .await
+        .expect("initialize should succeed");
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn rpc_surfaces_http_status_on_non_success() {
+    let server = MockServer::start_async().await;
+    server.mock(|when, then| {
+        when.method(httpmock::Method::POST);
+        then.status(401).body("token expired");
+    });
+
+    let err = client(&server).initialize().await.unwrap_err();
+    assert!(err.contains("status 401"), "got: {err}");
+    assert!(err.contains("token expired"), "got: {err}");
+}
+
+#[tokio::test]
+async fn rpc_reuses_mcp_session_id_from_server() {
+    let server = MockServer::start_async().await;
+    let session_mock = server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .body_contains("\"method\":\"initialize\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .header("Mcp-Session-Id", "sess-abc")
+                .json_body(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{}}}));
+        })
+        .await;
+    let followup_mock = server
+        .mock_async(|when, then| {
+            when.method(httpmock::Method::POST)
+                .header("Mcp-Session-Id", "sess-abc")
+                .body_contains("\"method\":\"tools/list\"");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"jsonrpc":"2.0","id":2,"result":{"tools":[]}}));
+        })
+        .await;
+
+    let c = client(&server);
+    c.initialize().await.expect("initialize");
+    c.list_tools().await.expect("list_tools");
+    session_mock.assert_async().await;
+    followup_mock.assert_async().await;
+}
