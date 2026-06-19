@@ -20,8 +20,10 @@ where
     // replies stay correlated with the caller's request rather than going to a
     // bare-null id.
     let id = extract_request_id(payload);
-    // JSON-RPC notifications (no `id` field) must not get a response.
-    if id.is_none() {
+    // Only drop on a true JSON-RPC notification — payload is a parseable JSON
+    // object that omits the `id` key. Malformed payloads or unparseable id
+    // values still get a JSON-RPC error reply so clients don't hang waiting.
+    if id.is_none() && is_notification(payload) {
         return;
     }
 
@@ -61,6 +63,17 @@ where
 
 fn parse_error() -> A2aError {
     A2aError::new(-32700, "Parse error")
+}
+
+/// True only when the payload is a parseable JSON object that omits the `id`
+/// key, matching JSON-RPC 2.0's definition of a notification. Anything else —
+/// non-JSON, non-object, or an `id` value the extractor couldn't decode — is a
+/// malformed request that still warrants an error reply.
+fn is_notification(payload: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return false;
+    };
+    matches!(value, serde_json::Value::Object(ref map) if !map.contains_key("id"))
 }
 
 #[cfg(test)]
@@ -200,6 +213,31 @@ mod tests {
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(body["error"]["code"], -32700);
         assert_eq!(body["id"], 7);
+    }
+
+    #[tokio::test]
+    async fn malformed_json_still_publishes_parse_error_with_null_id() {
+        let nats = AdvancedMockNatsClient::new();
+        let handler = stub();
+        handle(&handler, b"not json at all", Some("r".into()), &nats).await;
+        let body = parse_response(&nats.published_payloads()[0]);
+        assert_eq!(body["error"]["code"], -32700);
+        assert!(body["id"].is_null());
+    }
+
+    #[tokio::test]
+    async fn id_present_but_undecodable_still_publishes_error() {
+        let nats = AdvancedMockNatsClient::new();
+        let handler = stub();
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": true,
+            "method": "agent/getAuthenticatedExtendedCard",
+            "params": {}
+        }))
+        .unwrap();
+        handle(&handler, &payload, Some("r".into()), &nats).await;
+        assert!(!nats.published_payloads().is_empty());
     }
 
     #[tokio::test]
