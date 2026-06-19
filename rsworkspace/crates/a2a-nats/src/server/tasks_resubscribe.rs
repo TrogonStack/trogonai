@@ -26,12 +26,15 @@ where
         return;
     }
 
-    let result = match parse_request::<a2a::types::SubscribeToTaskRequest>(payload) {
-        Ok(req) => match req.params {
-            Some(params) => handler.tasks_resubscribe(params).await,
-            None => Err(A2aError::new(-32602, "Invalid params: missing params")),
-        },
+    let result = match parse_request::<serde_json::Value>(payload) {
         Err(_) => Err(A2aError::new(-32700, "Parse error")),
+        Ok(envelope) => match envelope.params {
+            None => Err(A2aError::new(-32602, "Invalid params: missing params")),
+            Some(raw) => match serde_json::from_value::<a2a::types::SubscribeToTaskRequest>(raw) {
+                Err(e) => Err(A2aError::new(-32602, format!("Invalid params: {e}"))),
+                Ok(params) => handler.tasks_resubscribe(params).await,
+            },
+        },
     };
     let bytes = match result {
         Ok(resp) => JsonRpcResponse::new(id, resp).to_bytes(),
@@ -130,7 +133,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parse_error_returns_jsonrpc_parse_error_code() {
+    async fn invalid_params_shape_returns_invalid_params_code() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
         let payload = serde_json::to_vec(&serde_json::json!({
@@ -142,7 +145,7 @@ mod tests {
         .unwrap();
         handle(&handler, &payload, Some("r".into()), &nats).await;
         let body = parse_response(&nats.published_payloads()[0]);
-        assert_eq!(body["error"]["code"], -32700);
+        assert_eq!(body["error"]["code"], -32602);
         assert_eq!(body["id"], 6);
     }
 
