@@ -4,6 +4,8 @@
 //! surface every handler will reach for.
 
 pub mod agent_card;
+pub mod bridge;
+pub mod dispatch;
 pub mod handler;
 pub mod message_send;
 pub mod message_stream;
@@ -19,5 +21,7 @@ pub mod tasks_resubscribe;
 pub mod test_support;
 pub mod wire;
 
+pub use bridge::{Bridge, BridgeError};
+pub use dispatch::A2aMethod;
 pub use handler::{A2aError, A2aExecutor, TaskEventStream};
 pub use wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
