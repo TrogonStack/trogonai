@@ -109,6 +109,11 @@ pub trait A2aExecutor: Send + Sync + 'static {
     ) -> Result<a2a::types::ListTasksResponse, A2aError>;
 
     async fn tasks_cancel(&self, request: a2a::types::CancelTaskRequest) -> Result<a2a::types::Task, A2aError>;
+
+    async fn tasks_resubscribe(
+        &self,
+        request: a2a::types::SubscribeToTaskRequest,
+    ) -> Result<a2a::types::Task, A2aError>;
 }
 
 #[cfg(test)]

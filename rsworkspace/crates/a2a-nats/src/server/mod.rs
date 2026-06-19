@@ -9,6 +9,7 @@ pub mod message_send;
 pub mod tasks_cancel;
 pub mod tasks_get;
 pub mod tasks_list;
+pub mod tasks_resubscribe;
 #[cfg(test)]
 pub mod test_support;
 pub mod wire;
