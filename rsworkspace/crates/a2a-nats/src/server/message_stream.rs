@@ -43,37 +43,12 @@ pub async fn handle<H, N, J>(
         return;
     }
 
-    let req = match parse_request::<serde_json::Value>(payload) {
-        Err(_) => {
-            publish_bootstrap_error(nats, &reply, id, A2aError::new(-32700, "Parse error")).await;
-            return;
-        }
-        Ok(envelope) => match envelope.params {
-            None => {
-                publish_bootstrap_error(
-                    nats,
-                    &reply,
-                    id,
-                    A2aError::new(-32602, "Invalid params: missing params"),
-                )
-                .await;
-                return;
-            }
-            Some(raw) => match serde_json::from_value::<a2a::types::SendMessageRequest>(raw) {
-                Err(e) => {
-                    publish_bootstrap_error(nats, &reply, id, A2aError::new(-32602, format!("Invalid params: {e}")))
-                        .await;
-                    return;
-                }
-                Ok(p) => p,
-            },
-        },
-    };
-
-    let (task, mut events) = match handler.message_stream(req).await {
-        Ok(pair) => pair,
-        Err(e) => {
-            publish_bootstrap_error(nats, &reply, id, e).await;
+    let prepared = prepare_bootstrap(handler, payload).await;
+    let (task, mut events) = match prepared {
+        Ok(p) => p,
+        Err(err) => {
+            let bytes = JsonRpcErrorResponse::new(id, err.code, err.message).to_bytes();
+            publish(nats, &reply, bytes, "message/stream error reply").await;
             return;
         }
     };
@@ -81,13 +56,9 @@ pub async fn handle<H, N, J>(
     let task_id = match A2aTaskId::new(task.id.clone()) {
         Ok(t) => t,
         Err(_) => {
-            publish_bootstrap_error(
-                nats,
-                &reply,
-                id,
-                A2aError::invalid_agent_response("handler returned task with invalid id"),
-            )
-            .await;
+            let err = A2aError::invalid_agent_response("handler returned task with invalid id");
+            let bytes = JsonRpcErrorResponse::new(id, err.code, err.message).to_bytes();
+            publish(nats, &reply, bytes, "message/stream error reply").await;
             return;
         }
     };
@@ -95,19 +66,13 @@ pub async fn handle<H, N, J>(
     // that landed, fall back to a freshly minted server-side id.
     let req_id = ReqId::new();
 
-    let bootstrap = match JsonRpcResponse::new(id, &task).to_bytes() {
-        Ok(b) => b,
-        Err(e) => {
-            warn!(error = %e, "failed to serialize message/stream bootstrap reply");
-            return;
-        }
-    };
-    let headers = async_nats::HeaderMap::new();
-    if let Err(e) = nats
-        .publish_with_headers(async_nats::Subject::from(reply.as_str()), headers, bootstrap)
-        .await
-    {
-        warn!(error = %e, "failed to publish message/stream bootstrap reply");
+    // The client deserializes message/stream's bootstrap reply as
+    // `SendMessageResponse` (same shape as `message/send`), which wraps the
+    // task under a `task` key. Wrap here so a bare Task doesn't fail
+    // client-side deserialization and bury the stream.
+    let bootstrap_envelope = a2a::types::SendMessageResponse::Task(task.clone());
+    let bootstrap_bytes = JsonRpcResponse::new(id, &bootstrap_envelope).to_bytes();
+    if !publish(nats, &reply, bootstrap_bytes, "message/stream bootstrap reply").await {
         return;
     }
 
@@ -137,24 +102,43 @@ pub async fn handle<H, N, J>(
     }
 }
 
-async fn publish_bootstrap_error<N: trogon_nats::PublishClient>(
+async fn prepare_bootstrap<H: A2aExecutor>(
+    handler: &H,
+    payload: &[u8],
+) -> Result<(a2a::types::Task, crate::server::handler::TaskEventStream), A2aError> {
+    let envelope = parse_request::<serde_json::Value>(payload).map_err(|_| A2aError::new(-32700, "Parse error"))?;
+    let raw = envelope
+        .params
+        .ok_or_else(|| A2aError::new(-32602, "Invalid params: missing params"))?;
+    let req = serde_json::from_value::<a2a::types::SendMessageRequest>(raw)
+        .map_err(|e| A2aError::new(-32602, format!("Invalid params: {e}")))?;
+    handler.message_stream(req).await
+}
+
+/// Publish `bytes` to `reply`. Returns `true` if the publish succeeded.
+/// `label` flows into the warn message so the failing operation is identifiable.
+async fn publish<N: trogon_nats::PublishClient>(
     nats: &N,
     reply: &str,
-    id: Option<crate::jsonrpc::JsonRpcId>,
-    err: A2aError,
-) {
-    match JsonRpcErrorResponse::new(id, err.code, err.message).to_bytes() {
-        Ok(b) => {
-            let headers = async_nats::HeaderMap::new();
-            if let Err(e) = nats
-                .publish_with_headers(async_nats::Subject::from(reply), headers, b)
-                .await
-            {
-                warn!(error = %e, "failed to publish message/stream error reply");
-            }
+    bytes: Result<bytes::Bytes, serde_json::Error>,
+    label: &'static str,
+) -> bool {
+    let bytes = match bytes {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(error = %e, label = label, "failed to serialize message/stream payload");
+            return false;
         }
-        Err(e) => warn!(error = %e, "failed to serialize message/stream error reply"),
+    };
+    let headers = async_nats::HeaderMap::new();
+    if let Err(e) = nats
+        .publish_with_headers(async_nats::Subject::from(reply), headers, bytes)
+        .await
+    {
+        warn!(error = %e, label = label, "failed to publish message/stream payload");
+        return false;
     }
+    true
 }
 
 #[cfg(test)]
@@ -226,7 +210,7 @@ mod tests {
         handle(&handler, &stream_payload(1), Some("r".into()), &nats, &js, &prefix()).await;
 
         let body = parse_response(&nats.published_payloads()[0]);
-        assert_eq!(body["result"]["id"].as_str(), Some("task-1"));
+        assert_eq!(body["result"]["task"]["id"].as_str(), Some("task-1"));
         let subjects = js.published_subjects();
         assert_eq!(subjects.len(), 1);
         assert!(
@@ -320,6 +304,23 @@ mod tests {
         .unwrap();
         handle(&handler, &payload, Some("r".into()), &nats, &js, &prefix()).await;
         assert!(nats.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn publish_returns_false_when_serialize_fails() {
+        let nats = AdvancedMockNatsClient::new();
+        let err: Result<bytes::Bytes, serde_json::Error> = Err(serde_json::from_str::<String>("x").unwrap_err());
+        let ok = publish(&nats, "r", err, "test-label").await;
+        assert!(!ok);
+        assert!(nats.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn publish_returns_false_when_nats_publish_fails() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_publish();
+        let ok = publish(&nats, "r", Ok(bytes::Bytes::from_static(b"{}")), "test-label").await;
+        assert!(!ok);
     }
 
     #[tokio::test]
