@@ -74,22 +74,22 @@ pub async fn run_io_loop<N, J, R, W>(
     // cleanly (drain in-flight RPCs).
     let mut shutdown_requested = false;
 
-    loop {
+    'outer: loop {
         tokio::select! {
             _ = &mut shutdown => {
                 debug!("io_loop received shutdown signal");
                 shutdown_requested = true;
-                break;
+                break 'outer;
             }
             line = lines.next_line() => {
                 match line {
                     Err(e) => {
                         error!(error = %e, "stdin read error");
-                        break;
+                        break 'outer;
                     }
                     Ok(None) => {
                         debug!("stdin closed");
-                        break;
+                        break 'outer;
                     }
                     Ok(Some(raw)) => {
                         let raw = raw.trim().to_owned();
@@ -101,18 +101,34 @@ pub async fn run_io_loop<N, J, R, W>(
                         let (id, method, params) = match parse_inbound(&raw) {
                             Ok(t) => t,
                             Err(frame) => {
-                                let _ = frame_tx.send(frame).await;
+                                // Outbound channel may be full while writer is
+                                // back-pressured; keep shutdown responsive.
+                                tokio::select! {
+                                    _ = &mut shutdown => {
+                                        shutdown_requested = true;
+                                        break 'outer;
+                                    }
+                                    _ = frame_tx.send(frame) => {}
+                                }
                                 continue;
                             }
                         };
 
                         // Acquire a dispatch slot before spawning so a fast
                         // producer can't create unbounded in-flight RPC work.
-                        let permit = match semaphore.clone().acquire_owned().await {
-                            Ok(p) => p,
-                            Err(e) => {
-                                error!(error = %e, "dispatch semaphore closed");
-                                break;
+                        // Poll shutdown alongside acquire so a saturated
+                        // semaphore doesn't strand the signal.
+                        let permit = tokio::select! {
+                            _ = &mut shutdown => {
+                                shutdown_requested = true;
+                                break 'outer;
+                            }
+                            p = semaphore.clone().acquire_owned() => match p {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    error!(error = %e, "dispatch semaphore closed");
+                                    break 'outer;
+                                }
                             }
                         };
                         let client = client.clone();
@@ -315,6 +331,39 @@ mod tests {
             return 0;
         };
         code
+    }
+
+    #[tokio::test]
+    async fn io_loop_shutdown_preempts_blocking_dispatch_acquire() {
+        let nats = AdvancedMockNatsClient::new();
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+
+        // Fill the loop with more requests than the semaphore allows, each one
+        // landing on an unstubbed subject so the dispatcher never resolves.
+        // The next `acquire_owned()` then sits indefinitely — shutdown must
+        // preempt it, not hang behind it.
+        let (stdin_reader, mut stdin_writer) = tokio::io::duplex(64 * 1024);
+        let (_stdout_reader, stdout_writer) = tokio::io::duplex(64 * 1024);
+
+        let line =
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tasks/get\",\"params\":{\"id\":\"never\",\"tenant\":\"\"}}\n";
+        for _ in 0..(MAX_INFLIGHT_DISPATCH + 4) {
+            stdin_writer.write_all(line).await.unwrap();
+        }
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let shutdown = async move {
+            let _ = shutdown_rx.await;
+        };
+
+        let handle = tokio::spawn(run_io_loop(client, stdin_reader, stdout_writer, shutdown));
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = shutdown_tx.send(());
+
+        let res = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
+        assert!(res.is_ok(), "io_loop did not exit on shutdown");
+        drop(stdin_writer);
     }
 
     #[test]
