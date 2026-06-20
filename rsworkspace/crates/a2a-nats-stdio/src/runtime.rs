@@ -186,6 +186,12 @@ mod tests {
         assert_eq!(cfg.agent_id.as_str(), "bot");
     }
 
+    #[tokio::test]
+    #[cfg(coverage)]
+    async fn coverage_run_stub_is_callable() {
+        super::run().await.unwrap();
+    }
+
     #[test]
     fn from_impls_construct_variants() {
         let e: RuntimeError = A2aPrefix::new("").unwrap_err().into();

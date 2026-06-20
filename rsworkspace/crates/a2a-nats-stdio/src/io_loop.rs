@@ -41,6 +41,13 @@ pub async fn run_io_loop<N, J, R, W>(
                         error!(error = %e, "stdout write failed");
                         return;
                     }
+                    // Flush per frame so a piped parent doesn't deadlock
+                    // waiting on a libc full-buffer that never drains until
+                    // the next line on stdin closes the loop.
+                    if let Err(e) = stdout.flush().await {
+                        error!(error = %e, "stdout flush failed");
+                        return;
+                    }
                 }
                 Err(e) => {
                     error!(error = %e, "frame serialization failed");
@@ -170,6 +177,33 @@ mod tests {
         let (_stdout_reader, stdout_writer) = tokio::io::duplex(1024);
 
         run_io_loop(client, stdin_reader, stdout_writer, std::future::ready(())).await;
+    }
+
+    #[tokio::test]
+    async fn io_loop_skips_blank_lines() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agents.bot.tasks.get", task_response("t-blank"));
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+
+        let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
+        let (mut stdout_reader, stdout_writer) = tokio::io::duplex(4096);
+
+        // Two blank lines, then a real request, then EOF.
+        stdin_writer.write_all(b"\n   \n").await.unwrap();
+        stdin_writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tasks/get\",\"params\":{\"id\":\"t-blank\",\"tenant\":\"\"}}\n")
+            .await
+            .unwrap();
+        drop(stdin_writer);
+
+        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+
+        let mut buf = vec![0u8; 4096];
+        let n = stdout_reader.read(&mut buf).await.unwrap();
+        let output = String::from_utf8_lossy(&buf[..n]);
+        // The blank lines are dropped silently and only the real request produces output.
+        assert!(output.contains("t-blank"), "expected response, got: {output}");
+        assert_eq!(output.matches('\n').count(), 1, "blank lines should not emit frames");
     }
 
     #[tokio::test]
