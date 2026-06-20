@@ -587,14 +587,16 @@ mod tests {
         serde_json::to_vec(&json).unwrap().into()
     }
 
+    #[track_caller]
     fn assert_err_code(frame: OutboundFrame, expected: i32) {
-        if let OutboundFrame::Error(OutboundError {
+        let OutboundFrame::Error(OutboundError {
             error: RpcError { code, .. },
             ..
         }) = frame
-        {
-            assert_eq!(code, expected);
-        }
+        else {
+            panic!("expected error frame, got non-error variant");
+        };
+        assert_eq!(code, expected);
     }
 
     #[tokio::test]

@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use a2a_nats::client::A2aClient;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
+use tokio::task::JoinSet;
 use tracing::{debug, error, warn};
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
@@ -9,6 +12,9 @@ use crate::dispatch::dispatch_request;
 use crate::wire::{InboundRequest, OutboundError, OutboundFrame, RpcId};
 
 const CHANNEL_CAP: usize = 128;
+/// Cap concurrent in-flight dispatch tasks. A fast producer on stdin can
+/// otherwise create unbounded RPC/network work and memory pressure.
+const MAX_INFLIGHT_DISPATCH: usize = 64;
 
 pub async fn run_io_loop<N, J, R, W>(
     client: A2aClient<N, J>,
@@ -56,15 +62,23 @@ pub async fn run_io_loop<N, J, R, W>(
         }
     });
 
-    let client = std::sync::Arc::new(client);
+    let client = Arc::new(client);
     let mut lines = BufReader::new(stdin).lines();
+    let semaphore = Arc::new(Semaphore::new(MAX_INFLIGHT_DISPATCH));
+    let mut dispatch_tasks: JoinSet<()> = JoinSet::new();
 
     tokio::pin!(shutdown);
+
+    // True iff we exited the read loop via the shutdown signal (signal-driven
+    // teardown — abort in-flight stream dispatchers). False iff stdin closed
+    // cleanly (drain in-flight RPCs).
+    let mut shutdown_requested = false;
 
     loop {
         tokio::select! {
             _ = &mut shutdown => {
                 debug!("io_loop received shutdown signal");
+                shutdown_requested = true;
                 break;
             }
             line = lines.next_line() => {
@@ -84,27 +98,28 @@ pub async fn run_io_loop<N, J, R, W>(
                         }
                         debug!(raw = %raw, "received line");
 
-                        let req: InboundRequest = match serde_json::from_str(&raw) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                warn!(error = %e, "failed to parse JSON-RPC request");
-                                let frame = OutboundFrame::Error(OutboundError::new(
-                                    RpcId::Null,
-                                    -32700,
-                                    format!("parse error: {e}"),
-                                ));
+                        let (id, method, params) = match parse_inbound(&raw) {
+                            Ok(t) => t,
+                            Err(frame) => {
                                 let _ = frame_tx.send(frame).await;
                                 continue;
                             }
                         };
 
-                        let id = req.id;
-                        let method = req.method;
-                        let params = req.params;
+                        // Acquire a dispatch slot before spawning so a fast
+                        // producer can't create unbounded in-flight RPC work.
+                        let permit = match semaphore.clone().acquire_owned().await {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!(error = %e, "dispatch semaphore closed");
+                                break;
+                            }
+                        };
                         let client = client.clone();
                         let tx = frame_tx.clone();
-                        tokio::spawn(async move {
+                        dispatch_tasks.spawn(async move {
                             dispatch_request(&client, id, &method, params, &tx).await;
+                            drop(permit);
                         });
                     }
                 }
@@ -112,8 +127,31 @@ pub async fn run_io_loop<N, J, R, W>(
         }
     }
 
+    // On signal-driven shutdown, abort in-flight dispatchers — long-lived
+    // `message/stream` / `tasks/resubscribe` tasks otherwise keep a `tx`
+    // clone alive and the writer never sees frame_rx close. On clean EOF
+    // we let in-flight RPCs drain so their responses reach stdout.
+    if shutdown_requested {
+        dispatch_tasks.abort_all();
+    }
+    while dispatch_tasks.join_next().await.is_some() {}
     drop(frame_tx);
     let _ = writer_task.await;
+}
+
+/// Split JSON-syntax failures (`-32700` Parse error) from envelope-shape
+/// failures (`-32600` Invalid Request). JSON-RPC reserves `-32700` for actual
+/// invalid JSON; structurally invalid requests are a different class.
+fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), OutboundFrame> {
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
+        warn!(error = %e, "stdin line is not valid JSON");
+        OutboundFrame::Error(OutboundError::new(RpcId::Null, -32700, format!("parse error: {e}")))
+    })?;
+    let req: InboundRequest = serde_json::from_value(value).map_err(|e| {
+        warn!(error = %e, "JSON-RPC envelope is invalid");
+        OutboundFrame::Error(OutboundError::new(RpcId::Null, -32600, format!("invalid request: {e}")))
+    })?;
+    Ok((req.id, req.method, req.params))
 }
 
 #[cfg(test)]
@@ -246,5 +284,45 @@ mod tests {
         let output = String::from_utf8_lossy(&buf[..n]);
         assert!(output.contains("\"error\""), "expected error in: {output}");
         assert!(output.contains("-32700"));
+    }
+
+    #[tokio::test]
+    async fn io_loop_handles_invalid_request_envelope() {
+        let nats = AdvancedMockNatsClient::new();
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+
+        let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
+        let (mut stdout_reader, stdout_writer) = tokio::io::duplex(4096);
+
+        // Valid JSON but missing the required `method` field on InboundRequest.
+        stdin_writer.write_all(b"{\"id\":1}\n").await.unwrap();
+        drop(stdin_writer);
+
+        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+
+        let mut buf = vec![0u8; 4096];
+        let n = stdout_reader.read(&mut buf).await.unwrap();
+        let output = String::from_utf8_lossy(&buf[..n]);
+        assert!(output.contains("-32600"), "expected invalid request in: {output}");
+    }
+
+    fn expect_err_code(result: Result<(RpcId, String, serde_json::Value), OutboundFrame>) -> i32 {
+        let OutboundFrame::Error(OutboundError {
+            error: crate::wire::RpcError { code, .. },
+            ..
+        }) = result.expect_err("expected error")
+        else {
+            return 0;
+        };
+        code
+    }
+
+    #[test]
+    fn parse_inbound_routes_syntax_to_parse_error_and_shape_to_invalid_request() {
+        assert_eq!(expect_err_code(parse_inbound("not json")), -32700);
+        assert_eq!(expect_err_code(parse_inbound(r#"{"id":1}"#)), -32600);
+        let (id, method, _) = parse_inbound(r#"{"jsonrpc":"2.0","id":7,"method":"tasks/get","params":{}}"#).unwrap();
+        assert_eq!(id, RpcId::Number(7));
+        assert_eq!(method, "tasks/get");
     }
 }
