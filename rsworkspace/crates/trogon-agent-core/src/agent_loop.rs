@@ -857,7 +857,9 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 .into_iter()
                 .filter_map(|opt| match opt? {
                     ContentBlockBuilder::Text(t) => Some(ContentBlock::Text { text: t }),
-                    ContentBlockBuilder::Thinking(t) => Some(ContentBlock::Thinking { thinking: t }),
+                    ContentBlockBuilder::Thinking(t) => {
+                        Some(ContentBlock::Thinking { thinking: t, signature: None })
+                    }
                     ContentBlockBuilder::ToolUse { id, name, input_buf, parent_tool_use_id } => {
                         let input = serde_json::from_str(&input_buf)
                             .unwrap_or(serde_json::Value::Object(Default::default()));

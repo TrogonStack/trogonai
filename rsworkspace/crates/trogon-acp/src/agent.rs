@@ -1061,7 +1061,6 @@ where
         let mut mcp_servers = Self::convert_mcp_servers(&args.mcp_servers);
         mcp_servers.extend(stdio_servers);
         let new_state = SessionState {
-            scope: None,
             tool_allowlist: Vec::new(),
             background_jobs: Vec::new(),
             env: src_state.env.clone(),
@@ -1084,6 +1083,7 @@ where
             branched_at_index: branch_at,
             tool_policies: src_state.tool_policies.clone(),
             scope: src_state.scope.clone(),
+            openapi_servers: src_state.openapi_servers.clone(),
             egress_policy: src_state.egress_policy.clone(),
             audit_log: vec![],
             terminal_id: None,

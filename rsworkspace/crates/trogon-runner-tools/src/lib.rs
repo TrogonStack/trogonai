@@ -6,6 +6,7 @@ pub mod elicitation;
 pub mod hooks;
 pub mod mcp;
 pub mod nats_todo_tool;
+pub mod openapi;
 pub mod permission;
 pub mod permission_bridge;
 pub mod permission_rules;
@@ -30,6 +31,7 @@ pub use elicitation::{
 };
 pub use hooks::{HookMatcher, HookOutcome, HookPostToolObserver, HooksConfig, run_event_hooks};
 pub use mcp::{McpDispatch, SessionMcpCache, build_session_mcp, convert_mcp_servers};
+pub use openapi::{ApiKeyLocation, OpenApiAuth, SpecSource, StoredOpenApiServer, build_session_openapi};
 pub use permission::{
     ChannelPermissionChecker, ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
     RulesPermissionChecker, SafetyClassifier, build_mode_permission_checker, check_tool_permission,

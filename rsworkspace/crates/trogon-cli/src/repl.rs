@@ -15,7 +15,6 @@ use crate::session_transcript::{
 };
 use crate::spawn_tracker::SpawnTracker;
 use crate::session_store::{SessionIndex, new_session_entry};
-use crate::spawn_tracker::SpawnTracker;
 use crate::transcript::SessionTranscriptRecorder;
 use rustyline::completion::{Completer, Pair};
 use rustyline::config::Configurer;
