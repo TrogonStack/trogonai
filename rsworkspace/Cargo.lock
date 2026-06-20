@@ -5776,6 +5776,7 @@ dependencies = [
  "agent-client-protocol",
  "async-nats",
  "axum 0.8.9",
+ "buffa 0.7.0",
  "bytes",
  "futures-util",
  "httpmock",

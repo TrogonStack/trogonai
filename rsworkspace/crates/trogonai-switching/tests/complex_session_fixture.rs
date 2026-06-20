@@ -198,6 +198,7 @@ fn certification_matrix() -> ProviderCertificationMatrix {
             switch_to: vec![TO_MODEL.to_string()],
             certified_level: CertificationLevel::Production,
             last_verified_at: None,
+            probe_results: vec![],
         })
         .unwrap();
     matrix
@@ -217,6 +218,7 @@ fn certification_matrix() -> ProviderCertificationMatrix {
             switch_to: vec![],
             certified_level: CertificationLevel::SwitchSafe,
             last_verified_at: None,
+            probe_results: vec![],
         })
         .unwrap();
     matrix
@@ -252,9 +254,16 @@ fn build_orchestrator(event_log: InMemoryEventLog, registry: Registry<MockRegist
         registry,
         Arc::new(MockRunnerAcknowledgement::default()),
         // CRITERION 7: continuity checkpoint enabled so the switch produces a
-        // Continuity Checkpoint result (in addition to the Safety Gate).
+        // Continuity Checkpoint result (in addition to the Safety Gate). Pin the
+        // checkpoint to internal-echo strictness — valid for tests/shadow/MVP per the
+        // doc — so this fixture exercises the happy path (echo of the Context Twin →
+        // checkpoint passes). The real-runner checkpoint (pass/fail/rollback) is covered
+        // separately in switch_flow.rs. Without this, the config default
+        // (`real_for_high_risk`) makes this cross-provider (high-risk) switch invoke the
+        // mock runner, whose empty Context Twin mismatches and rolls the switch back.
         SwitchingConfig {
             continuity_checkpoint_enabled: true,
+            checkpoint_strictness_raw: "internal_echo".to_string(),
             ..SwitchingConfig::default()
         },
         CapabilityConfig::default(),

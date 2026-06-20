@@ -330,18 +330,24 @@ fn messages_from_portable(history: &[PortableMessage]) -> Vec<Message> {
                             id,
                             name,
                             input_summary,
+                            input,
+                            parent_tool_use_id,
                         } => Some(ContentBlock::ToolUse {
                             id: id.clone(),
                             name: name.clone(),
-                            // V2 stores a textual summary, not the raw input; parse back to
-                            // JSON when possible, otherwise carry the summary as a string.
-                            input: serde_json::from_str(input_summary)
-                                .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone())),
-                            parent_tool_use_id: None,
+                            // Prefer the full structured `input`; fall back to parsing the
+                            // summary for legacy V2 payloads that predate the field.
+                            input: if input.is_null() {
+                                serde_json::from_str(input_summary)
+                                    .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone()))
+                            } else {
+                                input.clone()
+                            },
+                            parent_tool_use_id: parent_tool_use_id.clone(),
                         }),
-                        PortableBlock::ToolResult { id, output_summary } => Some(ContentBlock::ToolResult {
+                        PortableBlock::ToolResult { id, output_summary, output } => Some(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
-                            content: output_summary.clone(),
+                            content: output.clone().unwrap_or_else(|| output_summary.clone()),
                         }),
                         PortableBlock::Thinking { .. } => None,
                     })
@@ -364,14 +370,22 @@ fn portable_from_messages(messages: &[Message]) -> Vec<PortableMessage> {
                 .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text { text } => Some(PortableBlock::Text { text: text.clone() }),
-                    ContentBlock::ToolUse { id, name, input, .. } => Some(PortableBlock::ToolUse {
+                    ContentBlock::ToolUse {
+                        id,
+                        name,
+                        input,
+                        parent_tool_use_id,
+                    } => Some(PortableBlock::ToolUse {
                         id: id.clone(),
                         name: name.clone(),
                         input_summary: input.to_string(),
+                        input: input.clone(),
+                        parent_tool_use_id: parent_tool_use_id.clone(),
                     }),
                     ContentBlock::ToolResult { tool_use_id, content } => Some(PortableBlock::ToolResult {
                         id: tool_use_id.clone(),
                         output_summary: content.clone(),
+                        output: Some(content.clone()),
                     }),
                     ContentBlock::Thinking { .. } | ContentBlock::Image { .. } => None,
                 })

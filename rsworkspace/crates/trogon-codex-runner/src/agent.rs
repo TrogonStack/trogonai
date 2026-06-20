@@ -713,6 +713,8 @@ where
                             id,
                             name,
                             input_summary: input.to_string(),
+                            input,
+                            parent_tool_use_id: None,
                         },
                     );
                 }
@@ -734,7 +736,8 @@ where
                     tool_result_blocks.push(
                         trogon_runner_tools::portable_session::PortableBlock::ToolResult {
                             id,
-                            output_summary: output,
+                            output_summary: output.clone(),
+                            output: Some(output),
                         },
                     );
                 }

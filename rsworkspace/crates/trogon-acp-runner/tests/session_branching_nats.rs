@@ -934,6 +934,8 @@ async fn ext_method_codex_style_import_converts_blocks_in_nats_kv() {
                         id: "c1".to_string(),
                         name: "read_file".to_string(),
                         input_summary: serde_json::json!({"path": "test.txt"}).to_string(),
+                        input: serde_json::json!({"path": "test.txt"}),
+                        parent_tool_use_id: None,
                     }],
                 },
                 PortableMessage {
@@ -942,6 +944,7 @@ async fn ext_method_codex_style_import_converts_blocks_in_nats_kv() {
                     blocks: vec![PortableBlock::ToolResult {
                         id: "c1".to_string(),
                         output_summary: "file contents".to_string(),
+                        output: Some("file contents".to_string()),
                     }],
                 },
             ];

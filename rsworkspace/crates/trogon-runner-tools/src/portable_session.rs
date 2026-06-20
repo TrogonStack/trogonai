@@ -31,11 +31,29 @@ pub enum PortableBlock {
     ToolUse {
         id: String,
         name: String,
+        /// Human-readable / back-compat summary of the input (may be truncated). Kept so
+        /// N-1 readers that predate `input` still render something.
         input_summary: String,
+        /// Full structured tool input (cambio-modelo.md §11 No-Lossy: "input JSON
+        /// completo"; §637 "un modelo con tools recibe tool calls estructurados"). Absent
+        /// (null) in legacy V2 payloads written before this field existed — readers then
+        /// fall back to `input_summary`.
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        input: serde_json::Value,
+        /// Parent tool-use id for nested/sub-agent tool calls (§11 No-Lossy lists
+        /// `parent_tool_use_id` among fields that must not be dropped).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_tool_use_id: Option<String>,
     },
     ToolResult {
         id: String,
+        /// Human-readable / back-compat summary (may be truncated). Kept for N-1 readers.
         output_summary: String,
+        /// Full tool result content (cambio-modelo.md §11 No-Lossy: "output completo o
+        /// referencia a artefacto"; §828). Absent in legacy V2 payloads → readers fall
+        /// back to `output_summary`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
     },
     Thinking {
         text: String,
@@ -89,14 +107,26 @@ pub fn message_to_v2(m: &Message) -> PortableMessageV2 {
         .iter()
         .map(|b| match b {
             ContentBlock::Text { text } => PortableBlock::Text { text: text.clone() },
-            ContentBlock::ToolUse { id, name, input, .. } => PortableBlock::ToolUse {
+            ContentBlock::ToolUse {
+                id,
+                name,
+                input,
+                parent_tool_use_id,
+            } => PortableBlock::ToolUse {
                 id: id.clone(),
                 name: name.clone(),
                 input_summary: summarize_value(input),
+                // Carry the FULL structured input + parent linkage (no-lossy); the
+                // truncated `input_summary` is retained only for legacy display.
+                input: input.clone(),
+                parent_tool_use_id: parent_tool_use_id.clone(),
             },
             ContentBlock::ToolResult { tool_use_id, content } => PortableBlock::ToolResult {
                 id: tool_use_id.clone(),
                 output_summary: truncate_str(content, 500),
+                // Carry the FULL result content (no-lossy); `output_summary` is only a
+                // truncated display preview.
+                output: Some(content.clone()),
             },
             ContentBlock::Thinking { thinking } => PortableBlock::Thinking { text: thinking.clone() },
             ContentBlock::Image { .. } => PortableBlock::Text { text: "[image]".into() },
@@ -130,15 +160,24 @@ pub fn v2_to_messages(export: &PortableExportV2) -> Vec<Message> {
                         id,
                         name,
                         input_summary,
+                        input,
+                        parent_tool_use_id,
                     } => ContentBlock::ToolUse {
                         id: id.clone(),
                         name: name.clone(),
-                        input: serde_json::Value::String(input_summary.clone()),
-                        parent_tool_use_id: None,
+                        // Prefer the full structured input; fall back to the summary string
+                        // only for legacy V2 payloads that predate the `input` field.
+                        input: if input.is_null() {
+                            serde_json::Value::String(input_summary.clone())
+                        } else {
+                            input.clone()
+                        },
+                        parent_tool_use_id: parent_tool_use_id.clone(),
                     },
-                    PortableBlock::ToolResult { id, output_summary } => ContentBlock::ToolResult {
+                    PortableBlock::ToolResult { id, output_summary, output } => ContentBlock::ToolResult {
                         tool_use_id: id.clone(),
-                        content: output_summary.clone(),
+                        // Prefer the full content; fall back to the summary for legacy payloads.
+                        content: output.clone().unwrap_or_else(|| output_summary.clone()),
                     },
                     PortableBlock::Thinking { text } => ContentBlock::Thinking { thinking: text.clone() },
                 })
@@ -391,10 +430,13 @@ mod tests {
                 id: "c1".into(),
                 name: "read_file".into(),
                 input_summary: serde_json::json!({"path": "/foo"}).to_string(),
+                input: serde_json::json!({"path": "/foo"}),
+                parent_tool_use_id: Some("parent_1".into()),
             },
             PortableBlock::ToolResult {
                 id: "c1".into(),
                 output_summary: "file contents".into(),
+                output: Some("file contents".into()),
             },
         ];
         let msg = PortableMessage {
@@ -410,19 +452,118 @@ mod tests {
                 id,
                 name,
                 input_summary,
+                input,
+                parent_tool_use_id,
             } => {
                 assert_eq!(id, "c1");
                 assert_eq!(name, "read_file");
                 assert!(input_summary.contains("/foo"));
+                // The full structured input and parent linkage round-trip through serde.
+                assert_eq!(input, &serde_json::json!({"path": "/foo"}));
+                assert_eq!(parent_tool_use_id.as_deref(), Some("parent_1"));
             }
             _ => panic!("expected ToolUse"),
         }
         match &decoded.blocks[2] {
-            PortableBlock::ToolResult { id, output_summary } => {
+            PortableBlock::ToolResult { id, output_summary, output } => {
                 assert_eq!(id, "c1");
                 assert_eq!(output_summary, "file contents");
+                assert_eq!(output.as_deref(), Some("file contents"));
             }
             _ => panic!("expected ToolResult"),
+        }
+    }
+
+    // cambio-modelo.md §11 (No-Lossy: "input JSON completo ... parent_tool_use_id") and
+    // §637 ("un modelo con tools recibe tool calls estructurados"): a tool call's full
+    // structured input and parent linkage must survive the V2 export → import round trip,
+    // not be flattened to a truncated string (the old lossy behavior).
+    #[test]
+    fn v2_round_trip_preserves_structured_tool_input_and_parent() {
+        // A large input (> the 240-char summary cap) that is also a structured object.
+        let big_path = "/".to_string() + &"a".repeat(300);
+        let input = serde_json::json!({ "path": big_path, "recursive": true, "depth": 5 });
+        let original = vec![Message {
+            role: "assistant".into(),
+            content: vec![ContentBlock::ToolUse {
+                id: "toolu_1".into(),
+                name: "read_file".into(),
+                input: input.clone(),
+                parent_tool_use_id: Some("toolu_parent".into()),
+            }],
+        }];
+
+        let exported = messages_to_export_v2(&original);
+        // Serialize + deserialize so we also exercise the serde wire format.
+        let json = serde_json::to_string(&exported).unwrap();
+        let decoded: PortableExportV2 = serde_json::from_str(&json).unwrap();
+        let round_tripped = v2_to_messages(&decoded);
+
+        match &round_tripped[0].content[0] {
+            ContentBlock::ToolUse {
+                id,
+                name,
+                input: got_input,
+                parent_tool_use_id,
+            } => {
+                assert_eq!(id, "toolu_1");
+                assert_eq!(name, "read_file");
+                // Structured object preserved exactly — NOT collapsed to a string and NOT
+                // truncated, even though it exceeds the summary cap.
+                assert_eq!(got_input, &input, "full structured input must survive the round trip");
+                assert!(got_input.is_object(), "input must remain a JSON object, not a string");
+                assert_eq!(parent_tool_use_id.as_deref(), Some("toolu_parent"), "parent linkage preserved");
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    // cambio-modelo.md §11 (No-Lossy: tool "output completo o referencia a artefacto") and
+    // §828: a tool result's full content must survive the V2 round trip, not be silently
+    // truncated (the old behavior truncated to 500 chars without a marker or artifact ref).
+    #[test]
+    fn v2_round_trip_preserves_full_tool_result_content() {
+        let long_output = "line\n".repeat(400); // ~2000 chars, well over the 500 summary cap
+        let original = vec![Message {
+            role: "user".into(),
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "toolu_1".into(),
+                content: long_output.clone(),
+            }],
+        }];
+
+        let exported = messages_to_export_v2(&original);
+        let json = serde_json::to_string(&exported).unwrap();
+        let decoded: PortableExportV2 = serde_json::from_str(&json).unwrap();
+        let round_tripped = v2_to_messages(&decoded);
+
+        match &round_tripped[0].content[0] {
+            ContentBlock::ToolResult { tool_use_id, content } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(content, &long_output, "full tool result content must survive untruncated");
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    // N-1 compatibility: a legacy V2 payload written before the `input`/`parent_tool_use_id`
+    // fields existed (only `input_summary`) still imports — falling back to the summary
+    // string (cambio-modelo.md §1010 Schema Versioning: readers accept the prior version).
+    #[test]
+    fn v2_legacy_tooluse_without_input_field_falls_back_to_summary() {
+        let json = r#"{"version":2,"messages":[{"version":2,"role":"assistant","blocks":[{"type":"tool_use","id":"t1","name":"bash","input_summary":"{\"cmd\":\"ls\"}"}]}]}"#;
+        let decoded: PortableExportV2 = serde_json::from_str(json).unwrap();
+        let messages = v2_to_messages(&decoded);
+        match &messages[0].content[0] {
+            ContentBlock::ToolUse {
+                input,
+                parent_tool_use_id,
+                ..
+            } => {
+                assert_eq!(input, &serde_json::Value::String("{\"cmd\":\"ls\"}".into()));
+                assert!(parent_tool_use_id.is_none());
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
         }
     }
 }

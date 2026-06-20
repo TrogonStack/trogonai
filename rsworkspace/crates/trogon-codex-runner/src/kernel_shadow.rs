@@ -222,10 +222,13 @@ mod tests {
                     id: "t1".to_string(),
                     name: "fs_read".to_string(),
                     input_summary: "path=src/lib.rs".to_string(),
+                    input: serde_json::Value::Null,
+                    parent_tool_use_id: None,
                 },
                 PortableBlock::ToolResult {
                     id: "t1".to_string(),
                     output_summary: "42 lines".to_string(),
+                    output: Some("42 lines".to_string()),
                 },
             ],
         }];

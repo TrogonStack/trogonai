@@ -146,6 +146,7 @@ fn certification_matrix() -> ProviderCertificationMatrix {
             switch_to: vec!["xai/grok-code-fast".to_string()],
             certified_level: CertificationLevel::Production,
             last_verified_at: None,
+            probe_results: vec![],
         })
         .unwrap();
     matrix
@@ -165,6 +166,7 @@ fn certification_matrix() -> ProviderCertificationMatrix {
             switch_to: vec![],
             certified_level: CertificationLevel::SwitchSafe,
             last_verified_at: None,
+            probe_results: vec![],
         })
         .unwrap();
     matrix
@@ -589,4 +591,93 @@ async fn switch_rolls_back_to_previous_binding_when_checkpoint_fails() {
             })
     });
     assert!(rolled_back_detach, "rollback must detach the target with the rollback reason");
+}
+
+/// Happy-path counterpart to the rollback test: a high-risk (cross-provider) switch runs a
+/// REAL continuity checkpoint against the destination runner (`internal_echo` off), the
+/// destination's acknowledgement matches the session Context Twin, the checkpoint PASSES,
+/// and the switch completes — cambio-modelo.md §2310 ("checkpoint real pasado") and §2396
+/// for the success case. Without this, only the *failing* real checkpoint was covered.
+#[tokio::test]
+async fn switch_completes_when_real_checkpoint_passes_against_destination() {
+    use trogonai_session_contracts::ContinuityCheckpointStatus;
+    use trogonai_session_contracts::session_event_payload::Kind;
+
+    let session_id = SessionId::new("sess_ckpt_pass").unwrap();
+    let event_log = InMemoryEventLog::new();
+    event_log.append(created_event(session_id.as_str())).await.unwrap();
+    let registry = registry_with_schemas().await;
+
+    let kernel_config = SessionKernelConfig::default();
+    let snap_store = SnapshotStore::new(
+        trogon_nats::jetstream::MockJetStreamKvStore::new(),
+        kernel_config.clone(),
+    );
+    let leases = SessionLeaseManager::new(MockSessionLeaseFactory::new(MockSessionLease::new()), "switch-test");
+    let kernel = SessionKernel::new(kernel_config, event_log.clone(), snap_store.clone(), leases);
+    let orchestrator = SwitchOrchestrator::new(
+        kernel,
+        snap_store,
+        RunnerBindingStore::new(
+            trogon_nats::jetstream::MockJetStreamKvStore::new(),
+            SwitchingConfig::default(),
+        ),
+        ContextTwinStore::new(
+            trogon_nats::jetstream::MockJetStreamKvStore::new(),
+            ProjectionConfig::default(),
+        ),
+        registry,
+        // Default mock echoes an (empty) Context Twin; the minimal `created_event` session
+        // also materializes an empty twin, so the acknowledgement matches → checkpoint passes.
+        Arc::new(MockRunnerAcknowledgement::default()),
+        // checkpoint enabled + internal_echo OFF so the REAL destination runner ack is used;
+        // default strictness `real_for_high_risk` + cross-provider switch ⇒ a real checkpoint.
+        // The destination's acknowledgement substantially matches the session Context Twin
+        // (it clears the configured confidence floor), so the checkpoint passes — the
+        // mirror image of the rollback test, which uses a deliberately mismatching runner.
+        SwitchingConfig {
+            continuity_checkpoint_enabled: true,
+            continuity_checkpoint_internal_echo: false,
+            checkpoint_min_confidence: 0.6,
+            ..SwitchingConfig::default()
+        },
+        CapabilityConfig::default(),
+        ProjectionConfig::default(),
+        certification_matrix(),
+    );
+
+    let result = orchestrator
+        .switch_model(SwitchModelRequest {
+            session_id: session_id.clone(),
+            target_model: "xai/grok-code-fast".to_string(),
+            reason: ModelSwitchReason::UserRequested,
+            user_confirmed: true,
+            force: false,
+            force_acknowledged_losses: Vec::new(),
+            operation_id: OperationId::new("op_ckpt_pass").unwrap(),
+            correlation_id: "corr_ckpt_pass".to_string(),
+            idempotency_key: IdempotencyKey::new("idem_ckpt_pass").unwrap(),
+        })
+        .await
+        .expect("switch must not error")
+        .expect("switch must complete, not be gated");
+
+    // The switch completed cleanly and the real checkpoint passed.
+    assert_eq!(result.state, SwitchState::Completed);
+    let checkpoint = result.checkpoint.expect("a high-risk switch must produce a checkpoint result");
+    assert_eq!(
+        checkpoint.status.as_known(),
+        Some(ContinuityCheckpointStatus::Passed),
+        "the real checkpoint against the destination must pass when the ack matches the twin"
+    );
+
+    // The durable event log records continuity_checkpoint_started + completed.
+    let events = event_log.read_session_events(&session_id).await.unwrap();
+    let has = |pred: fn(&Kind) -> bool| {
+        events
+            .iter()
+            .any(|e| e.payload.as_option().and_then(|p| p.kind.as_ref()).is_some_and(pred))
+    };
+    assert!(has(|k| matches!(k, Kind::ContinuityCheckpointStarted(_))));
+    assert!(has(|k| matches!(k, Kind::ContinuityCheckpointCompleted(_))));
 }

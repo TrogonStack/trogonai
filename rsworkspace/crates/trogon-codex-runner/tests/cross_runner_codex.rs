@@ -300,6 +300,8 @@ async fn cross_runner_acp_style_export_into_codex_import() {
                         id: "c1".to_string(),
                         name: "str_replace".to_string(),
                         input_summary: serde_json::json!({"path": "f.rs", "old_str": "x", "new_str": "y"}).to_string(),
+                        input: serde_json::json!({"path": "f.rs", "old_str": "x", "new_str": "y"}),
+                        parent_tool_use_id: None,
                     }],
                 },
                 PortableMessage {
@@ -308,6 +310,7 @@ async fn cross_runner_acp_style_export_into_codex_import() {
                     blocks: vec![PortableBlock::ToolResult {
                         id: "c1".to_string(),
                         output_summary: "OK".to_string(),
+                        output: Some("OK".to_string()),
                     }],
                 },
                 PortableMessage { role: "assistant".to_string(), text: "done".to_string(), blocks: vec![] },
@@ -385,6 +388,8 @@ async fn cross_runner_openrouter_style_export_into_codex_import() {
                         id: "c2".to_string(),
                         name: "read_file".to_string(),
                         input_summary: serde_json::json!({"path": "test.txt"}).to_string(),
+                        input: serde_json::json!({"path": "test.txt"}),
+                        parent_tool_use_id: None,
                     }],
                 },
                 PortableMessage {
@@ -393,6 +398,7 @@ async fn cross_runner_openrouter_style_export_into_codex_import() {
                     blocks: vec![PortableBlock::ToolResult {
                         id: "c2".to_string(),
                         output_summary: "file contents".to_string(),
+                        output: Some("file contents".to_string()),
                     }],
                 },
                 PortableMessage { role: "assistant".to_string(), text: "I read the file".to_string(), blocks: vec![] },

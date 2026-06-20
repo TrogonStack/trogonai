@@ -436,54 +436,77 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             .await
             .unwrap()
             .unwrap();
-            let messages: Vec<serde_json::Value> =
-                serde_json::from_slice(&export_msg.payload).unwrap();
+            // `session/export` returns the portable session in one of two shapes
+            // (trogon-runner-tools::portable_session): V1 is a bare array of
+            // `{role, text}`; V2 is a versioned object `{version:2, messages:[{role,
+            // blocks:[{type:"text", text}]}]}` used once any block is richer than plain
+            // text. Normalize both to `(role, text)` so the assertion is format-agnostic.
+            // The raw ext-method NATS reply wraps the export in `{"result": <export>}`;
+            // unwrap it first. The inner export is then either V1 (a bare `{role, text}`
+            // array) or V2 (a versioned `{version:2, messages:[...]}` object).
+            let envelope: serde_json::Value = serde_json::from_slice(&export_msg.payload).unwrap();
+            let export = envelope.get("result").cloned().unwrap_or(envelope);
+            let normalized: Vec<(String, String)> = match &export {
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .map(|m| {
+                        (
+                            m["role"].as_str().unwrap_or_default().to_string(),
+                            m["text"].as_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect(),
+                serde_json::Value::Object(_) => export["messages"]
+                    .as_array()
+                    .expect("V2 export must carry a messages array")
+                    .iter()
+                    .map(|m| {
+                        let text = m["blocks"]
+                            .as_array()
+                            .and_then(|blocks| {
+                                blocks.iter().find_map(|b| {
+                                    (b["type"] == "text").then(|| b["text"].as_str().unwrap_or_default().to_string())
+                                })
+                            })
+                            .unwrap_or_default();
+                        (m["role"].as_str().unwrap_or_default().to_string(), text)
+                    })
+                    .collect(),
+                other => panic!("unexpected export shape: {other:?}"),
+            };
 
             assert_eq!(
-                messages.len(),
+                normalized.len(),
                 2,
-                "migrated OR session must have 2 messages; got: {messages:?}"
+                "migrated OR session must have 2 messages; got: {normalized:?}"
             );
+            assert_eq!(normalized[0].0, "user", "first migrated message must be user");
             assert_eq!(
-                messages[0]["role"].as_str(),
-                Some("user"),
-                "first migrated message must be user"
-            );
-            assert_eq!(
-                messages[0]["text"].as_str(),
-                Some("question from xai"),
+                normalized[0].1, "question from xai",
                 "first message text must survive migration"
             );
+            assert_eq!(normalized[1].0, "assistant", "second migrated message must be assistant");
             assert_eq!(
-                messages[1]["role"].as_str(),
-                Some("assistant"),
-                "second migrated message must be assistant"
-            );
-            assert_eq!(
-                messages[1]["text"].as_str(),
-                Some("answer from xai"),
+                normalized[1].1, "answer from xai",
                 "second message text must survive migration"
             );
         })
         .await;
 }
 
-/// Characterization test: documents what the cross-runner `switch_model` path
-/// PRESERVES and what it LOSES for a history containing `ToolUse` / `ToolResult`
-/// blocks. The migration serializes through the `PortableMessageV2` format
-/// (trogon-runner-tools::portable_session), which is intentionally LOSSY for
-/// tool blocks:
-///   * tool_use.input  → `value.to_string()` truncated to 240 chars, and on
-///                        import re-wrapped as `Value::String` (never reparsed
-///                        back to a JSON object).
-///   * tool_result.content → truncated to 500 chars.
-///   * parent_tool_use_id  → dropped (forced to None on import).
-///   * Image blocks        → replaced by the literal text "[image]".
+/// The cross-runner `switch_model` migration preserves `ToolUse` / `ToolResult`
+/// blocks losslessly through the `PortableMessageV2` format
+/// (trogon-runner-tools::portable_session): tool_use carries the FULL structured
+/// `input` (a JSON object, untruncated) and `parent_tool_use_id`, per
+/// cambio-modelo.md §11 (No-Lossy: "input JSON completo ... parent_tool_use_id")
+/// and §637 ("un modelo con tools recibe tool calls estructurados").
 ///
-/// This test LOCKS IN that behavior. If the format is ever made lossless, this
-/// test should be updated to assert exact preservation instead.
+/// This previously LOCKED IN the old lossy behavior (input stringified + truncated
+/// to 240 chars, parent dropped); it now asserts exact preservation after the format
+/// was made lossless. `input_summary` is still emitted for N-1 readers, but the
+/// structured `input` is the source of truth on import.
 #[tokio::test]
-async fn switch_model_tool_blocks_are_summarized_lossy() {
+async fn switch_model_tool_blocks_are_preserved_structurally() {
     let (_c, port) = start_nats_js().await;
     let (nats, js) = make_nats(port).await;
 
@@ -493,9 +516,10 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
             // ── 1. Seed source session with a tool-call round-trip ────────────
             let store = NatsSessionStore::open(&js).await.unwrap();
 
-            // Small input (< 240 chars: stringified but NOT truncated).
+            // Small structured input — preserved exactly as an object.
             let small_input = serde_json::json!({ "command": "ls -la", "timeout_ms": 5000 });
-            // Large input (> 240 chars: stringified AND truncated → data loss).
+            // Large structured input (its string form exceeds the 240-char summary cap) —
+            // still preserved in full, NOT truncated, because the structured `input` is carried.
             let big_value = "x".repeat(400);
             let large_input = serde_json::json!({ "path": "/etc/config", "blob": big_value });
 
@@ -571,8 +595,7 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
                 AgentContentBlock::Text { text } if text == "Let me list them."
             ));
 
-            // First tool_use: id + name kept, but input is STRINGIFIED (object
-            // → JSON string) and parent_tool_use_id is DROPPED.
+            // First tool_use: id + name + FULL structured input + parent linkage preserved.
             match &dst.messages[1].content[1] {
                 AgentContentBlock::ToolUse {
                     id,
@@ -582,41 +605,25 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
                 } => {
                     assert_eq!(id, "toolu_abc123", "tool_use id is preserved");
                     assert_eq!(name, "bash", "tool_use name is preserved");
-                    // LOSS #1: structured object collapsed into a JSON *string*.
+                    // Structured object preserved exactly — not collapsed to a string.
+                    assert_eq!(input, &small_input, "tool_use input is preserved as a structured object");
+                    assert!(input.is_object(), "input remains a JSON object");
+                    // Parent linkage preserved (was Some).
                     assert_eq!(
-                        input,
-                        &serde_json::Value::String(small_input.to_string()),
-                        "tool_use input is stringified, not kept as an object"
-                    );
-                    assert!(
-                        input.is_string() && !input.is_object(),
-                        "input must no longer be a JSON object"
-                    );
-                    // LOSS #2: parent linkage dropped.
-                    assert!(
-                        parent_tool_use_id.is_none(),
-                        "parent_tool_use_id is dropped on migration (was Some)"
+                        parent_tool_use_id.as_deref(),
+                        Some("toolu_parent"),
+                        "parent_tool_use_id is preserved across migration"
                     );
                 }
                 other => panic!("expected ToolUse, got {other:?}"),
             }
 
-            // Second tool_use: large input is stringified AND TRUNCATED to 240
-            // chars with a trailing ellipsis — concrete data loss.
+            // Second tool_use: large input preserved in FULL (not truncated), as an object.
             match &dst.messages[1].content[2] {
                 AgentContentBlock::ToolUse { id, input, .. } => {
                     assert_eq!(id, "toolu_big");
-                    let s = input.as_str().expect("large input is a string");
-                    assert!(s.ends_with('…'), "LOSS #3: long input is truncated with ellipsis");
-                    assert!(
-                        s.chars().count() <= 240,
-                        "truncated to <=240 chars (was {} in original)",
-                        large_input.to_string().len()
-                    );
-                    assert!(
-                        s.len() < large_input.to_string().len(),
-                        "destination input is strictly shorter than the original"
-                    );
+                    assert_eq!(input, &large_input, "large structured input is preserved untruncated");
+                    assert!(input.is_object(), "large input remains a JSON object");
                 }
                 other => panic!("expected ToolUse, got {other:?}"),
             }

@@ -685,6 +685,7 @@ mod tests {
                 switch_to,
                 certified_level: trogonai_capabilities::CertificationLevel::Production,
                 last_verified_at: None,
+                probe_results: vec![],
             }
         }
         let mut matrix = ProviderCertificationMatrix::default();

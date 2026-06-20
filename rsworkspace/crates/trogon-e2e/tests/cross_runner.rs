@@ -756,6 +756,8 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                             id: "c1".to_string(),
                             name: "str_replace".to_string(),
                             input_summary: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"}).to_string(),
+                            input: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"}),
+                            parent_tool_use_id: None,
                         }],
                     },
                     PortableMessageV2 {
@@ -764,6 +766,7 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                         blocks: vec![PortableBlock::ToolResult {
                             id: "c1".to_string(),
                             output_summary: "edit-applied".to_string(),
+                            output: Some("edit-applied".to_string()),
                         }],
                     },
                     PortableMessageV2 {
@@ -854,6 +857,8 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
                             id: "c1".to_string(),
                             name: "glob".to_string(),
                             input_summary: serde_json::json!({"pattern": "**/*.rs"}).to_string(),
+                            input: serde_json::json!({"pattern": "**/*.rs"}),
+                            parent_tool_use_id: None,
                         }],
                     },
                     PortableMessageV2 {
@@ -862,6 +867,7 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
                         blocks: vec![PortableBlock::ToolResult {
                             id: "c1".to_string(),
                             output_summary: "found: main.rs".to_string(),
+                            output: Some("found: main.rs".to_string()),
                         }],
                     },
                     PortableMessageV2 {

@@ -595,9 +595,12 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             model_id.to_string(),
             std::path::PathBuf::from(cwd),
         );
-        let outcome = self
-            .run_orchestrated_switch(stack, Arc::new(JsonAcknowledgementRunner::new(transport)), request)
-            .await;
+        let outcome = Box::pin(self.run_orchestrated_switch(
+            stack,
+            Arc::new(JsonAcknowledgementRunner::new(transport)),
+            request,
+        ))
+        .await;
         // Normalize ONCE into the structured SwitchResult before unwrapping, so every
         // return path carries it (§ Trabajo restante: "emitir SwitchResult estructurado").
         let result_kind = classify_switch_result(&outcome);
@@ -686,7 +689,24 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             portable
         };
 
-        let import_messages = messages_json_for_runner_hydration(&result.projection, &[])
+        // Hydrate the destination runner from the CANONICAL conversation (per-message role
+        // + full tool calls) rather than from the role-less, prompt-shaped projection
+        // blocks. The canonical session is the no-lossy source of truth (cambio-modelo.md
+        // §894 "el runner destino debe hidratarse desde la sesión Trogonai"); reconstructing
+        // messages from projection blocks dropped tool calls, mislabeled turn roles, and
+        // injected prompt scaffolding (system rules / context twin) as fake messages. The
+        // projection stays for the checkpoint prompt and degradation metadata; the
+        // destination runner textualizes structured tool blocks on import when text-only.
+        let conversation = stack
+            .kernel
+            .load_snapshot(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|snapshot| snapshot.state.into_option())
+            .map(|state| state.conversation)
+            .unwrap_or_default();
+        let import_messages = messages_json_for_runner_hydration(&PromptProjection::default(), &conversation)
             .map_err(|err| mk_fail(operation_id.as_str(), SwitchResult::FailedRecoverable, err.to_string()))?;
 
         let new_session_id = if let Some(target_runner_session_id) = target_runner_session_id {
@@ -756,7 +776,11 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             stack.projection_config.clone(),
             stack.certification.clone(),
         );
-        orchestrator.switch_model(request).await
+        // Heap-pin the orchestrator future so the large canonical-switch state does not
+        // inline into this caller's frame. The canonical path nests several async layers;
+        // on a 2 MB worker/test stack an inlined chain overflows in debug builds. See the
+        // matching note in `SwitchOrchestrator::switch_model`.
+        Box::pin(orchestrator.switch_model(request)).await
     }
 
     #[allow(clippy::too_many_arguments)]

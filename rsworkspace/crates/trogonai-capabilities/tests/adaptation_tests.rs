@@ -338,6 +338,7 @@ fn certification_matrix_switch_rules() {
             switch_to: vec!["xai/grok-code-fast".to_string()],
             certified_level: CertificationLevel::Production,
             last_verified_at: None,
+            probe_results: vec![],
         })
         .unwrap();
     matrix
@@ -357,6 +358,7 @@ fn certification_matrix_switch_rules() {
             switch_to: vec![],
             certified_level: CertificationLevel::SwitchSafe,
             last_verified_at: None,
+            probe_results: vec![],
         })
         .unwrap();
 

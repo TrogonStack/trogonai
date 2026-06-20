@@ -278,7 +278,14 @@ where
         // Lease flow step 22: acquire -> mutation -> append -> materialize -> release).
         // The `async move` block captures every `?` and early return so the explicit
         // release below always runs; the lease TTL stays only as the crash fallback.
-        let switch_outcome: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> = async move {
+        //
+        // `Box::pin` keeps this large per-switch future on the heap instead of inlining
+        // it into the caller's future. The canonical switch path nests many `async fn`
+        // layers (cross_runner -> run_orchestrated_switch -> here), and in debug builds an
+        // inlined chain of large futures produces a single oversized poll frame that
+        // overflows the current_thread runtime's stack. Boxing the biggest segment breaks
+        // that chain. Regression-covered by the real-NATS canonical switch e2e test.
+        let switch_outcome: Result<Result<SwitchCompletion, SwitchGateOutcome>, SwitchingError> = Box::pin(async move {
             switch_state = switch_state.transition_to(SwitchState::LeaseAcquired)?;
 
             let snapshot = self.load_or_materialize(&request.session_id).await?;
@@ -695,7 +702,7 @@ where
                 checkpoint: checkpoint_result,
                 events_appended,
             }))
-        }
+        })
         .await;
 
         // Normalize the attempt to ONE visible result, persist it as a durable event,

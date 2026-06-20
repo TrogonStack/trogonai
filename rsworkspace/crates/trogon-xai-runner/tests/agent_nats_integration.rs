@@ -1073,6 +1073,7 @@ async fn cancel_prompt_token_totals_persisted_to_kv() {
 #[tokio::test]
 async fn prompt_compacts_via_nats_and_clears_last_response_id() {
     use std::time::Duration;
+    use agent_client_protocol::SessionId;
     use trogon_xai_runner::Message;
 
     // Raw NATS client (needed for compactor_nats + the responder) + JetStream store.
@@ -1182,6 +1183,7 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
 #[tokio::test]
 async fn grok4fast_under_model_aware_threshold_is_not_compacted_e2e() {
     use std::time::Duration;
+    use agent_client_protocol::SessionId;
     use trogon_xai_runner::Message;
 
     let container = Nats::default()
