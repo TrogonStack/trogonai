@@ -76,6 +76,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-nats-stdio"
+version = "0.1.0"
+dependencies = [
+ "a2a-lf",
+ "a2a-nats",
+ "async-nats",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "a2a-pack"
 version = "0.1.0"
 dependencies = [
