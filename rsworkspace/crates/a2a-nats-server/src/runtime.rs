@@ -95,16 +95,18 @@ mod tests {
     }
 
     #[test]
-    fn runtime_error_source_chain_for_invalid_agent_id() {
+    fn runtime_error_display_and_source_for_invalid_agent_id() {
         let inner = A2aAgentId::new("a.b").unwrap_err();
         let e = RuntimeError::InvalidAgentId(inner);
+        assert_eq!(e.to_string(), "invalid agent id");
         assert!(std::error::Error::source(&e).is_some());
     }
 
     #[test]
-    fn runtime_error_source_chain_for_invalid_prefix() {
+    fn runtime_error_display_and_source_for_invalid_prefix() {
         let inner = A2aPrefix::new("").unwrap_err();
         let e = RuntimeError::InvalidPrefix(inner);
+        assert_eq!(e.to_string(), "invalid A2A prefix");
         assert!(std::error::Error::source(&e).is_some());
     }
 
@@ -136,6 +138,30 @@ mod tests {
         env.set(ENV_A2A_PREFIX, "bad prefix!");
         let result = parse_env(&env);
         assert!(matches!(result, Err(RuntimeError::InvalidPrefix(_))));
+    }
+
+    #[test]
+    fn runtime_error_display_and_source_for_nats_connect() {
+        let inner = trogon_nats::ConnectError::InvalidCredentials(std::io::Error::other("oops"));
+        let e = RuntimeError::NatsConnect(inner);
+        assert_eq!(e.to_string(), "NATS connection failed");
+        assert!(std::error::Error::source(&e).is_some());
+    }
+
+    #[test]
+    fn runtime_error_display_and_source_for_provision() {
+        let inner = a2a_nats::jetstream::ProvisionError("stream create failed".to_string());
+        let e = RuntimeError::Provision(inner);
+        assert_eq!(e.to_string(), "JetStream provisioning failed");
+        assert!(std::error::Error::source(&e).is_some());
+    }
+
+    #[test]
+    fn runtime_error_display_and_source_for_bridge() {
+        let inner = a2a_nats::server::BridgeError::Subscribe(Box::new(std::io::Error::other("denied")));
+        let e = RuntimeError::Bridge(inner);
+        assert_eq!(e.to_string(), "bridge error");
+        assert!(std::error::Error::source(&e).is_some());
     }
 
     #[test]
