@@ -76,6 +76,12 @@ pub async fn run_io_loop<N, J, R, W>(
 
     'outer: loop {
         tokio::select! {
+            // `biased;` keeps shutdown priority once the signal fires — without
+            // it, tokio's random branch selection can keep picking buffered
+            // stdin lines (or EOF) and `shutdown_requested` would never flip,
+            // so signal teardown would silently drain streaming tasks instead
+            // of aborting them.
+            biased;
             _ = &mut shutdown => {
                 debug!("io_loop received shutdown signal");
                 shutdown_requested = true;
@@ -104,6 +110,7 @@ pub async fn run_io_loop<N, J, R, W>(
                                 // Outbound channel may be full while writer is
                                 // back-pressured; keep shutdown responsive.
                                 tokio::select! {
+                                    biased;
                                     _ = &mut shutdown => {
                                         shutdown_requested = true;
                                         break 'outer;
@@ -119,6 +126,7 @@ pub async fn run_io_loop<N, J, R, W>(
                         // Poll shutdown alongside acquire so a saturated
                         // semaphore doesn't strand the signal.
                         let permit = tokio::select! {
+                            biased;
                             _ = &mut shutdown => {
                                 shutdown_requested = true;
                                 break 'outer;
@@ -163,9 +171,16 @@ fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), Outbou
         warn!(error = %e, "stdin line is not valid JSON");
         OutboundError::new(RpcId::Null, -32700, format!("parse error: {e}"))
     })?;
+    // Salvage the request id from the raw JSON before the envelope check so a
+    // malformed-shape `-32600` reply still correlates with the originating
+    // call. JSON-RPC requires echoing the id when it can be determined.
+    let salvaged_id = value
+        .get("id")
+        .and_then(|v| serde_json::from_value::<RpcId>(v.clone()).ok())
+        .unwrap_or(RpcId::Null);
     let req: InboundRequest = serde_json::from_value(value).map_err(|e| {
         warn!(error = %e, "JSON-RPC envelope is invalid");
-        OutboundError::new(RpcId::Null, -32600, format!("invalid request: {e}"))
+        OutboundError::new(salvaged_id, -32600, format!("invalid request: {e}"))
     })?;
     Ok((req.id, req.method, req.params))
 }
@@ -466,5 +481,17 @@ mod tests {
         let (id, method, _) = parse_inbound(r#"{"jsonrpc":"2.0","id":7,"method":"tasks/get","params":{}}"#).unwrap();
         assert_eq!(id, RpcId::Number(7));
         assert_eq!(method, "tasks/get");
+    }
+
+    #[test]
+    fn parse_inbound_preserves_id_on_envelope_failure() {
+        let err = parse_inbound(r#"{"id":42}"#).unwrap_err();
+        assert_eq!(err.id, RpcId::Number(42));
+        let err = parse_inbound(r#"{"id":"corr-7"}"#).unwrap_err();
+        assert_eq!(err.id, RpcId::String("corr-7".into()));
+        let err = parse_inbound(r#"{"jsonrpc":"2.0"}"#).unwrap_err();
+        assert_eq!(err.id, RpcId::Null);
+        let err = parse_inbound(r#"{"id":[1,2,3]}"#).unwrap_err();
+        assert_eq!(err.id, RpcId::Null);
     }
 }
