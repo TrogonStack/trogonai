@@ -1,0 +1,39 @@
+[package]
+name = "trogonai-session-kernel"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv"] }
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+bytes = { workspace = true }
+confique = { workspace = true }
+futures = { workspace = true }
+opentelemetry = { workspace = true }
+thiserror = "2"
+time = { workspace = true }
+tokio = { workspace = true, features = ["time", "sync", "rt"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-service-config = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+
+[features]
+default = []
+test-support = []
+
+[[test]]
+name = "kernel_mock_nats"
+required-features = ["test-support"]

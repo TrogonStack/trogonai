@@ -96,8 +96,6 @@ fn make_agent(base_url: &str) -> AgentLoop {
             proxy_url: "http://127.0.0.1:1".to_string(),
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
-            web_search_api_key: None,
-            web_search_endpoint: None,
         }),
         memory_owner: None,
         memory_repo: None,
@@ -3364,8 +3362,6 @@ async fn runner_trogon_md_deny_path_blocks_tool_without_permission_channel() {
                 proxy_url: "http://127.0.0.1:1".to_string(),
                 cwd: dir.path().to_string_lossy().into_owned(),
                 http_client: reqwest::Client::new(),
-                web_search_api_key: None,
-                web_search_endpoint: None,
             });
 
             let store = start_agent(
@@ -3601,8 +3597,6 @@ async fn runner_trogon_md_and_session_rules_merge_deny_beats_allow() {
                 proxy_url: "http://127.0.0.1:1".to_string(),
                 cwd: dir.path().to_string_lossy().into_owned(),
                 http_client: reqwest::Client::new(),
-                web_search_api_key: None,
-                web_search_endpoint: None,
             });
 
             let store = start_agent(

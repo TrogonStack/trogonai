@@ -1,0 +1,35 @@
+[package]
+name = "trogonai-artifacts"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv"] }
+base64 = "0.21"
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+bytes = { workspace = true }
+hex = "0.4"
+opentelemetry = { workspace = true }
+sha2 = "0.10"
+thiserror = "2"
+time = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-session-kernel = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogonai-session-kernel = { workspace = true, features = ["test-support"] }
+
+[features]
+default = []
+test-support = []

@@ -342,6 +342,19 @@ async fn resume_print_session(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     trogon_cli::env_local::load_env_local();
+
+    // Initialize the OpenTelemetry provider so kernel/switch metrics emitted from the
+    // CLI (e.g. `/model` cross-runner switches) actually export instead of registering
+    // against a no-op global meter (ADR-0008 / cambio-modelo.md Exit Criteria: "el
+    // binario host debe inicializar el provider OTel"). File-only logging is used so the
+    // interactive REPL is not corrupted by stderr log lines.
+    trogon_telemetry::init_logger_file_only(
+        trogon_telemetry::ServiceName::TrogonCli,
+        Vec::<trogon_telemetry::ResourceAttribute>::new(),
+        &trogon_std::env::SystemEnv,
+        &trogon_std::fs::SystemFs,
+    );
+
     let args = Args::parse();
 
     let otel_enabled = init_tracing(args.verbose, &args.prefix);
@@ -552,7 +565,42 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let registry_for_repl = registry.clone();
-        let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
+        let kernel_flags = trogonai_session_kernel::SessionKernelFeatureFlags::default();
+        let kernel_policies = trogonai_session_kernel::SessionKernelOperationalPolicy::default();
+        let kernel_stack = if kernel_flags.session_kernel_enabled {
+            Some(
+                trogon_cli::session_kernel::SessionKernelStack::provision(
+                    nats.clone(),
+                    kernel_flags.clone(),
+                    kernel_policies,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("session kernel provisioning failed: {e}"))?,
+            )
+        } else if kernel_flags.event_log_shadow_mode {
+            match trogon_cli::session_kernel::SessionKernelStack::provision(
+                nats.clone(),
+                kernel_flags.clone(),
+                kernel_policies,
+            )
+            .await
+            {
+                Ok(stack) => Some(stack),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "session kernel shadow provisioning failed — continuing without shadow sync"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let mut switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
+        if let Some(stack) = kernel_stack {
+            switcher = switcher.with_kernel_stack(stack);
+        }
         let factory = NatsSessionFactory::new(nats.clone());
 
         let resume = resolve_resume(args.continue_session, args.session_id.as_deref(), &args.prefix, &cwd);

@@ -68,7 +68,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use trogon_nats::{NatsConfig, connect};
-use trogon_secret_proxy::{stream, subjects, vault_admin, worker};
+use trogon_secret_proxy::{providers, stream, subjects, vault_admin, worker};
 use trogon_std::SystemEnv;
 use trogon_vault::{ApiKeyToken, DualWriteVault, MemoryVault, VaultStore};
 use trogon_vault::{HashicorpVaultConfig, HashicorpVaultStore, VaultAuth};
@@ -77,6 +77,7 @@ use trogon_vault_nats::{
     Audit, AuditPublisher, CryptoCtx, NatsKvVault, ensure_audit_stream, ensure_vault_bucket, grace_period_from_env,
 };
 
+#[allow(clippy::too_many_arguments)]
 async fn run_all<V: VaultStore + 'static>(
     nats: async_nats::Client,
     jetstream: async_nats::jetstream::Context,
@@ -85,6 +86,7 @@ async fn run_all<V: VaultStore + 'static>(
     consumer_name: &str,
     stream_name: &str,
     prefix: &str,
+    callable_providers: Vec<String>,
 ) where
     V::Error: std::fmt::Display,
 {
@@ -97,6 +99,17 @@ async fn run_all<V: VaultStore + 'static>(
             vault_admin::run(nats, vault, &prefix, vault_name.as_deref())
                 .await
                 .expect("Vault admin listener exited with error");
+        }
+    });
+
+    tokio::spawn({
+        let nats = nats.clone();
+        let prefix = prefix.to_string();
+        async move {
+            let known: Vec<&str> = callable_providers.iter().map(String::as_str).collect();
+            providers::run_providers_listener(nats, &prefix, &known)
+                .await
+                .expect("Provider introspection listener exited with error");
         }
     });
 
@@ -121,6 +134,17 @@ async fn build_hashicorp_vault(vault_addr: String) -> HashicorpVaultStore {
     HashicorpVaultStore::new(HashicorpVaultConfig::new(vault_addr, mount, auth))
         .await
         .expect("Failed to connect to HashiCorp Vault")
+}
+
+fn default_callable_providers() -> Vec<String> {
+    vec!["anthropic".into(), "xai".into(), "openrouter".into()]
+}
+
+fn providers_from_env_tokens() -> Vec<String> {
+    let keys: Vec<String> = std::env::vars()
+        .filter_map(|(k, _)| k.strip_prefix("VAULT_TOKEN_").map(|s| format!("tok_{s}")))
+        .collect();
+    providers::providers_from_token_keys(keys)
 }
 
 fn nats_kv_replicas() -> usize {
@@ -200,13 +224,33 @@ async fn main() {
             let audit: Arc<dyn Audit> = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
             let nats_kv = build_nats_kv_vault(&jetstream, &bucket, audit).await;
             let vault = Arc::new(DualWriteVault::new(infisical, nats_kv));
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_all(
+                nats,
+                jetstream,
+                vault,
+                http_client,
+                &consumer_name,
+                &sname,
+                &prefix,
+                default_callable_providers(),
+            )
+            .await;
         }
         (true, false, _) => {
             tracing::info!("Vault backend: Infisical");
             let config = InfisicalConfig::from_env().expect("Infisical env vars required");
             let vault = Arc::new(InfisicalVaultStore::new(config));
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_all(
+                nats,
+                jetstream,
+                vault,
+                http_client,
+                &consumer_name,
+                &sname,
+                &prefix,
+                default_callable_providers(),
+            )
+            .await;
         }
         (false, true, _) => {
             let bucket = std::env::var("VAULT_NATS_BUCKET").unwrap();
@@ -216,13 +260,33 @@ async fn main() {
                 .expect("Failed to ensure VAULT_AUDIT stream");
             let audit = Arc::new(AuditPublisher::new(jetstream.clone(), &bucket));
             let vault = Arc::new(build_nats_kv_vault(&jetstream, &bucket, audit).await);
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_all(
+                nats,
+                jetstream,
+                vault,
+                http_client,
+                &consumer_name,
+                &sname,
+                &prefix,
+                default_callable_providers(),
+            )
+            .await;
         }
         (false, false, true) => {
             let vault_addr = std::env::var("VAULT_ADDR").unwrap();
             tracing::info!(addr = %vault_addr, "Vault backend: HashiCorp Vault");
             let vault = Arc::new(build_hashicorp_vault(vault_addr).await);
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            run_all(
+                nats,
+                jetstream,
+                vault,
+                http_client,
+                &consumer_name,
+                &sname,
+                &prefix,
+                default_callable_providers(),
+            )
+            .await;
         }
         _ => {
             tracing::info!("Vault backend: in-memory (development mode)");
@@ -244,7 +308,18 @@ async fn main() {
                 }
             }
             tracing::info!(seeded, "Vault seeding complete");
-            run_all(nats, jetstream, vault, http_client, &consumer_name, &sname, &prefix).await;
+            let callable_providers = providers_from_env_tokens();
+            run_all(
+                nats,
+                jetstream,
+                vault,
+                http_client,
+                &consumer_name,
+                &sname,
+                &prefix,
+                callable_providers,
+            )
+            .await;
         }
     }
 }

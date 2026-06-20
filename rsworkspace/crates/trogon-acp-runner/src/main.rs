@@ -42,8 +42,15 @@ use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
 use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
+use trogon_acp_runner::kernel_sink::{ConversationSink, KernelConversationSink};
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
-use trogon_acp_runner::{ElicitationReq, PermissionReq};
+use trogon_acp_runner::{ElicitationReq, PermissionReq, ReqwestImageFetcher};
+use trogonai_artifacts::{ArtifactStore, ArtifactStoreConfig, FetchLimits, provision_artifact_object_store};
+use trogonai_session_kernel::{
+    EventLog, RolloutMetrics, SessionKernel, SessionKernelConfig, SessionKernelFeatureFlags,
+    SessionKernelOperationalPolicy, SessionKvLeaseFactory, SessionLeaseManager, SnapshotStore, enforce_rollout,
+    provision_lease_store, provision_snapshot_store,
+};
 
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -51,12 +58,16 @@ use trogon_agent_core::tools::ToolContext;
 #[cfg_attr(coverage, coverage(off))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "trogon_acp_runner=info,acp_nats=info".into()),
-        )
-        .init();
+    // Initialize OpenTelemetry (metrics/traces/logs) so the session-kernel shadow
+    // metrics actually export instead of recording into a no-op global meter
+    // (ADR-0008 / cambio-modelo.md §1123). Falls back to stderr/file logging when no
+    // OTLP collector is reachable, so local runs are unaffected.
+    trogon_telemetry::init_logger(
+        trogon_telemetry::ServiceName::TrogonAcpRunner,
+        Vec::<trogon_telemetry::ResourceAttribute>::new(),
+        &trogon_std::env::SystemEnv,
+        &trogon_std::fs::SystemFs,
+    );
 
     // ── Config from environment ───────────────────────────────────────────────
 
@@ -201,7 +212,27 @@ async fn main() -> anyhow::Result<()> {
 
     // ── TrogonAgent ───────────────────────────────────────────────────────────
 
-    let agent = trogon_acp_runner::TrogonAgent::new(
+    let conversation_sink = build_conversation_sink(&js).await;
+
+    // ── Model catalog (best-effort) ───────────────────────────────────────────
+    // Used for C4 compactor-provider backfill on legacy session load. If the
+    // catalog is unavailable the agent keeps legacy behavior (no backfill).
+    let catalog_snapshot =
+        match trogonai_catalog_client::open(&js, trogonai_catalog_client::CatalogClientConfig::default()).await {
+            Ok(client) => match client.catalog_snapshot().await {
+                Ok(snap) => Some(snap),
+                Err(e) => {
+                    tracing::warn!(error = %e, "acp: catalog snapshot unavailable — C4 backfill disabled");
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "acp: failed to open catalog client — C4 backfill disabled");
+                None
+            }
+        };
+
+    let mut agent = trogon_acp_runner::TrogonAgent::new(
         notifier,
         store.clone(),
         agent_loop,
@@ -214,6 +245,12 @@ async fn main() -> anyhow::Result<()> {
     .with_compactor(nats.clone())
     .with_execution_backend(nats.clone(), registry_for_agent)
     .with_safety_classifier(safety_classifier);
+    if let Some(sink) = conversation_sink {
+        agent = agent.with_conversation_sink(sink);
+    }
+    if let Some(catalog) = catalog_snapshot {
+        agent = agent.with_catalog(catalog);
+    }
 
     // Cheap shared handle for the spawn_agent responder. It runs sub-agents
     // in-process (see TrogonAgent::spawn_subagent) rather than round-tripping a
@@ -317,5 +354,115 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
 
+    // Flush and shut down the OpenTelemetry providers so buffered metrics/spans export.
+    if let Err(err) = trogon_telemetry::shutdown_otel() {
+        eprintln!("WARN: failed to shut down OpenTelemetry cleanly: {err}");
+    }
+
     Ok(())
+}
+
+/// Provision the Session Kernel conversation shadow sink when
+/// `TROGON_SESSION_KERNEL_ENABLED` is set. Returns `None` (legacy path) by default
+/// or if provisioning fails — the runner never blocks on the kernel.
+async fn build_conversation_sink(js: &jetstream::Context) -> Option<std::sync::Arc<dyn ConversationSink>> {
+    // The shadow event log (Fase 4) builds on its prerequisites per the rollout
+    // dependency order: it records each turn's mutations under a per-session Session
+    // Lease (Fase 2) and materializes them into the canonical snapshot (Fase 3). So the
+    // sink is gated by both `lease_enabled()` and `snapshot_enabled()` — each already
+    // folds in the master `session_kernel_enabled` flag. Disabling either prerequisite
+    // (`TROGON_SESSION_LEASE_ENABLED` / `TROGON_CANONICAL_SNAPSHOT_ENABLED` = false)
+    // disables the kernel recording path rather than running it half-wired.
+    // § "enforcement de promocion/rollback basada en metricas" (§2240: both thresholds
+    // must exist before activating default): before honoring the configured rollout flags,
+    // run them through the promotion gate against the measured rollout metrics. With no
+    // adverse metrics observed yet this is a no-op (Promote); a breached threshold forces
+    // canonical/event-primary back to the conservative defaults (the automatic rollback).
+    // The gate, thresholds and rollback live here; feeding the live cross-session metrics
+    // aggregate is the operational data-plane the doc defers.
+    let configured_flags = SessionKernelFeatureFlags::default();
+    let rollout_policy = SessionKernelOperationalPolicy::default().rollout_promotion;
+    let enforcement = enforce_rollout(&RolloutMetrics::clean(), &configured_flags, &rollout_policy);
+    if enforcement.decision.is_rollback() {
+        tracing::warn!(
+            decision = ?enforcement.decision,
+            "session kernel: rollout enforcement rolled back canonical/event-primary to conservative defaults"
+        );
+    }
+    let flags = enforcement.effective_flags;
+    if !flags.lease_enabled() || !flags.snapshot_enabled() {
+        return None;
+    }
+
+    let config = SessionKernelConfig::default();
+    let snapshot_kv = match provision_snapshot_store(js, &config).await {
+        Ok(kv) => kv,
+        Err(err) => {
+            tracing::warn!(error = %err, "session kernel: snapshot store provisioning failed; sink disabled");
+            return None;
+        }
+    };
+    let lease_kv = match provision_lease_store(js, &config).await {
+        Ok(kv) => kv,
+        Err(err) => {
+            tracing::warn!(error = %err, "session kernel: lease store provisioning failed; sink disabled");
+            return None;
+        }
+    };
+
+    let js_client = NatsJetStreamClient::new(js.clone());
+    let event_log = EventLog::new(js_client.clone(), js_client, config.clone());
+    // Provision the append-only event-log stream (§3; § NATS Operational Policy).
+    // Idempotent via get_or_create_stream; without it, event appends have no stream.
+    let operational_policy = SessionKernelOperationalPolicy::default();
+    if let Err(err) = event_log
+        .provision_stream(&NatsJetStreamClient::new(js.clone()), &operational_policy.nats)
+        .await
+    {
+        tracing::warn!(error = %err, "session kernel: event-log stream provisioning failed; sink disabled");
+        return None;
+    }
+    let snapshots = SnapshotStore::new(snapshot_kv, config.clone());
+    let leases = SessionLeaseManager::new(SessionKvLeaseFactory::new(lease_kv, &config), "trogon-acp-runner");
+
+    // Fase 5: provision the artifact object store and image fetcher. The object store is
+    // part of the kernel's storage infra (provisioned alongside snapshot/lease KV); the
+    // `artifact_store_enabled` flag gates whether large tool outputs and images are
+    // claim-checked to artifact refs (§925-927, §966-1008) or kept inline.
+    let object_store = match provision_artifact_object_store(js, &config).await {
+        Ok(store) => store,
+        Err(err) => {
+            tracing::warn!(error = %err, "session kernel: artifact object store provisioning failed; sink disabled");
+            return None;
+        }
+    };
+    let artifact_store = ArtifactStore::new(object_store, ArtifactStoreConfig::from_session_kernel(&config));
+    let image_fetcher = match ReqwestImageFetcher::new(&FetchLimits::default()) {
+        Ok(fetcher) => fetcher,
+        Err(err) => {
+            tracing::warn!(error = %err, "session kernel: image fetcher init failed; sink disabled");
+            return None;
+        }
+    };
+    let inline_limit = config.inline_artifact_limit_bytes;
+    let artifacts_enabled = flags.artifact_store_enabled;
+    // § Event Log Compaction and Retention: per-session retention maintenance is gated by
+    // its own flag (off by default) and uses the configured archive retention window.
+    let maintenance_enabled = flags.maintenance_enabled();
+    let retention_days = operational_policy.nats.event_archive_retention_days;
+
+    let kernel = SessionKernel::new(config, event_log, snapshots, leases);
+    info!(
+        artifacts_enabled,
+        maintenance_enabled, "session kernel: conversation shadow sink enabled"
+    );
+    Some(std::sync::Arc::new(KernelConversationSink::new(
+        kernel,
+        artifact_store,
+        image_fetcher,
+        artifacts_enabled,
+        inline_limit,
+        maintenance_enabled,
+        retention_days,
+    )))
 }

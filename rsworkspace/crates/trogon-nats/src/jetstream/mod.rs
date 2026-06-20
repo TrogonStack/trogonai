@@ -21,7 +21,7 @@ pub use client::{
 pub use create_conflicts::{is_create_key_value_already_exists, is_create_stream_already_exists};
 pub use message::{JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef, JsRequestMessage};
 pub use object_store::NatsObjectStore;
-pub use object_store::{ObjectStoreGet, ObjectStorePut};
+pub use object_store::{ObjectStoreDelete, ObjectStoreGet, ObjectStorePut};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
 pub use traits::{

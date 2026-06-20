@@ -897,7 +897,9 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
         tenant_id: "default".to_string(),
         name: "Pre-fix session".to_string(),
         model: None,
+        compactor_provider: None,
         compactor_model: None,
+        needs_compactor_migration: false,
         tools: vec![],
         memory_path: None,
         messages: vec![],
@@ -1054,10 +1056,15 @@ async fn ext_method_export_import_round_trip_with_nats_store() {
 
 // ── Stateful bash: terminal lifecycle integration tests (OpenRouter) ──────────
 
+type TerminalResponderHandles = (
+    Arc<Mutex<u32>>,
+    Arc<Mutex<std::collections::HashMap<String, String>>>,
+);
+
 fn spawn_stateful_terminal_responder_openrouter(
     nats: async_nats::Client,
     subject_prefix: &str,
-) -> (Arc<Mutex<u32>>, Arc<Mutex<std::collections::HashMap<String, String>>>) {
+) -> TerminalResponderHandles {
     use futures_util::StreamExt as _;
 
     let create_count = Arc::new(Mutex::new(0u32));

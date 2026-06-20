@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/v1/common.proto";
+
+message TestExecution {
+  string name = 1;
+  string result = 2;
+  optional string detail = 3;
+}
+
+message RelevantToolResult {
+  string tool_call_id = 1;
+  string tool_name = 2;
+  string summary = 3;
+  optional ArtifactRef artifact_ref = 4;
+}
+
+// Compact operational view derived from the canonical event log.
+message ContextTwin {
+  uint32 schema_version = 1;
+  string session_id = 2;
+  string current_objective = 3;
+  string active_plan = 4;
+  repeated string decisions = 5;
+  repeated string relevant_files = 6;
+  repeated string user_constraints = 7;
+  repeated string open_errors = 8;
+  repeated string open_risks = 9;
+  repeated TestExecution test_executions = 10;
+  repeated RelevantToolResult relevant_tool_results = 11;
+  repeated ArtifactRef artifacts = 12;
+  repeated string next_steps = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  uint64 derived_from_seq = 15;
+}

@@ -42,7 +42,15 @@ trogon-mcp           = { path = "../trogon-mcp" }
 trogon-nats          = { path = "../trogon-nats" }
 trogon-registry      = { workspace = true }
 trogon-runner-tools  = { path = "../trogon-runner-tools" }
+trogonai-catalog-client = { workspace = true }
+trogonai-artifacts = { workspace = true }
+buffa-types = "=0.7.0"
+trogonai-session-kernel = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-compactor-proto = { workspace = true }
+buffa = "=0.7.0"
 trogon-std           = { path = "../trogon-std" }
+trogon-telemetry     = { path = "../trogon-telemetry" }
 trogon-tools         = { path = "../trogon-tools" }
 
 [features]
@@ -95,6 +103,8 @@ tempfile               = { workspace = true }
 opentelemetry          = { workspace = true }
 testcontainers-modules = { workspace = true }
 trogon-nats            = { path = "../trogon-nats", features = ["test-support"] }
+trogonai-session-kernel = { workspace = true, features = ["test-support"] }
 trogon-runner-tools    = { path = "../trogon-runner-tools", features = ["test-helpers"] }
 trogon-std             = { path = "../trogon-std", features = ["test-support"] }
 trogon-registry        = { workspace = true, features = ["test-support"] }
+trogonai-catalog-proto = { workspace = true }

@@ -1,0 +1,343 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/v1/artifact_metadata.proto";
+import "trogonai/session/v1/common.proto";
+import "trogonai/session/v1/context_twin.proto";
+
+message SessionCreatedPayload {
+  string title = 1;
+  string cwd = 2;
+  optional string model = 3;
+  optional string runner = 4;
+  optional string compactor_model = 5;
+}
+
+message UserMessageAddedPayload {
+  CanonicalMessage message = 1;
+}
+
+message AssistantMessageStartedPayload {
+  string message_id = 1;
+  string model = 2;
+  string runner = 3;
+}
+
+message AssistantMessageCompletedPayload {
+  string message_id = 1;
+  CanonicalMessage message = 2;
+  TokenUsage usage = 3;
+}
+
+message ToolCallRequestedPayload {
+  string tool_call_id = 1;
+  string tool_execution_id = 2;
+  string name = 3;
+  string input_json = 4;
+  optional string parent_tool_use_id = 5;
+}
+
+message ToolCallApprovedPayload {
+  string tool_call_id = 1;
+  string tool_execution_id = 2;
+  string approved_by = 3;
+}
+
+message ToolCallStartedPayload {
+  string tool_call_id = 1;
+  string tool_execution_id = 2;
+}
+
+message ToolCallCompletedPayload {
+  string tool_call_id = 1;
+  string tool_execution_id = 2;
+  ToolCallResult result = 3;
+}
+
+message ToolCallFailedPayload {
+  string tool_call_id = 1;
+  string tool_execution_id = 2;
+  string error = 3;
+}
+
+message ArtifactCreatedPayload {
+  ArtifactMetadata artifact = 1;
+}
+
+message FileChangedPayload {
+  string path = 1;
+  FileChangeKind change_kind = 2;
+  optional string previous_path = 3;
+}
+
+message SummaryCreatedPayload {
+  string summary_id = 1;
+  string content = 2;
+  uint64 from_seq = 3;
+  uint64 to_seq = 4;
+}
+
+message ContextTwinUpdatedPayload {
+  ContextTwin context_twin = 1;
+}
+
+message SwitchAdaptationPlanCreatedPayload {
+  string plan_id = 1;
+  string from_model = 2;
+  string to_model = 3;
+  repeated SwitchAdaptation adaptations = 4;
+  repeated string warnings = 5;
+}
+
+message SwitchSafetyEvaluatedPayload {
+  string evaluation_id = 1;
+  SwitchSafetyStatus status = 2;
+  repeated SwitchSafetyReason reasons = 3;
+  optional string required_action = 4;
+}
+
+message ContinuityCheckpointStartedPayload {
+  string checkpoint_id = 1;
+  string target_model = 2;
+  string target_runner = 3;
+}
+
+message ContinuityCheckpointCompletedPayload {
+  string checkpoint_id = 1;
+  ContinuityCheckpointStatus status = 2;
+  double confidence = 3;
+  repeated ContinuityMismatch mismatches = 4;
+  repeated ContinuityRepair repairs_applied = 5;
+}
+
+message ModelSwitchedPayload {
+  string from_runner = 1;
+  string from_model = 2;
+  string to_runner = 3;
+  string to_model = 4;
+  ModelSwitchReason reason = 5;
+}
+
+// Durable record of the single normalized outcome of a switch attempt
+// (§ Contrato formal de resultado del switch: "cada resultado debe tener evento
+// canonico o campo durable asociado"). Emitted for every result, including the ones
+// that have no ModelSwitchedPayload (blocked / requires_confirmation / failed*).
+message SwitchOutcomeRecordedPayload {
+  SwitchVisibleResult result = 1;
+}
+
+message RunnerAttachedPayload {
+  string runner_id = 1;
+  string model_id = 2;
+  optional string capability_snapshot_id = 3;
+}
+
+message RunnerDetachedPayload {
+  string runner_id = 1;
+  string model_id = 2;
+  optional string reason = 3;
+}
+
+message PermissionRuleAddedPayload {
+  string rule_id = 1;
+  string rule_text = 2;
+}
+
+message TodoUpdatedPayload {
+  repeated TodoItem todos = 1;
+}
+
+message SessionCompactedPayload {
+  string summary_id = 1;
+  uint64 compacted_through_seq = 2;
+  uint64 tokens_before = 3;
+  uint64 tokens_after = 4;
+}
+
+message SessionBranchedPayload {
+  string parent_session_id = 1;
+  string child_session_id = 2;
+  uint64 branched_at_seq = 3;
+}
+
+// --- Cancellation and abort flow (§ Cancellation and Abort Semantics) ---
+
+message OperationCancelRequestedPayload {
+  string operation_id = 1;
+}
+
+message RunnerCancelRequestedPayload {
+  string operation_id = 1;
+  string runner_id = 2;
+}
+
+message RunnerCancelledPayload {
+  string operation_id = 1;
+  string runner_id = 2;
+}
+
+message OperationCancelledPayload {
+  string operation_id = 1;
+}
+
+message OperationCancelFailedPayload {
+  string operation_id = 1;
+  string error = 2;
+}
+
+message OperationRequiresReconciliationPayload {
+  string operation_id = 1;
+  string reason = 2;
+}
+
+// --- Force switch and user override (§ Force Switch and User Override) ---
+
+message ForceSwitchRequestedPayload {
+  string operation_id = 1;
+  repeated string acknowledged_losses = 2;
+}
+
+message ForceSwitchConfirmedPayload {
+  string operation_id = 1;
+}
+
+message ForceSwitchCompletedPayload {
+  string operation_id = 1;
+  repeated string invalidated = 2;
+  repeated string pending_reconciliation = 3;
+}
+
+message ForceSwitchRejectedPayload {
+  string operation_id = 1;
+  string reason = 2;
+}
+
+// --- Failure mode policy (§ Failure Mode Policy) ---
+
+message RunnerFailedPayload {
+  string runner_id = 1;
+  string model_id = 2;
+  string error = 3;
+}
+
+message InvalidEventRejectedPayload {
+  string event_id = 1;
+  string reason = 2;
+}
+
+// --- Event log compaction and retention (§ Event Log Compaction and Retention) ---
+
+message SnapshotCreatedPayload {
+  uint64 last_applied_seq = 1;
+}
+
+message EventsArchivedPayload {
+  uint64 through_seq = 1;
+  uint64 archived_count = 2;
+}
+
+message ArtifactGcMarkedPayload {
+  string artifact_id = 1;
+}
+
+message ArtifactGcDeletedPayload {
+  string artifact_id = 1;
+}
+
+// --- Security, secrets and sanitized exports (§ Security, Secrets and Sanitized Exports) ---
+
+message RedactionAppliedPayload {
+  string target_ref = 1;
+  string redaction_kind = 2;
+  uint32 occurrences = 3;
+}
+
+// --- Terminal and process continuity (§ Terminal and Process Policy) ---
+
+message TerminalContinuityCapturedPayload {
+  TerminalContinuity terminal = 1;
+}
+
+// --- Compactor model preservation (§ Token Budget, Compaction and Prompt Projection Policy) ---
+
+message CompactorModelPreservedPayload {
+  string compactor_model = 1;
+}
+
+message CompactorModelUnavailablePayload {
+  string compactor_model = 1;
+  string target_model = 2;
+}
+
+message FallbackToDefaultCompactorPayload {
+  string compactor_model = 1;
+  string target_model = 2;
+}
+
+message SessionEventPayload {
+  oneof kind {
+    SessionCreatedPayload session_created = 1;
+    UserMessageAddedPayload user_message_added = 2;
+    AssistantMessageStartedPayload assistant_message_started = 3;
+    AssistantMessageCompletedPayload assistant_message_completed = 4;
+    ToolCallRequestedPayload tool_call_requested = 5;
+    ToolCallApprovedPayload tool_call_approved = 6;
+    ToolCallStartedPayload tool_call_started = 7;
+    ToolCallCompletedPayload tool_call_completed = 8;
+    ToolCallFailedPayload tool_call_failed = 9;
+    ArtifactCreatedPayload artifact_created = 10;
+    FileChangedPayload file_changed = 11;
+    SummaryCreatedPayload summary_created = 12;
+    ContextTwinUpdatedPayload context_twin_updated = 13;
+    SwitchAdaptationPlanCreatedPayload switch_adaptation_plan_created = 14;
+    SwitchSafetyEvaluatedPayload switch_safety_evaluated = 15;
+    ContinuityCheckpointStartedPayload continuity_checkpoint_started = 16;
+    ContinuityCheckpointCompletedPayload continuity_checkpoint_completed = 17;
+    ModelSwitchedPayload model_switched = 18;
+    RunnerAttachedPayload runner_attached = 19;
+    RunnerDetachedPayload runner_detached = 20;
+    PermissionRuleAddedPayload permission_rule_added = 21;
+    TodoUpdatedPayload todo_updated = 22;
+    SessionCompactedPayload session_compacted = 23;
+    SessionBranchedPayload session_branched = 24;
+    OperationCancelRequestedPayload operation_cancel_requested = 25;
+    RunnerCancelRequestedPayload runner_cancel_requested = 26;
+    RunnerCancelledPayload runner_cancelled = 27;
+    OperationCancelledPayload operation_cancelled = 28;
+    OperationCancelFailedPayload operation_cancel_failed = 29;
+    OperationRequiresReconciliationPayload operation_requires_reconciliation = 30;
+    ForceSwitchRequestedPayload force_switch_requested = 31;
+    ForceSwitchConfirmedPayload force_switch_confirmed = 32;
+    ForceSwitchCompletedPayload force_switch_completed = 33;
+    ForceSwitchRejectedPayload force_switch_rejected = 34;
+    RunnerFailedPayload runner_failed = 35;
+    InvalidEventRejectedPayload invalid_event_rejected = 36;
+    SnapshotCreatedPayload snapshot_created = 37;
+    EventsArchivedPayload events_archived = 38;
+    ArtifactGcMarkedPayload artifact_gc_marked = 39;
+    ArtifactGcDeletedPayload artifact_gc_deleted = 40;
+    RedactionAppliedPayload redaction_applied = 41;
+    TerminalContinuityCapturedPayload terminal_continuity_captured = 42;
+    CompactorModelPreservedPayload compactor_model_preserved = 43;
+    CompactorModelUnavailablePayload compactor_model_unavailable = 44;
+    FallbackToDefaultCompactorPayload fallback_to_default_compactor = 45;
+    SwitchOutcomeRecordedPayload switch_outcome_recorded = 46;
+  }
+}
+
+// Append-only session event contract stored in JetStream.
+message SessionEvent {
+  uint32 schema_version = 1;
+  string event_id = 2;
+  string session_id = 3;
+  uint64 seq = 4;
+  string operation_id = 5;
+  string correlation_id = 6;
+  optional string causation_id = 7;
+  string idempotency_key = 8;
+  google.protobuf.Timestamp created_at = 9;
+  Actor actor = 10;
+  SessionEventPayload payload = 11;
+}

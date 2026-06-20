@@ -22,10 +22,13 @@ use trogon_acp_runner::{
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message as AgentMessage};
 use trogon_cli::CrossRunnerSwitcher;
+use trogon_cli::session_kernel::SessionKernelStack;
 use trogon_nats::{NatsAuth, NatsConfig};
 use trogon_openrouter_runner::{MockOpenRouterHttpClient, NatsSessionNotifier as OrNatsNotifier, OpenRouterAgent};
 use trogon_registry::{AgentCapability, MockRegistryStore, Registry};
 use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiNatsNotifier, XaiAgent};
+use trogonai_session_contracts::SessionId;
+use trogonai_session_kernel::{SessionKernelFeatureFlags, SessionKernelOperationalPolicy};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,19 @@ async fn start_nats_js() -> (ContainerAsync<Nats>, u16) {
         .start()
         .await
         .expect("Failed to start NATS container — is Docker running?");
+    let port = c.get_host_port_ipv4(4222).await.unwrap();
+    (c, port)
+}
+
+/// NATS 2.11+ JetStream server. The Session Kernel provisions a lease KV bucket with
+/// per-key TTL (limit markers), which requires NATS 2.11; the default image is older.
+async fn start_nats_js_v211() -> (ContainerAsync<Nats>, u16) {
+    let c = Nats::default()
+        .with_cmd(["--jetstream"])
+        .with_tag("2.11-alpine")
+        .start()
+        .await
+        .expect("Failed to start NATS 2.11 container — is Docker running?");
     let port = c.get_host_port_ipv4(4222).await.unwrap();
     (c, port)
 }
@@ -130,8 +146,8 @@ async fn switch_model_migrates_history_between_two_acp_runners() {
             let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
 
             // ── 4. Migrate the session ────────────────────────────────────────
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.src", "switcher-src-1", "dst-model", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "switcher-src-1", "sonnet", "dst-model", "/tmp")
                 .await
                 .expect("switch_model should succeed");
 
@@ -211,9 +227,10 @@ async fn switch_model_migrates_session_to_codex_runner_prefix() {
             registry.register(&codex_cap).await.unwrap();
 
             // ── 4. Migrate via CrossRunnerSwitcher ────────────────────────────
-            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.src", "codex-src-1", "o4-mini", "/tmp")
+            let mut switcher =
+                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "codex-src-1", "sonnet", "o4-mini", "/tmp")
                 .await
                 .expect("switch_model to codex runner must succeed");
 
@@ -258,7 +275,7 @@ async fn switch_model_returns_error_when_model_not_in_registry() {
             let mut switcher = CrossRunnerSwitcher::new(nats, make_config(port), registry);
 
             let result = switcher
-                .switch_model("acp.current", "session-xyz", "unknown-model-xyz", "/workspace")
+                .switch_model("acp.current", "session-xyz", "sonnet", "unknown-model-xyz", "/workspace")
                 .await;
 
             assert_eq!(
@@ -364,9 +381,16 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             registry.register(&or_cap).await.unwrap();
 
             // ── 5. Migrate XAI session to OpenRouter via CrossRunnerSwitcher ───
-            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.xai", &xai_session_id, "anthropic/claude-3-5-sonnet", "/tmp")
+            let mut switcher =
+                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model(
+                    "acp.xai",
+                    &xai_session_id,
+                    "grok-4",
+                    "anthropic/claude-3-5-sonnet",
+                    "/tmp",
+                )
                 .await
                 .expect("switch_model from xai to openrouter must succeed");
 
@@ -386,53 +410,77 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
             .await
             .unwrap()
             .unwrap();
-            let messages: Vec<serde_json::Value> = serde_json::from_slice(&export_msg.payload).unwrap();
+            // `session/export` returns the portable session in one of two shapes
+            // (trogon-runner-tools::portable_session): V1 is a bare array of
+            // `{role, text}`; V2 is a versioned object `{version:2, messages:[{role,
+            // blocks:[{type:"text", text}]}]}` used once any block is richer than plain
+            // text. Normalize both to `(role, text)` so the assertion is format-agnostic.
+            // The raw ext-method NATS reply wraps the export in `{"result": <export>}`;
+            // unwrap it first. The inner export is then either V1 (a bare `{role, text}`
+            // array) or V2 (a versioned `{version:2, messages:[...]}` object).
+            let envelope: serde_json::Value = serde_json::from_slice(&export_msg.payload).unwrap();
+            let export = envelope.get("result").cloned().unwrap_or(envelope);
+            let normalized: Vec<(String, String)> = match &export {
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .map(|m| {
+                        (
+                            m["role"].as_str().unwrap_or_default().to_string(),
+                            m["text"].as_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect(),
+                serde_json::Value::Object(_) => export["messages"]
+                    .as_array()
+                    .expect("V2 export must carry a messages array")
+                    .iter()
+                    .map(|m| {
+                        let text = m["blocks"]
+                            .as_array()
+                            .and_then(|blocks| {
+                                blocks.iter().find_map(|b| {
+                                    (b["type"] == "text").then(|| b["text"].as_str().unwrap_or_default().to_string())
+                                })
+                            })
+                            .unwrap_or_default();
+                        (m["role"].as_str().unwrap_or_default().to_string(), text)
+                    })
+                    .collect(),
+                other => panic!("unexpected export shape: {other:?}"),
+            };
 
             assert_eq!(
-                messages.len(),
+                normalized.len(),
                 2,
-                "migrated OR session must have 2 messages; got: {messages:?}"
+                "migrated OR session must have 2 messages; got: {normalized:?}"
             );
+            assert_eq!(normalized[0].0, "user", "first migrated message must be user");
             assert_eq!(
-                messages[0]["role"].as_str(),
-                Some("user"),
-                "first migrated message must be user"
-            );
-            assert_eq!(
-                messages[0]["text"].as_str(),
-                Some("question from xai"),
+                normalized[0].1, "question from xai",
                 "first message text must survive migration"
             );
+            assert_eq!(normalized[1].0, "assistant", "second migrated message must be assistant");
             assert_eq!(
-                messages[1]["role"].as_str(),
-                Some("assistant"),
-                "second migrated message must be assistant"
-            );
-            assert_eq!(
-                messages[1]["text"].as_str(),
-                Some("answer from xai"),
+                normalized[1].1, "answer from xai",
                 "second message text must survive migration"
             );
         })
         .await;
 }
 
-/// Characterization test: documents what the cross-runner `switch_model` path
-/// PRESERVES and what it LOSES for a history containing `ToolUse` / `ToolResult`
-/// blocks. The migration serializes through the `PortableMessageV2` format
-/// (trogon-runner-tools::portable_session), which is intentionally LOSSY for
-/// tool blocks:
-///   * tool_use.input  → `value.to_string()` truncated to 240 chars, and on
-///                        import re-wrapped as `Value::String` (never reparsed
-///                        back to a JSON object).
-///   * tool_result.content → truncated to 500 chars.
-///   * parent_tool_use_id  → dropped (forced to None on import).
-///   * Image blocks        → replaced by the literal text "[image]".
+/// The cross-runner `switch_model` migration preserves `ToolUse` / `ToolResult`
+/// blocks losslessly through the `PortableMessageV2` format
+/// (trogon-runner-tools::portable_session): tool_use carries the FULL structured
+/// `input` (a JSON object, untruncated) and `parent_tool_use_id`, per
+/// cambio-modelo.md §11 (No-Lossy: "input JSON completo ... parent_tool_use_id")
+/// and §637 ("un modelo con tools recibe tool calls estructurados").
 ///
-/// This test LOCKS IN that behavior. If the format is ever made lossless, this
-/// test should be updated to assert exact preservation instead.
+/// This previously LOCKED IN the old lossy behavior (input stringified + truncated
+/// to 240 chars, parent dropped); it now asserts exact preservation after the format
+/// was made lossless. `input_summary` is still emitted for N-1 readers, but the
+/// structured `input` is the source of truth on import.
 #[tokio::test]
-async fn switch_model_tool_blocks_are_summarized_lossy() {
+async fn switch_model_tool_blocks_are_preserved_structurally() {
     let (_c, port) = start_nats_js().await;
     let (nats, js) = make_nats(port).await;
 
@@ -442,9 +490,10 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
             // ── 1. Seed source session with a tool-call round-trip ────────────
             let store = NatsSessionStore::open(&js).await.unwrap();
 
-            // Small input (< 240 chars: stringified but NOT truncated).
+            // Small structured input — preserved exactly as an object.
             let small_input = serde_json::json!({ "command": "ls -la", "timeout_ms": 5000 });
-            // Large input (> 240 chars: stringified AND truncated → data loss).
+            // Large structured input (its string form exceeds the 240-char summary cap) —
+            // still preserved in full, NOT truncated, because the structured `input` is carried.
             let big_value = "x".repeat(400);
             let large_input = serde_json::json!({ "path": "/etc/config", "blob": big_value });
 
@@ -473,6 +522,7 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
                         content: vec![AgentContentBlock::ToolResult {
                             tool_use_id: "toolu_abc123".into(),
                             content: "total 8\n-rw-r--r-- 1 user user 0 main.rs".into(),
+                            blocks: vec![],
                         }],
                     },
                     AgentMessage::assistant(vec![AgentContentBlock::Text {
@@ -497,8 +547,8 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
             let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
 
             // ── 4. Migrate the session ────────────────────────────────────────
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.src", "switcher-tool-1", "dst-model", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "switcher-tool-1", "sonnet", "dst-model", "/tmp")
                 .await
                 .expect("switch_model should succeed");
             assert_eq!(new_prefix, "acp.dst");
@@ -520,8 +570,7 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
                 AgentContentBlock::Text { text } if text == "Let me list them."
             ));
 
-            // First tool_use: id + name kept, but input is STRINGIFIED (object
-            // → JSON string) and parent_tool_use_id is DROPPED.
+            // First tool_use: id + name + FULL structured input + parent linkage preserved.
             match &dst.messages[1].content[1] {
                 AgentContentBlock::ToolUse {
                     id,
@@ -531,48 +580,32 @@ async fn switch_model_tool_blocks_are_summarized_lossy() {
                 } => {
                     assert_eq!(id, "toolu_abc123", "tool_use id is preserved");
                     assert_eq!(name, "bash", "tool_use name is preserved");
-                    // LOSS #1: structured object collapsed into a JSON *string*.
+                    // Structured object preserved exactly — not collapsed to a string.
+                    assert_eq!(input, &small_input, "tool_use input is preserved as a structured object");
+                    assert!(input.is_object(), "input remains a JSON object");
+                    // Parent linkage preserved (was Some).
                     assert_eq!(
-                        input,
-                        &serde_json::Value::String(small_input.to_string()),
-                        "tool_use input is stringified, not kept as an object"
-                    );
-                    assert!(
-                        input.is_string() && !input.is_object(),
-                        "input must no longer be a JSON object"
-                    );
-                    // LOSS #2: parent linkage dropped.
-                    assert!(
-                        parent_tool_use_id.is_none(),
-                        "parent_tool_use_id is dropped on migration (was Some)"
+                        parent_tool_use_id.as_deref(),
+                        Some("toolu_parent"),
+                        "parent_tool_use_id is preserved across migration"
                     );
                 }
                 other => panic!("expected ToolUse, got {other:?}"),
             }
 
-            // Second tool_use: large input is stringified AND TRUNCATED to 240
-            // chars with a trailing ellipsis — concrete data loss.
+            // Second tool_use: large input preserved in FULL (not truncated), as an object.
             match &dst.messages[1].content[2] {
                 AgentContentBlock::ToolUse { id, input, .. } => {
                     assert_eq!(id, "toolu_big");
-                    let s = input.as_str().expect("large input is a string");
-                    assert!(s.ends_with('…'), "LOSS #3: long input is truncated with ellipsis");
-                    assert!(
-                        s.chars().count() <= 240,
-                        "truncated to <=240 chars (was {} in original)",
-                        large_input.to_string().len()
-                    );
-                    assert!(
-                        s.len() < large_input.to_string().len(),
-                        "destination input is strictly shorter than the original"
-                    );
+                    assert_eq!(input, &large_input, "large structured input is preserved untruncated");
+                    assert!(input.is_object(), "large input remains a JSON object");
                 }
                 other => panic!("expected ToolUse, got {other:?}"),
             }
 
             // msg[2]: ToolResult — id and (short) content preserved.
             match &dst.messages[2].content[0] {
-                AgentContentBlock::ToolResult { tool_use_id, content } => {
+                AgentContentBlock::ToolResult { tool_use_id, content, .. } => {
                     assert_eq!(tool_use_id, "toolu_abc123", "tool_result id is preserved");
                     assert_eq!(
                         content, "total 8\n-rw-r--r-- 1 user user 0 main.rs",
@@ -631,8 +664,8 @@ async fn switch_model_prompt_on_new_runner_after_migration() {
 
             // ── 4. Migrate the session ────────────────────────────────────────
             let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
-            let (new_prefix, new_session_id) = switcher
-                .switch_model("acp.ps.src", "post-switch-src-1", "ps-model", "/tmp")
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.ps.src", "post-switch-src-1", "sonnet", "ps-model", "/tmp")
                 .await
                 .expect("switch_model must succeed");
 
@@ -658,6 +691,89 @@ async fn switch_model_prompt_on_new_runner_after_migration() {
                 resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "prompt to migrated session must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// Canonical-path switch (Fase 8 / 11): with the Session Kernel enabled and
+/// `runner_binding_mode=canonical`, `CrossRunnerSwitcher::switch_model` drives the
+/// canonical orchestration (`switch_via_session_kernel`) instead of plain handoff. This
+/// exercises the canonical path end-to-end over REAL NATS JetStream between two real
+/// runners — coverage the mock-only `complex_session_fixture` cannot provide.
+///
+/// It verifies (a) the switch completes and the session is migrated to the target
+/// runner, and (b) the kernel materialized a canonical snapshot for the session over
+/// real NATS (shadow event log → snapshot), proving the canonical kernel integration
+/// ran rather than being bypassed.
+///
+/// Requires Docker.
+#[tokio::test]
+async fn canonical_switch_records_kernel_state_over_real_nats() {
+    let (_c, port) = start_nats_js_v211().await;
+    let (nats, js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            // ── 1. Seed source session ────────────────────────────────────────
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let src_state = SessionState {
+                messages: vec![
+                    AgentMessage::user_text("canonical question"),
+                    AgentMessage::assistant(vec![AgentContentBlock::Text {
+                        text: "canonical answer".into(),
+                    }]),
+                ],
+                ..Default::default()
+            };
+            store.save("sess_canon_1", &src_state).await.unwrap();
+
+            // ── 2. Two real runners on different prefixes ─────────────────────
+            attach_agent(make_agent(store.clone(), "acp.src"), nats.clone(), "acp.src");
+            attach_agent(make_agent(store.clone(), "acp.dst"), nats.clone(), "acp.dst");
+            tokio::time::sleep(Duration::from_millis(60)).await;
+
+            // ── 3. Registry: "dst-model" → "acp.dst" ──────────────────────────
+            let registry = Registry::new(MockRegistryStore::new());
+            let mut dst_cap = AgentCapability::new("dst-runner", ["chat"], "agents.dst.>");
+            dst_cap.metadata = serde_json::json!({ "models": ["dst-model"], "acp_prefix": "acp.dst" });
+            registry.register(&dst_cap).await.unwrap();
+
+            // ── 4. Session Kernel in CANONICAL binding mode ───────────────────
+            let mut flags = SessionKernelFeatureFlags::default().with_runner_binding_mode("canonical");
+            flags.session_kernel_enabled = true;
+            assert!(flags.use_canonical_runner_binding(), "test must drive the canonical path");
+            let stack = SessionKernelStack::provision(nats.clone(), flags, SessionKernelOperationalPolicy::default())
+                .await
+                .expect("kernel stack must provision against real NATS");
+            // Keep a snapshot-store handle to inspect canonical state after the switch.
+            let snapshots = stack.snapshots.clone();
+
+            let mut switcher =
+                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry).with_kernel_stack(stack);
+
+            // ── 5. Switch (canonical path; falls back to handoff only if the gate
+            //         blocks — either way the kernel records canonical state first) ──
+            let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+                .switch_model("acp.src", "sess_canon_1", "sonnet", "dst-model", "/tmp")
+                .await
+                .expect("switch_model should complete with the kernel enabled");
+            assert_eq!(new_prefix, "acp.dst");
+            assert!(!new_session_id.is_empty());
+
+            // ── 6. Session migrated to the destination runner ─────────────────
+            let dst_state = store.load(&new_session_id).await.unwrap();
+            assert_eq!(dst_state.messages.len(), 2, "migrated session must have 2 messages");
+            assert_eq!(dst_state.messages[0].role, "user");
+            assert_eq!(dst_state.messages[1].role, "assistant");
+
+            // ── 7. Canonical kernel materialized a snapshot over real NATS ────
+            let sid = SessionId::new("sess_canon_1").unwrap();
+            let snapshot = snapshots.load_snapshot(&sid).await.expect("snapshot load must not error");
+            assert!(
+                snapshot.is_some(),
+                "canonical kernel must materialize a snapshot for the switched session"
             );
         })
         .await;

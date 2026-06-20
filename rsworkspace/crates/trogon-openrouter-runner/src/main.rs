@@ -78,6 +78,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
+    let spawn_api_key = cfg.api_key.clone().unwrap_or_default();
+    let spawn_model = cfg.default_model.clone();
+    let spawn_prefix = cfg.prefix.clone();
+
     let nats_config = acp_nats::NatsConfig {
         servers: vec![cfg.nats_url.clone()],
         auth: acp_nats::NatsAuth::None,
@@ -85,22 +89,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-    let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
-    let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
-    let classifier_http = reqwest::Client::new();
-    let safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
-        classifier_http,
-        &proxy_url,
-        anthropic_base_url.as_deref(),
-        anthropic_token,
-    );
     let mut agent = OpenRouterAgent::new(notifier, cfg.default_model, cfg.api_key.unwrap_or_default());
     agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
     agent = agent.with_compactor(nats.clone());
     agent = agent.with_permissions(nats.clone(), acp_prefix.clone());
+    if let Ok(catalog) =
+        trogonai_catalog_client::open(&js_ctx, trogonai_catalog_client::CatalogClientConfig::default()).await
+    {
+        agent = agent.with_catalog(catalog);
+    }
     agent = agent.with_runner_config(runner_config);
-    agent = agent.with_safety_classifier(safety_classifier);
 
     {
         let js = js_ctx;
@@ -126,6 +124,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 warn!(error = %e, "openrouter: failed to open SESSIONS KV bucket — session persistence disabled");
             }
         }
+
+        // Fase 4 (§1875): provision the canonical shadow recorder. Off by default (gated
+        // by the kernel feature flags); when enabled, each completed turn is mirrored into
+        // the Session Kernel event log/snapshot in parallel with the KV snapshot above.
+        if let Some(shadow) = trogon_openrouter_runner::provision_kernel_shadow(&js).await {
+            agent = agent.with_kernel_shadow(shadow);
+        }
+    }
+
+    {
+        use trogon_openrouter_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
+        let base_url =
+            std::env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+        let site_url = std::env::var("OPENROUTER_SITE_URL").unwrap_or_else(|_| "https://trogonai.com".to_string());
+        let site_name = std::env::var("OPENROUTER_SITE_NAME").unwrap_or_else(|_| "TrogonAI".to_string());
+        tokio::spawn(run_spawn_subscriber(
+            nats.clone(),
+            spawn_prefix,
+            spawn_api_key,
+            spawn_model,
+            base_url,
+            site_url,
+            site_name,
+            Arc::new(ReqwestSpawnClient),
+        ));
     }
 
     let local = tokio::task::LocalSet::new();

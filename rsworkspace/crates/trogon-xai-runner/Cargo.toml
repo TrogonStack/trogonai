@@ -48,6 +48,12 @@ trogon-mcp          = { path = "../trogon-mcp" }
 trogon-nats         = { workspace = true }
 trogon-registry     = { workspace = true }
 trogon-runner-tools = { path = "../trogon-runner-tools" }
+trogonai-session-kernel = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-catalog-client = { workspace = true }
+trogonai-compactor-proto = { workspace = true }
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
 trogon-tools        = { path = "../trogon-tools" }
 async-trait     = { workspace = true }
 bytes           = { workspace = true }

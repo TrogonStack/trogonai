@@ -1,0 +1,36 @@
+[package]
+name = "trogonai-session-projection"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv"] }
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+bytes = { workspace = true }
+confique = { workspace = true }
+opentelemetry = { workspace = true }
+thiserror = "2"
+time = { workspace = true }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-service-config = { workspace = true }
+trogonai-capabilities = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-session-kernel = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogonai-capabilities = { workspace = true }
+
+[features]
+default = []
+test-support = []

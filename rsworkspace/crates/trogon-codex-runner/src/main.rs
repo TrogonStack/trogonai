@@ -66,8 +66,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let agent = DefaultCodexAgent::with_nats(nats.clone(), acp_prefix_parsed.clone(), default_model)
+    let mut agent = DefaultCodexAgent::with_nats(nats.clone(), acp_prefix_parsed.clone(), default_model)
         .with_compactor(nats.clone());
+    // Fase 4 (§1875): provision the canonical shadow recorder. Off by default (gated by
+    // the kernel feature flags); when enabled, each completed turn is mirrored into the
+    // Session Kernel event log/snapshot.
+    if let Some(shadow) = trogon_codex_runner::provision_kernel_shadow(&js_ctx).await {
+        agent = agent.with_kernel_shadow(shadow);
+    }
     let js = trogon_nats::jetstream::NatsJetStreamClient::new(js_ctx);
 
     let local = tokio::task::LocalSet::new();

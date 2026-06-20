@@ -148,7 +148,15 @@ async fn process_request_streaming<V, H, N>(
 
     /// Send Start(status) + Chunk(body_bytes) + End to surface an error.
     async fn send_error_response<N: NatsClient>(nats: &N, reply_to: &str, status: u16, body: Vec<u8>) {
-        publish_frame(nats, reply_to, StreamFrame::Start { status, headers: vec![] }).await;
+        publish_frame(
+            nats,
+            reply_to,
+            StreamFrame::Start {
+                status,
+                headers: vec![],
+            },
+        )
+        .await;
         publish_frame(nats, reply_to, StreamFrame::Chunk { seq: 0, data: body }).await;
         publish_frame(nats, reply_to, StreamFrame::End { error: None }).await;
     }
@@ -177,7 +185,10 @@ async fn process_request_streaming<V, H, N>(
     let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &real_key);
     forwarded_headers.push((auth_name, auth_val));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
-    if !forwarded_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+    if !forwarded_headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+    {
         forwarded_headers.push(("User-Agent".to_string(), "trogon-agent/1.0".to_string()));
     }
 
@@ -244,11 +255,7 @@ async fn process_request_streaming<V, H, N>(
 }
 
 /// Process a single outbound request: detokenize and call the AI provider.
-async fn process_request<V, H>(
-    request: &OutboundHttpRequest,
-    vault: &V,
-    http_client: &H,
-) -> OutboundHttpResponse
+async fn process_request<V, H>(request: &OutboundHttpRequest, vault: &V, http_client: &H) -> OutboundHttpResponse
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
@@ -283,7 +290,10 @@ where
     let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &real_key);
     forwarded_headers.push((auth_name, auth_val));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
-    if !forwarded_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+    if !forwarded_headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+    {
         forwarded_headers.push(("User-Agent".to_string(), "trogon-agent/1.0".to_string()));
     }
 
@@ -355,10 +365,7 @@ where
 ///
 /// Returns `(current_key, previous_key)`. `previous_key` is `Some` only during
 /// a rotation grace period — used by the caller for fallback-on-401.
-async fn resolve_token<V>(
-    vault: &V,
-    headers: &[(String, String)],
-) -> Result<(String, Option<String>), String>
+async fn resolve_token<V>(vault: &V, headers: &[(String, String)]) -> Result<(String, Option<String>), String>
 where
     V: VaultStore,
     V::Error: std::fmt::Display,
@@ -382,16 +389,14 @@ where
         ));
     }
 
-    let token = trogon_vault::ApiKeyToken::new(raw_token)
-        .map_err(|e| format!("Invalid proxy token: {}", e))?;
+    let token = trogon_vault::ApiKeyToken::new(raw_token).map_err(|e| format!("Invalid proxy token: {}", e))?;
 
     let (current_opt, previous_opt) = vault
         .resolve_with_previous(&token)
         .await
         .map_err(|e| format!("Vault error: {}", e))?;
 
-    let real_key = current_opt
-        .ok_or_else(|| format!("Token not found in vault: {}", token))?;
+    let real_key = current_opt.ok_or_else(|| format!("Token not found in vault: {}", token))?;
 
     if real_key.is_empty() {
         return Err(format!("Vault returned an empty key for token: {}", token));
@@ -515,8 +520,8 @@ mod tests {
     use crate::traits::{HttpClient, HttpResponse, NatsClient, StreamingHttpResponse};
 
     use super::{
-        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry,
-        process_request, process_request_streaming, resolve_token,
+        HTTP_INITIAL_RETRY_DELAY, forward_request, forward_request_with_retry, process_request,
+        process_request_streaming, resolve_token,
     };
 
     // ── MockNatsClient ────────────────────────────────────────────────────────
@@ -584,23 +589,17 @@ mod tests {
         }
 
         fn enqueue_ok(&self, status: u16, headers: Vec<(String, String)>, body: Vec<u8>) {
-            self.responses.lock().unwrap().push_back(Ok(HttpResponse {
-                status,
-                headers,
-                body,
-            }));
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(Ok(HttpResponse { status, headers, body }));
         }
 
         fn enqueue_err(&self, msg: impl Into<String>) {
             self.responses.lock().unwrap().push_back(Err(msg.into()));
         }
 
-        fn enqueue_streaming_ok(
-            &self,
-            status: u16,
-            headers: Vec<(String, String)>,
-            chunks: Vec<Vec<u8>>,
-        ) {
+        fn enqueue_streaming_ok(&self, status: u16, headers: Vec<(String, String)>, chunks: Vec<Vec<u8>>) {
             let ok_chunks = chunks.into_iter().map(Ok).collect();
             self.streaming
                 .lock()
@@ -617,13 +616,9 @@ mod tests {
             good_chunks: Vec<Vec<u8>>,
             error: impl Into<String>,
         ) {
-            let mut mixed: Vec<Result<Vec<u8>, String>> =
-                good_chunks.into_iter().map(Ok).collect();
+            let mut mixed: Vec<Result<Vec<u8>, String>> = good_chunks.into_iter().map(Ok).collect();
             mixed.push(Err(error.into()));
-            self.streaming
-                .lock()
-                .unwrap()
-                .push_back(Ok((status, headers, mixed)));
+            self.streaming.lock().unwrap().push_back(Ok((status, headers, mixed)));
         }
 
         fn enqueue_streaming_err(&self, msg: impl Into<String>) {
@@ -661,9 +656,7 @@ mod tests {
                 .unwrap_or_else(|| Err("MockHttpClient: no streaming responses enqueued".to_string()))?;
 
             let (status, headers, chunks) = entry;
-            let stream = futures_util::stream::iter(
-                chunks.into_iter().map(|c| c.map(Bytes::from)),
-            );
+            let stream = futures_util::stream::iter(chunks.into_iter().map(|c| c.map(Bytes::from)));
             Ok(StreamingHttpResponse {
                 status,
                 headers,
@@ -731,11 +724,7 @@ mod tests {
         let headers = make_headers("Bearer sk-ant-realkey");
         let result = resolve_token(&vault, &headers).await;
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("does not look like a proxy token")
-        );
+        assert!(result.unwrap_err().contains("does not look like a proxy token"));
     }
 
     /// Gap 3: token starting with `tok_` but missing provider/env/id segments
@@ -753,11 +742,7 @@ mod tests {
         for header in cases {
             let headers = make_headers(header);
             let result = resolve_token(&vault, &headers).await;
-            assert!(
-                result.is_err(),
-                "Malformed token '{}' must be rejected",
-                header
-            );
+            assert!(result.is_err(), "Malformed token '{}' must be rejected", header);
             let err = result.unwrap_err();
             assert!(
                 err.contains("Invalid proxy token"),
@@ -899,10 +884,7 @@ mod tests {
             "Bearer tok_anthropic_prod_abc123",
             "idem-1",
         );
-        let headers = vec![(
-            "Authorization".to_string(),
-            "Bearer sk-real-key".to_string(),
-        )];
+        let headers = vec![("Authorization".to_string(), "Bearer sk-real-key".to_string())];
         let resp = forward_request(&client, &request, &headers).await.unwrap();
         assert_eq!(resp.status, 200);
     }
@@ -925,13 +907,8 @@ mod tests {
             "Bearer tok_anthropic_prod_abc123",
             "idem-retry",
         );
-        let headers = vec![(
-            "Authorization".to_string(),
-            "Bearer sk-real-key".to_string(),
-        )];
-        let resp = forward_request_with_retry(&http, &request, &headers)
-            .await
-            .unwrap();
+        let headers = vec![("Authorization".to_string(), "Bearer sk-real-key".to_string())];
+        let resp = forward_request_with_retry(&http, &request, &headers).await.unwrap();
         assert_eq!(resp.status, 200);
     }
 
@@ -1053,15 +1030,9 @@ mod tests {
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
-        let request = make_request(
-            &format!("{}/v1/messages", mock_server.base_url()),
-            "",
-            "idem",
-        );
+        let request = make_request(&format!("{}/v1/messages", mock_server.base_url()), "", "idem");
 
-        let resp = forward_request_with_retry(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request_with_retry(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 401);
         assert_eq!(mock.hits(), 1, "4xx should not be retried");
@@ -1084,23 +1055,13 @@ mod tests {
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
-        let request = make_request(
-            &format!("{}/v1/messages", mock_server.base_url()),
-            "",
-            "idem",
-        );
+        let request = make_request(&format!("{}/v1/messages", mock_server.base_url()), "", "idem");
 
-        let resp = forward_request_with_retry(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request_with_retry(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 503);
         // HTTP_MAX_RETRIES=3 → 1 initial + 3 retries = 4 total calls
-        assert_eq!(
-            mock.hits(),
-            4,
-            "should attempt exactly 4 times (1 + 3 retries)"
-        );
+        assert_eq!(mock.hits(), 4, "should attempt exactly 4 times (1 + 3 retries)");
     }
 
     /// GET requests with an empty body must not send a body to the upstream.
@@ -1176,11 +1137,7 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .build()
             .unwrap();
-        let request = make_request(
-            &format!("http://127.0.0.1:{}/v1/messages", port),
-            "",
-            "idem",
-        );
+        let request = make_request(&format!("http://127.0.0.1:{}/v1/messages", port), "", "idem");
 
         let result = forward_request_with_retry(&client, &request, &[]).await;
 
@@ -1214,9 +1171,7 @@ mod tests {
             idempotency_key: "idem".to_string(),
         };
 
-        let resp = forward_request_with_retry(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request_with_retry(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 200);
         ok_mock.assert_async().await;
@@ -1254,9 +1209,7 @@ mod tests {
         let result = resolve_token(&vault, &headers).await;
         assert!(result.is_err(), "double-space Bearer must be rejected");
         assert!(
-            result
-                .unwrap_err()
-                .contains("does not look like a proxy token"),
+            result.unwrap_err().contains("does not look like a proxy token"),
             "Error must describe the rejection reason"
         );
     }
@@ -1418,11 +1371,7 @@ mod tests {
         );
         assert!(resp.error.is_some(), "Error field must be set");
 
-        assert_eq!(
-            mock.hits(),
-            0,
-            "Upstream must not be called when header is invalid"
-        );
+        assert_eq!(mock.hits(), 0, "Upstream must not be called when header is invalid");
     }
 
     // ── Gap: single-char real key strips every header containing that byte ────
@@ -1456,16 +1405,10 @@ mod tests {
         mock.assert_async().await;
 
         let link_present = resp.headers.iter().any(|(k, _)| k == "x-link");
-        assert!(
-            !link_present,
-            "x-link (value 'bookmark' contains 'k') must be stripped"
-        );
+        assert!(!link_present, "x-link (value 'bookmark' contains 'k') must be stripped");
 
         let ct_present = resp.headers.iter().any(|(k, _)| k == "content-type");
-        assert!(
-            ct_present,
-            "content-type must be preserved (no 'k' in value)"
-        );
+        assert!(ct_present, "content-type must be preserved (no 'k' in value)");
 
         let safe_present = resp.headers.iter().any(|(k, _)| k == "x-safe");
         assert!(safe_present, "x-safe must be preserved (no 'k' in value)");
@@ -1494,9 +1437,7 @@ mod tests {
             idempotency_key: "idem-418".to_string(),
         };
 
-        let resp = forward_request_with_retry(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request_with_retry(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 418, "4xx response must be returned as-is");
         assert_eq!(mock.hits(), 1, "4xx response must not trigger a retry");
@@ -1566,14 +1507,8 @@ mod tests {
                     "Authorization".to_string(),
                     "Bearer tok_anthropic_prod_dupauth1".to_string(),
                 ),
-                (
-                    "Authorization".to_string(),
-                    "Bearer some-extra-key-1".to_string(),
-                ),
-                (
-                    "authorization".to_string(),
-                    "Bearer some-extra-key-2".to_string(),
-                ),
+                ("Authorization".to_string(), "Bearer some-extra-key-1".to_string()),
+                ("authorization".to_string(), "Bearer some-extra-key-2".to_string()),
             ],
             body: b"{}".to_vec(),
             reply_to: "test.reply".to_string(),
@@ -1683,11 +1618,7 @@ mod tests {
                 attempts, shift
             );
             let multiplier = 1u32 << shift;
-            assert_eq!(
-                multiplier,
-                2u32.pow(31),
-                "Multiplier must be 2^31 at saturation"
-            );
+            assert_eq!(multiplier, 2u32.pow(31), "Multiplier must be 2^31 at saturation");
             let _delay = HTTP_INITIAL_RETRY_DELAY * multiplier;
         }
     }
@@ -1726,17 +1657,12 @@ mod tests {
             idempotency_key: "idem-invalid-utf8".to_string(),
         };
 
-        let resp = forward_request_with_retry(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request_with_retry(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 200);
 
         let has_invalid = resp.headers.iter().any(|(k, _)| k == "x-invalid");
-        assert!(
-            !has_invalid,
-            "Header with invalid UTF-8 value must be silently dropped"
-        );
+        assert!(!has_invalid, "Header with invalid UTF-8 value must be silently dropped");
 
         let has_valid = resp.headers.iter().any(|(k, _)| k == "x-valid");
         assert!(has_valid, "Header with valid ASCII value must be preserved");
@@ -1787,20 +1713,11 @@ mod tests {
             idempotency_key: "idem-5xx-retry".to_string(),
         };
 
-        let resp = forward_request_with_retry(&client, &request, &[])
-            .await
-            .unwrap();
+        let resp = forward_request_with_retry(&client, &request, &[]).await.unwrap();
 
         assert_eq!(resp.status, 200, "Second attempt must return 200");
-        assert_eq!(
-            resp.body, b"retried",
-            "Body from successful retry must be returned"
-        );
-        assert_eq!(
-            attempt_count.load(Ordering::SeqCst),
-            2,
-            "Must make exactly 2 attempts"
-        );
+        assert_eq!(resp.body, b"retried", "Body from successful retry must be returned");
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 2, "Must make exactly 2 attempts");
     }
 
     // ── Gap #9: first Authorization header wins when multiple with different casing ──
@@ -1812,10 +1729,7 @@ mod tests {
         let token_first = ApiKeyToken::new("tok_anthropic_prod_first01").unwrap();
         let token_second = ApiKeyToken::new("tok_anthropic_prod_second1").unwrap();
         vault.store(&token_first, "sk-ant-first-key").await.unwrap();
-        vault
-            .store(&token_second, "sk-ant-second-key")
-            .await
-            .unwrap();
+        vault.store(&token_second, "sk-ant-second-key").await.unwrap();
 
         let headers = vec![
             (
@@ -1846,10 +1760,7 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
-        assert!(
-            result.is_err(),
-            "Long non-tok_ header must produce an error"
-        );
+        assert!(result.is_err(), "Long non-tok_ header must produce an error");
         let msg = result.unwrap_err();
 
         assert!(
@@ -1883,10 +1794,7 @@ mod tests {
 
         let result = forward_request(&client, &request, &headers).await;
 
-        assert!(
-            result.is_err(),
-            "Control char in header value must cause an error"
-        );
+        assert!(result.is_err(), "Control char in header value must cause an error");
         assert!(
             result.unwrap_err().contains("HTTP request failed"),
             "Error must originate from the HTTP layer"
@@ -1986,14 +1894,9 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
+        assert!(result.is_err(), "Empty token after 'Bearer ' must be rejected");
         assert!(
-            result.is_err(),
-            "Empty token after 'Bearer ' must be rejected"
-        );
-        assert!(
-            result
-                .unwrap_err()
-                .contains("does not look like a proxy token"),
+            result.unwrap_err().contains("does not look like a proxy token"),
             "Error must mention the token format expectation"
         );
     }
@@ -2010,10 +1913,7 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
-        assert!(
-            result.is_err(),
-            "CRLF in Authorization value must be rejected"
-        );
+        assert!(result.is_err(), "CRLF in Authorization value must be rejected");
         let msg = result.unwrap_err();
         assert!(
             msg.contains("Invalid proxy token") || msg.contains("not found in vault"),
@@ -2030,8 +1930,7 @@ mod tests {
         let mock = mock_server
             .mock_async(|when, then| {
                 when.method(httpmock::Method::POST).path("/v1/messages");
-                then.status(301)
-                    .header("location", "https://example.com/new-location");
+                then.status(301).header("location", "https://example.com/new-location");
             })
             .await;
 
@@ -2053,11 +1952,7 @@ mod tests {
         let result = forward_request(&client, &request, &headers).await;
 
         assert!(result.is_ok(), "3xx must not cause a transport error");
-        assert_eq!(
-            result.unwrap().status,
-            301,
-            "301 must be returned as-is, not followed"
-        );
+        assert_eq!(result.unwrap().status, 301, "301 must be returned as-is, not followed");
         mock.assert_async().await;
     }
 
@@ -2077,11 +1972,7 @@ mod tests {
             "Whitespace-only key must pass is_empty() check — got: {:?}",
             result
         );
-        assert_eq!(
-            result.unwrap().0,
-            " ",
-            "Whitespace key must be returned unchanged"
-        );
+        assert_eq!(result.unwrap().0, " ", "Whitespace key must be returned unchanged");
     }
 
     // ── Gap 4 ──────────────────────────────────────────────────────────────
@@ -2091,9 +1982,7 @@ mod tests {
         let mock_server = httpmock::MockServer::start_async().await;
         let mock = mock_server
             .mock_async(|when, then| {
-                when.method(httpmock::Method::POST)
-                    .path("/v1/data")
-                    .body("\0");
+                when.method(httpmock::Method::POST).path("/v1/data").body("\0");
                 then.status(200);
             })
             .await;
@@ -2193,10 +2082,7 @@ mod tests {
 
         let result = resolve_token(&vault, &headers).await;
 
-        assert!(
-            result.is_err(),
-            "Non-breaking space after 'Bearer' must be rejected"
-        );
+        assert!(result.is_err(), "Non-breaking space after 'Bearer' must be rejected");
         assert!(
             result.unwrap_err().contains("not a Bearer token"),
             "Error must describe the rejection"
@@ -2219,10 +2105,7 @@ mod tests {
 
         let result = forward_request(&client, &request, &[]).await;
 
-        assert!(
-            result.is_err(),
-            "Method with internal spaces must be rejected"
-        );
+        assert!(result.is_err(), "Method with internal spaces must be rejected");
         assert!(
             result.unwrap_err().contains("Invalid HTTP method"),
             "Error must contain 'Invalid HTTP method'"
@@ -2369,10 +2252,7 @@ mod tests {
 
         let resp = process_request(&request, &vault, &http).await;
 
-        assert_eq!(
-            resp.status, 401,
-            "Without a previous key, 401 must be forwarded as-is"
-        );
+        assert_eq!(resp.status, 401, "Without a previous key, 401 must be forwarded as-is");
         assert!(resp.error.is_none(), "Upstream 401 must not set the error field");
     }
 
@@ -2591,8 +2471,10 @@ mod tests {
 
         let frames = nats.published_frames();
         // Start(401) + Chunk + End — no second HTTP call.
-        assert!(matches!(frames[0], StreamFrame::Start { status: 401, .. }),
-            "Start frame must carry the upstream 401 status");
+        assert!(
+            matches!(frames[0], StreamFrame::Start { status: 401, .. }),
+            "Start frame must carry the upstream 401 status"
+        );
 
         // The streaming queue is now empty: exactly one HTTP call was made.
         assert!(
@@ -2609,12 +2491,7 @@ mod tests {
         vault.store(&token, "sk-ant-realkey").await.unwrap();
 
         let http = MockHttpClient::new();
-        http.enqueue_streaming_with_mid_error(
-            200,
-            vec![],
-            vec![b"partial data".to_vec()],
-            "upstream connection reset",
-        );
+        http.enqueue_streaming_with_mid_error(200, vec![], vec![b"partial data".to_vec()], "upstream connection reset");
 
         let nats = MockNatsClient::new();
         let request = make_streaming_request("Bearer tok_anthropic_prod_stream6");

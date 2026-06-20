@@ -1,6 +1,8 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
+pub mod catalog_picker;
 pub mod compaction;
+pub mod compactor_wire;
 pub mod egress;
 pub mod elicitation;
 pub mod hooks;
@@ -13,18 +15,26 @@ pub mod permission_rules;
 pub mod portable_session;
 pub mod safety_classifier;
 pub mod scope;
+pub mod session_proto;
 pub mod session_store;
 pub mod spawn_agent_tool;
 pub mod spawn_session;
 pub mod subagents;
+
+pub use session_proto::{decode_compaction, encode_compaction};
 pub mod trogon_md;
 pub mod wasm_bash_tool;
 pub mod worktree;
 
-pub use compaction::{
-    COMPACT_SUBJECT, CompactError, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET, compaction_requested,
-    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold,
+pub use catalog_picker::{
+    DEFAULT_COMPACTOR_LABEL, compactor_model_config_option, compactor_model_current_value,
+    compactor_model_select_options, parse_compactor_config, session_window_from_catalog,
 };
+pub use compaction::{
+    COMPACT_SUBJECT, CompactError, CompactProviders, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET,
+    compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold, request_compaction,
+};
+pub use compactor_wire::{CompactWireResponse, decode_compact_response, encode_compact_request};
 pub use egress::EgressPolicy;
 pub use elicitation::{
     ElicitationReq, ElicitationTx, answer_from_response, elicit_via_channel, handle_elicitation_request_nats,

@@ -19,16 +19,17 @@ use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient}
 use acp_nats::{AcpPrefix, Bridge, Config};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, ModelId, ModelInfo, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, Result, ResumeSessionRequest, ResumeSessionResponse, SessionConfigOptionValue, SessionId,
-    SessionModelState, SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    Error, ErrorCode, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, LogoutRequest, LogoutResponse, ModelId, ModelInfo, NewSessionRequest, NewSessionResponse,
+    PromptRequest, PromptResponse, Result, ResumeSessionRequest, ResumeSessionResponse, SessionConfigOptionValue,
+    SessionId, SessionModelState, SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use tokio::sync::mpsc;
 use tracing::warn;
 use trogon_acp_runner::{SessionNotifier, SessionStore};
+use trogon_cli::CrossRunnerSwitcher;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsMessageOf, JsRequestMessage};
 use trogon_runner_tools::portable_session::{
     ParsedExport, PortableBlock, PortableMessage, export_json_from_wire, parse_export_json, v1_to_messages,
@@ -80,6 +81,10 @@ where
     session_cwd: Rc<RefCell<HashMap<String, String>>>,
     /// runner_sid → acp_sid, shared with the notification relay in `main.rs`.
     id_remap: IdRemap,
+    /// Optional canonical switch orchestrator backed by the Session Kernel. When present
+    /// and configured for `runner_binding_mode=canonical`, cross-runner model changes
+    /// are driven through the kernel instead of the legacy lossy handoff path.
+    canonical_switcher: Option<Rc<RefCell<CrossRunnerSwitcher<R>>>>,
 }
 
 impl<N, C, J, S, Notif, R> MultiRunnerAgent<N, C, J, S, Notif, R>
@@ -118,7 +123,13 @@ where
             active_sessions: Rc::new(RefCell::new(HashMap::new())),
             session_cwd: Rc::new(RefCell::new(HashMap::new())),
             id_remap: Rc::new(RefCell::new(HashMap::new())),
+            canonical_switcher: None,
         }
+    }
+
+    pub fn with_canonical_switcher(mut self, switcher: CrossRunnerSwitcher<R>) -> Self {
+        self.canonical_switcher = Some(Rc::new(RefCell::new(switcher)));
+        self
     }
 
     /// Clone of the shared remap table, for the notification relay loop in `main.rs`.
@@ -192,7 +203,7 @@ where
                         }
                     },
                 }
-            }
+            },
             Err(e) => {
                 warn!(error = %e, prefix, "multi-runner: session/export failed — history not transferred");
                 None
@@ -348,18 +359,24 @@ fn messages_from_portable(history: &[PortableMessage]) -> Vec<Message> {
                             id,
                             name,
                             input_summary,
+                            input,
+                            parent_tool_use_id,
                         } => Some(ContentBlock::ToolUse {
                             id: id.clone(),
                             name: name.clone(),
-                            // V2 stores a textual summary, not the raw input; parse back to
-                            // JSON when possible, otherwise carry the summary as a string.
-                            input: serde_json::from_str(input_summary)
-                                .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone())),
-                            parent_tool_use_id: None,
+                            // Prefer the full structured `input`; fall back to parsing the
+                            // summary for legacy V2 payloads that predate the field.
+                            input: if input.is_null() {
+                                serde_json::from_str(input_summary)
+                                    .unwrap_or_else(|_| serde_json::Value::String(input_summary.clone()))
+                            } else {
+                                input.clone()
+                            },
+                            parent_tool_use_id: parent_tool_use_id.clone(),
                         }),
-                        PortableBlock::ToolResult { id, output_summary } => Some(ContentBlock::ToolResult {
+                        PortableBlock::ToolResult { id, output_summary, output } => Some(ContentBlock::ToolResult {
                             tool_use_id: id.clone(),
-                            content: output_summary.clone(),
+                            content: output.clone().unwrap_or_else(|| output_summary.clone()),
                             blocks: vec![],
                         }),
                         PortableBlock::Thinking { .. } => None,
@@ -383,16 +400,22 @@ fn portable_from_messages(messages: &[Message]) -> Vec<PortableMessage> {
                 .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text { text } => Some(PortableBlock::Text { text: text.clone() }),
-                    ContentBlock::ToolUse { id, name, input, .. } => Some(PortableBlock::ToolUse {
+                    ContentBlock::ToolUse {
+                        id,
+                        name,
+                        input,
+                        parent_tool_use_id,
+                    } => Some(PortableBlock::ToolUse {
                         id: id.clone(),
                         name: name.clone(),
                         input_summary: input.to_string(),
+                        input: input.clone(),
+                        parent_tool_use_id: parent_tool_use_id.clone(),
                     }),
-                    ContentBlock::ToolResult {
-                        tool_use_id, content, ..
-                    } => Some(PortableBlock::ToolResult {
+                    ContentBlock::ToolResult { tool_use_id, content, .. } => Some(PortableBlock::ToolResult {
                         id: tool_use_id.clone(),
                         output_summary: content.clone(),
+                        output: Some(content.clone()),
                     }),
                     ContentBlock::Thinking { .. } | ContentBlock::Image { .. } => None,
                 })
@@ -491,6 +514,13 @@ where
                 })
                 .unwrap_or_else(|_| ".".to_string()),
         };
+        let previous_model = self
+            .store
+            .load(&acp_sid)
+            .await
+            .ok()
+            .and_then(|state| state.model)
+            .unwrap_or_else(|| self.inner.default_model.clone());
         // Keep the inner agent's model state in sync (drives the IDE model selector).
         let resp = self.inner.set_session_model(args).await?;
 
@@ -521,7 +551,48 @@ where
             return Ok(resp);
         }
 
-        // Migrate history: export from the source runner, then import into the target.
+        let canonical_switcher = self.canonical_switcher.as_ref().cloned();
+        let canonical_switching_enabled = canonical_switcher
+            .as_ref()
+            .is_some_and(|switcher| switcher.borrow().kernel_flags().use_canonical_runner_binding());
+        if canonical_switching_enabled {
+            let canonical_switcher = canonical_switcher.expect("checked above");
+            let target_existing_session = (target_prefix == self.embedded_prefix).then_some(acp_sid.as_str());
+            let surface = canonical_switcher
+                .borrow_mut()
+                .switch_model_for_session_into(
+                    &source_prefix,
+                    &source_sid,
+                    &acp_sid,
+                    target_existing_session,
+                    &previous_model,
+                    &model,
+                    &cwd,
+                )
+                .await
+                .map_err(|err| Error::new(ErrorCode::InternalError.into(), err))?;
+
+            if surface.new_prefix == self.embedded_prefix {
+                self.active_sessions.borrow_mut().remove(&acp_sid);
+            } else {
+                self.active_sessions.borrow_mut().insert(
+                    acp_sid.clone(),
+                    (surface.new_prefix.clone(), surface.new_session_id.clone()),
+                );
+                self.id_remap
+                    .borrow_mut()
+                    .insert(surface.new_session_id.clone(), acp_sid.clone());
+            }
+            if source_prefix != self.embedded_prefix && source_sid != surface.new_session_id {
+                self.close_runner_session(&source_prefix, &source_sid).await;
+                self.id_remap.borrow_mut().remove(&source_sid);
+            }
+            return Ok(resp);
+        }
+
+        // Legacy/MVP compatibility: migrate history by exporting from the source runner
+        // and importing into the target. This path is intentionally bypassed whenever the
+        // Session Kernel is configured for canonical runner bindings.
         // (Lossy across providers by design: tool-calls→text, thinking/image dropped.)
         let messages = self.export_history(&source_prefix, &source_sid).await;
         if target_prefix == self.embedded_prefix {
@@ -687,6 +758,8 @@ where
                     ),
                 }
             }
+            // Bridge unavailable: fall through to inner (same best-effort
+            // pattern as open_runner_session returning None → caller uses inner).
         }
 
         self.inner.set_session_config_option(args).await

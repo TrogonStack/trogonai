@@ -34,9 +34,18 @@ use trogon_acp_runner::{
 };
 use trogon_agent_core::agent_loop::ContentBlock as AgentContentBlock;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsMessageOf, JsRequestMessage};
+use trogon_runner_tools::{compactor_model_config_option, parse_compactor_config, session_window_from_catalog};
 use trogon_std::time::GetElapsed;
+use trogonai_catalog_client::{CatalogClient, CatalogClientConfig, CatalogSnapshot};
 
 const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
+
+/// Catalog inputs for building config options.
+pub(crate) struct ConfigCatalogCtx<'a> {
+    pub catalog: Option<&'a CatalogSnapshot>,
+    pub callable_providers: Option<&'a [String]>,
+    pub margin: f64,
+}
 
 /// Hardcoded available Claude models exposed by this agent.
 /// Built-in Claude Code slash commands sent in `available_commands_update`.
@@ -92,6 +101,9 @@ where
     /// Per-session stdio MCP bridges. Keyed by session_id.
     /// Spawned in `new_session`/`fork_session`, shut down in `close_session`.
     stdio_bridges: Arc<Mutex<HashMap<String, Vec<trogon_cli::StdioMcpBridge>>>>,
+    /// Cached model catalog for cross-provider compaction picker (M3b).
+    catalog_client: Option<Arc<CatalogClient<async_nats::jetstream::kv::Store>>>,
+    catalog_margin: f64,
 }
 
 impl<N, C, J, S: SessionStore + 'static, Notif: SessionNotifier + 'static> TrogonAcpAgent<N, C, J, S, Notif>
@@ -120,7 +132,23 @@ where
             gateway_config,
             terminal_output_cap: std::cell::Cell::new(false),
             stdio_bridges: Arc::new(Mutex::new(HashMap::new())),
+            catalog_client: None,
+            catalog_margin: CatalogClientConfig::default().margin,
         }
+    }
+
+    /// Attach the NATS-backed model catalog for the compaction picker.
+    pub fn with_catalog(mut self, client: CatalogClient<async_nats::jetstream::kv::Store>) -> Self {
+        self.catalog_client = Some(Arc::new(client));
+        self
+    }
+
+    fn catalog_snapshot(&self) -> Option<CatalogSnapshot> {
+        self.catalog_client.as_ref().and_then(|c| c.cached_snapshot())
+    }
+
+    fn callable_providers(&self) -> Option<Vec<String>> {
+        self.catalog_client.as_ref().and_then(|c| c.cached_providers())
     }
 
     /// Build the `SessionModeState` for a session.
@@ -150,10 +178,35 @@ where
 
     /// Build the `SessionConfigOption` list for a session.
     pub(crate) fn build_config_options(
+        &self,
         current_mode: &str,
         current_model: &str,
         allow_bypass: bool,
+        compactor_provider: Option<&str>,
         compactor_model: Option<&str>,
+    ) -> Vec<SessionConfigOption> {
+        Self::build_config_options_with_catalog(
+            current_mode,
+            current_model,
+            allow_bypass,
+            compactor_provider,
+            compactor_model,
+            ConfigCatalogCtx {
+                catalog: self.catalog_snapshot().as_ref(),
+                callable_providers: self.callable_providers().as_deref(),
+                margin: self.catalog_margin,
+            },
+        )
+    }
+
+    /// Static builder used by tests and permission relay (no catalog client).
+    pub(crate) fn build_config_options_with_catalog(
+        current_mode: &str,
+        current_model: &str,
+        allow_bypass: bool,
+        compactor_provider: Option<&str>,
+        compactor_model: Option<&str>,
+        catalog_ctx: ConfigCatalogCtx<'_>,
     ) -> Vec<SessionConfigOption> {
         use agent_client_protocol::SessionConfigSelectOption;
         let mut mode_options: Vec<SessionConfigSelectOption> = vec![
@@ -173,29 +226,22 @@ where
             .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
             .collect();
 
-        // Compaction model: "default" means same as session model (compactor_model = None).
-        // All options are Claude models (same Anthropic provider) so the select
-        // naturally enforces the same-provider constraint.
-        let mut compactor_options: Vec<SessionConfigSelectOption> =
-            vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
-        compactor_options.extend(
-            AVAILABLE_MODELS
-                .iter()
-                .map(|(id, name)| SessionConfigSelectOption::new(*id, *name)),
+        let session_window = session_window_from_catalog(catalog_ctx.catalog, "anthropic", current_model, 200_000);
+        let compactor_option = compactor_model_config_option(
+            compactor_provider,
+            compactor_model,
+            catalog_ctx.catalog,
+            catalog_ctx.callable_providers,
+            session_window,
+            catalog_ctx.margin,
         );
-        let current_compactor = compactor_model.unwrap_or("");
 
         vec![
             SessionConfigOption::select("mode", "Mode", current_mode.to_string(), mode_options)
                 .category(SessionConfigOptionCategory::Mode),
             SessionConfigOption::select("model", "Model", current_model.to_string(), model_options)
                 .category(SessionConfigOptionCategory::Model),
-            SessionConfigOption::select(
-                "compactor_model",
-                "Compaction Model",
-                current_compactor.to_string(),
-                compactor_options,
-            ),
+            compactor_option,
         ]
     }
 
@@ -745,10 +791,11 @@ where
         let allow_bypass = !is_running_as_root();
         let modes = Self::build_mode_state(&state.mode, allow_bypass);
         let models = Self::build_model_state(&self.default_model);
-        let config_options = Self::build_config_options(
+        let config_options = self.build_config_options(
             &state.mode,
             &self.default_model,
             allow_bypass,
+            state.compactor_provider.as_deref(),
             state.compactor_model.as_deref(),
         );
 
@@ -778,10 +825,11 @@ where
         let allow_bypass = !is_running_as_root();
         let modes = Self::build_mode_state(current_mode, allow_bypass);
         let models = Self::build_model_state(current_model);
-        let config_options = Self::build_config_options(
+        let config_options = self.build_config_options(
             current_mode,
             current_model,
             allow_bypass,
+            state.compactor_provider.as_deref(),
             state.compactor_model.as_deref(),
         );
 
@@ -829,10 +877,11 @@ where
         let _ = self.notification_sender.send(mode_notification).await;
 
         // Send updated config options
-        let config_options = Self::build_config_options(
+        let config_options = self.build_config_options(
             &mode_id,
             current_model,
             !is_running_as_root(),
+            state.compactor_provider.as_deref(),
             state.compactor_model.as_deref(),
         );
         let config_notification = SessionNotification::new(
@@ -895,7 +944,9 @@ where
         } else if config_id == "compactor_model" {
             // Write to the shared KV store so TrogonAgent (acp-runner) picks it up
             // on the next prompt — both share the same NatsSessionStore instance.
-            state.compactor_model = if value.is_empty() { None } else { Some(value.clone()) };
+            let (provider, model) = parse_compactor_config(&value);
+            state.compactor_provider = provider;
+            state.compactor_model = model;
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "agent: failed to persist compactor_model");
             }
@@ -903,10 +954,11 @@ where
 
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
         let current_model = state.model.as_deref().unwrap_or(&self.default_model);
-        let config_options = Self::build_config_options(
+        let config_options = self.build_config_options(
             current_mode,
             current_model,
             !is_running_as_root(),
+            state.compactor_provider.as_deref(),
             state.compactor_model.as_deref(),
         );
 
@@ -937,10 +989,11 @@ where
         }
 
         let current_mode = if state.mode.is_empty() { "default" } else { &state.mode };
-        let config_options = Self::build_config_options(
+        let config_options = self.build_config_options(
             current_mode,
             &model,
             !is_running_as_root(),
+            state.compactor_provider.as_deref(),
             state.compactor_model.as_deref(),
         );
         let config_notification = SessionNotification::new(
@@ -1066,7 +1119,9 @@ where
             env: src_state.env.clone(),
             messages,
             model: src_state.model.clone(),
+            compactor_provider: src_state.compactor_provider.clone(),
             compactor_model: src_state.compactor_model.clone(),
+            needs_compactor_migration: src_state.needs_compactor_migration,
             mode: src_state.mode.clone(),
             cwd,
             created_at: now_iso8601(),
@@ -1120,10 +1175,11 @@ where
         Ok(ForkSessionResponse::new(sid)
             .modes(Self::build_mode_state(current_mode, allow_bypass))
             .models(Self::build_model_state(current_model))
-            .config_options(Self::build_config_options(
+            .config_options(self.build_config_options(
                 current_mode,
                 current_model,
                 allow_bypass,
+                new_state.compactor_provider.as_deref(),
                 new_state.compactor_model.as_deref(),
             )))
     }
@@ -1148,10 +1204,11 @@ where
         Ok(ResumeSessionResponse::new()
             .modes(Self::build_mode_state(current_mode, allow_bypass))
             .models(Self::build_model_state(current_model))
-            .config_options(Self::build_config_options(
+            .config_options(self.build_config_options(
                 current_mode,
                 current_model,
                 allow_bypass,
+                state.compactor_provider.as_deref(),
                 state.compactor_model.as_deref(),
             )))
     }
@@ -1598,14 +1655,36 @@ mod tests {
 
     #[test]
     fn build_config_options_returns_two_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         // mode + model + compactor_model
         assert_eq!(opts.len(), 3);
     }
 
     #[test]
     fn build_config_options_first_option_is_mode() {
-        let opts = TestAgent::build_config_options("plan", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "plan",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         assert_eq!(opts[0].id.0.as_ref(), "mode");
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             assert_eq!(s.current_value.0.as_ref(), "plan");
@@ -1616,7 +1695,18 @@ mod tests {
 
     #[test]
     fn build_config_options_second_option_is_model() {
-        let opts = TestAgent::build_config_options("default", "claude-opus-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-opus-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         assert_eq!(opts[1].id.0.as_ref(), "model");
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[1].kind {
             assert_eq!(s.current_value.0.as_ref(), "claude-opus-4-6");
@@ -1627,7 +1717,18 @@ mod tests {
 
     #[test]
     fn build_config_options_with_bypass_mode_has_five_select_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", true, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            true,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
                 agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
@@ -1644,7 +1745,18 @@ mod tests {
 
     #[test]
     fn build_config_options_without_bypass_mode_has_four_select_options() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         if let agent_client_protocol::SessionConfigKind::Select(s) = &opts[0].kind {
             let flat: Vec<agent_client_protocol::SessionConfigSelectOption> = match &s.options {
                 agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => v.clone(),
@@ -1866,7 +1978,18 @@ mod tests {
 
     #[test]
     fn build_config_options_returns_mode_and_model() {
-        let opts = TestAgent::build_config_options("default", "claude-sonnet-4-6", false, None);
+        let opts = TestAgent::build_config_options_with_catalog(
+            "default",
+            "claude-sonnet-4-6",
+            false,
+            None,
+            None,
+            ConfigCatalogCtx {
+                catalog: None,
+                callable_providers: None,
+                margin: 1.2,
+            },
+        );
         // mode + model + compactor_model
         assert_eq!(opts.len(), 3);
         let ids: Vec<String> = opts.iter().map(|o| o.id.to_string()).collect();
@@ -3687,6 +3810,7 @@ mod tests {
                     role: "assistant".to_string(),
                     content: vec![AgentCb::Thinking {
                         thinking: "I'm thinking...".to_string(),
+                        signature: None,
                     }],
                 }],
                 ..Default::default()
@@ -3806,6 +3930,7 @@ mod tests {
                         },
                         AgentCb::Thinking {
                             thinking: "some thinking".to_string(),
+                            signature: None,
                         },
                     ],
                 }],
@@ -3904,6 +4029,7 @@ mod tests {
                         // Non-empty thinking — send attempted → fails → return at line 228
                         AgentCb::Thinking {
                             thinking: "deep thought".to_string(),
+                            signature: None,
                         },
                     ],
                 }],

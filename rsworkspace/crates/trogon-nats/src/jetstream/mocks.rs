@@ -24,7 +24,7 @@ use std::vec::IntoIter as VecIntoIter;
 use time::OffsetDateTime;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
-use super::object_store::{ObjectStoreGet, ObjectStorePut};
+use super::object_store::{ObjectStoreDelete, ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
@@ -1426,6 +1426,12 @@ impl JetStreamConsumer for MockJetStreamConsumer {
             .ok_or_else(|| MockError("messages() already called".to_string()))?;
         Ok(rx.boxed())
     }
+
+    async fn num_pending(&self) -> u64 {
+        // The channel-backed stream terminates when the sender drops, so a bounded read
+        // relies on stream end rather than this count; report an unbounded sentinel.
+        u64::MAX
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1517,6 +1523,15 @@ impl ObjectStoreGet for MockObjectStore {
             .find(|(k, _)| k == name)
             .map(|(_, v)| std::io::Cursor::new(v.to_vec()))
             .ok_or_else(|| MockError(format!("object not found: {name}")))
+    }
+}
+
+impl ObjectStoreDelete for MockObjectStore {
+    type Error = MockError;
+
+    async fn delete(&self, name: &str) -> Result<(), MockError> {
+        self.objects.lock().unwrap().retain(|(k, _)| k != name);
+        Ok(())
     }
 }
 

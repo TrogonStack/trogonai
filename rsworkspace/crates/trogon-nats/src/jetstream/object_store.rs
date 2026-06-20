@@ -21,6 +21,12 @@ pub trait ObjectStoreGet: Send + Sync + Clone + 'static {
     fn get(&self, name: &str) -> impl Future<Output = Result<Self::Reader, Self::Error>> + Send;
 }
 
+pub trait ObjectStoreDelete: Send + Sync + Clone + 'static {
+    type Error: Error + Send + Sync;
+
+    fn delete(&self, name: &str) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProvisionObjectStoreError {
     #[error("failed to create object store: {0}")]
@@ -74,5 +80,14 @@ impl ObjectStoreGet for NatsObjectStore {
 
     async fn get(&self, name: &str) -> Result<Self::Reader, Self::Error> {
         self.store.get(name).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl ObjectStoreDelete for NatsObjectStore {
+    type Error = async_nats::jetstream::object_store::DeleteError;
+
+    async fn delete(&self, name: &str) -> Result<(), Self::Error> {
+        self.store.delete(name).await
     }
 }

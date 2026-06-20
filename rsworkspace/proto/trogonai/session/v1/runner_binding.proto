@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/v1/common.proto";
+
+// Runtime runner binding snapshot for a session.
+message RunnerBinding {
+  uint32 schema_version = 1;
+  string session_id = 2;
+  string runner_id = 3;
+  string model_id = 4;
+  RunnerBindingStatus status = 5;
+  google.protobuf.Timestamp attached_at = 6;
+  optional google.protobuf.Timestamp detached_at = 7;
+  optional string detach_reason = 8;
+  optional string capability_snapshot_id = 9;
+}

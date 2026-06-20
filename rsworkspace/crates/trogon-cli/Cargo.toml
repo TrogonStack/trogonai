@@ -15,7 +15,7 @@ workspace = true
 acp-nats               = { workspace = true }
 agent-client-protocol  = { workspace = true, features = ["unstable_session_usage"] }
 anyhow                 = "1"
-async-nats             = { workspace = true, features = ["jetstream"] }
+async-nats             = { workspace = true, features = ["jetstream", "kv"] }
 axum                   = { workspace = true }
 async-trait            = { workspace = true }
 base64                 = "0.22"
@@ -40,9 +40,16 @@ trogon-memory          = { path = "../trogon-memory" }
 trogon-nats            = { workspace = true }
 trogon-registry        = { workspace = true }
 trogon-runner-tools    = { path = "../trogon-runner-tools" }
-trogon-telemetry       = { workspace = true }
+trogonai-capabilities  = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-session-kernel = { workspace = true }
+trogonai-session-projection = { workspace = true }
+trogonai-switching     = { workspace = true }
+trogonai-catalog-client = { workspace = true }
 trogon-tools           = { path = "../trogon-tools" }
 trogon-std             = { workspace = true }
+trogon-telemetry       = { workspace = true }
+time                   = { workspace = true }
 uuid                   = { workspace = true }
 
 [dev-dependencies]

@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+import "trogonai/compactor/v1/compactor.proto";
+
+// Compaction override persisted with the session.
+message CompactionConfig {
+  optional string compactor_model = 1;
+  optional string compactor_provider = 2;
+  // C4 migration: set when a bare `compactor_model` could not be resolved to a
+  // provider (ambiguous/unknown/catalog unavailable). Persists so the next load
+  // retries the backfill; cleared once the provider resolves and is rewritten.
+  bool needs_compactor_migration = 3;
+}
+
+// HTTP/SSE MCP server configuration stored per session.
+message McpHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message McpServer {
+  string name = 1;
+  string url = 2;
+  repeated McpHeader headers = 3;
+}
+
+// Per-tool path policy action.
+enum PolicyAction {
+  POLICY_ACTION_UNSPECIFIED = 0;
+  POLICY_ACTION_ALLOW = 1;
+  POLICY_ACTION_REQUIRE_APPROVAL = 2;
+  POLICY_ACTION_DENY = 3;
+}
+
+message ToolPolicy {
+  string tool = 1;
+  string path_pattern = 2;
+  PolicyAction action = 3;
+}
+
+// Outcome recorded in the permission audit log.
+enum AuditOutcome {
+  AUDIT_OUTCOME_UNSPECIFIED = 0;
+  AUDIT_OUTCOME_ALLOWED = 1;
+  AUDIT_OUTCOME_DENIED = 2;
+  AUDIT_OUTCOME_REQUIRED_APPROVAL = 3;
+  AUDIT_OUTCOME_APPROVED_BY_USER = 4;
+  AUDIT_OUTCOME_DENIED_BY_USER = 5;
+}
+
+message AuditEntry {
+  string timestamp = 1;
+  string tool = 2;
+  string input_summary = 3;
+  AuditOutcome outcome = 4;
+}
+
+message TodoItem {
+  string id = 1;
+  string content = 2;
+  string status = 3;
+}
+
+// Egress allow/deny for outbound MCP connections.
+enum EgressAction {
+  EGRESS_ACTION_UNSPECIFIED = 0;
+  EGRESS_ACTION_ALLOW = 1;
+  EGRESS_ACTION_DENY = 2;
+}
+
+message EgressRule {
+  string host_pattern = 1;
+  EgressAction action = 2;
+}
+
+message EgressPolicy {
+  EgressAction default_action = 1;
+  repeated EgressRule rules = 2;
+}
+
+// Full ACP session state persisted in NATS KV (replaces serde SessionState).
+// Field numbers 1-12 preserved from the initial schema; 13+ appended (ADR 0009).
+message SessionRecord {
+  repeated trogonai.compactor.v1.Message messages = 1;
+  optional string model = 2;
+  CompactionConfig compaction = 3;
+  string mode = 4;
+  string cwd = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  string title = 8;
+  optional string system_prompt = 9;
+  bool disable_builtin_tools = 10;
+  optional string parent_session_id = 11;
+  optional uint64 branched_at_index = 12;
+  repeated McpServer mcp_servers = 13;
+  repeated string additional_roots = 14;
+  repeated string allowed_tools = 15;
+  repeated ToolPolicy tool_policies = 16;
+  EgressPolicy egress_policy = 17;
+  repeated AuditEntry audit_log = 18;
+  optional string terminal_id = 19;
+  optional string terminal_cwd = 20;
+  repeated TodoItem todos = 21;
+  optional string permission_rules_text = 22;
+  uint32 spawn_depth = 23;
+  uint64 token_budget = 24;
+  uint64 total_input_tokens = 25;
+  uint64 total_output_tokens = 26;
+  uint64 total_cache_creation_tokens = 27;
+  uint64 total_cache_read_tokens = 28;
+  // Fields appended for platform-branch SessionState parity (ADR 0009). Simple
+  // fields use native proto types; complex nested types (which derive serde) are
+  // persisted as JSON strings to avoid duplicating their schemas here. An empty
+  // JSON string decodes to the type's default.
+  optional string system_prompt_override = 29;
+  repeated string additional_read_dirs = 30;
+  repeated string tool_allowlist = 31;
+  string env_json = 32;
+  string scope_json = 33;
+  string tool_hooks_json = 34;
+  string background_jobs_json = 35;
+  string openapi_servers_json = 36;
+}

@@ -6,9 +6,10 @@
 use std::fmt;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use tracing::warn;
 use trogon_tools::Message;
+
+use crate::compactor_wire::{CompactWireResponse, decode_compact_response, encode_compact_request};
 
 pub const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
 pub const DEFAULT_TOKEN_BUDGET: usize = 200_000;
@@ -35,39 +36,6 @@ impl fmt::Display for CompactError {
 
 impl std::error::Error for CompactError {}
 
-#[derive(Serialize)]
-struct CompactReq<'a> {
-    messages: &'a [Message],
-    /// Which provider the compactor should summarize with (e.g. "xai",
-    /// "openrouter", "anthropic") so each runner compacts via its own provider.
-    provider: &'a str,
-    /// Session model. The compactor summarizes with this unless `compactor_model`
-    /// is set. Empty string is omitted so the service falls back to its default.
-    #[serde(skip_serializing_if = "str::is_empty")]
-    model: &'a str,
-    /// Same-provider model override. Takes precedence over `model` when set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compactor_model: Option<&'a str>,
-}
-
-#[derive(Deserialize)]
-struct CompactResp {
-    messages: Vec<Message>,
-    #[serde(default)]
-    compacted: bool,
-    #[serde(default)]
-    #[allow(dead_code)]
-    tokens_before: usize,
-    #[serde(default)]
-    #[allow(dead_code)]
-    tokens_after: usize,
-}
-
-#[derive(Deserialize)]
-struct ErrorResp {
-    error: String,
-}
-
 /// Read `TOKEN_BUDGET` and `COMPACT_THRESHOLD_PCT` from the environment.
 pub fn compaction_settings_from_env() -> (usize, u8) {
     let budget = std::env::var("TOKEN_BUDGET")
@@ -91,59 +59,73 @@ pub fn over_threshold(messages: &[Message], token_budget: usize, threshold_pct: 
     estimate_tokens(messages) * 100 >= token_budget.saturating_mul(threshold_pct as usize)
 }
 
-/// Whether a compaction request should be sent to the compactor service.
+/// Session + compactor provider/model selection for a compaction request.
+pub struct CompactProviders<'a> {
+    pub session_provider: &'a str,
+    pub session_model: &'a str,
+    pub compactor_provider: Option<&'a str>,
+    pub compactor_model: Option<&'a str>,
+}
+
+/// Thin, thresholdless compaction call: build request + NATS request-reply + decode.
 ///
-/// Automatic compaction honors the token-budget threshold; manual `/compact` passes
-/// `force = true` to compact regardless of fill level.
-pub fn compaction_requested(messages: &[Message], token_budget: usize, threshold_pct: u8, force: bool) -> bool {
-    force || over_threshold(messages, token_budget, threshold_pct)
+/// Does **not** decide *when* to compact (no threshold check) and does **not**
+/// consolidate per-runner message conversion — callers own those. This helper only
+/// builds the [`encode_compact_request`] payload from `providers` + `context_window`,
+/// performs the NATS request-reply with `timeout`, and decodes the response.
+///
+/// Returns `Ok(Some(response))` with the full [`CompactWireResponse`] when the
+/// compactor compacted, else `Ok(None)`. The rich response preserves the
+/// `fallback_model`, token counts, and `kept_count` so callers can surface the
+/// fallback to the user (ADR 0004) and reuse the original tail. The helper also
+/// emits a `warn!` log whenever a fallback model was used.
+pub async fn request_compaction(
+    nats: &async_nats::Client,
+    messages: &[Message],
+    context_window: Option<u64>,
+    providers: CompactProviders<'_>,
+    timeout: Duration,
+) -> Result<Option<CompactWireResponse>, CompactError> {
+    let payload = encode_compact_request(
+        messages,
+        providers.session_provider,
+        providers.session_model,
+        context_window,
+        providers.compactor_provider,
+        providers.compactor_model,
+    );
+
+    let reply = tokio::time::timeout(timeout, nats.request(COMPACT_SUBJECT, payload.into()))
+        .await
+        .map_err(|_| CompactError::InvalidResponse("compactor request timed out".into()))?
+        .map_err(|e| CompactError::Request(e.to_string()))?;
+
+    let resp = decode_compact_response(&reply.payload)?;
+
+    if let Some(ref fallback) = resp.fallback_model {
+        warn!(fallback_model = %fallback, "compactor used fallback model");
+    }
+
+    if resp.compacted { Ok(Some(resp)) } else { Ok(None) }
 }
 
 /// Request compaction from `trogon-compactor` when history is over the threshold.
 ///
-/// Returns `Ok(None)` when under threshold (unless `force`) or the compactor chose not to compact.
+/// Returns `Ok(None)` when under threshold or the compactor chose not to compact.
 /// Returns `Ok(Some(messages))` when compaction succeeded.
-#[allow(clippy::too_many_arguments)]
 pub async fn maybe_compact(
     nats: &async_nats::Client,
     messages: &[Message],
     token_budget: usize,
     threshold_pct: u8,
-    force: bool,
-    provider: &str,
-    model: &str,
-    compactor_model: Option<&str>,
+    providers: CompactProviders<'_>,
 ) -> Result<Option<Vec<Message>>, CompactError> {
-    if !compaction_requested(messages, token_budget, threshold_pct, force) {
+    if !over_threshold(messages, token_budget, threshold_pct) {
         return Ok(None);
     }
 
-    let payload = serde_json::to_vec(&CompactReq {
-        messages,
-        provider,
-        model,
-        compactor_model,
-    })
-    .map_err(|e| CompactError::Serialize(e.to_string()))?;
-
-    let reply = tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into()))
-        .await
-        .map_err(|_| CompactError::InvalidResponse("compactor request timed out".into()))?
-        .map_err(|e| CompactError::Request(e.to_string()))?;
-
-    if let Ok(err) = serde_json::from_slice::<ErrorResp>(&reply.payload) {
-        warn!(error = %err.error, "compactor returned error");
-        return Err(CompactError::InvalidResponse(err.error));
-    }
-
-    let resp: CompactResp =
-        serde_json::from_slice(&reply.payload).map_err(|e| CompactError::InvalidResponse(e.to_string()))?;
-
-    if resp.compacted {
-        Ok(Some(resp.messages))
-    } else {
-        Ok(None)
-    }
+    let resp = request_compaction(nats, messages, None, providers, COMPACT_TIMEOUT).await?;
+    Ok(resp.map(|r| r.messages))
 }
 
 #[cfg(test)]
@@ -193,32 +175,14 @@ mod tests {
     }
 
     #[test]
-    fn compaction_requested_honors_threshold_when_not_forced() {
-        let msgs = vec![user_msg("hello")];
-        assert!(!compaction_requested(
-            &msgs,
-            DEFAULT_TOKEN_BUDGET,
-            DEFAULT_COMPACT_THRESHOLD_PCT,
-            false,
-        ));
-        let big = "x".repeat(DEFAULT_TOKEN_BUDGET * 4);
-        let big_msgs = vec![user_msg(&big)];
-        assert!(compaction_requested(
-            &big_msgs,
-            DEFAULT_TOKEN_BUDGET,
-            DEFAULT_COMPACT_THRESHOLD_PCT,
-            false,
-        ));
-    }
+    fn gap_c_session_provider_on_wire_from_runner_identity() {
+        use buffa::Message as _;
+        use trogonai_compactor_proto::CompactRequest as ProtoRequest;
 
-    #[test]
-    fn compaction_requested_bypasses_threshold_when_forced() {
-        let msgs = vec![user_msg("hello")];
-        assert!(compaction_requested(
-            &msgs,
-            DEFAULT_TOKEN_BUDGET,
-            DEFAULT_COMPACT_THRESHOLD_PCT,
-            true,
-        ));
+        let payload = encode_compact_request(&[], "xai", "grok-4", None, Some("anthropic"), Some("claude-haiku"));
+        let proto = ProtoRequest::decode_from_slice(&payload).unwrap();
+        assert_eq!(proto.provider, "xai");
+        assert_eq!(proto.compactor_provider.as_deref(), Some("anthropic"));
+        assert_eq!(proto.compactor_model.as_deref(), Some("claude-haiku"));
     }
 }

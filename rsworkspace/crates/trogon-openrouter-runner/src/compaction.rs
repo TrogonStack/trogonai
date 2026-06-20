@@ -1,129 +1,78 @@
-//! Context compaction for openrouter-runner via the `trogon-compactor` NATS
-//! service.
+//! Context compaction for openrouter-runner via the shared `trogon-compactor` helper.
 //!
-//! openrouter is stateless — the full history is sent on every request, so it
-//! must fit the window. Compaction runs PRE-request. The forward conversion to
-//! the compactor's Anthropic-shaped wire format is strictly 1:1 (one runner
-//! message → one wire message).
-//!
-//! **Gap 2**: the reverse conversion (tool_calls / tool-result reconstruction)
-//! is *eliminated*, not just tested. The compactor preserves the kept tail
-//! verbatim and reports `kept_count`; we reuse our OWN original tail messages
-//! and only convert the 2 prepended summary/ack messages (plain text). The wire
-//! types are mirrored locally to avoid a dependency on `trogon-compactor`.
+//! The wire protocol, NATS request-reply, decoding, and fallback logging all live
+//! in [`trogon_runner_tools::request_compaction`]. This module keeps only the
+//! openrouter-specific concerns: converting the runner's [`Message`] type (with its
+//! OpenAI-style `tool_calls`/`tool_call_id`) to/from the shared
+//! [`trogon_tools::Message`], the compaction gate ([`should_compact`]), the request
+//! timeout, and rebuilding the post-compaction history (summary pair + original
+//! tail).
 
 use std::time::Duration;
 
 use async_nats::Client;
-use serde::{Deserialize, Serialize};
+use trogon_runner_tools::{CompactProviders, CompactWireResponse, request_compaction};
+use trogon_tools::{ContentBlock, Message as ToolMessage};
 
 use crate::client::Message;
 
-const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
+const SESSION_PROVIDER: &str = "openrouter";
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 
-// ── Local mirror of the compactor wire format ───────────────────────────────────
-
-#[derive(Serialize, Deserialize)]
-struct WireMessage {
-    role: String,
-    content: Vec<WireBlock>,
+fn to_tool_messages(history: &[Message]) -> Vec<ToolMessage> {
+    history.iter().map(message_to_tool).collect()
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WireBlock {
-    Text {
-        text: String,
-    },
-    ToolUse {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-    },
-}
-
-#[derive(Serialize)]
-struct CompactReq<'a> {
-    messages: Vec<WireMessage>,
-    provider: &'a str,
-    model: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compactor_model: Option<&'a str>,
-    context_window: u64,
-}
-
-#[derive(Deserialize)]
-struct CompactResp {
-    messages: Vec<WireMessage>,
-    #[serde(default)]
-    compacted: bool,
-    #[serde(default)]
-    kept_count: usize,
-}
-
-// ── Forward conversion (1:1) ─────────────────────────────────────────────────────
-
-fn to_wire(history: &[Message]) -> Vec<WireMessage> {
-    history.iter().map(message_to_wire).collect()
-}
-
-fn message_to_wire(m: &Message) -> WireMessage {
+fn message_to_tool(m: &Message) -> ToolMessage {
     if m.role == "tool" {
-        // OpenAI tool result → Anthropic ToolResult under a `user` message.
-        WireMessage {
+        ToolMessage {
             role: "user".into(),
-            content: vec![WireBlock::ToolResult {
+            content: vec![ContentBlock::ToolResult {
                 tool_use_id: m.tool_call_id.clone().unwrap_or_default(),
                 content: m.content.clone(),
+                blocks: vec![],
             }],
         }
     } else if m.role == "assistant" && m.tool_calls.is_some() {
-        // Assistant with tool_calls → one message: optional Text + N ToolUse.
         let mut content = Vec::new();
         if !m.content.is_empty() {
-            content.push(WireBlock::Text {
+            content.push(ContentBlock::Text {
                 text: m.content.clone(),
             });
         }
         for tc in m.tool_calls.as_deref().unwrap_or(&[]) {
-            content.push(WireBlock::ToolUse {
+            content.push(ContentBlock::ToolUse {
                 id: tc.id.clone(),
                 name: tc.name.clone(),
                 input: serde_json::from_str(&tc.arguments).unwrap_or(serde_json::Value::Null),
+                parent_tool_use_id: None,
             });
         }
-        WireMessage {
+        ToolMessage {
             role: "assistant".into(),
             content,
         }
     } else {
-        WireMessage {
+        ToolMessage {
             role: m.role.clone(),
-            content: vec![WireBlock::Text {
+            content: vec![ContentBlock::Text {
                 text: m.content.clone(),
             }],
         }
     }
 }
 
-/// Plain-text projection of a wire message (used only for the summary/ack pair).
-fn wire_text(w: &WireMessage) -> String {
-    w.content
+/// Flatten a shared tool message's text blocks into a single string.
+fn tool_text(m: &ToolMessage) -> String {
+    m.content
         .iter()
         .filter_map(|b| match b {
-            WireBlock::Text { text } => Some(text.as_str()),
+            ContentBlock::Text { text } => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
         .join("")
 }
-
-// ── Token estimation + trigger (Gap 3) ──────────────────────────────────────────
 
 /// Rough token estimate: 1 token ≈ 4 bytes of content + tool-call arguments.
 pub fn estimate_tokens(history: &[Message]) -> u64 {
@@ -140,8 +89,6 @@ pub fn estimate_tokens(history: &[Message]) -> u64 {
     (bytes / 4) as u64
 }
 
-/// Pre-check: only call the service when over 85 % of the window. `None` window
-/// (unknown model) → never compact (conservative; avoids a wrong threshold).
 pub fn should_compact(history: &[Message], context_window: Option<u64>) -> bool {
     match context_window {
         Some(cw) if cw > 0 => estimate_tokens(history) > cw * 85 / 100,
@@ -149,8 +96,6 @@ pub fn should_compact(history: &[Message], context_window: Option<u64>) -> bool 
     }
 }
 
-/// Per-request NATS timeout for the compaction call. Configurable via
-/// `COMPACTOR_REQUEST_TIMEOUT_SECS` (default 60 s). Always bounded (never `None`).
 fn request_timeout() -> Duration {
     let secs = std::env::var("COMPACTOR_REQUEST_TIMEOUT_SECS")
         .ok()
@@ -159,61 +104,19 @@ fn request_timeout() -> Duration {
     Duration::from_secs(secs)
 }
 
-// ── Compaction call (Gap 2: reuse own tail) ──────────────────────────────────────
-
-/// Sends the history to the compactor and returns `(new_history, compacted)`.
-///
-/// On `compacted`, the new history is `[summary, ack]` (converted from the
-/// response — plain text) followed by the runner's OWN original tail of length
-/// `kept_count` — so tool_calls / tool-result pairing is never reconstructed.
-/// On any failure, returns the original history unchanged.
-pub async fn compact(
-    nats: &Client,
-    history: Vec<Message>,
-    model: &str,
-    compactor_model: Option<&str>,
-    context_window: u64,
-) -> (Vec<Message>, bool) {
-    let req = CompactReq {
-        messages: to_wire(&history),
-        provider: "openrouter",
-        model,
-        compactor_model,
-        context_window,
-    };
-    let Ok(payload) = serde_json::to_vec(&req) else {
-        return (history, false);
-    };
-
-    let request = async_nats::Request::new()
-        .payload(payload.into())
-        .timeout(Some(request_timeout()));
-
-    let reply = match nats.send_request(COMPACT_SUBJECT, request).await {
-        Ok(r) => r,
-        Err(_) => return (history, false),
-    };
-    let resp: CompactResp = match serde_json::from_slice(&reply.payload) {
-        Ok(r) => r,
-        Err(_) => return (history, false),
-    };
-
-    rebuild(history, resp)
-}
-
-/// Gap 2 core: build the new history from the response + our own tail.
-fn rebuild(history: Vec<Message>, resp: CompactResp) -> (Vec<Message>, bool) {
-    // Guard the invariants: only rebuild when compacted, the prepended
-    // summary+ack are present, and kept_count maps into our history.
-    if !resp.compacted || resp.messages.len() < 2 || resp.kept_count > history.len() {
+/// Rebuild the post-compaction history: keep the compactor's summary pair (first
+/// two messages) and re-attach the original tail by `kept_count`. Bails to the
+/// original history (`compacted == false`) when the response is malformed.
+fn rebuild(history: Vec<Message>, resp: CompactWireResponse) -> (Vec<Message>, bool) {
+    if resp.messages.len() < 2 || resp.kept_count > history.len() {
         return (history, false);
     }
 
     let mut new_history: Vec<Message> = resp.messages[..2]
         .iter()
-        .map(|w| Message {
-            role: w.role.clone(),
-            content: wire_text(w),
+        .map(|m| Message {
+            role: m.role.clone(),
+            content: tool_text(m),
             prompt_tokens: None,
             completion_tokens: None,
             tool_calls: None,
@@ -224,6 +127,32 @@ fn rebuild(history: Vec<Message>, resp: CompactResp) -> (Vec<Message>, bool) {
     let tail_start = history.len() - resp.kept_count;
     new_history.extend_from_slice(&history[tail_start..]);
     (new_history, true)
+}
+
+/// Sends the history to the compactor service and returns `(new_history,
+/// compacted)`. On any failure (compactor down, timeout, invalid response, or
+/// "not compacted") returns the original history unchanged with
+/// `compacted == false`.
+pub async fn compact(
+    nats: &Client,
+    history: Vec<Message>,
+    model: &str,
+    compactor_provider: Option<&str>,
+    compactor_model: Option<&str>,
+    context_window: u64,
+) -> (Vec<Message>, bool) {
+    let messages = to_tool_messages(&history);
+    let providers = CompactProviders {
+        session_provider: SESSION_PROVIDER,
+        session_model: model,
+        compactor_provider,
+        compactor_model,
+    };
+
+    match request_compaction(nats, &messages, Some(context_window), providers, request_timeout()).await {
+        Ok(Some(resp)) => rebuild(history, resp),
+        Ok(None) | Err(_) => (history, false),
+    }
 }
 
 #[cfg(test)]
@@ -253,8 +182,6 @@ mod tests {
         Message::tool_result(id.into(), content)
     }
 
-    // ── forward conversion 1:1 ────────────────────────────────────────────────
-
     #[test]
     fn forward_conversion_is_one_to_one() {
         let history = vec![
@@ -263,85 +190,59 @@ mod tests {
             tool("c1", "file.txt"),
             Message::assistant("done"),
         ];
-        let wire = to_wire(&history);
-        assert_eq!(wire.len(), history.len(), "must be strictly 1:1");
+        let tool_msgs = to_tool_messages(&history);
+        assert_eq!(tool_msgs.len(), history.len());
     }
 
-    #[test]
-    fn tool_message_becomes_user_tool_result() {
-        let wire = to_wire(&[tool("c1", "out")]);
-        assert_eq!(wire[0].role, "user");
-        assert!(matches!(wire[0].content[0], WireBlock::ToolResult { .. }));
-    }
-
-    #[test]
-    fn assistant_with_two_tool_calls_is_single_message_with_two_tooluse() {
-        let m = assistant_tc("thinking", &[("c1", "a", "{}"), ("c2", "b", "{}")]);
-        let wire = to_wire(&[m]);
-        assert_eq!(wire.len(), 1, "one assistant message");
-        let tool_uses = wire[0]
-            .content
-            .iter()
-            .filter(|b| matches!(b, WireBlock::ToolUse { .. }))
-            .count();
-        assert_eq!(tool_uses, 2);
-        assert!(matches!(wire[0].content[0], WireBlock::Text { .. }), "text first");
-    }
-
-    // ── Gap 2: rebuild reuses own tail, no reverse conversion ─────────────────
-
-    fn resp(summary: &str, kept_count: usize, compacted: bool) -> CompactResp {
-        CompactResp {
+    fn resp(summary: &str, kept_count: usize, compacted: bool) -> CompactWireResponse {
+        CompactWireResponse {
             messages: vec![
-                WireMessage {
+                ToolMessage {
                     role: "user".into(),
-                    content: vec![WireBlock::Text { text: summary.into() }],
+                    content: vec![ContentBlock::Text { text: summary.into() }],
                 },
-                WireMessage {
+                ToolMessage {
                     role: "assistant".into(),
-                    content: vec![WireBlock::Text { text: "ack".into() }],
+                    content: vec![ContentBlock::Text { text: "ack".into() }],
                 },
             ],
             compacted,
+            tokens_before: 0,
+            tokens_after: 0,
             kept_count,
+            fallback_model: None,
         }
     }
 
     #[test]
-    fn rebuild_reuses_original_tail_and_keeps_tool_pairing() {
-        // History: old user, assistant+tool_calls, tool result, recent user.
+    fn rebuild_reuses_original_tail() {
         let history = vec![
             user("old"),
             assistant_tc("", &[("c1", "bash", "{}")]),
             tool("c1", "out"),
             user("recent question"),
         ];
-        // Compactor kept the last 1 message (the recent user turn).
         let (new_history, compacted) = rebuild(history, resp("<context-summary>\nS\n</context-summary>", 1, true));
         assert!(compacted);
-        // [summary, ack, recent user] — 3 messages.
         assert_eq!(new_history.len(), 3);
-        assert_eq!(new_history[0].role, "user");
-        assert!(new_history[0].content.contains("context-summary"));
-        assert_eq!(new_history[1].role, "assistant");
-        // The kept tail is the runner's OWN original message, intact.
-        assert_eq!(new_history[2].role, "user");
         assert_eq!(new_history[2].content, "recent question");
     }
 
     #[test]
-    fn rebuild_not_compacted_returns_history_unchanged() {
+    fn rebuild_bails_on_short_response() {
         let history = vec![user("a"), user("b")];
-        let (out, compacted) = rebuild(history, resp("S", 2, false));
+        let mut r = resp("S", 1, true);
+        r.messages.truncate(1);
+        let (out, compacted) = rebuild(history, r);
         assert!(!compacted);
         assert_eq!(out.len(), 2);
     }
 
     #[test]
-    fn rebuild_rejects_kept_count_larger_than_history() {
+    fn rebuild_bails_when_kept_count_exceeds_history() {
         let history = vec![user("a")];
-        let (out, compacted) = rebuild(history, resp("S", 5, true));
-        assert!(!compacted, "kept_count > history.len() must fall back");
+        let (out, compacted) = rebuild(history, resp("S", 99, true));
+        assert!(!compacted);
         assert_eq!(out.len(), 1);
     }
 
@@ -351,23 +252,27 @@ mod tests {
     }
 
     #[test]
-    fn should_compact_respects_threshold() {
-        let history = vec![user(&"x".repeat(40))]; // ~10 tokens
-        assert!(should_compact(&history, Some(11)));
-        assert!(!should_compact(&history, Some(1000)));
-    }
+    fn payload_carries_session_and_compactor_identity() {
+        // The wire payload is built by the shared helper's `encode_compact_request`;
+        // assert it stamps the openrouter session provider plus the compactor override.
+        use buffa::Message as _;
+        use trogon_runner_tools::encode_compact_request;
+        use trogonai_compactor_proto::CompactRequest as ProtoRequest;
 
-    #[test]
-    fn request_timeout_defaults_to_60s_and_reads_env_override() {
-        unsafe { std::env::remove_var("COMPACTOR_REQUEST_TIMEOUT_SECS") };
-        assert_eq!(request_timeout(), Duration::from_secs(60), "default must be 60s");
-
-        unsafe { std::env::set_var("COMPACTOR_REQUEST_TIMEOUT_SECS", "120") };
-        assert_eq!(request_timeout(), Duration::from_secs(120), "env override must apply");
-
-        unsafe { std::env::set_var("COMPACTOR_REQUEST_TIMEOUT_SECS", "not-a-number") };
-        assert_eq!(request_timeout(), Duration::from_secs(60), "bad value → default");
-
-        unsafe { std::env::remove_var("COMPACTOR_REQUEST_TIMEOUT_SECS") };
+        let history = vec![user("hi")];
+        let messages = to_tool_messages(&history);
+        let bytes = encode_compact_request(
+            &messages,
+            SESSION_PROVIDER,
+            "anthropic/claude-3.5-sonnet",
+            Some(128_000),
+            Some("anthropic"),
+            Some("claude-haiku"),
+        );
+        let proto = ProtoRequest::decode_from_slice(&bytes).unwrap();
+        assert_eq!(proto.provider, "openrouter");
+        assert_eq!(proto.context_window, 128_000);
+        assert_eq!(proto.compactor_provider.as_deref(), Some("anthropic"));
+        assert_eq!(proto.compactor_model.as_deref(), Some("claude-haiku"));
     }
 }

@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
-use trogon_cli::fs::Fs;
 use trogon_cli::RealFs;
+use trogon_cli::fs::Fs;
 use trogon_cli::repl::{expand_mentions, handle_slash_command};
 use trogon_cli::session::{CompactResult, Session, SessionSummary, StreamEvent};
 
@@ -62,9 +62,7 @@ impl Fs for TestFs {
         // For all other paths (e.g. TROGON.md parent) delegate normally.
         if path
             .to_str()
-            .map(|s| {
-                s.ends_with(".config/trogon") || s.ends_with(".config/trogon/")
-            })
+            .map(|s| s.ends_with(".config/trogon") || s.ends_with(".config/trogon/"))
             .unwrap_or(false)
         {
             if let Some(parent) = self.config_file.parent() {
@@ -123,8 +121,7 @@ impl Session for QueuedSession {
     fn prompt(
         &self,
         text: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
-    {
+    ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_ {
         let turns = self.turns.clone();
         let recorded = self.recorded_prompts.clone();
         let text = text.to_string();
@@ -159,16 +156,11 @@ impl Session for QueuedSession {
         self.prompt(text)
     }
 
-    fn set_model(
-        &self,
-        _model_id: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+    fn set_model(&self, _model_id: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         async move { Ok(()) }
     }
 
-    fn compact(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
+    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
         async move {
             Ok(CompactResult {
                 compacted: true,
@@ -187,29 +179,19 @@ impl Session for QueuedSession {
         async move { Ok(()) }
     }
 
-    fn set_cwd(
-        &self,
-        _cwd: &Path,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+    fn set_cwd(&self, _cwd: &Path) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         async move { Ok(()) }
     }
 
-    fn list_sessions(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
+    fn list_sessions(&self) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
         async move { Ok(vec![]) }
     }
 
-    fn session_cwd(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+    fn session_cwd(&self) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
         async move { Ok(None) }
     }
 
-    fn set_mode(
-        &self,
-        _mode: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+    fn set_mode(&self, _mode: &str) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         async move { Ok(()) }
     }
 
@@ -217,8 +199,7 @@ impl Session for QueuedSession {
         &self,
         _config_id: &str,
         _value: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-    {
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         async move { Ok(()) }
     }
 
@@ -290,8 +271,14 @@ fn expand_mentions_integration_multiple_real_files_expanded() {
 
     let result = expand_mentions("use @alpha.rs and @beta.rs", dir.path(), &RealFs);
 
-    assert!(result.contains("fn alpha()"), "alpha.rs content must be injected; got: {result}");
-    assert!(result.contains("fn beta()"), "beta.rs content must be injected; got: {result}");
+    assert!(
+        result.contains("fn alpha()"),
+        "alpha.rs content must be injected; got: {result}"
+    );
+    assert!(
+        result.contains("fn beta()"),
+        "beta.rs content must be injected; got: {result}"
+    );
 }
 
 /// Text with no `@` is returned unchanged — no files are read.
@@ -313,17 +300,27 @@ fn config_set_persists_to_real_file_and_get_reads_it_back() {
     let config_file = dir.path().join("config.json");
     let fs = TestFs::new(config_file.clone());
 
-    let set_out =
-        handle_slash_command("/config", "set theme dark", 0, 0, "test-model", dir.path(), &fs, None, None);
-    assert_eq!(set_out, "theme = dark", "set must confirm the assignment; got: {set_out}");
+    let set_out = handle_slash_command("/config", "set theme dark", 0, 0, "test-model", dir.path(), &fs, None, None);
+    assert_eq!(
+        set_out, "theme = dark",
+        "set must confirm the assignment; got: {set_out}"
+    );
 
     let written = std::fs::read_to_string(&config_file).expect("config file must exist after set");
-    assert!(written.contains("theme"), "config file must contain the key; got: {written}");
-    assert!(written.contains("dark"), "config file must contain the value; got: {written}");
+    assert!(
+        written.contains("theme"),
+        "config file must contain the key; got: {written}"
+    );
+    assert!(
+        written.contains("dark"),
+        "config file must contain the value; got: {written}"
+    );
 
-    let get_out =
-        handle_slash_command("/config", "get theme", 0, 0, "test-model", dir.path(), &fs, None, None);
-    assert_eq!(get_out, "theme = dark", "get must return the persisted value; got: {get_out}");
+    let get_out = handle_slash_command("/config", "get theme", 0, 0, "test-model", dir.path(), &fs, None, None);
+    assert_eq!(
+        get_out, "theme = dark",
+        "get must return the persisted value; got: {get_out}"
+    );
 }
 
 /// `/config set` followed by a second `/config set` on the same key overwrites
@@ -347,8 +344,7 @@ fn config_set_overwrites_existing_value_on_real_disk() {
         None,
     );
 
-    let get_out =
-        handle_slash_command("/config", "get model", 0, 0, "test-model", dir.path(), &fs, None, None);
+    let get_out = handle_slash_command("/config", "get model", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert_eq!(
         get_out, "model = claude-opus-4-7",
         "second set must overwrite first; got: {get_out}"
@@ -362,8 +358,7 @@ fn config_get_missing_key_returns_not_set_from_real_file() {
     let config_file = dir.path().join("config.json");
     let fs = TestFs::new(config_file);
 
-    let out =
-        handle_slash_command("/config", "get nonexistent", 0, 0, "test-model", dir.path(), &fs, None, None);
+    let out = handle_slash_command("/config", "get nonexistent", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert!(out.contains("not set"), "missing key must say 'not set'; got: {out}");
 }
 
@@ -378,7 +373,10 @@ fn config_no_args_shows_path_and_contents_from_real_file() {
 
     let out = handle_slash_command("/config", "", 0, 0, "test-model", dir.path(), &fs, None, None);
     assert!(out.contains("config:"), "output must begin with 'config:'; got: {out}");
-    assert!(out.contains("production"), "output must contain the stored value; got: {out}");
+    assert!(
+        out.contains("production"),
+        "output must contain the stored value; got: {out}"
+    );
 }
 
 // ── /help integration test ───────────────────────────────────────────────────
@@ -388,13 +386,10 @@ fn config_no_args_shows_path_and_contents_from_real_file() {
 #[test]
 fn slash_help_lists_all_required_commands_integration() {
     let dir = tempfile::tempdir().unwrap();
-    let out = handle_slash_command("/help", "", 0, 0, "test-model", dir.path(), &RealFs, None);
+    let out = handle_slash_command("/help", "", 0, 0, "test-model", dir.path(), &RealFs, None, None);
 
     for cmd in &["/help", "/cost", "/clear", "/compact", "/config", "/model", "/init"] {
-        assert!(
-            out.contains(cmd),
-            "/help output must include '{cmd}'; got:\n{out}"
-        );
+        assert!(out.contains(cmd), "/help output must include '{cmd}'; got:\n{out}");
     }
 }
 
@@ -438,13 +433,15 @@ fn cost_reads_model_from_real_config_and_formats_output() {
     );
 
     // 500_000 tokens at $28.5/Mtoken = $14.25
-    let out =
-        handle_slash_command("/cost", "", 500_000, 1_000_000, "claude-opus-4-7", dir.path(), &fs, None, None);
+    let out = handle_slash_command("/cost", "", 500_000, 1_000_000, "claude-opus-4-7", dir.path(), &fs, None, None);
 
     assert!(out.contains("500"), "used tokens must appear; got: {out}");
     assert!(out.contains("1,000"), "context size must appear; got: {out}");
     assert!(out.contains("50%"), "percentage must be 50%; got: {out}");
-    assert!(out.contains("14.25"), "cost must be $14.25 for opus at 500k tokens; got: {out}");
+    assert!(
+        out.contains("14.25"),
+        "cost must be $14.25 for opus at 500k tokens; got: {out}"
+    );
 }
 
 /// `/cost` with no config file (first run) defaults to the sonnet rate.
@@ -455,10 +452,12 @@ fn cost_defaults_to_sonnet_rate_when_no_config_exists() {
     let fs = TestFs::new(config_file);
 
     // 1_000_000 tokens at sonnet rate $6.0/Mtoken = $6.00
-    let out =
-        handle_slash_command("/cost", "", 1_000_000, 2_000_000, "test-model", dir.path(), &fs, None, None);
+    let out = handle_slash_command("/cost", "", 1_000_000, 2_000_000, "test-model", dir.path(), &fs, None, None);
 
-    assert!(out.contains("6.00"), "default sonnet rate must produce $6.00 for 1M tokens; got: {out}");
+    assert!(
+        out.contains("6.00"),
+        "default sonnet rate must produce $6.00 for 1M tokens; got: {out}"
+    );
 }
 
 // ── REPL history persistence ──────────────────────────────────────────────────
@@ -476,13 +475,11 @@ fn repl_history_persists_to_disk_and_reloads_across_sessions() {
 
     // ── 1. First session: add entries and save to disk ────────────────────────
     {
-        let mut rl = rustyline::DefaultEditor::new()
-            .expect("rustyline DefaultEditor::new must succeed");
+        let mut rl = rustyline::DefaultEditor::new().expect("rustyline DefaultEditor::new must succeed");
         rl.add_history_entry("explain the codebase").unwrap();
         rl.add_history_entry("write tests for the parser").unwrap();
         rl.add_history_entry("run the build").unwrap();
-        rl.save_history(&history_file)
-            .expect("save_history must succeed");
+        rl.save_history(&history_file).expect("save_history must succeed");
     }
 
     // History file must exist and be non-empty after save.
@@ -490,8 +487,7 @@ fn repl_history_persists_to_disk_and_reloads_across_sessions() {
         history_file.exists(),
         "history file must exist on disk after save_history"
     );
-    let raw = std::fs::read_to_string(&history_file)
-        .expect("history file must be readable");
+    let raw = std::fs::read_to_string(&history_file).expect("history file must be readable");
     assert!(
         raw.contains("explain the codebase"),
         "history file must contain first entry; got: {raw}"
@@ -507,8 +503,7 @@ fn repl_history_persists_to_disk_and_reloads_across_sessions() {
 
     // ── 2. Second session: load from the same file — must not error ──────────
     {
-        let mut rl = rustyline::DefaultEditor::new()
-            .expect("rustyline DefaultEditor::new must succeed");
+        let mut rl = rustyline::DefaultEditor::new().expect("rustyline DefaultEditor::new must succeed");
         rl.load_history(&history_file)
             .expect("load_history must succeed on existing history file");
     }

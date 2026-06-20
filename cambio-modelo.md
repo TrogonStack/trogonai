@@ -963,6 +963,50 @@ Reglas:
 - cifrado cuando haya datos sensibles;
 - permisos por sesion/workspace.
 
+#### Politica para imagenes URL y Base64
+
+Si una imagen forma parte del contexto necesario para continuar la sesion, Trogonai debe convertirla en artifact propio. Ni una URL externa ni un string Base64 deben ser la verdad canonica de largo plazo.
+
+Imagen por URL:
+
+```text
+fetch -> validate -> hash -> store bytes as artifact
+keep source_url as metadata
+```
+
+Reglas:
+
+- fetchear la URL con limites de timeout, tamano, redirects y content type;
+- validar MIME real y dimensiones cuando aplique;
+- calcular `sha256` sobre los bytes obtenidos;
+- guardar bytes en Object Store/claim-check como artifact propio;
+- preservar `source_url`, `fetched_at`, `mime`, `size_bytes`, `sha256`, `storage_ref` y `availability`;
+- si no se puede fetchear por auth, timeout, tamano, politica o red, guardar solo `external_ref` degradado;
+- si la imagen es indispensable y solo existe como `external_ref`, Switch Safety Gate debe bloquear o pedir confirmacion explicita.
+
+Imagen Base64:
+
+```text
+decode -> validate -> hash -> store bytes as artifact
+keep source_encoding/source_declared_mime as metadata
+```
+
+Reglas:
+
+- decodificar Base64 a bytes crudos antes de persistir;
+- validar MIME real contra MIME declarado, si existe;
+- calcular `sha256` sobre los bytes, no sobre el string Base64;
+- guardar bytes en Object Store/claim-check como artifact propio;
+- preservar `source_encoding=base64`, `declared_mime`, `decoded_mime`, `size_bytes`, `sha256` y `storage_ref`;
+- no guardar el string Base64 como artifact canonico salvo como fallback diagnostico explicitamente degradado;
+- si Base64 no decodifica o excede limites, bloquear, pedir confirmacion o degradar explicitamente.
+
+Motivo:
+
+- una URL externa puede expirar, cambiar contenido, requerir auth o desaparecer;
+- Base64 es un encoding de transporte, no una forma canonica de almacenamiento;
+- bytes validados permiten deduplicacion, integridad, previews, permisos, retention y rehidratacion consistente entre modelos/proveedores.
+
 ### Schema Versioning and Migrations
 
 Todo formato durable debe estar versionado.
@@ -1871,6 +1915,188 @@ Esta seccion convierte la arquitectura en una secuencia de entrega. No reemplaza
 | Config portable implicita | `SessionEnvelope.config` explicito, incluyendo `compactor_model` |
 | Runner import interpreta historia a su manera | Prompt Compiler adapta contexto por capabilities |
 
+### Decisiones cerradas para implementar el switch canonico
+
+Estas decisiones son parte del plan de implementacion. No son preferencias opcionales: definen cuando el cambio de modelo cumple el objetivo de continuar la misma sesion al cambiar a cualquier modelo soportado por los runners existentes.
+
+#### Decisiones arquitectonicas
+
+1. **Session Kernel es la fuente de verdad**
+   - La sesion canonica pertenece a Trogonai.
+   - El estado durable debe vivir en event log, snapshots, Context Twin, artifact refs y metadata canonica.
+   - Los runners pueden mantener caches o sesiones internas, pero no pueden ser la fuente semantica de continuidad.
+   - Criterio de implementacion: despues de un switch, el `session_id` visible de Trogonai no cambia y el estado reconstruible sale del Session Kernel, no del runner anterior.
+
+2. **`session/export` / `session/import` es compatibilidad temporal**
+   - Export/import puede seguir existiendo para shadow mode, migracion y fallback de sesiones legacy.
+   - No cuenta como cumplimiento final del switch canonico.
+   - Criterio de implementacion: mientras `event_log_primary` este desactivado, export/import puede ser fallback con warning; cuando `event_log_primary` este activo para una sesion, un fallo de runner binding canonico debe producir error reparable o rollback controlado, no handoff silencioso.
+
+3. **Identidad visible estable**
+   - El usuario sigue viendo el mismo `session_id` de Trogonai.
+   - El runner puede crear, reemplazar o descartar un runtime binding interno.
+   - Criterio de implementacion: UI/CLI/API no deben exponer un nuevo `session_id` como si fuera una sesion nueva salvo que el usuario pida fork/branch.
+
+4. **Modelo destino permitido solo si existe runner y capability contract**
+   - El target puede ser cualquier modelo de cualquier proveedor soportado por los runners existentes.
+   - "Soportado" significa: runner resoluble, credenciales/configuracion disponibles, capabilities conocidas y adaptacion posible para el estado actual.
+   - Criterio de implementacion: si falta runner, credencial, capability indispensable o certificacion requerida, el switch debe bloquearse o pedir confirmacion explicita segun politica.
+
+5. **Capability Negotiation es obligatoria antes del attach**
+   - El sistema debe comparar capacidades del modelo actual y destino antes de hidratar el runner destino.
+   - Debe producir un adaptation plan durable con degradaciones visibles.
+   - Criterio de implementacion: ningun switch canonico puede registrar `runner_attached` sin un `switch_adaptation_plan_created` asociado.
+
+6. **Switch Safety Gate protege el momento del cambio**
+   - Capability Negotiation decide si el destino puede representar el contexto.
+   - Safety Gate decide si es seguro cambiar ahora.
+   - Criterio de implementacion: tools en progreso, artifacts no persistidos, terminal/proceso indispensable vivo, stream incompleto o capability indispensable ausente deben producir `block` o `requires_confirmation`.
+
+7. **Continuity Checkpoint real para switches de riesgo**
+   - `internal_echo` solo es valido para tests, shadow mode o MVP explicitamente marcado.
+   - En production/high-risk, el checkpoint debe ejecutarse contra el modelo/runner destino o bloquear acciones riesgosas posteriores hasta reparar contexto.
+   - Criterio de implementacion: un switch de alto riesgo no puede considerarse completo sin `continuity_checkpoint_completed` con pass, repaired o degraded acknowledged.
+
+8. **Artifacts y tool outputs no se pierden**
+   - Outputs grandes, imagenes, logs y resultados no portables deben persistirse como artifact refs antes del switch.
+   - Criterio de implementacion: si un dato necesario para continuar existe solo inline/truncado y excede limites, Safety Gate debe bloquear hasta persistirlo o marcar degradacion confirmada.
+
+9. **Terminales, procesos vivos y estado provider-specific no son portables**
+   - No se deben fingir migraciones de PTYs, procesos vivos, provider response IDs, hidden reasoning ni thread IDs internos.
+   - Criterio de implementacion: el switch preserva cwd, comandos relevantes, outputs persistidos y estado resumible; invalida lo vivo/no portable con degradacion visible.
+
+10. **MCP/tools se recalculan por runner/modelo**
+    - La configuracion portable de MCP/tools y permisos viaja en la sesion canonica.
+    - La disponibilidad efectiva se recalcula para el runner/modelo destino.
+    - Criterio de implementacion: si una tool indispensable no esta disponible despues del cambio, Safety Gate bloquea o pide confirmacion.
+
+11. **Session Kernel owns contracts**
+    - Schemas, migraciones, compatibility fixtures y capability registry pertenecen al Session Kernel/Core.
+    - Los runners adaptan/proyectan; no definen contratos canonicos divergentes.
+    - Criterio de implementacion: todo evento/snapshot/projection usado por mas de un runner debe vivir en contratos versionados.
+
+#### Politicas configurables
+
+Estas decisiones no deben hardcodearse como verdades permanentes. Deben vivir en config/feature flags con defaults conservadores y telemetria.
+
+- **Umbral de divergencia shadow**: porcentaje/maximo de sesiones donde snapshot, replay y estado legacy pueden diferir antes de habilitar event-primary.
+- **Block vs confirmation**: matriz por riesgo para decidir si una degradacion bloquea o requiere confirmacion del usuario.
+- **Fallback budget**: numero o tasa maxima de fallbacks a handoff antes de considerar el rollout no saludable.
+- **Certification level por modelo/proveedor**: modelos con tools, artifacts o acciones destructivas deben requerir certificacion mas fuerte que modelos de texto simple.
+- **Checkpoint strictness**: switches simples pueden usar checkpoint ligero; switches con tools, artifacts, terminal o cambios de proveedor deben usar checkpoint real contra destino.
+- **Artifact inline limit**: limite de bytes para inline payloads antes de exigir Object Store/claim-check.
+- **Retention/TTL/SLOs**: duracion de eventos, snapshots, artifacts, leases y retry windows.
+
+Cada politica debe tener:
+
+- default documentado;
+- ubicacion de config (ADR-0007: nombre canonico tipado con precedencia defaults < TOML < env `TROGON_*` < CLI, validacion despues del merge, secretos fuera de config); ningun valor declarado configurable aqui puede quedar hardcodeado;
+- evento o metrica asociada (ADR-0008: OpenTelemetry, instrument con nombre semantico y `service.name`; el binario host debe inicializar el provider OTel para que la metrica realmente se exporte, no solo se registre en un meter no-op);
+- comportamiento de rollback;
+- criterio para cambiar el default.
+
+#### Conformidad con ADRs de plataforma (PR #207)
+
+Este diseno no inventa convenciones donde ya existe una decision de plataforma: adopta los ADRs del repositorio. La conformidad es parte del criterio de "listo", no opcional.
+
+- **ADR-0009 (Protocol Buffers):** todos los contratos canonicos durables y de persistencia schemaless (event log, snapshots KV, artifact metadata, context twin, capability schema, runner binding, prompt projection, `SwitchResult` y el resultado visible) son `.proto` versionados bajo `proto/` con encoding binario en paths internos; los tipos generados viven en un crate con sufijo `-proto` y se convierten a value-objects de dominio en el borde. JSON solo en bordes exentos (export/import legacy, diagnostico), nunca como verdad canonica.
+- **ADR-0002 / ADR-0001 (crate boundaries / taxonomy):** los crates del kernel usan prefijo `trogonai-*` (especificos de producto) y sufijo `-proto` para tipos generados. Los crates de dominio no dependen de apps, servicios, runners ni CLIs; los adapters dependen del dominio, no al reves. Un Service (lifecycle propio, identidad OTel) vive en `services/`, no como cualquier binario.
+- **ADR-0003 (transport taxonomy):** NATS/JetStream es el backbone interno, no el transporte publico por defecto; no se introduce gRPC/REST/HTTP entre componentes internos. Si el resultado del switch se expone como service API publica, debe justificarse por ADR-0003 y usar contrato protobuf por ADR-0009. El nombre del protocolo (ACP/MCP) se mantiene separado del nombre del transporte (NATS/stdio/HTTP/WebSocket).
+- **ADR-0007 (configuration sources):** flags de rollout, thresholds, budgets, TTLs, strictness y perfiles siguen la precedencia y el naming de ADR-0007; TOML es la fuente primaria human-editable.
+- **ADR-0008 (OpenTelemetry):** metricas, trazas y logs por OpenTelemetry (nombres semanticos, `service.name`, export OTLP via collector), setup compartido tipo `trogon-telemetry`, observabilidad bajo modulos `telemetry/`; el host que ejecuta el kernel debe inicializar el provider.
+
+#### Contrato formal de resultado del switch
+
+El switch debe devolver y persistir un resultado normalizado. No debe depender de strings libres en logs o mensajes de UI.
+
+Resultado minimo:
+
+```text
+switched
+blocked
+requires_confirmation
+degraded
+repaired
+rolled_back
+failed_recoverable
+failed_terminal
+```
+
+Semantica esperada:
+
+- `switched`: el modelo destino quedo activo sin degradaciones relevantes.
+- `blocked`: el switch no se ejecuto porque Safety Gate encontro una condicion no segura.
+- `requires_confirmation`: el switch puede ejecutarse, pero requiere confirmacion explicita por perdida/degradacion.
+- `degraded`: el switch se ejecuto con degradaciones visibles y registradas.
+- `repaired`: el checkpoint detecto mismatch y Trogonai reparo la proyeccion antes de continuar.
+- `rolled_back`: Trogonai intento cambiar, fallo una etapa posterior y restauro el binding anterior.
+- `failed_recoverable`: el switch fallo, pero la sesion canonica sigue consistente y se puede reintentar.
+- `failed_terminal`: el switch fallo por una condicion que requiere intervencion o cambio de configuracion antes de reintentar.
+
+Criterio de implementacion:
+
+- cada resultado debe estar representado en tipos/proto;
+- cada resultado debe tener evento canonico o campo durable asociado;
+- cada resultado debe mapear a metricas y al contrato de resultado visible del switch;
+- los tests deben validar que Safety Gate, runner binding, checkpoint y rollback producen resultados consistentes.
+
+#### Contrato de resultado visible del switch
+
+Este contrato reemplaza la frase "UX/API" cuando pueda ser ambigua. Aqui, "API" significa cualquier contrato que expone el resultado del switch: CLI, TUI, evento NATS, struct Rust, protocolo interno o API futura. No implica necesariamente REST/HTTP. Si el resultado se expone como service API publica, debe seguir ADR 0003 y ADR 0009.
+
+Toda superficie que exponga cambio de modelo debe mostrar o devolver suficiente informacion para no crear continuidad falsa.
+
+Respuesta minima:
+
+```json
+{
+  "session_id": "sess_...",
+  "result": "switched",
+  "from_model": "openrouter/claude-sonnet",
+  "to_model": "xai/grok-code-fast",
+  "from_runner": "openrouter",
+  "to_runner": "xai",
+  "runner_changed": true,
+  "degradations": [],
+  "lost_capabilities": [],
+  "fallback_used": false,
+  "fallback_reason": null,
+  "checkpoint": {
+    "required": true,
+    "status": "passed"
+  },
+  "next_action": null
+}
+```
+
+Reglas del contrato visible:
+
+- si `fallback_used=true`, el usuario debe ver que fue handoff/fallback y no switch canonico completo;
+- si `result=blocked`, la respuesta debe incluir `next_action`, por ejemplo esperar tool, persistir artifact, cancelar proceso o elegir otro modelo;
+- si `result=requires_confirmation`, la respuesta debe listar degradaciones y capabilities faltantes;
+- si `result=degraded`, la degradacion debe quedar en snapshot/event log y ser visible en CLI/UI;
+- si `result=failed_recoverable` o `rolled_back`, el `session_id` visible debe seguir estable y el estado canonico debe quedar consistente;
+- si `result=failed_terminal`, la respuesta debe indicar la causa concreta: runner inexistente, credencial faltante, capability indispensable ausente, schema incompatible o artifact irreparable.
+
+Criterio de implementacion:
+
+- el contrato debe existir antes de activar `runner_binding_mode=canonical`;
+- CLI, TUI, eventos NATS, structs Rust y cualquier API futura deben consumir el mismo tipo de resultado;
+- logs y metricas deben derivarse del resultado estructurado, no de parsear texto;
+- golden tests deben cubrir al menos `switched`, `blocked`, `requires_confirmation`, `degraded`, `rolled_back` y `failed_recoverable`.
+
+#### Compatibilidad temporal permitida
+
+Estas excepciones son aceptables solo durante MVP/shadow/rollout:
+
+- legacy store sigue siendo operational source mientras `event_log_primary=false`;
+- export/import puede hidratar runners mientras `runner_binding_mode=handoff` o `shadow`;
+- `internal_echo` puede simular Continuity Checkpoint en tests y shadow mode;
+- runner-owned sessions pueden existir como bindings internos;
+- handoff fallback puede usarse para sesiones legacy con warning explicito.
+
+Estas excepciones deben eliminarse o quedar desactivadas por defecto antes de declarar el switch canonico como production-ready.
+
 ### Implementation Phases
 
 | Fase | Objetivo | Cambios de codigo | Feature flag | Tests requeridos | Criterio de salida |
@@ -1884,7 +2110,8 @@ Esta seccion convierte la arquitectura en una secuencia de entrega. No reemplaza
 | 7 | Switch Safety Gate minimo | Validar estado operativo, pending tools, artifacts y capabilities antes del switch | `switch_safety_gate_enabled` | busy/tool-running/capability tests | switches inseguros se bloquean o advierten |
 | 8 | Runner binding desde sesion canonica | Guardar binding en KV y adjuntar runner desde snapshot/projection | `runner_binding_mode=canonical` | cross-runner integration tests | switch no depende de copiar runner session state |
 | 9 | Continuity Checkpoint alto riesgo | Ejecutar checkpoint y registrar pass/fail/degradation events | `continuity_checkpoint_enabled` | checkpoint pass/fail tests | high-risk switches validan continuidad o degradan |
-| 10 | Event log primary para sesiones nuevas | Usar replay + snapshots como fuente de verdad para sesiones opt-in | `event_log_primary_new_sessions` | replay/recovery tests | sesiones nuevas reconstruyen desde event log |
+| 10 | Politicas operativas, resultado y certificacion | Configurar block/confirm, divergence thresholds, fallback budget, checkpoint strictness, `SwitchResult`, contrato visible de resultado y matriz inicial de modelos | `switch_policy_profile` | policy matrix/result contract/certification tests | decisiones configurables tienen defaults, metrics, contrato visible y rollback |
+| 11 | Event log primary para sesiones nuevas | Usar replay + snapshots como fuente de verdad para sesiones opt-in | `event_log_primary_new_sessions` | replay/recovery tests | sesiones nuevas reconstruyen desde event log |
 
 ### First PRs
 
@@ -1931,25 +2158,36 @@ Esta seccion convierte la arquitectura en una secuencia de entrega. No reemplaza
 9. **PR 9: Canonical runner binding**
    - Guardar binding en KV.
    - Adjuntar runner destino desde snapshot/projection.
-   - Mantener fallback a handoff actual detras de feature flag.
+   - Mantener fallback a handoff actual solo detras de feature flag y con warning explicito.
+   - Garantizar que el `session_id` visible de Trogonai no cambia.
 
-10. **PR 10: Event-primary new sessions**
+10. **PR 10: Switch policy and certification matrix**
+   - Agregar config para block vs confirmation, fallback budget, checkpoint strictness y artifact inline limit.
+   - Definir `SwitchResult` en tipos/proto y mapearlo a eventos, metricas, CLI y API.
+   - Agregar contrato de resultado visible para exponer degradaciones, capabilities perdidas, fallback y checkpoint.
+   - Definir matriz inicial de runners/modelos certificados.
+   - Registrar metrics para shadow divergence, canonical attach success, handoff fallback rate y checkpoint result.
+   - Documentar defaults y rollback.
+
+11. **PR 11: Event-primary new sessions**
    - Activar event log como primary solo para sesiones nuevas y opt-in.
    - Mantener adapter para sesiones viejas.
+   - Desactivar handoff silencioso para sesiones kernel-primary.
 
 ### PR Dependency Order
 
 El orden de implementacion importa. Estos PRs no deben tratarse como una lista paralela:
 
-- PR 1 bloquea PR 4, PR 5, PR 6, PR 7, PR 8, PR 9 y PR 10, porque define los contratos canonicos que todos consumen.
+- PR 1 bloquea PR 4, PR 5, PR 6, PR 7, PR 8, PR 9, PR 10 y PR 11, porque define los contratos canonicos que todos consumen.
 - PR 2 debe completarse antes de validar switches cross-runner, porque `compactor_model` y la configuracion portable forman parte del estado de continuidad.
-- PR 3 debe completarse antes de activar PR 8 o PR 10, porque prompt, switch, cancelacion y attach/detach necesitan serializacion por `session_id`.
+- PR 3 debe completarse antes de activar PR 8, PR 9 o PR 11, porque prompt, switch, cancelacion y attach/detach necesitan serializacion por `session_id`.
 - PR 4 debe existir antes de PR 5 en modo util, porque el snapshot permite comparar materializacion contra replay del event log.
-- PR 5 debe existir antes de PR 10, porque event-primary no debe activarse sin haber corrido event log en shadow mode.
+- PR 5 debe existir antes de PR 11, porque event-primary no debe activarse sin haber corrido event log en shadow mode.
 - PR 6 debe completarse antes de PR 7 y PR 9, porque PromptProjection y runner binding no deben depender de tool IO truncado.
 - PR 7 debe completarse antes de PR 9, porque el runner destino debe recibir una proyeccion canonica y no una importacion best-effort.
 - PR 8 debe completarse antes de PR 9, porque el attach del runner destino debe estar protegido por Safety Gate.
-- PR 9 debe completarse antes de PR 10, porque event-primary necesita bindings canonicos para no volver al ownership del runner.
+- PR 9 debe completarse antes de PR 11, porque event-primary necesita bindings canonicos para no volver al ownership del runner.
+- PR 10 debe completarse antes de PR 11, porque event-primary necesita politicas operativas cerradas para bloquear, confirmar, degradar y hacer rollback de forma consistente.
 
 ### No-Lossy Contract
 
@@ -2004,45 +2242,123 @@ El test pasa solo si:
 - los retries no duplican eventos ni efectos externos;
 - el switch genera Safety Gate result y, cuando aplica, Continuity Checkpoint.
 
-### Open Implementation Decisions
+### Estado de decisiones de implementacion
 
-Antes de empezar los PRs de implementacion hay que cerrar estas decisiones. No cambian la arquitectura; evitan que cada PR invente defaults incompatibles.
+Esta tabla reemplaza la lista generica de decisiones abiertas. Algunas decisiones ya estan cerradas por la implementacion actual; otras son correctas solo para MVP/shadow y deben corregirse antes de declarar switching canonico production-ready.
 
-| Decision | Por que bloquea implementacion | Criterio recomendado |
-| --- | --- | --- |
-| Ubicacion de contratos y tipos Rust | Define ownership, imports, generacion protobuf y migraciones | Crear `trogonai-session-contracts` + `trogonai-session-kernel` o modulos equivalentes; no poner el kernel dentro de `trogon-transcript` tal cual |
-| Nombres de streams y buckets NATS | Evita que event log, KV snapshots, leases y artifacts usen namespaces incompatibles | Seguir convencion actual uppercase/prefijada: `ACP_*`, `AGENT_REGISTRY`, buckets versionados por ambiente/workspace |
-| Feature flags definitivas | Permite rollout, shadow mode y rollback controlado | Centralizarlas en config de Trogonai y documentar default por fase |
-| Runners/modelos iniciales de certificacion | Sin matriz inicial no hay criterio real de switching cross-runner | Elegir al menos dos runners/proveedores y un set minimo de capabilities |
-| Limites, TTLs, retention y SLOs iniciales | Afectan NATS, artifact store, costos y UX | Empezar conservador, medir en shadow mode y ajustar antes de default |
-| Rollout inicial | Define si se migran sesiones existentes o solo sesiones nuevas | Activar event-primary primero solo en sesiones nuevas opt-in |
-| Ownership de schemas, migraciones y capability registry | Evita drift entre runners y core | Session Kernel owns schemas; runners solo adaptan/proyectan |
+| Decision | Estado | Decision correcta para producto final | Trabajo restante |
+| --- | --- | --- | --- |
+| Ubicacion de contratos y tipos Rust | Cerrada | Usar `trogonai-session-contracts` para protos/tipos y `trogonai-session-kernel` para log, snapshots, leases y materializacion. No mover el kernel dentro de `trogon-transcript`. | Mantener compatibility fixtures y migrators por version. |
+| Separacion de kernel/capabilities/switching/artifacts | Cerrada | Mantener crates separados: Session Kernel/Core owns contracts; runners solo adaptan/proyectan. | Evitar que runners definan contratos canonicos propios. |
+| Nombres de streams y buckets NATS | Cerrada para implementacion inicial | Usar prefijo configurable con defaults `ACP_*`: session events, snapshots, leases, usage y artifacts. | Documentar nombres por ambiente y validar collision/retention antes de production. |
+| Feature flags de rollout | Cerrada como secuencia | Defaults conservadores: kernel off o shadow, handoff legacy, canonical opt-in, event-primary opt-in para sesiones nuevas. | Implementar enforcement de promocion/rollback basada en metricas. |
+| Rollout inicial | Cerrada como direccion | Shadow mode -> canonical opt-in -> event-primary para sesiones nuevas -> migracion de sesiones legacy. | No activar default sin thresholds de shadow divergence y fallback budget. |
+| Runners/modelos iniciales de certificacion | Cerrada como proceso | Baseline Claude/Grok puede existir como `Basic`/manual; `SwitchSafe` o `Production` solo por probes/contract tests. | Implementar probes y promocion verificable de la matriz. |
+| Capability baseline manual | Cerrada | Baseline manual debe ser usable para negociacion conservadora, pero no debe equivaler a certificacion real. | Marcar manual/unverified en UX/metrics/policy y bloquear o confirmar si falta verificacion. |
+| Limites, TTLs, retention y SLOs iniciales | Cerrada con valores iniciales revisables | Defaults conservadores para inline artifact, payload, snapshots, leases, retention, replicas y SLOs. | Mantener los defaults actuales como iniciales y ajustarlos solo con datos de shadow. |
+| Ownership de schemas, migraciones y capability registry | Cerrada | Session Kernel/Core owns schemas, migrations, compatibility fixtures y capability registry semantics. | Mantener review centralizado de schema changes. |
+| Fallback de canonical switch a `export/import` | Cerrada; pendiente de implementacion | `export/import` solo es permitido en legacy/shadow/MVP con warning. En `runner_binding_mode=canonical` o sesiones event-primary, fallo canonical debe producir rollback, `failed_recoverable` o `blocked`, no handoff silencioso. | Cambiar `cross_runner` para condicionar fallback por modo y emitir `SwitchResult` estructurado. |
+| Continuity Checkpoint | Cerrada; pendiente de implementacion production | `internal_echo` solo para tests/shadow/MVP. Switches high-risk o production deben validar contra el runner/modelo destino. | Hacer checkpoint real configurable por risk policy y bloquear risky tools si falla. |
+| `SwitchResult` formal | Cerrada como contrato | Debe existir como contrato estructurado con `switched`, `blocked`, `requires_confirmation`, `degraded`, `repaired`, `rolled_back`, `failed_recoverable`, `failed_terminal`. | Agregar enum/tipo compartido en proto/Rust y mapearlo a eventos, metrics, CLI y API. |
+| Contrato de resultado visible del switch | Cerrada como contrato minimo | Toda superficie visible debe exponer `session_id`, `result`, modelos/runners origen/destino, degradations, lost capabilities, fallback, checkpoint y `next_action`. | Crear respuesta unica de switch y golden tests para estados principales. |
+| Block vs confirmation | Cerrada como politica inicial | Lo irreversible, no portable o indispensable faltante bloquea; degradacion aceptable requiere confirmacion. | Implementar matriz configurable por risk/capability/artifact/tool state. |
+| Fallback budget y shadow divergence thresholds | Cerrada con valores iniciales revisables | Canonical no puede promoverse si cae demasiado a handoff o si replay/snapshot divergen mas que el umbral definido. | Implementar thresholds iniciales, metricas y rollback automatico/manual. |
 
-Estas decisiones deben resolverse antes de activar `event_log_primary_new_sessions`. Algunas pueden cerrarse durante PR 1-3, pero no deben quedar abiertas al llegar a runner binding canonico.
+Las decisiones de direccion quedan cerradas. Los items marcados como pendientes de implementacion no son debates abiertos: son trabajo requerido para que el producto cumpla la semantica final de "cambiar modelo dentro de la misma sesion".
+
+### Decisiones finales cerradas
+
+Estas reglas cierran las decisiones de producto para el objetivo final del documento: cambiar en medio de una sesion a cualquier modelo soportado por cualquier proveedor de los runners existentes y continuar el trabajo sin continuidad falsa.
+
+| Area | Decision final |
+| --- | --- |
+| Feature flags de rollout | El default debe ser conservador. `handoff` y `shadow` sirven para migrar; `canonical` y `event-primary` se activan por opt-in y solo se promueven por metricas. |
+| Certificacion de runners/modelos | La matriz baseline puede arrancar en `Basic`, pero `SwitchSafe` y `Production` solo se asignan por probes, contract tests o validacion explicita. |
+| Capability baseline manual | Puede alimentar Capability Negotiation, pero siempre cuenta como manual/no verificada. No debe habilitar switches sin warning cuando la capability es indispensable. |
+| Limites y SLOs | Los defaults iniciales son aceptables solo como punto de partida. Promotion a default requiere datos de shadow y criterios documentados para cambiar limites, TTLs, retention y SLOs. |
+| Fallback canonical -> handoff | Handoff automatico solo se permite en legacy/shadow/MVP con warning. En sesiones canonical/event-primary, el fallo debe devolver rollback, `failed_recoverable` o `blocked`; nunca handoff silencioso. |
+| Continuity Checkpoint | `internal_echo` solo es valido para tests/shadow/MVP. En production o high-risk, el checkpoint debe ejecutarse contra el runner/modelo destino. |
+| `SwitchResult` | Debe ser un contrato compartido y durable, no un struct local ambiguo. Debe cubrir `switched`, `blocked`, `requires_confirmation`, `degraded`, `repaired`, `rolled_back`, `failed_recoverable` y `failed_terminal`. |
+| Resultado visible del switch | Debe existir una respuesta unica para CLI/TUI/eventos NATS/structs Rust/API futura con `session_id`, `result`, modelos/runners origen y destino, degradaciones, capabilities perdidas, fallback, checkpoint y `next_action`. |
+| Block vs confirmation | Lo irreversible, no portable o indispensable faltante bloquea. Lo portable con degradacion aceptable requiere confirmacion explicita. La politica debe ser configurable y testeada. |
+| Fallback budget y shadow divergence | Canonical no se promueve si el fallback a handoff supera el presupuesto o si replay/snapshot divergen mas que el umbral. Ambos umbrales deben existir antes de activar default. |
+
+Regla de revision:
+
+- si una implementacion usa `export/import`, `internal_echo`, baseline manual o matriz `Basic`, debe marcarlo como temporal en eventos, metricas y UX;
+- si el usuario ve `switched`, no puede haber handoff silencioso, checkpoint pendiente critico ni degradacion no reconocida;
+- si el sistema no puede preservar una capability indispensable, debe bloquear o pedir confirmacion, no continuar como si la sesion fuera equivalente;
+- si una politica no tiene threshold o criterio de cierre, no puede usarse para promover canonical/event-primary a default.
+
+Valores iniciales cerrados y revisables:
+
+- **Shadow divergence**: cero tolerancia para perdida canonica, tool IO truncado como verdad, `session_id` cambiado, artifact ref perdido o capability indispensable omitida; divergencias menores de proyeccion pueden permitirse solo si quedan registradas y bajo presupuesto de rollout.
+- **Fallback budget**: fallback a handoff permitido solo en legacy/shadow/MVP; cualquier fallback en una sesion kernel-primary/canonical bloquea promocion a default hasta corregirse.
+- **SLO/TTL/retention/limits**: usar los defaults actuales de implementacion como valores iniciales; cualquier cambio requiere datos de shadow, impacto de costo/UX y actualizacion documentada.
+
+### Reglas de interpretacion semantica
+
+Estas reglas evitan lecturas permisivas de secciones MVP, roadmap o ejemplos. Aplican a todo el documento.
+
+1. **Handoff no cumple la semantica final**
+   - `session/export` / `session/import` puede existir en legacy, shadow, MVP o migracion.
+   - No cuenta como cambio canonico dentro de la misma sesion.
+   - Cualquier uso de handoff debe quedar visible en eventos, metricas y UX.
+
+2. **High-risk requiere checkpoint real o resolucion explicita**
+   - Para production/high-risk, `internal_echo` no es suficiente.
+   - El switch debe terminar con checkpoint real pasado, checkpoint reparado, bloqueo, rollback o confirmacion explicita de degradacion.
+   - Una advertencia pasiva no basta para continuar con acciones riesgosas.
+
+3. **Configurable no significa abierto**
+   - La regla de producto esta cerrada.
+   - Lo configurable son valores como thresholds, budgets, TTLs, SLOs, strictness y perfiles de rollout.
+   - Todo valor configurable debe tener default, metrica, criterio de cambio y rollback.
+
+4. **`switched` no puede ocultar degradacion**
+   - `switched` significa cambio completado sin degradaciones relevantes, sin handoff y sin checkpoint critico pendiente.
+   - Si hubo handoff, fallback, perdida de capability, checkpoint reparado o confirmacion requerida, el resultado debe ser `degraded`, `repaired`, `requires_confirmation`, `rolled_back`, `failed_recoverable` o `blocked`, segun corresponda.
+
+5. **"Cualquier modelo/proveedor" significa soportado por Trogonai**
+   - El objetivo no significa cualquier modelo disponible en internet.
+   - Significa cualquier modelo resoluble por un runner existente, con credenciales/configuracion disponibles, capabilities conocidas y politica/certificacion suficiente.
+   - Si falta una capability indispensable, el switch bloquea o requiere confirmacion explicita de degradacion.
 
 ### Implementation Backlog
 
-Este backlog convierte las decisiones abiertas en trabajo ejecutable. No reemplaza el tracker del equipo; define los items minimos que deben existir antes o durante los primeros PRs.
+Este backlog contiene solo el trabajo que queda despues de clasificar las decisiones anteriores. Los items cerrados por la implementacion actual no deben volver a tratarse como investigacion; deben mantenerse con tests, fixtures y review de compatibilidad.
 
 | Backlog item | Owner sugerido | Depende de | Resultado esperado | Bloquea |
 | --- | --- | --- | --- | --- |
-| Definir crate/module canonico de contratos | Session Kernel/Core | Revision de crates actuales y ADR 0002/0009 | Ruta decidida, preferentemente `trogonai-session-contracts` + `trogonai-session-kernel`, `.proto` owners y fixtures iniciales | PR 1, migraciones, runners adapters |
-| Definir namespace NATS compatible | Platform/Infra | Convenciones `ACP_*`, `ACP_SESSIONS`, `AGENT_REGISTRY` actuales | Nombres uppercase/prefijados para streams, KV buckets y Object Store buckets | PR 3, PR 4, PR 5, artifact store |
-| Definir feature flags definitivas | Core/Product Infra | Roadmap de rollout | Flags, defaults y ubicacion de config documentados | Shadow mode, rollback, rollout gradual |
-| Elegir runners/modelos iniciales | Product/Runtime | Extender `trogon-registry` mas alla de `metadata.models` | Matriz inicial con dos proveedores/runners y capabilities esperadas | Certificacion cross-runner, PR 8, PR 9 |
-| Fijar limites operacionales iniciales | Platform/Infra | NATS deployment target | Max message size, inline artifact limit, TTL, retention, replicas y SLOs iniciales | Production readiness, artifact policy, SLOs |
-| Definir estrategia de rollout | Product/Core | Feature flags y compatibilidad con sesiones actuales | Decision: sesiones nuevas opt-in primero, migracion posterior con adapter | PR 10, migration plan, rollback |
-| Asignar ownership de migrations/schema governance | Core/Runtime | Crate/module canonico de schemas | Responsable de schema review, migrators, fixtures y compatibility tests | Versioning, capability registry freshness, event-primary |
+| Mantener governance de contratos y migraciones | Session Kernel/Core | `trogonai-session-contracts` y migrators existentes | Compatibility fixtures por version, schema review y migrators documentados | Event-primary, upgrades, runners adapters |
+| Documentar namespaces NATS por ambiente | Platform/Infra | Defaults `ACP_*` actuales | Tabla de streams/buckets/object stores por ambiente, retention y collision policy | Production readiness |
+| Implementar thresholds de shadow divergence | Core/Product Infra | Shadow event log + snapshot comparison | Umbral inicial: cero perdida canonica tolerada; divergencias no canonicas deben quedar bajo presupuesto documentado antes de promocion | PR 11, default rollout |
+| Implementar fallback budget | Product/Core | Metrics de canonical attach y handoff fallback | Presupuesto inicial: fallback a handoff solo en legacy/shadow; cualquier fallback en kernel-primary bloquea promocion | Canonical rollout |
+| Corregir fallback canonical -> handoff | Runtime/CLI | `SwitchResult`, feature flags y runner binding mode | Handoff permitido solo en legacy/shadow; kernel-primary usa rollback/error reparable | PR 9, PR 11, semantica final |
+| Implementar checkpoint real para high-risk | Runtime/Switching | Runner checkpoint API y risk policy | `internal_echo` limitado a tests/shadow; production/high-risk valida contra modelo destino | Production switching, risky tools |
+| Promover certificacion por probes | Runtime/Capabilities | Baseline Claude/Grok `Basic` | Probes/contract tests que suben modelos a `SwitchSafe` o `Production` | Switch sin warning, provider confidence |
+| Formalizar `SwitchResult` compartido | Session Kernel/Switching | Contratos proto/Rust | Enum/tipo durable con estados finales, eventos y metrics | Resultado visible, rollback, policy tests |
+| Crear respuesta visible unica de switch | CLI/TUI/API/Product | `SwitchResult` formal | Respuesta con modelos/runners, degradations, lost capabilities, fallback, checkpoint y `next_action` | Producto final, golden tests |
+| Implementar matriz block vs confirmation | Product/Core | Safety Gate y capability/adaptation plan | Politica configurable: irreversible/no portable/indispensable bloquea; degradacion aceptable confirma | PR 10, Safety Gate consistency |
+| Ajustar limites y SLOs con datos reales | Platform/Core | Shadow metrics y NATS deployment target | Defaults revisados para inline limit, TTL, retention, replicas y latency SLOs | Production readiness |
 
-Cada item debe producir una decision concreta, no solo investigacion. Si una decision queda temporal, debe incluir fecha o condicion de revision y no debe bloquear el modo shadow.
+Cada item debe producir una decision o cambio verificable. Si una decision queda temporal, debe incluir la condicion concreta para revisarla y no debe bloquear el modo shadow.
+
+### Nota para implementaciones parciales
+
+Si ya existe una implementacion parcial, migrarla incrementalmente detras de feature flags. No romper sesiones legacy innecesariamente, pero tampoco presentar legacy, handoff o `session/export` / `session/import` como switching canonico final.
+
+La compatibilidad temporal debe quedar visible en eventos, metricas y UX, y debe converger hacia `SwitchResult`, respuesta visible unica, rollback/error reparable en canonical/event-primary y checkpoint real para high-risk.
 
 ### Rollback Strategy
 
 - Cada fase debe estar detras de feature flag.
 - Shadow mode nunca debe bloquear el flujo actual salvo corrupcion detectada.
 - Si event append falla en modo primary, no mutar.
-- Si canonical projection falla, usar fallback solo con warning explicito.
-- Si runner binding canonical falla, volver al handoff actual mientras exista compatibilidad.
+- Si canonical projection falla en legacy/shadow, usar fallback solo con warning explicito.
+- Si canonical projection falla en una sesion event-primary, no mutar y devolver `failed_recoverable` o `blocked`.
+- Si runner binding canonical falla en legacy/shadow, volver al handoff actual solo mientras exista compatibilidad y con warning explicito.
+- Si runner binding canonical falla en `runner_binding_mode=canonical` para una sesion kernel-primary, hacer rollback del binding anterior o devolver error reparable; no hacer handoff silencioso.
 
 ### Implementation Exit Criteria
 
@@ -2054,7 +2370,8 @@ El cambio puede considerarse listo para default cuando:
 - switches inseguros se bloquean o requieren confirmacion;
 - tool IO canonico no se trunca;
 - al menos dos runners externos pasan la matriz basica de switching;
-- rollback por feature flag fue probado.
+- rollback por feature flag fue probado;
+- el codigo cumple los ADRs de plataforma (PR #207): contratos protobuf versionados (ADR-0009), boundaries y naming de crates (ADR-0002/0001), transporte NATS interno sin gRPC/REST entre internos (ADR-0003), configuracion por precedencia ADR-0007 sin valores configurables hardcodeados, y observabilidad OpenTelemetry con provider inicializado en el binario host (ADR-0008).
 
 ## Criterios de aceptacion
 
@@ -2076,7 +2393,7 @@ Un cambio de modelo esta bien implementado si:
 - existe un switch adaptation plan antes de adjuntar el runner destino;
 - existe una evaluacion de Switch Safety antes de registrar `model_switched`;
 - los switches inseguros se bloquean o piden confirmacion;
-- para switches de alto riesgo existe un Continuity Checkpoint pasado o una degradacion advertida;
+- para switches de alto riesgo existe un Continuity Checkpoint real pasado, reparado, bloqueo, rollback o confirmacion explicita de degradacion;
 - el estado no portable se invalida de forma explicita;
 - los artefactos grandes siguen disponibles;
 - los permisos y policies portables se preservan;

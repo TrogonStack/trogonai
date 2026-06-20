@@ -30,6 +30,7 @@ use std::borrow::Cow;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use crate::client_supervisor::AcpClientSupervisor;
 use crate::stream_input::{StreamInputEvent, StreamInputReader};
@@ -86,6 +87,8 @@ struct FileAtHelper {
     /// and cycled by Shift+Tab ([`TabModeHandler`]). `Arc<Mutex>` so the handler
     /// (which must be `Send + Sync`) can share it; no real contention.
     mode: std::sync::Arc<std::sync::Mutex<String>>,
+    /// Catalog-backed `/compact-model` suggestions (provider-qualified ids + `default`).
+    compact_model_suggestions: Arc<RwLock<Vec<String>>>,
 }
 
 impl Default for FileAtHelper {
@@ -104,6 +107,7 @@ impl FileAtHelper {
             cwd,
             history_hinter: HistoryHinter::new(),
             mode,
+            compact_model_suggestions: Arc::new(RwLock::new(Vec::new())),
         }
     }
 }
@@ -115,6 +119,26 @@ impl Completer for FileAtHelper {
 
     fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
         let before = &line[..pos];
+        if let Some(compact_start) = compact_model_completion_start(before) {
+            let partial = &before[compact_start..];
+            let suggestions = self
+                .compact_model_suggestions
+                .read()
+                .map(|s| s.clone())
+                .unwrap_or_default();
+            let partial_lower = partial.to_ascii_lowercase();
+            let mut pairs: Vec<Pair> = suggestions
+                .iter()
+                .filter(|s| s.to_ascii_lowercase().starts_with(&partial_lower))
+                .map(|s| Pair {
+                    display: s.clone(),
+                    replacement: s.clone(),
+                })
+                .collect();
+            pairs.sort_by(|a, b| a.display.cmp(&b.display));
+            return Ok((compact_start, pairs));
+        }
+
         let Some(at_pos) = before.rfind('@') else {
             return Ok((pos, vec![]));
         };
@@ -145,6 +169,21 @@ impl Completer for FileAtHelper {
         pairs.sort_by(|a, b| a.display.cmp(&b.display));
         Ok((at_pos + 1, pairs))
     }
+}
+
+/// Start index of the argument fragment for `/compact-model` tab completion.
+fn compact_model_completion_start(before_cursor: &str) -> Option<usize> {
+    let trimmed = before_cursor.trim_start();
+    let leading_ws = before_cursor.len().saturating_sub(trimmed.len());
+    if !trimmed.starts_with("/compact-model") {
+        return None;
+    }
+    let after_cmd = trimmed.strip_prefix("/compact-model")?;
+    if !after_cmd.is_empty() && !after_cmd.starts_with(' ') {
+        return None;
+    }
+    let arg_start = leading_ws + "/compact-model".len() + after_cmd.find(' ')? + 1;
+    Some(arg_start)
 }
 
 impl Hinter for FileAtHelper {
@@ -481,9 +520,32 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let resumed = resume.is_some();
     let mut session = if let Some(entry) = resume {
         prefix = entry.prefix.clone();
-        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd, &fs).await {
+        // Fase 11: if the session is event-log-primary, reconstruct it from the kernel
+        // event log and hydrate a fresh runner session, instead of loading the runner's
+        // own (possibly stale) state. Returns None in the default legacy mode, so the
+        // common path is unchanged.
+        let event_primary_id = match switcher
+            .resume_event_primary(&prefix, &entry.session_id, &cwd.to_string_lossy())
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("warning: kernel-primary resume failed ({e}) — falling back to runner load");
+                None
+            }
+        };
+        let resume_id = event_primary_id.as_deref().unwrap_or(&entry.session_id);
+        match activate_session(&factory, &mut mcp_manager, &prefix, resume_id, &cwd, &fs).await {
             Ok(s) => {
-                eprintln!("resumed session {} on {prefix}", s.session_id());
+                if event_primary_id.is_some() {
+                    eprintln!(
+                        "resumed session {} from event log on {prefix} (kernel-primary runner session {})",
+                        entry.session_id,
+                        s.session_id()
+                    );
+                } else {
+                    eprintln!("resumed session {} on {prefix}", s.session_id());
+                }
                 s
             }
             Err(e) => {
@@ -532,9 +594,25 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         }
     }
 
+    // Fase 11: mark a freshly created session's routing record so it is event-log-primary
+    // per the configured mode (no-op when the kernel is inactive — the default). This is
+    // what `resume_event_primary` reads to decide whether to reconstruct from the event log.
+    if !resumed && let Err(e) = switcher.mark_session_event_primary(session.session_id()).await {
+        eprintln!("warning: could not mark session routing record: {e}");
+    }
+
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
         let _ = fs.create_dir_all(dir);
+    }
+
+    let compact_model_suggestions: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+    {
+        let suggestions = compact_model_suggestions.clone();
+        let initial_model = session.current_model();
+        tokio::spawn(async move {
+            refresh_compact_model_suggestions(&suggestions, &initial_model).await;
+        });
     }
 
     let mut rl: Editor<FileAtHelper, _> = Editor::new()?;
@@ -784,6 +862,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     &session.current_model(),
                                     session_name.as_deref(),
                                 );
+                                // Fase 11: mark the freshly cleared session's routing record
+                                // (no-op when the kernel is inactive).
+                                if let Err(e) = switcher.mark_session_event_primary(session.session_id()).await {
+                                    eprintln!("warning: could not mark session routing record: {e}");
+                                }
                                 eprintln!("session cleared — new session {}", session.session_id());
                                 spawn_tracker = SpawnTracker::default();
                                 rewind_state.reset();
@@ -914,6 +997,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             .or_else(|| std::env::var("TROGON_NATS_URL").ok())
                             .unwrap_or_else(|| "nats://localhost:4222".to_string());
                         crate::doctor::print_checks(&url).await;
+                    } else if cmd == "/probe" {
+                        // § Capability Registry Freshness: run the contract-test battery
+                        // against the current model/runner and certify it from the verified
+                        // results (promotes out of the unverified `Basic` baseline). Requires
+                        // the session kernel to be enabled.
+                        let model_id = session.current_model();
+                        let cwd_str = cwd
+                            .canonicalize()
+                            .unwrap_or_else(|_| cwd.clone())
+                            .to_string_lossy()
+                            .into_owned();
+                        println!("Probing capabilities of {model_id} on {prefix} …");
+                        match switcher.certify_model(&prefix, &model_id, &cwd_str).await {
+                            Ok(level) => println!("Certified {model_id} → {level}"),
+                            Err(e) => eprintln!("probe failed: {e}"),
+                        }
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = resolve_model_alias(arg.trim());
                         let cwd_str = cwd
@@ -921,8 +1020,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             .unwrap_or_else(|_| cwd.clone())
                             .to_string_lossy()
                             .into_owned();
-                        match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, &cwd_str)
-                            .await
+                        // The from_model for the visible result; captured before the switch
+                        // replaces the active session.
+                        let current_model = session.current_model();
+                        match apply_model_switch(
+                            &mut switcher,
+                            &prefix,
+                            session.session_id(),
+                            &current_model,
+                            &model_id,
+                            &cwd_str,
+                        )
+                        .await
                         {
                             Ok(outcome) => {
                                 if outcome.same_runner {
@@ -937,32 +1046,70 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 &model_id,
                                                 session_name.as_deref(),
                                             );
+                                            let suggestions = compact_model_suggestions.clone();
+                                            let model_for_catalog = model_id.clone();
+                                            tokio::spawn(async move {
+                                                refresh_compact_model_suggestions(&suggestions, &model_for_catalog)
+                                                    .await;
+                                            });
                                         }
                                         Err(e) => eprintln!("Error setting model: {e}"),
                                     }
                                 } else {
-                                    let applied = finish_cross_runner_model_switch(
-                                        &factory,
-                                        session,
-                                        &outcome,
-                                        &model_id,
-                                        &mut mcp_manager,
-                                        &cwd,
-                                        &fs,
-                                        &project_dir,
-                                        session_name.as_deref(),
-                                        skip_permissions,
-                                        client_supervisor.as_ref(),
-                                        None,
-                                    )
-                                    .await;
-                                    session = applied.session;
-                                    prefix = applied.prefix;
-                                    session_mode = applied.session_mode;
+                                    // B5: shut down the OLD session's MCP bridges before
+                                    // switching, otherwise their child processes are leaked
+                                    // across the runner switch (mirrors /clear and /resume).
+                                    let old_session_id = session.session_id().to_string();
+                                    mcp_manager.shutdown_session(&old_session_id).await;
+                                    session.close().await;
+                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
+                                    prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
-                                    compactor_model_sel = None;
-                                    rewind_state.reset();
+                                    // B5: the cross-runner session was created with NO
+                                    // mcp_servers, so MCP tools would be missing. Rebind MCP
+                                    // for the new session (shutdown + spawn_pending +
+                                    // commit_pending + load_session) so its tools are available.
+                                    if let Err(e) = respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await {
+                                        eprintln!("warning: could not bind MCP for new session: {e}");
+                                    }
+                                    // MED-5: the new runner starts a session with mode
+                                    // initialized from TROGON_MODE; keep the REPL's tracked
+                                    // mode in sync so /status and permission prompts match.
+                                    if skip_permissions {
+                                        if let Err(e) = session.set_mode("bypassPermissions").await {
+                                            eprintln!("warning: could not set bypassPermissions: {e}");
+                                        }
+                                        session_mode = "bypassPermissions".to_string();
+                                    } else {
+                                        session_mode =
+                                            std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
+                                    }
+                                    if let Some(ref sup) = client_supervisor
+                                        && let Err(e) = sup.rebind(&outcome.new_prefix, session.session_id()).await
+                                    {
+                                        eprintln!("error rebinding permission client: {e}");
+                                    }
+                                    match session.set_model(&model_id).await {
+                                        Ok(()) => {
+                                            render_switch_visible(&outcome.visible);
+                                            persist_session_index(
+                                                &fs,
+                                                &project_dir,
+                                                &prefix,
+                                                session.session_id(),
+                                                &model_id,
+                                                None,
+                                            );
+                                            let suggestions = compact_model_suggestions.clone();
+                                            let model_for_catalog = model_id.clone();
+                                            tokio::spawn(async move {
+                                                refresh_compact_model_suggestions(&suggestions, &model_for_catalog)
+                                                    .await;
+                                            });
+                                        }
+                                        Err(e) => eprintln!("Error setting model on new runner: {e}"),
+                                    }
                                 }
                             }
                             Err(e) => eprintln!("Error switching model: {e}"),
@@ -2041,6 +2188,9 @@ pub(crate) struct ModelSwitchOutcome {
     pub same_runner: bool,
     pub new_prefix: String,
     pub new_session_id: String,
+    /// The single durable visible switch result (§ Contrato de resultado visible del
+    /// switch). The REPL renders THIS so it never shows false continuity (§2084/§2289).
+    pub visible: trogonai_session_contracts::SwitchVisibleResult,
 }
 
 /// Records cross-runner switch phases for unit tests (ordering assertions).
@@ -2162,7 +2312,7 @@ pub fn resolve_model_alias(input: &str) -> String {
         "grok" => "grok-3".into(),
         "grok-mini" => "grok-3-mini".into(),
         "openrouter" => {
-            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".into())
+            std::env::var("OPENROUTER_DEFAULT_MODEL").unwrap_or_else(|_| "anthropic/claude-sonnet-4".into())
         }
         // Short aliases for the OpenRouter models. These must match the IDs the
         // openrouter runner registers (OPENROUTER_MODELS); update both together.
@@ -2180,16 +2330,18 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     switcher: &mut SW,
     current_prefix: &str,
     current_session_id: &str,
+    current_model: &str,
     model_id: &str,
     cwd: &str,
 ) -> Result<ModelSwitchOutcome, String> {
-    let (new_prefix, new_session_id) = switcher
-        .switch_model(current_prefix, current_session_id, model_id, cwd)
+    let surface = switcher
+        .switch_model(current_prefix, current_session_id, current_model, model_id, cwd)
         .await?;
     Ok(ModelSwitchOutcome {
-        same_runner: new_prefix == current_prefix,
-        new_prefix,
-        new_session_id,
+        same_runner: surface.new_prefix == current_prefix,
+        new_prefix: surface.new_prefix,
+        new_session_id: surface.new_session_id,
+        visible: surface.visible,
     })
 }
 
@@ -2227,7 +2379,7 @@ where
         .unwrap_or_else(|_| cwd.to_path_buf())
         .to_string_lossy()
         .into_owned();
-    match apply_model_switch(switcher, prefix, session.session_id(), &model_id, &cwd_str).await {
+    match apply_model_switch(switcher, prefix, session.session_id(), &session.current_model(), &model_id, &cwd_str).await {
         Ok(outcome) => {
             if outcome.same_runner {
                 match session.set_model(&model_id).await {
@@ -2285,25 +2437,6 @@ where
 /// - No argument   → show current compaction model override (if any)
 /// - `default`     → clear the override; compaction uses the session model
 /// - `<model_id>`  → set the compaction model (must be same provider as current runner)
-pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Result<String, String> {
-    if arg.is_empty() {
-        return Ok("compaction model: default (same as session model)\n\
-             change with: /compact-model <model-id>\n\
-             reset with:  /compact-model default"
-            .to_string());
-    }
-    let value = if arg == "default" { "" } else { arg };
-    session
-        .set_session_config_option("compactor_model", value)
-        .await
-        .map_err(|e| e.to_string())?;
-    if value.is_empty() {
-        Ok("compaction model reset to default (same as session model)".to_string())
-    } else {
-        Ok(format!("compaction model set to: {value}"))
-    }
-}
-
 // ── checkpoint / rewind ───────────────────────────────────────────────────────
 
 async fn handle_checkpoint_command<S: Session>(
@@ -2485,6 +2618,69 @@ fn release_notes_text() -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Render the visible switch result for the CLI (§ Contrato de resultado visible del
+/// switch, §2072-2079). A clean canonical `switched` prints a plain confirmation; a
+/// `degraded`/handoff, `repaired` or any fallback is shown explicitly so the user never
+/// reads a switch as more complete than it was (§2289: a visible `switched` cannot hide a
+/// handoff, a pending checkpoint or an unacknowledged degradation).
+pub(crate) fn render_switch_visible(visible: &trogonai_session_contracts::SwitchVisibleResult) {
+    use trogonai_session_contracts::SwitchResult;
+    let to = &visible.to_model;
+    match visible.result.as_known() {
+        Some(SwitchResult::Switched) => println!("Switched to {to}"),
+        Some(SwitchResult::Repaired) => {
+            println!("Switched to {to} — context repaired before continuing");
+        }
+        Some(SwitchResult::Degraded) => {
+            if visible.fallback_used {
+                println!("Switched to {to} via handoff (canonical session state not migrated)");
+            } else {
+                println!("Switched to {to} — with degradations");
+            }
+        }
+        other => {
+            // blocked / requires_confirmation / rolled_back / failed_* — surfaced verbatim
+            // so the user sees exactly what happened rather than a false "Switched".
+            let label = other
+                .map(switch_result_label_cli)
+                .unwrap_or("unknown");
+            println!("Model switch: {label}");
+        }
+    }
+    for degradation in &visible.degradations {
+        println!("  ⚠ {degradation}");
+    }
+    if !visible.lost_capabilities.is_empty() {
+        println!("  ⚠ lost capabilities: {}", visible.lost_capabilities.join(", "));
+    }
+    if let Some(checkpoint) = visible.checkpoint.as_option()
+        && checkpoint.required
+    {
+        println!("  continuity checkpoint: {}", checkpoint.status);
+    }
+    if let Some(reason) = &visible.fallback_reason {
+        println!("  fallback reason: {reason}");
+    }
+    if let Some(next) = &visible.next_action {
+        println!("  next: {next}");
+    }
+}
+
+fn switch_result_label_cli(result: trogonai_session_contracts::SwitchResult) -> &'static str {
+    use trogonai_session_contracts::SwitchResult;
+    match result {
+        SwitchResult::Unspecified => "unspecified",
+        SwitchResult::Switched => "switched",
+        SwitchResult::Blocked => "blocked",
+        SwitchResult::RequiresConfirmation => "requires confirmation",
+        SwitchResult::Degraded => "degraded",
+        SwitchResult::Repaired => "repaired",
+        SwitchResult::RolledBack => "rolled back",
+        SwitchResult::FailedRecoverable => "failed (recoverable)",
+        SwitchResult::FailedTerminal => "failed (terminal)",
+    }
+}
+
 pub fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
@@ -2504,6 +2700,7 @@ pub fn handle_slash_command<F: Fs>(
 Commands:
   {m}/help{r}               show this help
   {m}/doctor{r}             run health checks (same as `trogon doctor`)
+  {m}/probe{r}              probe + certify the current model's capabilities
   {m}/status{r}             prefix, model, tokens, registered runners
   {m}/cost{r}               show token usage for this session
   {m}/context{r}            show context-window usage for this session
@@ -2964,6 +3161,122 @@ pub(crate) async fn format_status<RS: RegistryStore>(
     format!("prefix: {prefix}\nmodel:   {model}\nsession: {session_id}\n{tokens}\nrunners: {runners}")
 }
 
+// ── /compact-model command handler ────────────────────────────────────────────
+
+/// Handle `/compact-model [<model_id>|default]`.
+///
+/// Catalog-backed listing and provider-qualified selection (M3).
+pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Result<String, String> {
+    let catalog = load_catalog_snapshot().await;
+
+    if arg.is_empty() {
+        let mut out = String::from(
+            "compaction model: default (same as session model)\n\
+             Estos son los modelos con ventana suficiente para compactar esta sesión.\n",
+        );
+        if let Some((snap, providers)) = catalog {
+            let session_window = session_window_for_model(&snap, &session.current_model());
+            let entries = trogonai_catalog_client::compactable_models(trogonai_catalog_client::CompactableFilter {
+                catalog: &snap,
+                callable_providers: &providers,
+                session_window,
+                margin: 1.2,
+            });
+            if entries.is_empty() {
+                out.push_str("(no cross-provider models available — credential snapshot unavailable)\n");
+            } else {
+                for e in &entries {
+                    out.push_str(&format!("  {}::{}  ({})\n", e.provider, e.model_id, e.context_window));
+                }
+            }
+        } else {
+            out.push_str("(catalog unavailable — start trogonai-catalog)\n");
+        }
+        out.push_str("set: /compact-model <provider::model>  |  reset: /compact-model default");
+        return Ok(out);
+    }
+
+    let value = if arg == "default" {
+        String::new()
+    } else if arg.contains("::") {
+        arg.to_string()
+    } else if let Some((snap, _)) = catalog {
+        match trogonai_catalog_client::resolve(&snap, arg) {
+            Ok(q) => trogonai_catalog_client::qualify(&q.provider, &q.model_id),
+            Err(trogonai_catalog_client::CodecError::Ambiguous { id, providers }) => {
+                return Err(format!(
+                    "ambiguous model id '{id}' — qualify as provider::model (candidates: {})",
+                    providers.join(", ")
+                ));
+            }
+            Err(trogonai_catalog_client::CodecError::Unknown { id }) => {
+                return Err(format!("unknown model id '{id}' — use /compact-model to list options"));
+            }
+            Err(trogonai_catalog_client::CodecError::InvalidFormat { value }) => {
+                return Err(format!("invalid qualified value '{value}'"));
+            }
+        }
+    } else {
+        return Err(format!(
+            "unknown model '{arg}' — catalog unavailable; use provider::model format"
+        ));
+    };
+
+    session
+        .set_session_config_option("compactor_model", &value)
+        .await
+        .map_err(|e| e.to_string())?;
+    if value.is_empty() {
+        Ok("compaction model reset to default (same as session model)".to_string())
+    } else {
+        Ok(format!("compaction model set to: {value}"))
+    }
+}
+
+async fn load_catalog_snapshot() -> Option<(trogonai_catalog_client::CatalogSnapshot, Vec<String>)> {
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let client = async_nats::connect(&nats_url).await.ok()?;
+    let js = async_nats::jetstream::new(client);
+    let catalog_client = trogonai_catalog_client::open(&js, trogonai_catalog_client::CatalogClientConfig::default())
+        .await
+        .ok()?;
+    let snap = catalog_client.catalog_snapshot().await.ok()?;
+    let providers = catalog_client.callable_providers().await.ok()?;
+    Some((snap, providers))
+}
+
+fn session_window_for_model(catalog: &trogonai_catalog_client::CatalogSnapshot, model: &str) -> u64 {
+    catalog
+        .entries
+        .iter()
+        .find(|e| e.model_id == model)
+        .map(|e| e.context_window)
+        .unwrap_or(200_000)
+}
+
+async fn refresh_compact_model_suggestions(suggestions: &Arc<RwLock<Vec<String>>>, session_model: &str) {
+    let Some((snap, providers)) = load_catalog_snapshot().await else {
+        return;
+    };
+    let session_window = session_window_for_model(&snap, session_model);
+    let config = trogonai_catalog_client::CatalogClientConfig::default();
+    let entries = trogonai_catalog_client::compactable_models(trogonai_catalog_client::CompactableFilter {
+        catalog: &snap,
+        callable_providers: &providers,
+        session_window,
+        margin: config.margin,
+    });
+    let mut list = vec!["default".to_string()];
+    list.extend(
+        entries
+            .iter()
+            .map(|e| trogonai_catalog_client::qualify(&e.provider, &e.model_id)),
+    );
+    if let Ok(mut guard) = suggestions.write() {
+        *guard = list;
+    }
+}
+
 // ── /config ───────────────────────────────────────────────────────────────────
 
 fn config_path() -> PathBuf {
@@ -3319,6 +3632,44 @@ mod tests {
     }
 
     // ── FileAtHelper tab-completion (uses real fs directly — no Fs trait) ─────
+
+    #[allow(dead_code)]
+    fn test_file_at_helper(cwd: PathBuf) -> FileAtHelper {
+        FileAtHelper {
+            cwd,
+            history_hinter: HistoryHinter::new(),
+            mode: std::sync::Arc::new(std::sync::Mutex::new(String::from("default"))),
+            compact_model_suggestions: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    #[test]
+    fn compact_model_completion_start_finds_argument_offset() {
+        assert_eq!(compact_model_completion_start("/compact-model "), Some(15));
+        assert_eq!(compact_model_completion_start("/compact-model xai::"), Some(15));
+        assert!(compact_model_completion_start("/compact-model").is_none());
+        assert!(compact_model_completion_start("/compact").is_none());
+    }
+
+    #[test]
+    fn file_at_helper_complete_compact_model_filters_catalog() {
+        let suggestions = Arc::new(RwLock::new(vec![
+            "default".into(),
+            "anthropic::claude-haiku".into(),
+            "xai::grok-4".into(),
+        ]));
+        let helper = FileAtHelper {
+            cwd: PathBuf::from("/tmp"),
+            history_hinter: HistoryHinter::new(),
+            mode: std::sync::Arc::new(std::sync::Mutex::new(String::from("default"))),
+            compact_model_suggestions: suggestions,
+        };
+        let history = rustyline::history::DefaultHistory::new();
+        let ctx = Context::new(&history);
+        let (_, pairs) = helper.complete("/compact-model xai", 18, &ctx).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].display, "xai::grok-4");
+    }
 
     #[test]
     fn file_at_helper_complete_no_at_returns_empty() {
@@ -4181,7 +4532,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_same_runner_sets_same_runner_flag() {
         let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
-        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-sonnet-4-6", "claude-opus-4-7", "/ws")
             .await
             .unwrap();
         assert!(outcome.same_runner);
@@ -4192,7 +4543,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_cross_runner_returns_new_prefix_and_session() {
         let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "new-sess-99");
-        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "claude-sonnet-4-6", "grok-3", "/ws")
             .await
             .unwrap();
         assert!(!outcome.same_runner);
@@ -4203,7 +4554,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_error_propagates() {
         let mut switcher = MockRunnerSwitcher::error("no runner found for model: unknown");
-        let err = apply_model_switch(&mut switcher, "acp", "sess-1", "unknown", "/ws")
+        let err = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-sonnet-4-6", "unknown", "/ws")
             .await
             .unwrap_err();
         assert!(err.contains("no runner found for model: unknown"), "got: {err}");
@@ -4212,7 +4563,7 @@ mod tests {
     #[tokio::test]
     async fn model_switch_cross_runner_different_from_current_prefix() {
         let mut switcher = MockRunnerSwitcher::cross_runner("acp.openrouter", "s-42");
-        let outcome = apply_model_switch(&mut switcher, "acp", "s-old", "gpt-4o", "/workspace")
+        let outcome = apply_model_switch(&mut switcher, "acp", "s-old", "claude-sonnet-4-6", "gpt-4o", "/workspace")
             .await
             .unwrap();
         assert!(!outcome.same_runner, "cross-runner must not be same_runner");
@@ -4507,6 +4858,7 @@ mod tests {
             same_runner: false,
             new_prefix: "acp.xai".into(),
             new_session_id: "new-sess".into(),
+            visible: trogonai_session_contracts::SwitchVisibleResult::default(),
         };
 
         let applied = finish_cross_runner_model_switch(
@@ -4549,7 +4901,7 @@ mod tests {
         let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "xai-sess-99");
         let factory = MockSessionFactory::new("default");
 
-        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "claude-sonnet-4-6", "grok-3", "/ws")
             .await
             .unwrap();
 
@@ -4568,7 +4920,7 @@ mod tests {
         let session = std::sync::Arc::new(MockSession::new("sess-1"));
         let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
 
-        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-sonnet-4-6", "claude-opus-4-7", "/ws")
             .await
             .unwrap();
 

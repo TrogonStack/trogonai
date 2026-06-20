@@ -21,6 +21,7 @@ pub mod config;
 pub mod impls;
 pub mod messages;
 pub mod provider;
+pub mod providers;
 pub mod proxy;
 pub mod stream;
 pub mod subjects;

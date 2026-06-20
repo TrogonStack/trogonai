@@ -43,10 +43,7 @@ impl Drop for CancelSubscription {
 /// silently discards all notifications.
 #[async_trait(?Send)]
 pub trait PromptEventClient {
-    async fn session_notification(
-        &self,
-        notif: SessionNotification,
-    ) -> agent_client_protocol::Result<()>;
+    async fn session_notification(&self, notif: SessionNotification) -> agent_client_protocol::Result<()>;
 }
 
 /// Abstraction over the raw NATS transport used by `TrogonAgent`.
@@ -81,17 +78,10 @@ pub trait SessionNotifier: Clone {
     /// `mpsc::Receiver`.  The channel stays open for the lifetime of the
     /// prompt; the spawned forwarder task exits when the receiver is dropped.
     /// Returns `None` if the subscribe call fails.
-    async fn subscribe_steer(
-        &self,
-        subject: String,
-    ) -> Option<tokio::sync::mpsc::Receiver<String>>;
+    async fn subscribe_steer(&self, subject: String) -> Option<tokio::sync::mpsc::Receiver<String>>;
 
     /// Build a notification client bound to the given ACP session.
-    fn make_prompt_client(
-        &self,
-        session_id: AcpSessionId,
-        prefix: AcpPrefix,
-    ) -> Box<dyn PromptEventClient>;
+    fn make_prompt_client(&self, session_id: AcpSessionId, prefix: AcpPrefix) -> Box<dyn PromptEventClient>;
 }
 
 // ── Real NATS implementation ──────────────────────────────────────────────────
@@ -141,10 +131,7 @@ impl SessionNotifier for NatsSessionNotifier {
         Some(CancelSubscription { rx, task })
     }
 
-    async fn subscribe_steer(
-        &self,
-        subject: String,
-    ) -> Option<tokio::sync::mpsc::Receiver<String>> {
+    async fn subscribe_steer(&self, subject: String) -> Option<tokio::sync::mpsc::Receiver<String>> {
         let mut sub = match self.client.subscribe(subject).await {
             Ok(s) => s,
             Err(_) => return None,
@@ -161,18 +148,9 @@ impl SessionNotifier for NatsSessionNotifier {
         Some(rx)
     }
 
-    fn make_prompt_client(
-        &self,
-        session_id: AcpSessionId,
-        prefix: AcpPrefix,
-    ) -> Box<dyn PromptEventClient> {
+    fn make_prompt_client(&self, session_id: AcpSessionId, prefix: AcpPrefix) -> Box<dyn PromptEventClient> {
         Box::new(NatsPromptEventClient {
-            proxy: NatsClientProxy::new(
-                self.client.clone(),
-                session_id,
-                prefix,
-                Duration::from_secs(30),
-            ),
+            proxy: NatsClientProxy::new(self.client.clone(), session_id, prefix, Duration::from_secs(30)),
         })
     }
 }
@@ -183,10 +161,7 @@ struct NatsPromptEventClient {
 
 #[async_trait(?Send)]
 impl PromptEventClient for NatsPromptEventClient {
-    async fn session_notification(
-        &self,
-        notif: SessionNotification,
-    ) -> agent_client_protocol::Result<()> {
+    async fn session_notification(&self, notif: SessionNotification) -> agent_client_protocol::Result<()> {
         self.proxy.session_notification(notif).await
     }
 }
@@ -310,10 +285,7 @@ pub mod mock {
             Some(CancelSubscription::from_receiver(rx))
         }
 
-        async fn subscribe_steer(
-            &self,
-            subject: String,
-        ) -> Option<tokio::sync::mpsc::Receiver<String>> {
+        async fn subscribe_steer(&self, subject: String) -> Option<tokio::sync::mpsc::Receiver<String>> {
             self.steer_subjects.lock().unwrap().push(subject);
             // Simulate a subscription failure if requested.
             if std::mem::replace(&mut *self.steer_fail.lock().unwrap(), false) {
@@ -330,11 +302,7 @@ pub mod mock {
             Some(rx)
         }
 
-        fn make_prompt_client(
-            &self,
-            _session_id: AcpSessionId,
-            _prefix: AcpPrefix,
-        ) -> Box<dyn PromptEventClient> {
+        fn make_prompt_client(&self, _session_id: AcpSessionId, _prefix: AcpPrefix) -> Box<dyn PromptEventClient> {
             Box::new(NullPromptEventClient)
         }
     }
@@ -344,10 +312,7 @@ pub mod mock {
 
     #[async_trait::async_trait(?Send)]
     impl PromptEventClient for NullPromptEventClient {
-        async fn session_notification(
-            &self,
-            _notif: SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _notif: SessionNotification) -> agent_client_protocol::Result<()> {
             Ok(())
         }
     }
@@ -376,7 +341,11 @@ mod tests {
     #[tokio::test]
     async fn schedule_publish_captures_without_delay() {
         let notifier = MockSessionNotifier::new();
-        notifier.schedule_publish("sched.subj".into(), Bytes::from("sched-data"), std::time::Duration::from_secs(99));
+        notifier.schedule_publish(
+            "sched.subj".into(),
+            Bytes::from("sched-data"),
+            std::time::Duration::from_secs(99),
+        );
         let pubs = notifier.published();
         assert_eq!(pubs.len(), 1);
         assert_eq!(pubs[0].0, "sched.subj");

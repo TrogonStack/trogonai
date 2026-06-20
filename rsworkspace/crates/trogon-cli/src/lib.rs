@@ -1,5 +1,8 @@
 #![allow(clippy::manual_async_fn)]
 pub mod app;
+pub mod cancellation;
+pub mod capability_probe;
+pub mod checkpoint_transport;
 pub mod client_supervisor;
 pub mod commands;
 pub mod doctor;
@@ -19,6 +22,7 @@ pub mod session;
 pub mod skills;
 pub mod session_rewind;
 pub mod session_transcript;
+pub mod session_kernel;
 pub mod session_store;
 pub mod settings;
 pub mod spawn_tracker;
@@ -40,7 +44,7 @@ pub use stdio_mcp_bridge::StdioMcpBridge;
 pub use trogon_runner_tools::{HookOutcome, HooksConfig};
 
 pub mod cross_runner;
-pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher};
+pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher, SwitchSurface};
 
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};

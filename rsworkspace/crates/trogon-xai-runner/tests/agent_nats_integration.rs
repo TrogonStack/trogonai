@@ -1151,12 +1151,13 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
                 .await
                 .unwrap();
 
-            // The compactor's 3-message result replaced the large history.
+            // Pre-turn compaction replaces the 25-message history with 3 summary
+            // messages; this turn then adds user + assistant (5 total).
             let hist = agent.test_session_history("s-compact").await;
             assert_eq!(
                 hist.len(),
-                3,
-                "history must be replaced by the compactor's compacted result"
+                5,
+                "compacted history (3) plus this turn's user and assistant"
             );
             assert!(
                 hist[0].content.as_deref().unwrap_or("").contains("context-summary"),
@@ -1168,6 +1169,110 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
                 agent.test_last_response_id("s-compact").await,
                 None,
                 "last_response_id must be cleared after compaction"
+            );
+        })
+        .await;
+}
+
+/// grok-4-fast at ~187k tokens is below the model-aware gate (2M×85% = 1.7M).
+/// A stand-in compactor records requests; compaction must not run on this turn —
+/// the single model-aware path uses the model's real 2M window, so 187k (~9%)
+/// is well under threshold and the large history is preserved verbatim.
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn grok4fast_under_model_aware_threshold_is_not_compacted_e2e() {
+    use std::time::Duration;
+    use agent_client_protocol::SessionId;
+    use trogon_xai_runner::Message;
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // Stand-in compactor: CAPTURES each request payload, then replies with a
+    // 3-message compacted history so the runner applies it.
+    let captured = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let cap = captured.clone();
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or(serde_json::Value::Null);
+            cap.lock().unwrap().push(v);
+            if let Some(reply) = msg.reply {
+                let body = serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "<context-summary>\nsummary\n</context-summary>"}]},
+                        {"role": "assistant", "content": [{"type": "text", "text": "ack"}]},
+                        {"role": "user", "content": [{"type": "text", "text": "recent"}]}
+                    ],
+                    "compacted": true,
+                    "tokens_before": 999_999,
+                    "tokens_after": 100,
+                    "kept_count": 1
+                });
+                responder
+                    .publish(reply, serde_json::to_vec(&body).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Default model grok-4-fast-reasoning → context_window_tokens = 2_000_000.
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4-fast-reasoning", "test-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store))
+        .with_compactor(nats.clone());
+
+    // ~187k-token history: 25 × 30 KB ≈ 750 KB / 4 ≈ 187k tokens — under 1.7M gate.
+    let big = "x".repeat(30_000);
+    let mut history = Vec::new();
+    for i in 0..25 {
+        if i % 2 == 0 {
+            history.push(Message::user(format!("{big}{i}")));
+        } else {
+            history.push(Message::assistant_text(format!("{big}{i}")));
+        }
+    }
+    agent.test_insert_session_with_history("s-fast", "/tmp", history).await;
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            agent
+                .prompt(PromptRequest::new(
+                    SessionId::from("s-fast"),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // The model-aware gate (1.7M) is far above 187k, so compaction must NOT
+            // run: the compactor is never called and the large history is preserved.
+            assert!(
+                captured.lock().unwrap().is_empty(),
+                "compactor must not be called when history is under the model-aware threshold"
+            );
+
+            let hist = agent.test_session_history("s-fast").await;
+            assert!(
+                hist.len() >= 25,
+                "large history must be preserved (got {} messages)",
+                hist.len()
+            );
+            assert!(
+                !hist
+                    .iter()
+                    .any(|m| m.content.as_deref().unwrap_or("").contains("context-summary")),
+                "history must not be replaced by a compaction summary"
             );
         })
         .await;

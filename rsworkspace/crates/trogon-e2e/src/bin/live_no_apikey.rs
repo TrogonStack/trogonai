@@ -205,7 +205,7 @@ async fn test_cross_runner_switcher(nats: &async_nats::Client, js: &jetstream::C
     let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_nats_config(&src_prefix), registry);
 
     let result = switcher
-        .switch_model(&src_prefix, &src_session_id, "live-dst-model", "/tmp")
+        .switch_model(&src_prefix, &src_session_id, "live-src-model", "live-dst-model", "/tmp")
         .await;
 
     match result {
@@ -213,7 +213,11 @@ async fn test_cross_runner_switcher(nats: &async_nats::Client, js: &jetstream::C
             ko(LABEL, &format!("switch_model failed: {e}"));
             false
         }
-        Ok((new_prefix, new_session_id)) => {
+        Ok(trogon_cli::SwitchSurface {
+            new_prefix,
+            new_session_id,
+            ..
+        }) => {
             if new_prefix != dst_prefix {
                 ko(LABEL, &format!("expected prefix {dst_prefix}, got {new_prefix}"));
                 return false;

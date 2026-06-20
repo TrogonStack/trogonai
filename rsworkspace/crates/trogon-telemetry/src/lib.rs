@@ -170,6 +170,88 @@ where
     }
 }
 
+/// Initialize OpenTelemetry providers + file logging for an **interactive** host
+/// (the `trogon` CLI/REPL) WITHOUT attaching a stderr logging layer.
+///
+/// Services use [`init_logger`], which writes structured JSON logs to stderr — that
+/// is correct for a daemon whose stderr *is* its log stream, but it would corrupt an
+/// interactive TUI. The CLI still must initialize the provider so kernel/switch
+/// metrics actually export instead of registering against a no-op meter (ADR-0008 /
+/// cambio-modelo.md Exit Criteria: "el binario host debe inicializar el provider OTel
+/// para que la metrica realmente se exporte"). Logs go to the per-service log file only.
+pub fn init_logger_file_only<E, F, A>(service_name: ServiceName, resource_attributes: A, env: &E, fs: &F)
+where
+    E: ReadEnv,
+    F: CreateDirAll + OpenAppendFile,
+    A: IntoIterator<Item = ResourceAttribute>,
+{
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let (log_file, file_layer_info) = try_open_log_file(service_name, env, fs);
+    let file_layer = log_file.map(|file| {
+        tracing_subscriber::fmt::layer()
+            .with_writer(file)
+            .with_thread_ids(true)
+            .with_span_events(FmtSpan::CLOSE)
+            .json()
+    });
+
+    match try_init_otel(service_name, resource_attributes) {
+        Ok((tracer_provider, meter_provider, logger_provider)) => {
+            opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+            opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+
+            let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
+            let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+            if trace::TRACER_PROVIDER.set(tracer_provider).is_err() {
+                eprintln!("WARN: tracer provider already initialized");
+            }
+
+            opentelemetry::global::set_meter_provider(meter_provider.clone());
+            if metric::METER_PROVIDER.set(meter_provider).is_err() {
+                eprintln!("WARN: meter provider already initialized");
+            }
+
+            let otel_logs_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+            if log::LOGGER_PROVIDER.set(logger_provider).is_err() {
+                eprintln!("WARN: logger provider already initialized");
+            }
+
+            if let Err(e) = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(file_layer)
+                .with(otel_trace_layer)
+                .with(otel_logs_layer)
+                .try_init()
+            {
+                eprintln!("WARN: tracing subscriber already initialized: {e}");
+            }
+
+            tracing::info!("CLI telemetry initialized with OpenTelemetry (file-only logging)");
+            if let Some(msg) = file_layer_info {
+                tracing::info!("{}", msg);
+            }
+        }
+        Err(e) => {
+            if let Err(init_error) = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(file_layer)
+                .try_init()
+            {
+                eprintln!("WARN: tracing subscriber already initialized: {init_error}");
+            }
+
+            tracing::warn!(
+                error = %e,
+                "CLI telemetry initialized without OpenTelemetry (init failed)"
+            );
+            if let Some(msg) = file_layer_info {
+                tracing::info!("{}", msg);
+            }
+        }
+    }
+}
+
 fn try_init_otel<A>(
     service_name: ServiceName,
     resource_attributes: A,

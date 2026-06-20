@@ -22,12 +22,7 @@ pub struct CompactResult {
     pub tokens_after: usize,
 }
 
-async fn ext_method<N: NatsClient>(
-    nats: &N,
-    prefix: &str,
-    method: &str,
-    params: Value,
-) -> anyhow::Result<Value> {
+async fn ext_method<N: NatsClient>(nats: &N, prefix: &str, method: &str, params: Value) -> anyhow::Result<Value> {
     let params_raw = serde_json::value::RawValue::from_string(params.to_string())
         .map_err(|e| anyhow::anyhow!("invalid ext params: {e}"))?;
     let req = ExtRequest::new(method, params_raw.into());
@@ -42,7 +37,10 @@ async fn ext_method<N: NatsClient>(
     // New discriminated envelope: {"result": <body>} | {"error": {code,message,...}}
     if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
         if let Some(err) = env.get("error") {
-            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("ext method error");
+            let msg = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("ext method error");
             return Err(anyhow::anyhow!("{msg}"));
         }
         if let Some(result) = env.get("result") {
@@ -1949,8 +1947,9 @@ mod tests {
     async fn compact_surfaces_runner_error_message() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
-        let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let session = TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![])
+            .await
+            .unwrap();
 
         // Runner replies with a discriminated error envelope.
         let error_reply = serde_json::json!({

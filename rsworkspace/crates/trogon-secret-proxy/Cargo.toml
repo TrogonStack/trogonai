@@ -15,6 +15,7 @@ futures-util = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = "2"
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -23,6 +24,8 @@ trogon-std = { path = "../trogon-std" }
 trogon-vault          = { path = "../trogon-vault",          features = ["hashicorp-vault", "infisical"] }
 trogon-vault-nats     = { path = "../trogon-vault-nats" }
 trogon-vault-approvals = { path = "../trogon-vault-approvals", features = ["slack"] }
+trogonai-catalog-proto = { workspace = true }
+buffa = "=0.7.0"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

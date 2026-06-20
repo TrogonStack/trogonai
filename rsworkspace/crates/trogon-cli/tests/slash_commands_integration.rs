@@ -352,11 +352,11 @@ async fn nats_factory_successive_creates_return_distinct_ids() {
 
 // ── /compact ──────────────────────────────────────────────────────────────────
 
-/// session.compact() delegates compaction to the runner via a single
-/// `session/compact` ext method; the runner owns export→compactor→import and
-/// returns the `CompactResult`.
+/// session.compact() delegates compaction to the runner via the single `session/compact`
+/// ext method (the runner owns export → compactor → import internally) and returns the
+/// runner's CompactResult.
 #[tokio::test]
-async fn compact_export_compactor_import_round_trip() {
+async fn compact_delegates_to_runner_session_compact() {
     let (_container, port) = start_nats().await;
     let nats = connect(port).await;
     let nats_bg = connect(port).await;
@@ -459,8 +459,8 @@ async fn model_slash_command_cross_runner_switch_via_real_nats() {
     );
     let mut switcher = CrossRunnerSwitcher::new(nats, base_config, registry);
 
-    let (new_prefix, new_session_id) = switcher
-        .switch_model("acp.src", "old-session", "grok-4", "/workspace")
+    let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+        .switch_model("acp.src", "old-session", "sonnet", "grok-4", "/workspace")
         .await
         .expect("switch_model must succeed via real NATS");
 
@@ -495,8 +495,8 @@ async fn model_slash_command_same_runner_returns_unchanged_session() {
     );
     let mut switcher = CrossRunnerSwitcher::new(nats, base_config, registry);
 
-    let (new_prefix, new_session_id) = switcher
-        .switch_model("acp.acp", "current-session", "claude-opus-4-6", "/workspace")
+    let trogon_cli::cross_runner::SwitchSurface { new_prefix, new_session_id, .. } = switcher
+        .switch_model("acp.acp", "current-session", "sonnet", "claude-opus-4-6", "/workspace")
         .await
         .expect("same-runner switch_model must succeed");
 
@@ -580,8 +580,8 @@ async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
     let mut switcher = CrossRunnerSwitcher::new(nats.clone(), base_config, registry);
 
     // /model: switch from acp.src to grok-4
-    let (new_prefix, _) = switcher
-        .switch_model("acp.src", "old-session", "grok-4", "/workspace")
+    let trogon_cli::cross_runner::SwitchSurface { new_prefix, .. } = switcher
+        .switch_model("acp.src", "old-session", "sonnet", "grok-4", "/workspace")
         .await
         .expect("switch_model must succeed");
 
@@ -601,8 +601,9 @@ async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
     );
 }
 
-/// compact() on a session created via attach_session sends the `session/compact`
-/// ext method with the attached session id.
+/// compact() on a session created via attach_session sends the `session/compact` ext
+/// request with the attached session id (not a freshly generated one) and returns the
+/// runner's CompactResult.
 #[tokio::test]
 async fn compact_on_attached_session_uses_correct_session_id() {
     let (_container, port) = start_nats().await;
@@ -617,20 +618,20 @@ async fn compact_on_attached_session_uses_correct_session_id() {
 
     let compact_handle = tokio::spawn(async move { session.compact().await.unwrap() });
 
-    let req_msg = tokio::time::timeout(TIMEOUT, compact_sub.next())
+    let compact_msg = tokio::time::timeout(TIMEOUT, compact_sub.next())
         .await
         .expect("timed out waiting for session/compact")
         .expect("no session/compact message");
-    // ExtRequest is `#[serde(transparent)]` with `method` skipped (the method is
-    // carried in the NATS subject), so the payload IS the params object directly —
-    // sessionId is at the top level, not nested under a "params" key.
-    let req: serde_json::Value = serde_json::from_slice(&req_msg.payload).unwrap();
-    assert_eq!(req["sessionId"].as_str().unwrap(), "attached-for-compact");
-    if let Some(reply) = req_msg.reply {
+    // ExtRequest is `#[serde(transparent)]` with `method` skipped (the method is carried
+    // in the NATS subject), so the payload IS the params object directly — sessionId is
+    // at the top level, not nested under a "params" key.
+    let compact_req: serde_json::Value = serde_json::from_slice(&compact_msg.payload).unwrap();
+    assert_eq!(compact_req["sessionId"].as_str().unwrap(), "attached-for-compact");
+    if let Some(reply) = compact_msg.reply {
         nats_bg
             .publish(
                 reply,
-                ext_response(r#"{"compacted":false,"tokens_before":0,"tokens_after":0}"#).into(),
+                ext_response(r#"{"compacted":false,"tokens_before":10,"tokens_after":10}"#).into(),
             )
             .await
             .unwrap();
@@ -641,8 +642,8 @@ async fn compact_on_attached_session_uses_correct_session_id() {
         result,
         CompactResult {
             compacted: false,
-            tokens_before: 0,
-            tokens_after: 0,
+            tokens_before: 10,
+            tokens_after: 10,
         }
     );
 }

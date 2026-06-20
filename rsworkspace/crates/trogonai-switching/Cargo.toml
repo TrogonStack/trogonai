@@ -1,0 +1,44 @@
+[package]
+name = "trogonai-switching"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv"] }
+async-trait = { workspace = true }
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+bytes = { workspace = true }
+confique = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+thiserror = "2"
+time = { workspace = true }
+tokio = { workspace = true, features = ["time", "sync"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-registry = { workspace = true }
+trogon-service-config = { workspace = true }
+trogonai-artifacts = { workspace = true }
+trogonai-capabilities = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-session-kernel = { workspace = true }
+trogonai-session-projection = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+buffa = "=0.7.0"
+buffa-types = "=0.7.0"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-registry = { workspace = true, features = ["test-support"] }
+trogonai-session-kernel = { workspace = true, features = ["test-support"] }
+trogonai-switching = { path = ".", features = ["test-support"] }
+
+[features]
+default = []
+test-support = []

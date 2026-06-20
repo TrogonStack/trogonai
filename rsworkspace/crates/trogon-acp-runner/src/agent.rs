@@ -5,18 +5,15 @@ use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats::nats::{ExtSessionReady, session as session_subjects};
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock,
-    EmbeddedResourceResource, Error, ErrorCode, ExtRequest, ExtResponse, ForkSessionRequest,
-    ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigSelectOption, SessionForkCapabilities, SessionId,
-    SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
-    SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-    SetSessionModelResponse, StopReason,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse, CancelNotification,
+    CloseSessionRequest, CloseSessionResponse, ContentBlock, EmbeddedResourceResource, Error, ErrorCode, ExtRequest,
+    ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, ModelInfo, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
+    SessionCapabilities, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionMode, SessionModeState,
+    SessionModelState, SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -27,16 +24,18 @@ use trogon_agent_core::tools::{ToolDef, all_tool_defs, exit_plan_mode_tool_def};
 
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
-use trogon_runner_tools::egress::EgressPolicy;
-use trogon_runner_tools::permission_rules::PermissionRules;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{AccumulatingPromptClient, CancelSubscription, PromptEventClient, SessionNotifier};
-use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
 use trogon_runner_tools::build_mode_permission_checker;
-use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionState, SessionStore, append_audit_entries, now_iso8601};
+use trogon_runner_tools::egress::EgressPolicy;
+use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
+use trogon_runner_tools::permission_rules::PermissionRules;
+use trogon_runner_tools::session_store::{
+    AuditEntry, NatsSessionStore, SessionState, SessionStore, append_audit_entries, now_iso8601,
+};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
+use trogon_runner_tools::{CompactError, CompactProviders, parse_compactor_config, request_compaction};
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
-use trogon_runner_tools::CompactError;
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -45,6 +44,9 @@ pub struct GatewayConfig {
     pub token: String,
     pub extra_headers: Vec<(String, String)>,
 }
+
+/// Session provider identity for the acp-runner (Anthropic).
+const SESSION_PROVIDER: &str = "anthropic";
 
 /// Returns the context window token limit for a given model ID.
 ///
@@ -103,19 +105,15 @@ fn user_message_from_request(req: &PromptRequest) -> Message {
                 text: format!("[@{}]({})", rl.name, rl.uri),
             }),
             ContentBlock::Resource(er) => match &er.resource {
-                EmbeddedResourceResource::TextResourceContents(t) => {
-                    Some(AgentContentBlock::Text {
-                        text: format!("\n<context ref=\"{}\">\n{}\n</context>", t.uri, t.text),
-                    })
-                }
-                EmbeddedResourceResource::BlobResourceContents(b) => {
-                    Some(AgentContentBlock::Image {
-                        source: ImageSource::Base64 {
-                            media_type: b.mime_type.clone().unwrap_or_default(),
-                            data: b.blob.clone(),
-                        },
-                    })
-                }
+                EmbeddedResourceResource::TextResourceContents(t) => Some(AgentContentBlock::Text {
+                    text: format!("\n<context ref=\"{}\">\n{}\n</context>", t.uri, t.text),
+                }),
+                EmbeddedResourceResource::BlobResourceContents(b) => Some(AgentContentBlock::Image {
+                    source: ImageSource::Base64 {
+                        media_type: b.mime_type.clone().unwrap_or_default(),
+                        data: b.blob.clone(),
+                    },
+                }),
                 _ => None,
             },
             _ => None,
@@ -147,10 +145,7 @@ fn invalid_session_id(e: acp_nats::session_id::SessionIdError) -> Error {
 
 /// Estimates the token count of a message list using the heuristic `bytes / 4`.
 fn estimate_token_count(messages: &[Message]) -> u64 {
-    serde_json::to_string(messages)
-        .map(|s| s.len() as u64)
-        .unwrap_or(0)
-        / 4
+    serde_json::to_string(messages).map(|s| s.len() as u64).unwrap_or(0) / 4
 }
 
 /// Sends the conversation history to `trogon-compactor` via NATS request-reply.
@@ -161,49 +156,6 @@ fn estimate_token_count(messages: &[Message]) -> u64 {
 /// Times out after 25 s (well under the registry TTL of 30 s) so that a slow or
 /// absent compactor never holds the session semaphore long enough to cause the
 /// registry entry to expire or the CLI to time out.
-/// Request sent to `trogon-compactor`. acp is Anthropic-only, so `provider` is
-/// always `"anthropic"`; the service compacts with the session `model` unless a
-/// same-provider `compactor_model` override is set.
-#[derive(serde::Serialize)]
-struct CompactReq<'a> {
-    messages: &'a [Message],
-    provider: &'a str,
-    model: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compactor_model: Option<&'a str>,
-}
-
-#[derive(serde::Deserialize)]
-struct CompactResp {
-    messages: Vec<Message>,
-    #[serde(default)]
-    compacted: bool,
-    #[serde(default)]
-    tokens_before: usize,
-    #[serde(default)]
-    tokens_after: usize,
-    /// Number of kept trailing messages (Gap 2). acp ignores it — uses
-    /// `messages` directly since its format is already Anthropic-shaped.
-    #[serde(default)]
-    #[allow(dead_code)]
-    kept_count: usize,
-}
-
-/// Builds the JSON payload for a compaction request. Extracted so the wire
-/// contract (provider/model/compactor_model) is unit-testable without NATS.
-fn build_compact_payload(
-    messages: &[Message],
-    model: &str,
-    compactor_model: Option<&str>,
-) -> Result<Vec<u8>, serde_json::Error> {
-    serde_json::to_vec(&CompactReq {
-        messages,
-        provider: "anthropic",
-        model,
-        compactor_model,
-    })
-}
-
 /// Requests compaction from `trogon-compactor`.
 ///
 /// Returns `Ok(Some(messages))` when the compactor compacted, `Ok(None)` when it
@@ -212,45 +164,47 @@ fn build_compact_payload(
 /// caller pick its policy: the manual `/compact` handler propagates the `Err` so
 /// the user sees the compactor-down failure, while the auto-path degrades and
 /// continues uncompacted in the background.
+///
+/// The shared [`request_compaction`] helper owns building the request, the NATS
+/// request-reply, and decoding. This per-runner wrapper keeps acp-specific
+/// concerns: the session provider identity, the model's `context_window_tokens`,
+/// the 25 s timeout (well under the 30 s registry TTL), and `session_id`-scoped
+/// telemetry. It does **not** decide *when* to compact — the threshold check lives
+/// at the call sites.
 async fn compact_messages(
     nats: &async_nats::Client,
     messages: &[Message],
     session_id: &str,
     model: &str,
+    compactor_provider: Option<&str>,
     compactor_model: Option<&str>,
 ) -> Result<Option<Vec<Message>>, CompactError> {
-    let payload = build_compact_payload(messages, model, compactor_model)
-        .map_err(|e| CompactError::Serialize(e.to_string()))?;
-
-    let reply = match tokio::time::timeout(
+    let outcome = request_compaction(
+        nats,
+        messages,
+        Some(context_window_tokens(model)),
+        CompactProviders {
+            session_provider: SESSION_PROVIDER,
+            session_model: model,
+            compactor_provider,
+            compactor_model,
+        },
         std::time::Duration::from_secs(25),
-        nats.request("trogon.compactor.compact", payload.into()),
     )
-    .await
-    {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Err(CompactError::Request(e.to_string())),
-        Err(_elapsed) => {
-            return Err(CompactError::InvalidResponse(
-                "compactor did not respond within 25 s".into(),
-            ));
-        }
-    };
+    .await?;
 
-    let resp: CompactResp = serde_json::from_slice(&reply.payload)
-        .map_err(|e| CompactError::InvalidResponse(e.to_string()))?;
+    let new_messages = outcome.map(|r| r.messages);
 
-    if resp.compacted {
+    if let Some(ref new_msgs) = new_messages {
         info!(
             session_id,
-            tokens_before = resp.tokens_before,
-            tokens_after = resp.tokens_after,
+            tokens_before = estimate_token_count(messages),
+            tokens_after = estimate_token_count(new_msgs),
             "context compacted"
         );
-        Ok(Some(resp.messages))
-    } else {
-        Ok(None)
     }
+
+    Ok(new_messages)
 }
 
 /// Agent implementation that handles all ACP methods via NATS.
@@ -293,6 +247,12 @@ pub struct TrogonAgent<
     /// Read once from `COMPACT_THRESHOLD_PCT` so the env override is honored on
     /// the hot path (NEW-22), matching the compactor service's own default.
     compact_threshold_pct: u8,
+    /// Optional Session Kernel sink: when set, each turn's conversation is mirrored
+    /// into the canonical event log (shadow mode). `None` keeps the legacy path.
+    conversation_sink: Option<Arc<dyn crate::kernel_sink::ConversationSink>>,
+    /// Model catalog snapshot used for C4 compactor-provider backfill on load.
+    /// `None` (catalog unavailable) keeps the legacy behavior unchanged.
+    catalog: Option<trogonai_catalog_client::CatalogSnapshot>,
 }
 
 // Manual `Clone` so the spawn handler can hold a cheap, shared handle to the
@@ -319,13 +279,13 @@ impl<S: Clone, A, N: Clone, M: Clone> Clone for TrogonAgent<S, A, N, M> {
             execution_nats: self.execution_nats.clone(),
             classifier: self.classifier.clone(),
             compact_threshold_pct: self.compact_threshold_pct,
+            conversation_sink: self.conversation_sink.clone(),
+            catalog: self.catalog.clone(),
         }
     }
 }
 
-impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
-    TrogonAgent<S, A, N, FsTrogonMdLoader>
-{
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N, FsTrogonMdLoader> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         notifier: N,
@@ -355,13 +315,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
             execution_nats: None,
             classifier: None,
             compact_threshold_pct: trogon_runner_tools::compaction_settings_from_env().1,
+            conversation_sink: None,
+            catalog: None,
         }
     }
 }
 
-impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdLoading>
-    TrogonAgent<S, A, N, M>
-{
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdLoading> TrogonAgent<S, A, N, M> {
     pub fn with_md_loader<M2: TrogonMdLoading>(self, loader: M2) -> TrogonAgent<S, A, N, M2> {
         TrogonAgent {
             md_loader: loader,
@@ -381,6 +341,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             execution_nats: self.execution_nats,
             classifier: self.classifier,
             compact_threshold_pct: self.compact_threshold_pct,
+            conversation_sink: self.conversation_sink,
+            catalog: self.catalog,
         }
     }
 
@@ -393,6 +355,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         self
     }
 
+    /// Mirror each turn's conversation into the canonical Session Kernel event log
+    /// (shadow mode). Best-effort and non-fatal; leaves the legacy store
+    /// authoritative. Wired only when the Session Kernel is enabled.
+    pub fn with_conversation_sink(mut self, sink: Arc<dyn crate::kernel_sink::ConversationSink>) -> Self {
+        self.conversation_sink = Some(sink);
+        self
+    }
+
     /// Enable context compaction via `trogon-compactor`.
     ///
     /// When set, each prompt call sends the session history to
@@ -401,6 +371,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     /// continues without compaction.
     pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
         self.compactor_nats = Some(nats);
+        self
+    }
+
+    /// Attach a model catalog snapshot for C4 compactor-provider backfill.
+    ///
+    /// On load, a legacy serde session carrying a bare `compactor_model` (no
+    /// provider) has its `compactor_provider` resolved from this catalog and the
+    /// record rewritten as protobuf. `None` (catalog unavailable) leaves legacy
+    /// records untouched — graceful degradation.
+    pub fn with_catalog(mut self, catalog: trogonai_catalog_client::CatalogSnapshot) -> Self {
+        self.catalog = Some(catalog);
         self
     }
 
@@ -759,6 +740,61 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
         };
 
+        // C4 migration: a pre-M3 serde session carries a bare `compactor_model`
+        // with no `compactor_provider`. Resolve the provider against the catalog and
+        // durably rewrite the record as the protobuf pair on save. Ambiguous/unknown/
+        // catalog-unavailable cases are NOT silent: warn and persist
+        // `needs_compactor_migration` so the next load retries, preserving the bare
+        // value rather than guessing a provider. Best-effort: a save failure never
+        // fails the prompt.
+        {
+            use trogonai_catalog_client::BackfillOutcome;
+            let prev_needs_migration = state.needs_compactor_migration;
+            let mut dirty = false;
+            match self.catalog.as_ref() {
+                Some(catalog) => {
+                    let outcome = trogonai_catalog_client::backfill_compactor_provider(
+                        &mut state.compactor_provider,
+                        state.compactor_model.as_deref(),
+                        catalog,
+                    );
+                    match outcome {
+                        BackfillOutcome::Resolved => {
+                            state.needs_compactor_migration = false;
+                            dirty = true;
+                        }
+                        BackfillOutcome::Ambiguous | BackfillOutcome::Unknown => {
+                            warn!(
+                                session_id,
+                                compactor_model = state.compactor_model.as_deref().unwrap_or(""),
+                                outcome = ?outcome,
+                                "agent: could not resolve compactor provider for bare model; \
+                                 degrading and flagging for retry (needs_compactor_migration)"
+                            );
+                            state.needs_compactor_migration = true;
+                            dirty = !prev_needs_migration;
+                        }
+                        BackfillOutcome::NoModel | BackfillOutcome::AlreadyResolved => {}
+                    }
+                }
+                None => {
+                    if state.compactor_provider.is_none() && state.compactor_model.is_some() {
+                        warn!(
+                            session_id,
+                            compactor_model = state.compactor_model.as_deref().unwrap_or(""),
+                            "agent: catalog unavailable; cannot resolve compactor provider for bare \
+                             model; flagging for retry (needs_compactor_migration)"
+                        );
+                        state.needs_compactor_migration = true;
+                        dirty = !prev_needs_migration;
+                    }
+                }
+            }
+            if dirty && let Err(e) = self.store.save(&session_id, &state).await {
+                warn!(session_id, error = %e, "agent: failed to persist C4 compactor-provider backfill");
+            }
+        }
+
         // MED-17: remember the cwd/mode at load time so the final save can tell
         // which fields this prompt actually changed and re-apply only those on top
         // of a fresh read (preserving concurrent writes to todos/model/config/etc.).
@@ -772,11 +808,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 .iter()
                 .find_map(|b| {
                     if let ContentBlock::Text(t) = b {
-                        if !t.text.is_empty() {
-                            Some(t.text.clone())
-                        } else {
-                            None
-                        }
+                        if !t.text.is_empty() { Some(t.text.clone()) } else { None }
                     } else {
                         None
                     }
@@ -805,14 +837,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             && estimate_token_count(&state.messages)
                 > state.token_budget * self.compact_threshold_pct as u64 / 100
         {
-            let model = state
-                .model
-                .as_deref()
-                .unwrap_or(&self.default_model)
-                .to_string();
+            let model = state.model.as_deref().unwrap_or(&self.default_model).to_string();
+            let compactor_provider = state.compactor_provider.clone();
             let compactor_model = state.compactor_model.clone();
-            match compact_messages(nats, &state.messages, &session_id, &model, compactor_model.as_deref())
-                .await
+            match compact_messages(
+                nats,
+                &state.messages,
+                &session_id,
+                &model,
+                compactor_provider.as_deref(),
+                compactor_model.as_deref(),
+            )
+            .await
             {
                 Ok(Some(new_msgs)) => state.messages = new_msgs,
                 Ok(None) => {}
@@ -917,9 +953,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     && let Some(entry) = entries.first()
                     && trogon_runner_tools::is_tool_in_allowlist(&tool_allowlist, "bash")
                 {
-                    let prefix = entry.metadata["acp_prefix"]
-                        .as_str()
-                        .unwrap_or("acp.wasm");
+                    let prefix = entry.metadata["acp_prefix"].as_str().unwrap_or("acp.wasm");
                     let bash = WasmRuntimeBashTool::new(
                         nats.clone(),
                         prefix,
@@ -973,12 +1007,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         vec![(name, orig, client)],
                     );
                 }
-                if needs_perm
-                    && let Some(ref perm_tx) = self.permission_tx
-                {
-                    let mut rules = if let Some(trogon_md) =
-                        self.md_loader.load(&state.cwd).await
-                    {
+                if needs_perm && let Some(ref perm_tx) = self.permission_tx {
+                    let mut rules = if let Some(trogon_md) = self.md_loader.load(&state.cwd).await {
                         PermissionRules::parse(&trogon_md)
                     } else {
                         PermissionRules::default()
@@ -1095,10 +1125,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         };
 
         let context_window = Some(context_window_tokens(&agent.model()));
-        let current_model = state
-            .model
-            .clone()
-            .unwrap_or_else(|| self.agent.model());
+        let current_model = state.model.clone().unwrap_or_else(|| self.agent.model());
 
         let agent_fut = tokio::task::spawn_local(async move {
             agent
@@ -1413,8 +1440,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 // No partial turn to commit, but persist token usage from completed turns.
                 state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
                 state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
-                state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
-                state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
+                state.total_cache_creation_tokens = state
+                    .total_cache_creation_tokens
+                    .saturating_add(last_cache_creation_tokens as u64);
+                state.total_cache_read_tokens = state
+                    .total_cache_read_tokens
+                    .saturating_add(last_cache_read_tokens as u64);
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to save token usage on cancel");
                 }
@@ -1422,19 +1453,85 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         if let Some(updated) = final_messages {
-            self.save_prompt_state_merged(
-                &session_id,
-                &state,
-                &orig_cwd,
-                &orig_mode,
-                updated,
-                last_input_tokens,
-                last_output_tokens,
-                last_cache_creation_tokens,
-                last_cache_read_tokens,
-                &audit_buf,
-            )
-            .await;
+            // MED-17: compaction and the turn itself are long; meanwhile other ops
+            // write the session KV (permission bridge → allowed_tools, bash →
+            // terminal_id, todo_write → todos, set_session_model/config → model/
+            // config, load_session → mcp_servers, …). The old code only merged
+            // allowed_tools/terminal_id back, so every other concurrent write was
+            // clobbered by this save. Instead, start from the freshest persisted
+            // state and re-apply ONLY the fields this prompt owns.
+            let prompt_title = state.title.clone();
+            let cwd_changed = state.cwd != orig_cwd;
+            let mode_changed = state.mode != orig_mode;
+            let prompt_cwd = state.cwd.clone();
+            let prompt_terminal_cwd = state.terminal_cwd.clone();
+            let prompt_mode = state.mode.clone();
+
+            let mut merged = match self.store.load(&session_id).await {
+                Ok(fresh) => fresh,
+                // Reload failed — fall back to the in-memory state we already hold.
+                Err(_) => state,
+            };
+            merged.messages = updated;
+            merged.updated_at = now_iso8601();
+            // The prompt assigns the title on the first turn; carry it if set.
+            if !prompt_title.is_empty() {
+                merged.title = prompt_title;
+            }
+            // change_directory during the turn updates cwd + clears terminal_cwd.
+            if cwd_changed {
+                merged.cwd = prompt_cwd;
+                merged.terminal_cwd = prompt_terminal_cwd;
+            }
+            // ExitPlanMode flow flips mode to "plan" mid-turn.
+            if mode_changed {
+                merged.mode = prompt_mode;
+            }
+            // Accumulate this turn's token usage onto the reloaded `merged` state
+            // (the value actually persisted below), preserving prior totals.
+            merged.total_input_tokens = merged.total_input_tokens.saturating_add(last_input_tokens as u64);
+            merged.total_output_tokens = merged.total_output_tokens.saturating_add(last_output_tokens as u64);
+            merged.total_cache_creation_tokens = merged
+                .total_cache_creation_tokens
+                .saturating_add(last_cache_creation_tokens as u64);
+            merged.total_cache_read_tokens = merged
+                .total_cache_read_tokens
+                .saturating_add(last_cache_read_tokens as u64);
+            let new_entries = audit_buf
+                .lock()
+                .map(|mut g| g.drain(..).collect::<Vec<_>>())
+                .unwrap_or_default();
+            append_audit_entries(&mut merged.audit_log, new_entries);
+            if let Err(e) = self.store.save(&session_id, &merged).await {
+                warn!(session_id, error = %e, "agent: failed to save session");
+            }
+
+            // Shadow-mirror the conversation into the canonical event log when the
+            // Session Kernel is enabled (§3). Best-effort and non-fatal.
+            if let Some(sink) = &self.conversation_sink {
+                // The sink builds the full, no-lossy canonical view of state.messages
+                // (structured content blocks, complete tool input/output, and — Fase 5 —
+                // large outputs / images as artifact refs) and records it as canonical
+                // truth (§11 Transcript no-lossy; § No-Lossy Contract).
+                let todos: Vec<trogonai_session_contracts::TodoItem> = merged
+                    .todos
+                    .iter()
+                    .map(|todo| trogonai_session_contracts::TodoItem {
+                        id: todo.id.clone(),
+                        content: todo.content.clone(),
+                        status: todo.status.clone(),
+                        ..Default::default()
+                    })
+                    .collect();
+                sink.sync(
+                    &session_id,
+                    &merged.messages,
+                    &merged.cwd,
+                    merged.terminal_cwd.as_deref(),
+                    &todos,
+                )
+                .await;
+            }
         }
 
         Ok(PromptResponse::new(if cancelled {
@@ -1465,23 +1562,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     agent_client_protocol::Agent for TrogonAgent<S, A, N, M>
 {
     #[cfg_attr(coverage, coverage(off))]
-    async fn initialize(
-        &self,
-        _req: InitializeRequest,
-    ) -> agent_client_protocol::Result<InitializeResponse> {
+    async fn initialize(&self, _req: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
         let mut session_caps_meta = serde_json::Map::new();
         session_caps_meta.insert("close".to_string(), serde_json::json!({}));
         session_caps_meta.insert("listChildren".to_string(), serde_json::json!({}));
         session_caps_meta.insert("branchAtIndex".to_string(), serde_json::json!({}));
-        let capabilities = AgentCapabilities::new()
-            .load_session(true)
-            .session_capabilities(
-                SessionCapabilities::new()
-                    .list(SessionListCapabilities::new())
-                    .fork(SessionForkCapabilities::new())
-                    .resume(SessionResumeCapabilities::new())
-                    .meta(session_caps_meta),
-            );
+        let capabilities = AgentCapabilities::new().load_session(true).session_capabilities(
+            SessionCapabilities::new()
+                .list(SessionListCapabilities::new())
+                .fork(SessionForkCapabilities::new())
+                .resume(SessionResumeCapabilities::new())
+                .meta(session_caps_meta),
+        );
         Ok(InitializeResponse::new(ProtocolVersion::LATEST)
             .agent_capabilities(capabilities)
             .agent_info(Implementation::new(
@@ -1543,10 +1635,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn new_session(
-        &self,
-        req: NewSessionRequest,
-    ) -> agent_client_protocol::Result<NewSessionResponse> {
+    async fn new_session(&self, req: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
         let session_id = uuid::Uuid::new_v4().to_string();
 
         let meta = req.meta.as_ref();
@@ -1660,10 +1749,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn load_session(
-        &self,
-        req: LoadSessionRequest,
-    ) -> agent_client_protocol::Result<LoadSessionResponse> {
+    async fn load_session(&self, req: LoadSessionRequest) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
         self.make_acp_session_id(&req.session_id)?;
         let mut state = match self.store.load(&session_id).await {
@@ -1721,7 +1807,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let session_id = req.session_id.to_string();
         let semaphore = self.acquire_session_lock(&session_id);
-        let _permit = semaphore.acquire_owned().await
+        let _permit = semaphore
+            .acquire_owned()
+            .await
             .map_err(|_| internal_error("session lock closed"))?;
         let mut state = match self.store.load(&session_id).await {
             Ok(s) => s,
@@ -1746,7 +1834,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     ) -> agent_client_protocol::Result<SetSessionModelResponse> {
         let session_id = req.session_id.to_string();
         let semaphore = self.acquire_session_lock(&session_id);
-        let _permit = semaphore.acquire_owned().await
+        let _permit = semaphore
+            .acquire_owned()
+            .await
             .map_err(|_| internal_error("session lock closed"))?;
         let mut state = match self.store.load(&session_id).await {
             Ok(s) => s,
@@ -1771,16 +1861,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
         let session_id = req.session_id.to_string();
         let semaphore = self.acquire_session_lock(&session_id);
-        let _permit = semaphore.acquire_owned().await
+        let _permit = semaphore
+            .acquire_owned()
+            .await
             .map_err(|_| internal_error("session lock closed"))?;
         let config_id = req.config_id.to_string();
         let value = match &req.value {
-            agent_client_protocol::SessionConfigOptionValue::ValueId { value } => {
-                value.to_string()
-            }
-            agent_client_protocol::SessionConfigOptionValue::Boolean { value } => {
-                value.to_string()
-            }
+            agent_client_protocol::SessionConfigOptionValue::ValueId { value } => value.to_string(),
+            agent_client_protocol::SessionConfigOptionValue::Boolean { value } => value.to_string(),
             _ => String::new(),
         };
 
@@ -1810,11 +1898,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 }
             }
             "permissions" => {
-                state.permission_rules_text = if value.is_empty() {
-                    None
-                } else {
-                    Some(value.clone())
-                };
+                state.permission_rules_text = if value.is_empty() { None } else { Some(value.clone()) };
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist permission rules");
@@ -1822,7 +1906,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 }
             }
             "compactor_model" => {
-                state.compactor_model = if value.is_empty() { None } else { Some(value.clone()) };
+                let (provider, model) = parse_compactor_config(&value);
+                state.compactor_provider = provider;
+                state.compactor_model = model;
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist compactor_model");
@@ -1877,10 +1963,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn list_sessions(
-        &self,
-        _req: ListSessionsRequest,
-    ) -> agent_client_protocol::Result<ListSessionsResponse> {
+    async fn list_sessions(&self, _req: ListSessionsRequest) -> agent_client_protocol::Result<ListSessionsResponse> {
         let ids = match self.store.list_ids().await {
             Ok(ids) => ids,
             Err(e) => {
@@ -1902,18 +1985,28 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
             let mut session_meta = serde_json::Map::new();
             if let Some(ref parent_id) = state.parent_session_id {
-                session_meta
-                    .insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                session_meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
             }
             if let Some(idx) = state.branched_at_index {
-                session_meta
-                    .insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                session_meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
             }
             if state.total_input_tokens > 0 || state.total_output_tokens > 0 {
-                session_meta.insert("totalInputTokens".to_string(), serde_json::json!(state.total_input_tokens));
-                session_meta.insert("totalOutputTokens".to_string(), serde_json::json!(state.total_output_tokens));
-                session_meta.insert("totalCacheCreationTokens".to_string(), serde_json::json!(state.total_cache_creation_tokens));
-                session_meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(state.total_cache_read_tokens));
+                session_meta.insert(
+                    "totalInputTokens".to_string(),
+                    serde_json::json!(state.total_input_tokens),
+                );
+                session_meta.insert(
+                    "totalOutputTokens".to_string(),
+                    serde_json::json!(state.total_output_tokens),
+                );
+                session_meta.insert(
+                    "totalCacheCreationTokens".to_string(),
+                    serde_json::json!(state.total_cache_creation_tokens),
+                );
+                session_meta.insert(
+                    "totalCacheReadTokens".to_string(),
+                    serde_json::json!(state.total_cache_read_tokens),
+                );
             }
             if !session_meta.is_empty() {
                 info = info.meta(session_meta);
@@ -1925,10 +2018,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn fork_session(
-        &self,
-        req: ForkSessionRequest,
-    ) -> agent_client_protocol::Result<ForkSessionResponse> {
+    async fn fork_session(&self, req: ForkSessionRequest) -> agent_client_protocol::Result<ForkSessionResponse> {
         let source_id = req.session_id.to_string();
         let mut state = match self.store.load(&source_id).await {
             Ok(s) => s,
@@ -1972,10 +2062,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn resume_session(
-        &self,
-        req: ResumeSessionRequest,
-    ) -> agent_client_protocol::Result<ResumeSessionResponse> {
+    async fn resume_session(&self, req: ResumeSessionRequest) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
         self.make_acp_session_id(&req.session_id)?;
         self.publish_session_ready(&session_id).await?;
@@ -1983,10 +2070,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn close_session(
-        &self,
-        req: CloseSessionRequest,
-    ) -> agent_client_protocol::Result<CloseSessionResponse> {
+    async fn close_session(&self, req: CloseSessionRequest) -> agent_client_protocol::Result<CloseSessionResponse> {
         let session_id = req.session_id.to_string();
 
         // Cancel any running prompt for this session.
@@ -1997,10 +2081,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             &acp_session_id,
         )
         .to_string();
-        let cancel_payload = serde_json::to_vec(
-            &serde_json::json!({ "sessionId": &session_id }),
-        )
-        .unwrap_or_default();
+        let cancel_payload = serde_json::to_vec(&serde_json::json!({ "sessionId": &session_id })).unwrap_or_default();
         self.notifier.publish(cancel_subject, cancel_payload.into()).await;
 
         if let Err(e) = self.store.delete(&session_id).await {
@@ -2018,10 +2099,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn prompt(
-        &self,
-        req: PromptRequest,
-    ) -> agent_client_protocol::Result<PromptResponse> {
+    async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
 
         // Serialize concurrent prompts for the same session.
@@ -2048,9 +2126,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         .to_string();
         let steer_rx = self.notifier.subscribe_steer(steer_subject).await;
 
-        let prompt_client = self
-            .notifier
-            .make_prompt_client(acp_session_id, acp_prefix);
+        let prompt_client = self.notifier.make_prompt_client(acp_session_id, acp_prefix);
 
         self.run_prompt(&req, &*prompt_client, cancel_sub, steer_rx).await
     }
@@ -2073,12 +2149,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
     async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
         if args.method.as_ref() == "session/list_children" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params
-                .get("sessionId")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params.get("sessionId").and_then(|v| v.as_str()).unwrap_or_default();
             let children = self
                 .store
                 .list_children(session_id)
@@ -2090,30 +2162,40 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             return Ok(ExtResponse::new(raw.into()));
         }
         if args.method.as_ref() == "session/export" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params["sessionId"].as_str()
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"]
+                .as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
             // B11: acquire the session lock before loading, consistent with prompt /
             // import / set_session_*. Without it, an export racing a concurrent
             // compaction round-trip could read torn / stale history mid-write.
             let semaphore = self.acquire_session_lock(session_id);
-            let _permit = semaphore.acquire_owned().await
+            let _permit = semaphore
+                .acquire_owned()
+                .await
                 .map_err(|_| internal_error("session lock closed"))?;
-            let state = self.store.load(session_id).await
+            let state = self
+                .store
+                .load(session_id)
+                .await
                 .map_err(|e| internal_error(e.to_string()))?;
             let raw = trogon_runner_tools::portable_session::export_json_from_wire(&state.messages)
                 .map_err(|e| internal_error(e.to_string()))?;
-            return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
-                .map_err(|e| internal_error(e.to_string()))?.into()));
+            return Ok(ExtResponse::new(
+                serde_json::value::RawValue::from_string(raw)
+                    .map_err(|e| internal_error(e.to_string()))?
+                    .into(),
+            ));
         }
         if args.method.as_ref() == "session/import" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params["sessionId"].as_str()
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"]
+                .as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
             let semaphore = self.acquire_session_lock(session_id);
-            let _permit = semaphore.acquire_owned().await
+            let _permit = semaphore
+                .acquire_owned()
+                .await
                 .map_err(|_| internal_error("session lock closed"))?;
             let messages_json = params["messages"].to_string();
             let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
@@ -2132,17 +2214,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 }
             };
             state.updated_at = now_iso8601();
-            self.store.save(session_id, &state).await
+            self.store
+                .save(session_id, &state)
+                .await
                 .map_err(|e| internal_error(e.to_string()))?;
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
         if args.method.as_ref() == "session/compact" {
-            let params: serde_json::Value =
-                serde_json::from_str(args.params.get()).unwrap_or_default();
-            let session_id = params["sessionId"].as_str().ok_or_else(|| {
-                Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string())
-            })?;
+            let params: serde_json::Value = serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"]
+                .as_str()
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
             let semaphore = self.acquire_session_lock(session_id);
             let _permit = semaphore
                 .acquire_owned()
@@ -2156,14 +2239,21 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             let tokens_before = estimate_token_count(&state.messages);
             let (compacted, tokens_after) = if let Some(ref nats) = self.compactor_nats {
                 let model = state.model.clone().unwrap_or_else(|| self.default_model.clone());
+                let compactor_provider = state.compactor_provider.clone();
                 let compactor_model = state.compactor_model.clone();
                 // Manual /compact propagates a compactor-down failure as an error so
                 // the user sees it, rather than reporting a misleading "no compaction
                 // needed". Distinct from the auto-path, which degrades silently.
-                let compacted_msgs =
-                    compact_messages(nats, &state.messages, session_id, &model, compactor_model.as_deref())
-                        .await
-                        .map_err(|e| internal_error(e.to_string()))?;
+                let compacted_msgs = compact_messages(
+                    nats,
+                    &state.messages,
+                    session_id,
+                    &model,
+                    compactor_provider.as_deref(),
+                    compactor_model.as_deref(),
+                )
+                .await
+                .map_err(|e| internal_error(e.to_string()))?;
                 match compacted_msgs {
                     Some(new_msgs) => {
                         let after = estimate_token_count(&new_msgs);
@@ -2240,10 +2330,7 @@ mod tests {
     #[test]
     fn user_message_from_request_text_block() {
         use agent_client_protocol::TextContent;
-        let req = PromptRequest::new(
-            "s1",
-            vec![ContentBlock::Text(TextContent::new("hello"))],
-        );
+        let req = PromptRequest::new("s1", vec![ContentBlock::Text(TextContent::new("hello"))]);
         let msg = user_message_from_request(&req);
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content.len(), 1);
@@ -2258,10 +2345,7 @@ mod tests {
         let mut tool_name_by_id: HashMap<String, String> = HashMap::new();
         let id = "tool-abc-123".to_string();
         tool_name_by_id.insert(id.clone(), "EnterPlanMode".to_string());
-        let is_enter_plan = tool_name_by_id
-            .get(&id)
-            .map(|n| n == "EnterPlanMode")
-            .unwrap_or(false);
+        let is_enter_plan = tool_name_by_id.get(&id).map(|n| n == "EnterPlanMode").unwrap_or(false);
         assert!(is_enter_plan);
     }
 
@@ -2271,10 +2355,7 @@ mod tests {
         tool_name_by_id.insert("id-1".to_string(), "get_pr_diff".to_string());
         tool_name_by_id.insert("id-2".to_string(), "TodoWrite".to_string());
         for id in &["id-1", "id-2"] {
-            let is_enter_plan = tool_name_by_id
-                .get(*id)
-                .map(|n| n == "EnterPlanMode")
-                .unwrap_or(false);
+            let is_enter_plan = tool_name_by_id.get(*id).map(|n| n == "EnterPlanMode").unwrap_or(false);
             assert!(!is_enter_plan, "tool {id} must not be detected as EnterPlanMode");
         }
     }
@@ -2286,39 +2367,54 @@ mod tests {
         assert_eq!(estimate_token_count(&[]), 0);
     }
 
-    #[test]
-    fn context_window_tokens_defaults_to_200k_and_honors_1m_suffix() {
-        assert_eq!(context_window_tokens("claude-sonnet-4-6"), 200_000);
-        // Unknown models default to 200K (sane meter), never 0.
-        assert_eq!(context_window_tokens("some-future-model"), 200_000);
-        // The `[1m]` suffix selects the 1M-token window.
-        assert_eq!(context_window_tokens("claude-sonnet-4-6[1m]"), 1_000_000);
-    }
-
-    // ── build_compact_payload: wire contract ──────────────────────────────────
+    // ── compaction request wire contract (acp provider identity) ──────────────
+    //
+    // acp delegates build+NATS+decode to `request_compaction`; here we assert the
+    // acp-specific inputs (SESSION_PROVIDER + context_window_tokens) produce the
+    // expected wire payload via the underlying `encode_compact_request`.
 
     #[test]
-    fn build_compact_payload_includes_provider_model_and_override() {
+    fn compact_request_includes_provider_model_and_override() {
+        use buffa::Message as _;
+        use trogon_runner_tools::encode_compact_request;
+        use trogonai_compactor_proto::CompactRequest as ProtoRequest;
+
         let msgs = vec![Message::user_text("hi")];
-        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", Some("claude-haiku-4-5")).unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v["provider"], "anthropic", "acp always compacts via anthropic");
-        assert_eq!(v["model"], "claude-opus-4-6", "session model is sent");
-        assert_eq!(v["compactor_model"], "claude-haiku-4-5", "override is sent when set");
-        assert!(v["messages"].is_array());
-    }
-
-    #[test]
-    fn build_compact_payload_omits_compactor_model_when_none() {
-        let msgs = vec![Message::user_text("hi")];
-        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", None).unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v["model"], "claude-opus-4-6");
-        assert!(
-            v.get("compactor_model").is_none(),
-            "compactor_model must be omitted when unset (skip_serializing_if), so the service \
-             falls back to the session model"
+        let bytes = encode_compact_request(
+            &msgs,
+            SESSION_PROVIDER,
+            "claude-opus-4-6",
+            Some(context_window_tokens("claude-opus-4-6")),
+            Some("xai"),
+            Some("grok-4"),
         );
+        let proto = ProtoRequest::decode_from_slice(&bytes).unwrap();
+        assert_eq!(proto.provider, "anthropic");
+        assert_eq!(proto.model, "claude-opus-4-6");
+        assert_eq!(proto.compactor_provider.as_deref(), Some("xai"));
+        assert_eq!(proto.compactor_model.as_deref(), Some("grok-4"));
+        assert_eq!(proto.messages.len(), 1);
+    }
+
+    #[test]
+    fn compact_request_omits_compactor_fields_when_none() {
+        use buffa::Message as _;
+        use trogon_runner_tools::encode_compact_request;
+        use trogonai_compactor_proto::CompactRequest as ProtoRequest;
+
+        let msgs = vec![Message::user_text("hi")];
+        let bytes = encode_compact_request(
+            &msgs,
+            SESSION_PROVIDER,
+            "claude-opus-4-6",
+            Some(context_window_tokens("claude-opus-4-6")),
+            None,
+            None,
+        );
+        let proto = ProtoRequest::decode_from_slice(&bytes).unwrap();
+        assert_eq!(proto.model, "claude-opus-4-6");
+        assert!(proto.compactor_provider.is_none());
+        assert!(proto.compactor_model.is_none());
     }
 
     #[test]
@@ -2372,7 +2468,10 @@ mod tests {
         let threshold = budget * 85 / 100; // 85
         // estimate == threshold → condition (estimate > threshold) is false → no compact
         let estimate = threshold;
-        assert!(estimate <= threshold, "strictly greater-than must be false at the boundary");
+        assert!(
+            estimate <= threshold,
+            "strictly greater-than must be false at the boundary"
+        );
     }
 
     // ── ext_method: session/export and session/import ─────────────────────────
@@ -2382,11 +2481,9 @@ mod tests {
 
     #[cfg(feature = "test-helpers")]
     fn make_export_params(session_id: &str) -> std::sync::Arc<serde_json::value::RawValue> {
-        serde_json::value::RawValue::from_string(
-            serde_json::json!({"sessionId": session_id}).to_string(),
-        )
-        .unwrap()
-        .into()
+        serde_json::value::RawValue::from_string(serde_json::json!({"sessionId": session_id}).to_string())
+            .unwrap()
+            .into()
     }
 
     #[cfg(feature = "test-helpers")]
@@ -2412,9 +2509,7 @@ mod tests {
         let state = SessionState {
             messages: vec![
                 Message::user_text("hello"),
-                Message::assistant(vec![AgentContentBlock::Text {
-                    text: "world".into(),
-                }]),
+                Message::assistant(vec![AgentContentBlock::Text { text: "world".into() }]),
             ],
             ..Default::default()
         };
@@ -2705,9 +2800,10 @@ mod tests {
                 assert_eq!(exp.messages.len(), 1);
                 assert_eq!(exp.messages[0].role, "assistant");
                 assert!(
-                    exp.messages[0].blocks.iter().any(
-                        |b| matches!(b, PortableBlock::ToolUse { name, .. } if name == "read_file")
-                    ),
+                    exp.messages[0]
+                        .blocks
+                        .iter()
+                        .any(|b| matches!(b, PortableBlock::ToolUse { name, .. } if name == "read_file")),
                     "export must preserve the tool_use as a ToolUse block; got: {:?}",
                     exp.messages[0].blocks
                 );
@@ -2771,7 +2867,9 @@ mod tests {
             messages: vec![Message {
                 role: "user".to_string(),
                 content: vec![
-                    AgentContentBlock::Text { text: "before".to_string() },
+                    AgentContentBlock::Text {
+                        text: "before".to_string(),
+                    },
                     AgentContentBlock::ToolResult {
                         tool_use_id: "c2".to_string(),
                         content: "result".to_string(),
@@ -2794,7 +2892,9 @@ mod tests {
                 assert_eq!(exp.messages.len(), 1);
                 let blocks = &exp.messages[0].blocks;
                 assert!(
-                    blocks.iter().any(|b| matches!(b, PortableBlock::Text { text } if text == "before")),
+                    blocks
+                        .iter()
+                        .any(|b| matches!(b, PortableBlock::Text { text } if text == "before")),
                     "text block must be preserved; got: {blocks:?}"
                 );
                 assert!(
@@ -2821,6 +2921,7 @@ mod tests {
                 role: "assistant".to_string(),
                 content: vec![AgentContentBlock::Thinking {
                     thinking: "internal reasoning".to_string(),
+                    signature: None,
                 }],
             }],
             ..Default::default()
@@ -2868,10 +2969,7 @@ mod tests {
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
 
-        let params = make_import_params(
-            "s1",
-            serde_json::json!([{"role": "user", "text": "imported"}]),
-        );
+        let params = make_import_params("s1", serde_json::json!([{"role": "user", "text": "imported"}]));
 
         agent
             .ext_method(ExtRequest::new("session/import", params))
@@ -2910,13 +3008,18 @@ mod tests {
             .set_session_config_option(SetSessionConfigOptionRequest::new(
                 "s-cm",
                 "compactor_model",
-                "claude-haiku-4-5",
+                "anthropic::claude-haiku-4-5",
             ))
             .await
             .unwrap();
 
         // Must persist to the store (acp's SessionState is the persisted type).
         let state = store_clone.load("s-cm").await.unwrap();
+        assert_eq!(
+            state.compactor_provider,
+            Some("anthropic".to_string()),
+            "compactor_provider override must persist on the acp session"
+        );
         assert_eq!(
             state.compactor_model,
             Some("claude-haiku-4-5".to_string()),
@@ -2925,14 +3028,11 @@ mod tests {
 
         // Empty value clears it.
         agent
-            .set_session_config_option(SetSessionConfigOptionRequest::new(
-                "s-cm",
-                "compactor_model",
-                "",
-            ))
+            .set_session_config_option(SetSessionConfigOptionRequest::new("s-cm", "compactor_model", ""))
             .await
             .unwrap();
         let cleared = store_clone.load("s-cm").await.unwrap();
+        assert_eq!(cleared.compactor_provider, None, "empty value clears provider");
         assert_eq!(cleared.compactor_model, None, "empty value clears the override");
     }
 
@@ -3069,10 +3169,7 @@ mod tests {
         );
 
         let resp = agent
-            .ext_method(ExtRequest::new(
-                "session/export",
-                make_export_params("no-such"),
-            ))
+            .ext_method(ExtRequest::new("session/export", make_export_params("no-such")))
             .await
             .unwrap();
 
@@ -3105,9 +3202,7 @@ mod tests {
                 .unwrap()
                 .into();
 
-        let result = agent
-            .ext_method(ExtRequest::new("session/export", params))
-            .await;
+        let result = agent.ext_method(ExtRequest::new("session/export", params)).await;
 
         assert!(result.is_err(), "missing sessionId must return an error");
     }
@@ -3155,10 +3250,7 @@ mod tests {
             serde_json::from_str(export_resp.0.get()).unwrap();
 
         // Import into "dst"
-        let import_params = make_import_params(
-            "dst",
-            serde_json::to_value(&exported_messages).unwrap(),
-        );
+        let import_params = make_import_params("dst", serde_json::to_value(&exported_messages).unwrap());
         agent
             .ext_method(ExtRequest::new("session/import", import_params))
             .await
@@ -3197,10 +3289,7 @@ mod tests {
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
 
-        let params = make_import_params(
-            "ts1",
-            serde_json::json!([{"role": "user", "text": "hello"}]),
-        );
+        let params = make_import_params("ts1", serde_json::json!([{"role": "user", "text": "hello"}]));
 
         agent
             .ext_method(ExtRequest::new("session/import", params))
@@ -3208,10 +3297,7 @@ mod tests {
             .unwrap();
 
         let state = store_clone.load("ts1").await.unwrap();
-        assert!(
-            !state.updated_at.is_empty(),
-            "updated_at must be set after import"
-        );
+        assert!(!state.updated_at.is_empty(), "updated_at must be set after import");
     }
 
     #[cfg(feature = "test-helpers")]
@@ -3234,8 +3320,9 @@ mod tests {
 
         // messages is not an array of PortableMessage — it's a plain string
         let params = serde_json::value::RawValue::from_string(
-            serde_json::json!({"sessionId":"s1","messages":"not-an-array"}).to_string()
-        ).unwrap();
+            serde_json::json!({"sessionId":"s1","messages":"not-an-array"}).to_string(),
+        )
+        .unwrap();
         let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
         assert!(result.is_err(), "malformed messages must return Err");
     }
@@ -3252,13 +3339,14 @@ mod tests {
 
         store_clone.save("s1", &SessionState::default()).await.unwrap();
 
-        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
-            .with_events(vec![AgentEvent::UsageSummary {
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022").with_events(vec![
+            AgentEvent::UsageSummary {
                 input_tokens: 100,
                 output_tokens: 50,
                 cache_creation_tokens: 10,
                 cache_read_tokens: 5,
-            }]);
+            },
+        ]);
 
         let agent = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
@@ -3272,17 +3360,87 @@ mod tests {
         );
 
         let local = tokio::task::LocalSet::new();
-        local.run_until(async {
-            let req = PromptRequest::new("s1", vec![]);
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent.run_prompt(&req, &client, None, None).await.unwrap();
-        }).await;
+        local
+            .run_until(async {
+                let req = PromptRequest::new("s1", vec![]);
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent.run_prompt(&req, &client, None, None).await.unwrap();
+            })
+            .await;
 
         let saved = store_clone.load("s1").await.unwrap();
         assert_eq!(saved.total_input_tokens, 100);
         assert_eq!(saved.total_output_tokens, 50);
         assert_eq!(saved.total_cache_creation_tokens, 10);
         assert_eq!(saved.total_cache_read_tokens, 5);
+    }
+
+    /// C4 migration end-to-end at the agent level: a legacy session loaded with a
+    /// bare `compactor_model` (no provider) has its provider resolved from the
+    /// catalog and the migrated state durably persisted via the store.
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_prompt_backfills_and_persists_compactor_provider_from_catalog() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+        use trogonai_catalog_client::{CatalogEntry, CatalogSnapshot};
+        use trogonai_catalog_proto::ModelModality;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        // Legacy session: compactor_model set, compactor_provider absent.
+        store_clone
+            .save(
+                "s1",
+                &SessionState {
+                    compactor_model: Some("grok-2".to_string()),
+                    compactor_provider: None,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let catalog = CatalogSnapshot {
+            entries: vec![CatalogEntry {
+                model_id: "grok-2".into(),
+                provider: "xai".into(),
+                context_window: 131_072,
+                max_output: 8192,
+                modality: ModelModality::TEXT,
+            }],
+        };
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022");
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        )
+        .with_catalog(catalog);
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let req = PromptRequest::new("s1", vec![]);
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent.run_prompt(&req, &client, None, None).await.unwrap();
+            })
+            .await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.compactor_model.as_deref(), Some("grok-2"));
+        assert_eq!(
+            saved.compactor_provider.as_deref(),
+            Some("xai"),
+            "C4 backfill must resolve and persist the provider"
+        );
     }
 
     #[cfg(feature = "test-helpers")]
@@ -3342,7 +3500,10 @@ mod tests {
         }).await;
 
         let saved = store_clone.load("s1").await.unwrap();
-        assert_eq!(saved.total_input_tokens, 200, "tokens from completed turns must be persisted on cancel");
+        assert_eq!(
+            saved.total_input_tokens, 200,
+            "tokens from completed turns must be persisted on cancel"
+        );
         assert_eq!(saved.total_output_tokens, 80);
         assert_eq!(saved.total_cache_read_tokens, 20);
     }
@@ -3358,13 +3519,14 @@ mod tests {
         let store_clone = store.clone();
         store_clone.save("s1", &SessionState::default()).await.unwrap();
 
-        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
-            .with_events(vec![AgentEvent::UsageSummary {
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022").with_events(vec![
+            AgentEvent::UsageSummary {
                 input_tokens: 80,
                 output_tokens: 30,
                 cache_creation_tokens: 5,
                 cache_read_tokens: 10,
-            }]);
+            },
+        ]);
 
         let agent = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
@@ -3378,20 +3540,25 @@ mod tests {
         );
 
         let local = tokio::task::LocalSet::new();
-        local.run_until(async {
-            let req = PromptRequest::new("s1", vec![]);
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent.run_prompt(&req, &client, None, None).await.unwrap();
+        local
+            .run_until(async {
+                let req = PromptRequest::new("s1", vec![]);
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent.run_prompt(&req, &client, None, None).await.unwrap();
 
-            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
-            let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1")
-                .expect("session must appear in list");
-            let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
-            assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(80));
-            assert_eq!(meta.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(30));
-            assert_eq!(meta.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(5));
-            assert_eq!(meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(10));
-        }).await;
+                let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+                let info = resp
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id.to_string() == "s1")
+                    .expect("session must appear in list");
+                let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
+                assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(80));
+                assert_eq!(meta.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(30));
+                assert_eq!(meta.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(5));
+                assert_eq!(meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(10));
+            })
+            .await;
     }
 
     #[cfg(feature = "test-helpers")]
@@ -3402,13 +3569,19 @@ mod tests {
 
         let store = MemorySessionStore::new();
         let store_clone = store.clone();
-        store_clone.save("s1", &SessionState {
-            total_input_tokens: 120,
-            total_output_tokens: 45,
-            total_cache_creation_tokens: 7,
-            total_cache_read_tokens: 18,
-            ..Default::default()
-        }).await.unwrap();
+        store_clone
+            .save(
+                "s1",
+                &SessionState {
+                    total_input_tokens: 120,
+                    total_output_tokens: 45,
+                    total_cache_creation_tokens: 7,
+                    total_cache_read_tokens: 18,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let agent = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
@@ -3422,7 +3595,10 @@ mod tests {
         );
 
         let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
-        let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1")
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "s1")
             .expect("session must appear in list");
         let meta = info.meta.as_ref().expect("meta must be present for pre-saved tokens");
         assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(120));
@@ -3439,13 +3615,19 @@ mod tests {
 
         let store = MemorySessionStore::new();
         let store_clone = store.clone();
-        store_clone.save("src", &SessionState {
-            total_input_tokens: 150,
-            total_output_tokens: 60,
-            total_cache_creation_tokens: 8,
-            total_cache_read_tokens: 12,
-            ..Default::default()
-        }).await.unwrap();
+        store_clone
+            .save(
+                "src",
+                &SessionState {
+                    total_input_tokens: 150,
+                    total_output_tokens: 60,
+                    total_cache_creation_tokens: 8,
+                    total_cache_read_tokens: 12,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let agent = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
@@ -3458,7 +3640,10 @@ mod tests {
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
 
-        let fork_resp = agent.fork_session(ForkSessionRequest::new("src", "/tmp")).await.unwrap();
+        let fork_resp = agent
+            .fork_session(ForkSessionRequest::new("src", "/tmp"))
+            .await
+            .unwrap();
         let new_id = fork_resp.session_id.to_string();
 
         let forked = store_clone.load(&new_id).await.unwrap();
@@ -3479,41 +3664,63 @@ mod tests {
         let store_clone = store.clone();
         store_clone.save("s1", &SessionState::default()).await.unwrap();
 
-        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
-            .with_events(vec![AgentEvent::UsageSummary {
-                input_tokens: 100, output_tokens: 50,
-                cache_creation_tokens: 0, cache_read_tokens: 0,
-            }]);
+        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022").with_events(vec![
+            AgentEvent::UsageSummary {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            },
+        ]);
         let agent1 = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
             store.clone(),
             runner1,
-            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
         let local = tokio::task::LocalSet::new();
-        local.run_until(async {
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent1.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
-        }).await;
+        local
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent1
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
 
-        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
-            .with_events(vec![AgentEvent::UsageSummary {
-                input_tokens: 80, output_tokens: 40,
-                cache_creation_tokens: 0, cache_read_tokens: 0,
-            }]);
+        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022").with_events(vec![
+            AgentEvent::UsageSummary {
+                input_tokens: 80,
+                output_tokens: 40,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            },
+        ]);
         let agent2 = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
             store,
             runner2,
-            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
         let local2 = tokio::task::LocalSet::new();
-        local2.run_until(async {
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent2.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
-        }).await;
+        local2
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent2
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
 
         let saved = store_clone.load("s1").await.unwrap();
         assert_eq!(saved.total_input_tokens, 180);
@@ -3531,41 +3738,63 @@ mod tests {
         let store_clone = store.clone();
         store_clone.save("s1", &SessionState::default()).await.unwrap();
 
-        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
-            .with_events(vec![AgentEvent::UsageSummary {
-                input_tokens: 10, output_tokens: 5,
-                cache_creation_tokens: 6, cache_read_tokens: 15,
-            }]);
+        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022").with_events(vec![
+            AgentEvent::UsageSummary {
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_creation_tokens: 6,
+                cache_read_tokens: 15,
+            },
+        ]);
         let agent1 = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
             store.clone(),
             runner1,
-            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
         let local = tokio::task::LocalSet::new();
-        local.run_until(async {
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent1.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
-        }).await;
+        local
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent1
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
 
-        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
-            .with_events(vec![AgentEvent::UsageSummary {
-                input_tokens: 10, output_tokens: 5,
-                cache_creation_tokens: 9, cache_read_tokens: 20,
-            }]);
+        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022").with_events(vec![
+            AgentEvent::UsageSummary {
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_creation_tokens: 9,
+                cache_read_tokens: 20,
+            },
+        ]);
         let agent2 = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
             store,
             runner2,
-            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
             std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         );
         let local2 = tokio::task::LocalSet::new();
-        local2.run_until(async {
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent2.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
-        }).await;
+        local2
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent2
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
 
         let saved = store_clone.load("s1").await.unwrap();
         assert_eq!(saved.total_cache_creation_tokens, 15);
@@ -3580,11 +3809,17 @@ mod tests {
 
         let store = MemorySessionStore::new();
         let store_clone = store.clone();
-        store_clone.save("s1", &SessionState {
-            total_input_tokens: 100,
-            total_output_tokens: 40,
-            ..Default::default()
-        }).await.unwrap();
+        store_clone
+            .save(
+                "s1",
+                &SessionState {
+                    total_input_tokens: 100,
+                    total_output_tokens: 40,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let agent = TrogonAgent::new(
             crate::session_notifier::mock::MockSessionNotifier::new(),
@@ -3598,13 +3833,21 @@ mod tests {
         );
 
         let local = tokio::task::LocalSet::new();
-        local.run_until(async {
-            let client = crate::session_notifier::mock::NullPromptEventClient;
-            agent.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
-        }).await;
+        local
+            .run_until(async {
+                let client = crate::session_notifier::mock::NullPromptEventClient;
+                agent
+                    .run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None)
+                    .await
+                    .unwrap();
+            })
+            .await;
 
         let saved = store_clone.load("s1").await.unwrap();
-        assert_eq!(saved.total_input_tokens, 100, "tokens must not decrease when prompt has no usage event");
+        assert_eq!(
+            saved.total_input_tokens, 100,
+            "tokens must not decrease when prompt has no usage event"
+        );
         assert_eq!(saved.total_output_tokens, 40);
     }
 

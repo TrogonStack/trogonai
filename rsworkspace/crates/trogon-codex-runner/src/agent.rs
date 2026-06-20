@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, Notify};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
+use trogon_runner_tools::compaction::{CompactProviders, compaction_settings_from_env, estimate_tokens, request_compaction};
 
 use crate::permissions::{ModeGateAction, mode_gate_action};
 use crate::process::{CodexEvent, CodexToolKind, RealProcessSpawner};
@@ -265,6 +265,10 @@ pub struct CodexAgent<N: SessionNotifierFactory, P: ProcessSpawner> {
     /// Dedicated NATS client for the `trogon-compactor` service (context
     /// compaction). `None` disables `session/compact`. Mirrors xai-runner.
     compactor_nats: Option<async_nats::Client>,
+    /// Fase 4 (§1875) canonical shadow recorder: mirrors each completed turn into the
+    /// Session Kernel event log/snapshot (the session belongs to Trogonai). `None` when
+    /// the kernel is disabled (default). Best-effort; never blocks the prompt path.
+    kernel_shadow: Option<Arc<dyn crate::kernel_shadow::ShadowRecorder>>,
 }
 
 /// Convenience type alias for the production agent wired to real dependencies.
@@ -338,6 +342,7 @@ where
             prompt_timeout,
             available_models,
             compactor_nats: None,
+            kernel_shadow: None,
         }
     }
 
@@ -355,6 +360,14 @@ where
         {
             warn!(session_id, error = %e, "codex: turn_interrupt failed");
         }
+    }
+
+    /// Attach the Fase 4 canonical shadow recorder (§1875): each completed turn is
+    /// mirrored into the Session Kernel event log/snapshot. `None` (default) leaves the
+    /// in-memory-only path untouched.
+    pub fn with_kernel_shadow(mut self, recorder: Arc<dyn crate::kernel_shadow::ShadowRecorder>) -> Self {
+        self.kernel_shadow = Some(recorder);
+        self
     }
 
     /// Ensures the process is running, spawning (or re-spawning) as needed,
@@ -949,6 +962,8 @@ where
                             id,
                             name,
                             input_summary: input.to_string(),
+                            input,
+                            parent_tool_use_id: None,
                         },
                     );
                 }
@@ -975,7 +990,8 @@ where
                     tool_result_blocks.push(
                         trogon_runner_tools::portable_session::PortableBlock::ToolResult {
                             id,
-                            output_summary: output,
+                            output_summary: output.clone(),
+                            output: Some(output),
                         },
                     );
                 }
@@ -988,7 +1004,9 @@ where
                     let silent = text.trim().is_empty();
                     // Will we nudge for a recap? (ran tools, no text, not yet nudged)
                     let will_nudge = ran_tools && silent && !auto_summary_done;
-                    {
+                    // Update the in-memory history, then snapshot it (only when the kernel
+                    // shadow is active) so the lock is released before the async record.
+                    let history_for_shadow = {
                         let mut sessions = self.sessions.lock().await;
                         if let Some(s) = sessions.get_mut(&session_id) {
                             if !tool_calls.is_empty() {
@@ -1014,8 +1032,11 @@ where
                                     ),
                                 );
                             }
+                            self.kernel_shadow.as_ref().map(|_| s.history.clone())
+                        } else {
+                            None
                         }
-                    } // drop sessions lock before re-acquiring the process
+                    };
 
                     // Auto-summary guarantee: ran tools but produced no text → the
                     // model went silent. Re-prompt once for a brief recap (codex
@@ -1039,6 +1060,11 @@ where
                             info!(session_id, "codex: silent after tools — requesting recap");
                             continue;
                         }
+                    }
+                    // Fase 4 (§1875/§1671 shadow mode): mirror the turn into the canonical
+                    // kernel (the session belongs to Trogonai). Best-effort.
+                    if let (Some(shadow), Some(history)) = (&self.kernel_shadow, history_for_shadow) {
+                        shadow.record_turn(&session_id, &history, model.as_deref().unwrap_or_default()).await;
                     }
 
                     break StopReason::EndTurn;
@@ -1212,19 +1238,24 @@ where
                     "no compactor backend for compaction",
                 )
             })?;
-            let (token_budget, threshold_pct) = compaction_settings_from_env();
-            let compacted_wire = maybe_compact(
+            let (_token_budget, _threshold_pct) = compaction_settings_from_env();
+            // Manual `/compact` forces compaction regardless of fill level, so call the
+            // thresholdless `request_compaction` directly (the session model compacts).
+            let compacted_wire = request_compaction(
                 nats,
                 &wire,
-                token_budget,
-                threshold_pct,
-                true,
-                "openai",
-                &resolved_model,
                 None,
+                CompactProviders {
+                    session_provider: "openai",
+                    session_model: &resolved_model,
+                    compactor_provider: None,
+                    compactor_model: None,
+                },
+                std::time::Duration::from_secs(25),
             )
             .await
-            .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?
+            .map(|r| r.messages);
             let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
                 let tokens_after = estimate_tokens(&cw);
                 let new_history = codex_history_from_wire(cw);

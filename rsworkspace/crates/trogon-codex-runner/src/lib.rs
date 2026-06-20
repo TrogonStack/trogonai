@@ -15,6 +15,7 @@
 //! Per-tool permission gating inside the subprocess is not enforced by this runner — see
 //! [`permissions`] for details.
 
+pub mod kernel_shadow;
 pub mod traits;
 
 mod agent;
@@ -22,4 +23,5 @@ mod permissions;
 mod process;
 
 pub use agent::{CodexAgent, DefaultCodexAgent, NatsNotifierFactory};
+pub use kernel_shadow::{ShadowRecorder, provision as provision_kernel_shadow};
 pub use process::{CodexProcess, RealProcessSpawner};

@@ -106,6 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
+    let _spawn_api_key = api_key.clone();
+    let _spawn_model = default_model.clone();
+    let _spawn_prefix = prefix.clone();
+
     let nats_config = acp_nats::NatsConfig {
         servers: vec![nats_url.clone()],
         auth: acp_nats::NatsAuth::None,
@@ -117,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
     let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL").ok();
     let classifier_http = reqwest::Client::new();
-    let safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
+    let _safety_classifier = trogon_runner_tools::build_auto_safety_classifier(
         classifier_http,
         &proxy_url,
         anthropic_base_url.as_deref(),
@@ -126,9 +130,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
         .with_execution_backend(nats.clone(), registry_for_agent)
         .with_compactor(nats.clone())
-        .with_permissions(nats.clone(), acp_prefix.clone())
-        .with_runner_config(runner_config)
-        .with_safety_classifier(safety_classifier);
+        .with_permissions(nats.clone(), acp_prefix.clone());
+    if let Ok(catalog) =
+        trogonai_catalog_client::open(&js_ctx, trogonai_catalog_client::CatalogClientConfig::default()).await
+    {
+        agent = agent.with_catalog(catalog);
+    }
+    let mut agent = agent.with_runner_config(runner_config);
 
     // If AGENT_ID is set, attach console skill loaders so skills defined in
     // trogon-console are injected into every new session's system prompt.

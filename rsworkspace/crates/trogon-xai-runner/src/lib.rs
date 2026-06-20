@@ -3,14 +3,17 @@ pub mod agent_loader;
 mod client;
 pub mod compaction;
 mod http_client;
+pub mod kernel_shadow;
 mod session_notifier;
 pub mod session_store;
 pub mod skill_loader;
+pub mod spawn_handler;
 
 pub use agent::XaiAgent;
 pub use agent_loader::{AgentConfig, AgentLoader, AgentLoading};
 pub use client::{FinishReason, InputItem, Message, ToolSpec, XaiClient, XaiEvent};
 pub use http_client::XaiHttpClient;
+pub use kernel_shadow::{ShadowRecorder, provision as provision_kernel_shadow};
 pub use session_notifier::{NatsSessionNotifier, SessionNotifier};
 pub use session_store::{
     DefaultSessionStore, NatsSessionStore, SessionStoring, open_default_session_store, session_store_from_open,

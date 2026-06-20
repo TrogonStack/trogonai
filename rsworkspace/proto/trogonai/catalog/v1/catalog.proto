@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package trogonai.catalog.v1;
+
+// Model modality for compaction eligibility filtering.
+enum ModelModality {
+  MODEL_MODALITY_UNSPECIFIED = 0;
+  TEXT = 1;
+  EMBEDDING = 2;
+  IMAGE = 3;
+  MODERATION = 4;
+  CLASSIFICATION = 5;
+}
+
+// A single model entry in the catalog.
+message CatalogEntry {
+  string model_id = 1;
+  string provider = 2;
+  uint64 context_window = 3;
+  uint32 max_output = 4;
+  ModelModality modality = 5;
+}
+
+// Full catalog snapshot stored in NATS KV.
+message CatalogSnapshot {
+  repeated CatalogEntry entries = 1;
+  int64 fetched_at_unix_secs = 2;
+}
+
+// Callable providers snapshot (from trogon.proxy.providers).
+message ProviderSnapshot {
+  repeated string providers = 1;
+  int64 fetched_at_unix_secs = 2;
+}
+
+// KV envelope with type info for migrations.
+message CatalogRecord {
+  string schema_version = 1;
+  bytes payload = 2;
+}

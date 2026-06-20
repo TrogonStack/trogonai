@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::{Agent, ContentBlock, NewSessionRequest, PromptRequest, TextContent};
+use buffa::Message as _;
 use futures::StreamExt;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
@@ -25,6 +26,7 @@ use trogon_acp_runner::{
     session_store::{SessionStore, mock::MemorySessionStore},
 };
 use trogon_agent_core::agent_loop::Message;
+use trogonai_compactor_proto::CompactResponse as ProtoCompactResponse;
 
 async fn start_nats() -> (testcontainers_modules::testcontainers::ContainerAsync<Nats>, u16) {
     let container = Nats::default()
@@ -73,17 +75,17 @@ async fn compactor_called_when_messages_exceed_85_percent_of_token_budget() {
             tokio::task::spawn_local(async move {
                 if let Some(msg) = sub.next().await {
                     was_called_inner.store(true, Ordering::SeqCst);
-                    let req: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                    let resp = serde_json::json!({
-                        "messages": req["messages"],
-                        "compacted": false,
-                        "tokens_before": 0,
-                        "tokens_after": 0,
-                    });
+                    let resp = ProtoCompactResponse {
+                        messages: Vec::new(),
+                        compacted: false,
+                        tokens_before: 0,
+                        tokens_after: 0,
+                        kept_count: 0,
+                        fallback_model: None,
+                        __buffa_unknown_fields: Default::default(),
+                    };
                     if let Some(reply_to) = msg.reply {
-                        let _ = reply_nats
-                            .publish(reply_to, serde_json::to_vec(&resp).unwrap().into())
-                            .await;
+                        let _ = reply_nats.publish(reply_to, resp.encode_to_vec().into()).await;
                     }
                 }
             });
@@ -150,16 +152,17 @@ async fn compactor_not_called_when_messages_below_85_percent_of_token_budget() {
             tokio::task::spawn_local(async move {
                 if let Some(msg) = sub.next().await {
                     was_called_inner.store(true, Ordering::SeqCst);
-                    // Reply to avoid hanging compact_messages.
-                    let req: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-                    let resp = serde_json::json!({
-                        "messages": req["messages"],
-                        "compacted": false,
-                    });
+                    let resp = ProtoCompactResponse {
+                        messages: Vec::new(),
+                        compacted: false,
+                        tokens_before: 0,
+                        tokens_after: 0,
+                        kept_count: 0,
+                        fallback_model: None,
+                        __buffa_unknown_fields: Default::default(),
+                    };
                     if let Some(reply_to) = msg.reply {
-                        let _ = reply_nats
-                            .publish(reply_to, serde_json::to_vec(&resp).unwrap().into())
-                            .await;
+                        let _ = reply_nats.publish(reply_to, resp.encode_to_vec().into()).await;
                     }
                 }
             });

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package trogonai.session.v1;
+
+// Per-session routing/migration metadata persisted in NATS KV alongside the canonical
+// snapshot (cambio-modelo.md § "NATS KV para snapshots": `sessions.{id}.routing`).
+//
+// It records whether the event log is the primary source of truth for this session and
+// the legacy-migration provenance. On resume the kernel reads this record and, when the
+// session is event-log-primary, reconstructs canonical state from event-log replay
+// instead of runner-owned messages (Fase 11: "Usar replay + snapshots como fuente de
+// verdad para sesiones opt-in").
+message SessionRoutingRecord {
+  uint32 schema_version = 1;
+  string session_id = 2;
+  // Whether reads should prefer the event log as the source of truth for this session.
+  bool event_log_primary = 3;
+  // Whether this session was migrated from a legacy runner-owned session.
+  bool migrated_from_legacy = 4;
+  // Number of legacy messages imported when the session was migrated.
+  uint64 legacy_message_count = 5;
+}
