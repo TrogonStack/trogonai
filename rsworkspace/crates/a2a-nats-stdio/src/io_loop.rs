@@ -100,7 +100,7 @@ pub async fn run_io_loop<N, J, R, W>(
 
                         let (id, method, params) = match parse_inbound(&raw) {
                             Ok(t) => t,
-                            Err(frame) => {
+                            Err(err) => {
                                 // Outbound channel may be full while writer is
                                 // back-pressured; keep shutdown responsive.
                                 tokio::select! {
@@ -108,7 +108,7 @@ pub async fn run_io_loop<N, J, R, W>(
                                         shutdown_requested = true;
                                         break 'outer;
                                     }
-                                    _ = frame_tx.send(frame) => {}
+                                    _ = frame_tx.send(OutboundFrame::Error(err)) => {}
                                 }
                                 continue;
                             }
@@ -158,14 +158,14 @@ pub async fn run_io_loop<N, J, R, W>(
 /// Split JSON-syntax failures (`-32700` Parse error) from envelope-shape
 /// failures (`-32600` Invalid Request). JSON-RPC reserves `-32700` for actual
 /// invalid JSON; structurally invalid requests are a different class.
-fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), OutboundFrame> {
+fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), OutboundError> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
         warn!(error = %e, "stdin line is not valid JSON");
-        OutboundFrame::Error(OutboundError::new(RpcId::Null, -32700, format!("parse error: {e}")))
+        OutboundError::new(RpcId::Null, -32700, format!("parse error: {e}"))
     })?;
     let req: InboundRequest = serde_json::from_value(value).map_err(|e| {
         warn!(error = %e, "JSON-RPC envelope is invalid");
-        OutboundFrame::Error(OutboundError::new(RpcId::Null, -32600, format!("invalid request: {e}")))
+        OutboundError::new(RpcId::Null, -32600, format!("invalid request: {e}"))
     })?;
     Ok((req.id, req.method, req.params))
 }
@@ -322,17 +322,6 @@ mod tests {
         assert!(output.contains("-32600"), "expected invalid request in: {output}");
     }
 
-    fn expect_err_code(result: Result<(RpcId, String, serde_json::Value), OutboundFrame>) -> i32 {
-        let OutboundFrame::Error(OutboundError {
-            error: crate::wire::RpcError { code, .. },
-            ..
-        }) = result.expect_err("expected error")
-        else {
-            return 0;
-        };
-        code
-    }
-
     #[tokio::test]
     async fn io_loop_shutdown_preempts_blocking_dispatch_acquire() {
         let nats = AdvancedMockNatsClient::new();
@@ -366,10 +355,114 @@ mod tests {
         drop(stdin_writer);
     }
 
+    // AsyncWrite that fails on the N-th poll_write/poll_flush call. Used to
+    // exercise the writer task's three I/O error branches (write payload,
+    // write newline, flush) which are otherwise unreachable with duplex pipes.
+    struct FailingWriter {
+        writes_until_fail: std::sync::atomic::AtomicUsize,
+        fail_on_flush: bool,
+    }
+    impl tokio::io::AsyncWrite for FailingWriter {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            let remaining = self.writes_until_fail.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            if remaining == 0 {
+                std::task::Poll::Ready(Err(std::io::Error::other("write boom")))
+            } else {
+                std::task::Poll::Ready(Ok(buf.len()))
+            }
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            if self.fail_on_flush {
+                std::task::Poll::Ready(Err(std::io::Error::other("flush boom")))
+            } else {
+                std::task::Poll::Ready(Ok(()))
+            }
+        }
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    async fn run_with_failing_writer(writes_until_fail: usize, fail_on_flush: bool) {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agents.bot.tasks.get", task_response("t-fw"));
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+
+        let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
+        let writer = FailingWriter {
+            writes_until_fail: std::sync::atomic::AtomicUsize::new(writes_until_fail),
+            fail_on_flush,
+        };
+
+        let req =
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tasks/get\",\"params\":{\"id\":\"t-fw\",\"tenant\":\"\"}}\n";
+        stdin_writer.write_all(req).await.unwrap();
+        drop(stdin_writer);
+
+        run_io_loop(client, stdin_reader, writer, std::future::pending::<()>()).await;
+    }
+
+    #[tokio::test]
+    async fn writer_task_handles_payload_write_failure() {
+        run_with_failing_writer(0, false).await;
+    }
+
+    #[tokio::test]
+    async fn writer_task_handles_newline_write_failure() {
+        run_with_failing_writer(1, false).await;
+    }
+
+    #[tokio::test]
+    async fn writer_task_handles_flush_failure() {
+        run_with_failing_writer(usize::MAX, true).await;
+    }
+
+    // AsyncRead that surfaces an error on first poll_read. Covers the
+    // `Err(e) => break` stdin-read branch.
+    struct FailingReader;
+    impl tokio::io::AsyncRead for FailingReader {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Err(std::io::Error::other("read boom")))
+        }
+    }
+
+    #[tokio::test]
+    async fn io_loop_exits_on_stdin_read_error() {
+        let nats = AdvancedMockNatsClient::new();
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let (_stdout_reader, stdout_writer) = tokio::io::duplex(1024);
+        run_io_loop(client, FailingReader, stdout_writer, std::future::pending::<()>()).await;
+    }
+
+    #[tokio::test]
+    async fn failing_writer_shutdown_returns_ready_ok() {
+        let mut w = FailingWriter {
+            writes_until_fail: std::sync::atomic::AtomicUsize::new(usize::MAX),
+            fail_on_flush: false,
+        };
+        // Exercise the success branch of poll_flush + poll_shutdown.
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
     #[test]
     fn parse_inbound_routes_syntax_to_parse_error_and_shape_to_invalid_request() {
-        assert_eq!(expect_err_code(parse_inbound("not json")), -32700);
-        assert_eq!(expect_err_code(parse_inbound(r#"{"id":1}"#)), -32600);
+        assert_eq!(parse_inbound("not json").unwrap_err().error.code, -32700);
+        assert_eq!(parse_inbound(r#"{"id":1}"#).unwrap_err().error.code, -32600);
         let (id, method, _) = parse_inbound(r#"{"jsonrpc":"2.0","id":7,"method":"tasks/get","params":{}}"#).unwrap();
         assert_eq!(id, RpcId::Number(7));
         assert_eq!(method, "tasks/get");
