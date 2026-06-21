@@ -89,7 +89,7 @@ where
                             Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
                         )
                     });
-                    let sse_stream = typed_event_stream_to_sse(stream, id);
+                    let sse_stream = typed_event_stream_to_sse(stream, id, "message/stream");
                     sse_response(bootstrap_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),
@@ -170,7 +170,7 @@ where
                             Event::default().data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
                         )
                     });
-                    let sse_stream = typed_event_stream_to_sse(stream, id);
+                    let sse_stream = typed_event_stream_to_sse(stream, id, "tasks/resubscribe");
                     sse_response(snapshot_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),

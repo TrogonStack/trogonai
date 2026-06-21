@@ -123,7 +123,7 @@ where
                     Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
                 )
             });
-            sse_response(bootstrap_sse.chain(typed_event_stream_to_sse(stream, Value::Null)))
+            sse_response(bootstrap_sse.chain(typed_event_stream_to_sse(stream, Value::Null, "message/stream")))
         }
         Err(e) => rest_error_response(&e),
     }
@@ -262,13 +262,19 @@ where
     };
     match client.tasks_resubscribe(&task_id, q.last_event_id.unwrap_or(0)).await {
         Ok((snapshot, stream)) => {
-            let snapshot_event = serde_json::json!({ "result": snapshot });
+            // Match the JSON-RPC handler envelope so subscribe doesn't mix
+            // bare {result} frames with full JSON-RPC frames downstream.
+            let snapshot_event = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "result": snapshot,
+            });
             let snapshot_sse = futures::stream::once(async move {
                 Ok::<Event, Infallible>(
                     Event::default().data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
                 )
             });
-            sse_response(snapshot_sse.chain(typed_event_stream_to_sse(stream, Value::Null)))
+            sse_response(snapshot_sse.chain(typed_event_stream_to_sse(stream, Value::Null, "tasks/resubscribe")))
         }
         Err(e) => rest_error_response(&e),
     }
