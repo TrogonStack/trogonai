@@ -7,6 +7,8 @@ use async_trait::async_trait;
 
 use a2a_auth_callout::{BridgeMintRequest, BridgeMintResponse};
 
+#[cfg(test)]
+pub(crate) use callout_mint::harness_callout_dispatcher;
 pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
 
 use crate::error::BridgeError;
