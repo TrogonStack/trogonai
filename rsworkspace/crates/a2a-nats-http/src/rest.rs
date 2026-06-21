@@ -21,7 +21,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::Value;
@@ -58,14 +58,6 @@ where
             "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
             get(get_push_config::<N, J>).delete(delete_push_config::<N, J>),
         )
-        .route(
-            "/v1/tasks/{id}/pushNotificationConfigs/{configId}/_keep_delete_chain",
-            delete(noop),
-        )
-}
-
-async fn noop() -> Response {
-    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn get_card<N, J>(State(client): State<Arc<A2aClient<N, J>>>) -> Response
@@ -269,8 +261,8 @@ where
 
 async fn post_push_set<N, J>(
     State(client): State<Arc<A2aClient<N, J>>>,
-    Path(_id): Path<String>,
-    Json(req): Json<TaskPushNotificationConfig>,
+    Path(id): Path<String>,
+    Json(mut req): Json<TaskPushNotificationConfig>,
 ) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
@@ -282,6 +274,19 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
+    // The path id is authoritative — reject a body that targets a different
+    // task instead of letting untrusted JSON pick the write target. Untyped
+    // JSON crosses the boundary here; this is the one conversion site.
+    if !req.task_id.is_empty() && req.task_id != id {
+        let body = serde_json::json!({
+            "error": {
+                "code": -32602,
+                "message": "task id in body does not match path"
+            }
+        });
+        return (StatusCode::BAD_REQUEST, Json(body)).into_response();
+    }
+    req.task_id = id;
     match client.push_set(&req).await {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(e) => rest_error_response(&e),

@@ -85,18 +85,29 @@ impl RequestedExtension {
         // RFC-style optional marker: a trailing `;q=0` is treated as "optional".
         // We also accept a `?` prefix as an alternative optional marker that
         // is easy to author by hand.
+        // Skip tokens whose URI segment ends up empty after stripping the
+        // optional `?` prefix or `;q=…` params — e.g. a bare `"?"` or a `;q=0`
+        // would otherwise be implicitly negotiated as an empty-URI extension.
         if let Some(stripped) = trimmed.strip_prefix('?') {
+            let uri = stripped.trim();
+            if uri.is_empty() {
+                return None;
+            }
             Some(Self {
-                uri: stripped.trim().to_string(),
+                uri: uri.to_string(),
                 required: false,
             })
         } else if let Some((uri, params)) = trimmed.split_once(';') {
+            let uri = uri.trim();
+            if uri.is_empty() {
+                return None;
+            }
             let optional = params.split(';').any(|p| {
                 let p = p.trim().to_ascii_lowercase();
                 p == "q=0" || p == "q=0.0" || p == "optional"
             });
             Some(Self {
-                uri: uri.trim().to_string(),
+                uri: uri.to_string(),
                 required: !optional,
             })
         } else {

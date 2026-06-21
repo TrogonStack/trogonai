@@ -19,10 +19,14 @@ pub fn typed_event_stream_to_sse(
                     "result": response,
                 });
                 serde_json::to_string(&envelope).unwrap_or_else(|e| {
+                    // Server-side serialization failure is `-32603` Internal,
+                    // not `-32700` Parse error (that's reserved for invalid
+                    // JSON on the way in). Echo the original id so the client
+                    // can correlate the failure with their stream subscription.
                     serde_json::json!({
                         "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": -32700, "message": format!("serialize error: {e}") }
+                        "id": jsonrpc_id,
+                        "error": { "code": -32603, "message": format!("serialize error: {e}") }
                     })
                     .to_string()
                 })
