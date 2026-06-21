@@ -20,10 +20,7 @@ pub enum ApiKeyError {
     /// The caller-supplied audience didn't match the registry entry's
     /// audience for this API key.
     #[error("API key audience mismatch: requested={requested:?} registered={registered:?}")]
-    AudienceMismatch {
-        requested: String,
-        registered: String,
-    },
+    AudienceMismatch { requested: String, registered: String },
 }
 
 impl From<ApiKeyError> for AuthCalloutError {
