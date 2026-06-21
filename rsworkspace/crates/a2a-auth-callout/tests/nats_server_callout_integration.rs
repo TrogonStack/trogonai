@@ -195,6 +195,14 @@ impl NatsCalloutStack {
             .expect("signing source"),
         );
 
+        // TODO(task #8): pin `server_issuer` to the NATS server's own
+        // identity NKey (the key that signs $SYS.REQ.USER.AUTH request
+        // JWTs), not to `auth_callout.issuer` from nats.conf — the
+        // latter is the callout service's own response-signing key.
+        // `nats-server` 2.14 auto-generates the server NKey per boot,
+        // so this harness needs to read it from the connection INFO
+        // line or pin it via deterministic config before the
+        // ignored Docker tests can pass end-to-end.
         let server_issuer = NkeyPublic::parse(NATS_SERVER_AUTH_CALLOUT_ISSUER).expect("server issuer nkey");
         let callout_seed = NkeySeed::parse(CALLOUT_RESPONSE_ISSUER_SEED).expect("callout issuer seed");
         let wire = Arc::new(AuthCalloutWireCodec::new(server_issuer, callout_seed, None, None).expect("wire codec"));
@@ -284,6 +292,7 @@ accounts {{
   }}
   APP {{}}
   SYS {{}}
+  {TENANT_ACCOUNT} {{}}
 }}
 system_account: SYS
 
