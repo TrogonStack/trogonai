@@ -38,9 +38,20 @@ impl fmt::Display for AccountName {
 
 pub type AudienceAccount = AccountName;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct ExternalSubject(String);
+
+// Custom Deserialize so JSON-sourced subjects run through the same validator
+// as `ExternalSubject::new` — derived transparent Deserialize would let an
+// empty `sub` slip into UserJwtClaims, mint with `ext_sub=""`, then fail
+// verify because `ExternalSubject::new("")` rejects it.
+impl<'de> Deserialize<'de> for ExternalSubject {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
 
 impl ExternalSubject {
     pub fn new(subject: impl Into<String>) -> Result<Self, JwtError> {
