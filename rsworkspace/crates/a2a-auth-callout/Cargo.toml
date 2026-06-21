@@ -1,0 +1,25 @@
+[package]
+name = "a2a-auth-callout"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "NATS auth-callout server for A2A: caller credential verification + minted user JWT issuance"
+publish = false
+
+[[bin]]
+name = "a2a-auth-callout"
+path = "src/main.rs"
+
+[lib]
+name = "a2a_auth_callout"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[features]
+test-support = []
