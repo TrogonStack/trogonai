@@ -189,26 +189,33 @@ where
         // Aborted joins surface as JoinError on signal-driven teardown; only
         // record join errors when shutdown wasn't requested so we don't
         // mistake our own abort for a real failure.
-        if !shutdown_requested {
-            if let Err(join_err) = res {
-                loop_err.get_or_insert_with(|| std::io::Error::other(join_err));
-            }
+        if !shutdown_requested && let Err(join_err) = res {
+            loop_err.get_or_insert_with(|| std::io::Error::other(join_err));
         }
     }
     drop(frame_tx);
 
-    // Surface the first real failure: writer error > loop error > writer
-    // join result. A successful writer is the no-op success path.
-    if let Some(e) = writer_err {
-        return Err(e);
-    }
-    if let Some(e) = loop_err {
-        return Err(e);
-    }
-    match writer_task.await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(join_err) => Err(std::io::Error::other(join_err)),
+    // If the writer-died branch fired, writer_err already holds its exit
+    // status — the writer_task handle is consumed. Otherwise await it so any
+    // frames still queued (e.g. dispatch responses produced just before a
+    // stdin read error) finish flushing before we return.
+    let writer_result = if writer_err.is_some() {
+        writer_err.map_or(Ok(()), Err)
+    } else {
+        match writer_task.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(join_err) => Err(std::io::Error::other(join_err)),
+        }
+    };
+
+    // Surface the first real failure: writer error wins (it means stdout was
+    // broken or queued frames were lost), then loop errors (stdin read /
+    // dispatch join), then success.
+    match (writer_result, loop_err) {
+        (Err(e), _) => Err(e),
+        (Ok(()), Some(e)) => Err(e),
+        (Ok(()), None) => Ok(()),
     }
 }
 
