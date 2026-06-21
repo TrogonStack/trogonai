@@ -14,7 +14,7 @@ pub struct StaticSigningKeySource {
 impl StaticSigningKeySource {
     pub fn new(seed: &str, version: KeyVersion) -> Result<Self, AuthCalloutError> {
         Ok(Self {
-            current: SigningKeyHandle::new(version, SigningKey::from_seed(seed).map_err(map_seed_err)?),
+            current: SigningKeyHandle::new(version, SigningKey::from_seed(seed)?),
             previous: None,
         })
     }
@@ -26,13 +26,10 @@ impl StaticSigningKeySource {
         previous_version: KeyVersion,
     ) -> Result<Self, AuthCalloutError> {
         Ok(Self {
-            current: SigningKeyHandle::new(
-                current_version,
-                SigningKey::from_seed(current_seed).map_err(map_seed_err)?,
-            ),
+            current: SigningKeyHandle::new(current_version, SigningKey::from_seed(current_seed)?),
             previous: Some(SigningKeyHandle::new(
                 previous_version,
-                SigningKey::from_seed(previous_seed).map_err(map_seed_err)?,
+                SigningKey::from_seed(previous_seed)?,
             )),
         })
     }
@@ -50,8 +47,4 @@ impl SigningKeySource for StaticSigningKeySource {
         }
         keys
     }
-}
-
-fn map_seed_err(err: crate::jwt::JwtError) -> AuthCalloutError {
-    AuthCalloutError::Internal(err.to_string())
 }

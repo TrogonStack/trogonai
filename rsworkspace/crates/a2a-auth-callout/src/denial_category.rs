@@ -30,9 +30,14 @@ impl DenialCategory {
             AuthCalloutError::Deserialize(_) => Self::InvalidRequest,
             AuthCalloutError::Serialize(_) => Self::InternalError,
             AuthCalloutError::Reply(_) => Self::InternalError,
-            AuthCalloutError::JwtMint(_) => Self::InternalError,
+            AuthCalloutError::Jwt(_) => Self::InternalError,
             AuthCalloutError::WireFormat(_) => Self::InternalError,
             AuthCalloutError::Internal(_) => Self::InternalError,
+            AuthCalloutError::MissingEnvVar(_)
+            | AuthCalloutError::UnknownSigningKeySource(_)
+            | AuthCalloutError::VaultNotConfigured
+            | AuthCalloutError::KeyLoadIo { .. }
+            | AuthCalloutError::KeyLoadUtf8(_) => Self::InternalError,
             AuthCalloutError::CredentialVerification(msg) => Self::from_credential_message(msg),
         }
     }
@@ -85,7 +90,7 @@ mod tests {
             DenialCategory::InternalError
         );
         assert_eq!(
-            DenialCategory::from_auth_callout_error(&AuthCalloutError::JwtMint("x".into())),
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::Jwt(crate::jwt::JwtError::Encode("x".into()))),
             DenialCategory::InternalError
         );
     }

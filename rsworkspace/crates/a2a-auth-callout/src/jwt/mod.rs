@@ -256,7 +256,7 @@ impl std::error::Error for JwtError {
 
 impl From<JwtError> for AuthCalloutError {
     fn from(value: JwtError) -> Self {
-        Self::JwtMint(value.to_string())
+        Self::Jwt(value)
     }
 }
 
@@ -413,7 +413,10 @@ mod tests {
             .unwrap();
         let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
         let decoded = UserJwtClaims::verify_with_handles(token.as_str(), &[handle]).unwrap();
-        assert_eq!(decoded.sub.as_str(), "user/alice");
+        // `sub` round-trips the caller-supplied ExternalSubject ("alice"),
+        // independent of the SpiceDB principal which can carry a different
+        // shape ("user/alice"). See nats_user_jwt::ext_sub.
+        assert_eq!(decoded.sub.as_str(), "alice");
         assert_eq!(decoded.aud.as_str(), "tenant-acme");
         assert_eq!(decoded.caller_id.as_str(), "caller1");
         assert_eq!(decoded.data.spicedb_subject().unwrap().as_str(), "user/alice");

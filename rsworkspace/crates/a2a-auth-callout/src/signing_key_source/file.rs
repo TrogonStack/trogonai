@@ -21,11 +21,9 @@ impl FileSigningKeySource {
         current_path: impl AsRef<Path>,
         previous_path: Option<impl AsRef<Path>>,
     ) -> Result<Self, AuthCalloutError> {
-        let current_bytes = std::fs::read(current_path.as_ref()).map_err(|e| {
-            AuthCalloutError::Internal(format!(
-                "failed to read signing key at {}: {e}",
-                current_path.as_ref().display()
-            ))
+        let current_bytes = std::fs::read(current_path.as_ref()).map_err(|e| AuthCalloutError::KeyLoadIo {
+            path: current_path.as_ref().to_path_buf(),
+            source: e,
         })?;
         // VERSION_CURRENT / VERSION_PREVIOUS are validated string constants;
         // their KeyVersion::new can't fail at runtime.
@@ -38,11 +36,9 @@ impl FileSigningKeySource {
         let previous = match previous_path {
             None => None,
             Some(p) => {
-                let bytes = std::fs::read(p.as_ref()).map_err(|e| {
-                    AuthCalloutError::Internal(format!(
-                        "failed to read previous signing key at {}: {e}",
-                        p.as_ref().display()
-                    ))
+                let bytes = std::fs::read(p.as_ref()).map_err(|e| AuthCalloutError::KeyLoadIo {
+                    path: p.as_ref().to_path_buf(),
+                    source: e,
                 })?;
                 #[allow(clippy::expect_used)]
                 let version = KeyVersion::new(VERSION_PREVIOUS).expect("static version");
@@ -56,9 +52,9 @@ impl FileSigningKeySource {
 
 fn signing_key_from_file_bytes(bytes: &[u8]) -> Result<SigningKey, AuthCalloutError> {
     let seed = std::str::from_utf8(bytes)
-        .map_err(|e| AuthCalloutError::Internal(format!("signing key file must be UTF-8 NKey seed: {e}")))?
+        .map_err(AuthCalloutError::KeyLoadUtf8)?
         .trim();
-    SigningKey::from_seed(seed).map_err(|e| AuthCalloutError::Internal(e.to_string()))
+    SigningKey::from_seed(seed).map_err(AuthCalloutError::Jwt)
 }
 
 impl SigningKeySource for FileSigningKeySource {

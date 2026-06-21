@@ -8,6 +8,7 @@ use super::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, SigningKeySource, StaticSigningKeySource,
     VaultSigningKeySource,
 };
+use crate::error::AuthCalloutError;
 use crate::jwt::{CallerId, ExternalSubject, UserJwtClaims, UserJwtSubject};
 use crate::permissions::IssuedPermissions;
 use crate::{AccountName, SpiceDbPrincipal};
@@ -75,7 +76,7 @@ fn file_missing_current_errors() {
 #[test]
 fn vault_load_always_errors() {
     let err = VaultSigningKeySource::load().unwrap_err();
-    assert!(err.to_string().contains("vault source not implemented"));
+    assert!(matches!(err, AuthCalloutError::VaultNotConfigured));
 }
 
 #[test]

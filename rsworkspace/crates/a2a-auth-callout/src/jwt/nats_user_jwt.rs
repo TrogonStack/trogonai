@@ -43,6 +43,10 @@ struct NatsUserJwtPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     nbf: Option<i64>,
     caller_id: &'a str,
+    /// Caller-asserted external subject (Stytch/OIDC sub, mTLS DN, etc.).
+    /// `sub` above is the NATS user NKey identity for the connection; this
+    /// field preserves the input subject so verify can return what was minted.
+    ext_sub: &'a str,
     kid: &'a str,
     data: &'a Value,
     nats: Value,
@@ -56,6 +60,11 @@ struct VerifiedPayload {
     #[allow(dead_code)]
     sub: String,
     caller_id: String,
+    /// Caller-asserted external subject; preserved separately from `sub` (which
+    /// is the NATS user NKey for the connection). Older tokens minted before
+    /// this field existed fall back to `data.spicedb_subject`.
+    #[serde(default)]
+    ext_sub: Option<String>,
     kid: String,
     data: Value,
     nats: VerifiedNatsBlock,
@@ -119,6 +128,7 @@ pub(crate) fn mint_nats_user_jwt(
         sub: user_subject.as_str(),
         nbf: Some(iat_secs),
         caller_id: claims.caller_id.as_str(),
+        ext_sub: claims.sub.as_str(),
         kid: material.version().as_str(),
         data: &claims.data.0,
         nats: nats_value,
@@ -208,12 +218,17 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
     }
 
     let data = SpiceDbPrincipal(payload.data);
-    let external_sub = data
-        .spicedb_subject()
-        .map(|s| ExternalSubject::new(s.as_str()))
-        .transpose()
-        .map_err(|e| JwtError::Decode(e.to_string()))?
-        .ok_or_else(|| JwtError::Decode("minted user JWT data missing spicedb_subject".into()))?;
+    // Prefer the dedicated `ext_sub` claim (preserves the caller-supplied
+    // ExternalSubject across mint→verify); fall back to `data.spicedb_subject`
+    // for tokens minted before the dedicated field existed.
+    let external_sub = match payload.ext_sub {
+        Some(s) => ExternalSubject::new(s),
+        None => data
+            .spicedb_subject()
+            .map(|s| ExternalSubject::new(s.as_str()))
+            .transpose()?
+            .ok_or_else(|| JwtError::Decode("minted user JWT missing ext_sub / spicedb_subject".into())),
+    }?;
     let caller_id = CallerId::new(payload.caller_id)?;
     let aud = AccountName::new(
         payload

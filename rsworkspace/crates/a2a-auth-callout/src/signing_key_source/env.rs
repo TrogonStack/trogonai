@@ -28,15 +28,20 @@ pub struct EnvSigningKeySource {
 
 impl EnvSigningKeySource {
     pub fn from_env() -> Result<Self, AuthCalloutError> {
+        let current_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
+            .map_err(|_| AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET"))?;
+        Self::from_secrets(current_secret)
+    }
+
+    /// Constructor that takes the current secret directly. Lets the loader
+    /// resolve a fallback (e.g. `AUTH_CALLOUT_ISSUER_NKEY_SEED`) without
+    /// mutating the process environment.
+    pub fn from_secrets(current_secret: String) -> Result<Self, AuthCalloutError> {
         ENV_DEV_WARN_ONCE.call_once(|| {
             #[cfg(test)]
             ENV_DEV_WARN_COUNT.fetch_add(1, Ordering::SeqCst);
             warn!("AUTH_CALLOUT_SIGNING_SECRET env custody is dev-only; use file or vault in production");
         });
-
-        let current_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET").map_err(|_| {
-            AuthCalloutError::Internal("AUTH_CALLOUT_SIGNING_SECRET is required for env custody".into())
-        })?;
         // `KeyVersion::new` only rejects empty / illegal-char strings; the
         // VERSION_CURRENT / VERSION_PREVIOUS constants are validated at
         // compile time, so a failure here would be a code bug, not runtime.
@@ -63,7 +68,7 @@ impl EnvSigningKeySource {
 }
 
 fn signing_key_from_secret(secret: &str) -> Result<SigningKey, AuthCalloutError> {
-    SigningKey::from_seed(secret.trim()).map_err(|e| AuthCalloutError::Internal(e.to_string()))
+    SigningKey::from_seed(secret.trim()).map_err(AuthCalloutError::Jwt)
 }
 
 impl SigningKeySource for EnvSigningKeySource {
