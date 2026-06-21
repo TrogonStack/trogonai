@@ -116,22 +116,20 @@ impl X509MtlsVerifier {
 
         let asn1_now = ASN1Time::from(now);
         let mut trusted = false;
+        // Several anchors may share the same subject during CA rotation —
+        // don't bail on the first expired or signature-mismatched one; keep
+        // scanning so a still-valid sibling anchor can vouch for the leaf.
         for ca in &cas {
             if leaf.issuer() != ca.subject() {
                 continue;
             }
-            // Reject expired or not-yet-valid trust anchors — the anchor list
-            // is operator-supplied and may rotate; an expired CA shouldn't
-            // still mint identities just because it's pinned.
             if !ca.validity().is_valid_at(asn1_now) {
-                return Err(AuthCalloutError::CredentialVerification(
-                    "trust anchor certificate is not valid at verification time".into(),
-                ));
+                continue;
             }
-            leaf.verify_signature(Some(&ca.tbs_certificate.subject_pki))
-                .map_err(|e| AuthCalloutError::CredentialVerification(format!("certificate signature: {e}")))?;
-            trusted = true;
-            break;
+            if leaf.verify_signature(Some(&ca.tbs_certificate.subject_pki)).is_ok() {
+                trusted = true;
+                break;
+            }
         }
 
         if !trusted {

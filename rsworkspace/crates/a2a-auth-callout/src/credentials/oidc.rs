@@ -169,7 +169,16 @@ fn url_origin(s: &str) -> Option<(String, String, Option<String>)> {
     if host.is_empty() {
         return None;
     }
-    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase(), port))
+    let scheme = scheme.to_ascii_lowercase();
+    // Normalize the default ports against the scheme so `https://host` and
+    // `https://host:443` collapse to the same origin — otherwise discovery
+    // rejects a legitimate jwks_uri whenever the configured issuer omits
+    // the default port.
+    let port = match (scheme.as_str(), port.as_deref()) {
+        ("https", Some("443")) | ("http", Some("80")) => None,
+        _ => port,
+    };
+    Some((scheme, host.to_ascii_lowercase(), port))
 }
 
 impl JwksOidcVerifier {
@@ -510,5 +519,29 @@ mod tests {
         assert!(OidcClientId::new("").is_err());
         assert!(OidcClientId::new("   ").is_err());
         assert!(OidcClientId::new("good-client").is_ok());
+    }
+
+    #[test]
+    fn same_origin_normalizes_default_ports() {
+        assert!(super::same_origin(
+            "https://idp.example.com/jwks",
+            "https://idp.example.com:443"
+        ));
+        assert!(super::same_origin(
+            "https://idp.example.com:443/jwks",
+            "https://idp.example.com"
+        ));
+        assert!(super::same_origin(
+            "http://idp.example.com:80/jwks",
+            "http://idp.example.com"
+        ));
+        assert!(!super::same_origin(
+            "https://idp.example.com:444/jwks",
+            "https://idp.example.com"
+        ));
+        assert!(!super::same_origin(
+            "http://idp.example.com/jwks",
+            "https://idp.example.com"
+        ));
     }
 }
