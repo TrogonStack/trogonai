@@ -13,8 +13,12 @@ impl CallerJwtHeaderValue {
     }
 
     pub fn parse(token: impl Into<String>) -> Result<Self, JwtError> {
-        let token = token.into();
-        if token.trim().is_empty() {
+        // Trim once on entry — JWT decoders downstream choke on leading/trailing
+        // whitespace, and storing the original value let space-padded but
+        // otherwise valid headers pass `parse()` only to break later in
+        // `as_str()`-consuming code paths.
+        let token = token.into().trim().to_owned();
+        if token.is_empty() {
             return Err(JwtError::Decode("caller JWT header value is empty".into()));
         }
         if token.split('.').count() != 3 {
