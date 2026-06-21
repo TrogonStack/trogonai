@@ -4,9 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::jwt::CallerId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct SubjectPattern(String);
+
+// Custom Deserialize so JSON-sourced patterns (e.g. IssuedPermissions carried
+// in UserJwtClaims) run through SubjectPattern::new. Derived transparent
+// Deserialize would let a permission patternserialize and mint into the
+// embedded NATS user permissions without ever seeing the validator.
+impl<'de> Deserialize<'de> for SubjectPattern {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Debug)]
 pub enum SubjectPatternError {
@@ -105,6 +116,10 @@ pub enum TemplateError {
     MissingValue(&'static str),
     UnclosedPlaceholder,
     InvalidSubject(SubjectPatternError),
+    /// A placeholder value contained characters that would break out of the
+    /// rendered subject segment (`.`, `*`, `>`, whitespace, or an empty
+    /// string).
+    InvalidPlaceholderValue(String),
 }
 
 impl fmt::Display for TemplateError {
@@ -114,6 +129,12 @@ impl fmt::Display for TemplateError {
             Self::MissingValue(name) => write!(f, "ACL template context missing required field: {name}"),
             Self::UnclosedPlaceholder => f.write_str("ACL template has an unclosed '{' placeholder"),
             Self::InvalidSubject(err) => write!(f, "materialized subject is invalid: {err}"),
+            Self::InvalidPlaceholderValue(name) => {
+                write!(
+                    f,
+                    "ACL template placeholder {{{name}}} value would escape its subject segment"
+                )
+            }
         }
     }
 }
@@ -165,16 +186,33 @@ fn substitute_placeholders(template: &str, ctx: &SubjectAclContext<'_>) -> Resul
         if !closed {
             return Err(TemplateError::UnclosedPlaceholder);
         }
-        let value = match name.as_str() {
+        let raw = match name.as_str() {
             "caller" => ctx.caller.ok_or(TemplateError::MissingValue("caller"))?,
             "aud" => ctx.aud.ok_or(TemplateError::MissingValue("aud"))?,
             "sub" => ctx.sub.ok_or(TemplateError::MissingValue("sub"))?,
             "iss" => ctx.iss.ok_or(TemplateError::MissingValue("iss"))?,
             other => return Err(TemplateError::UnknownPlaceholder(other.to_string())),
         };
-        out.push_str(value);
+        // Placeholder values are interpolated into NATS subject patterns. Any
+        // `.`, `*`, `>`, whitespace or empty value would expand the rendered
+        // pattern's scope or produce an unparseable subject — fail closed
+        // before the rendered string ever reaches SubjectPattern::new.
+        validate_placeholder_value(name.as_str(), raw)?;
+        out.push_str(raw);
     }
     Ok(out)
+}
+
+fn validate_placeholder_value(name: &str, value: &str) -> Result<(), TemplateError> {
+    if value.is_empty()
+        || value.contains('.')
+        || value.contains('*')
+        || value.contains('>')
+        || value.chars().any(char::is_whitespace)
+    {
+        return Err(TemplateError::InvalidPlaceholderValue(name.to_string()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -269,9 +307,25 @@ mod tests {
             ..Default::default()
         };
         let err = tmpl.materialize(&ctx).unwrap_err();
-        assert!(matches!(
-            err,
-            TemplateError::InvalidSubject(SubjectPatternError::Whitespace)
-        ));
+        // Whitespace now fails on the placeholder validator before the
+        // rendered subject reaches SubjectPattern::new — same fail-closed
+        // intent, earlier catch point.
+        assert!(matches!(err, TemplateError::InvalidPlaceholderValue(ref n) if n == "aud"));
+    }
+
+    #[test]
+    fn template_rejects_wildcard_and_dotted_placeholder_values() {
+        let tmpl = SubjectAclTemplate::new(vec![], vec!["_INBOX.{caller}.>".into()]);
+        for bad in ["", "*", ">", "alice.evil"] {
+            let ctx = SubjectAclContext {
+                caller: Some(bad),
+                ..Default::default()
+            };
+            let err = tmpl.materialize(&ctx).unwrap_err();
+            assert!(
+                matches!(err, TemplateError::InvalidPlaceholderValue(ref n) if n == "caller"),
+                "expected InvalidPlaceholderValue for caller={bad:?}"
+            );
+        }
     }
 }
