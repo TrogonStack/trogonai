@@ -46,7 +46,7 @@ data-encoding = "=2.10.0"
 tempfile = { workspace = true }
 rand = { workspace = true }
 rcgen = "=0.13.2"
-rsa = { version = "=0.9.7", features = ["pem"] }
+rsa = { version = "=0.9.10", features = ["pem"] }
 testcontainers = "=0.27.0"
 wiremock = { workspace = true }
 
