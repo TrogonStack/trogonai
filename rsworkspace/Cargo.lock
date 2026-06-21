@@ -10,6 +10,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "data-encoding",
+ "futures",
  "hex",
  "hmac 0.12.1",
  "jsonwebtoken",

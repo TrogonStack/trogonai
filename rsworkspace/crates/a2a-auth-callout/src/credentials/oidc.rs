@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::error::AuthCalloutError;
+use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{
     AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, spicedb_principal_from_oidc_claims,
 };
@@ -19,7 +19,7 @@ impl OidcIssuerUrl {
         }
         if s.is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
-                "OIDC issuer URL is empty".into(),
+                CredentialError::InvalidCredentials("OIDC issuer URL is empty".into()),
             ));
         }
         Ok(Self(s))
@@ -38,7 +38,7 @@ impl OidcClientId {
         let s = id.into();
         if s.trim().is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
-                "OIDC client ID must not be empty".into(),
+                CredentialError::InvalidCredentials("OIDC client ID must not be empty".into()),
             ));
         }
         Ok(Self(s))
@@ -100,43 +100,45 @@ impl JwksOidcVerifier {
             .connect_timeout(std::time::Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
+            .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
         let uri = format!("{}/.well-known/openid-configuration", issuer.as_str());
         let resp = http
             .get(uri)
             .send()
             .await
-            .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
+            .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
         let doc: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
+            .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
         // Refuse a discovery doc whose `issuer` claim doesn't match the one
         // we asked for — the doc is fetched off the network and a MITM /
         // misconfigured DNS could redirect us at an attacker's IdP.
         let doc_issuer = doc
             .get("issuer")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("missing issuer in OIDC discovery".into()))?;
+            .ok_or_else(|| CredentialError::InvalidCredentials("missing issuer in OIDC discovery".into()))?;
         if doc_issuer.trim_end_matches('/') != issuer.as_str().trim_end_matches('/') {
-            return Err(AuthCalloutError::CredentialVerification(format!(
+            return Err(CredentialError::InvalidCredentials(format!(
                 "OIDC discovery issuer mismatch: configured={:?} discovered={:?}",
                 issuer.as_str(),
                 doc_issuer
-            )));
+            ))
+            .into());
         }
         let jwks_uri = doc
             .get("jwks_uri")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("missing jwks_uri in OIDC discovery".into()))?;
+            .ok_or_else(|| CredentialError::InvalidCredentials("missing jwks_uri in OIDC discovery".into()))?;
         // Constrain jwks_uri to the issuer's origin so a tampered discovery
         // doc can't point us at attacker-controlled JWKS while tokens still
         // claim the expected `iss`.
         if !same_origin(jwks_uri, issuer.as_str()) {
-            return Err(AuthCalloutError::CredentialVerification(format!(
+            return Err(CredentialError::InvalidCredentials(format!(
                 "OIDC jwks_uri {jwks_uri:?} is outside issuer origin {:?}",
                 issuer.as_str()
-            )));
+            ))
+            .into());
         }
         Ok(Self {
             issuer,
@@ -195,10 +197,10 @@ impl JwksOidcVerifier {
                     .get(jwks_uri)
                     .send()
                     .await
-                    .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
+                    .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
                 resp.json::<JwkSet>()
                     .await
-                    .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))
+                    .map_err(|e| AuthCalloutError::from(CredentialError::InvalidCredentials(e.to_string())))
             }
             JwksSource::Static(j) => Ok((**j).clone()),
         }
@@ -206,10 +208,13 @@ impl JwksOidcVerifier {
 
     fn decoding_key_for_jwk(jwk: &jsonwebtoken::jwk::Jwk) -> Result<DecodingKey, AuthCalloutError> {
         match &jwk.algorithm {
-            AlgorithmParameters::RSA(rsa) => DecodingKey::from_rsa_components(&rsa.n, &rsa.e)
-                .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid RSA JWK components: {e}"))),
+            AlgorithmParameters::RSA(rsa) => DecodingKey::from_rsa_components(&rsa.n, &rsa.e).map_err(|e| {
+                AuthCalloutError::from(CredentialError::InvalidCredentials(format!(
+                    "invalid RSA JWK components: {e}"
+                )))
+            }),
             _ => Err(AuthCalloutError::CredentialVerification(
-                "OIDC JWK must be RSA for this verifier".into(),
+                CredentialError::InvalidCredentials("OIDC JWK must be RSA for this verifier".into()),
             )),
         }
     }
@@ -221,37 +226,36 @@ impl JwksOidcVerifier {
     ) -> Result<UserJwtClaims, AuthCalloutError> {
         if self.expected_id_token_audiences.is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
-                "no expected OIDC token audiences configured".into(),
+                CredentialError::InvalidCredentials("no expected OIDC token audiences configured".into()),
             ));
         }
         let jwks = self.fetch_jwks().await?;
         let header = decode_header(token.as_str())
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid JWT header: {e}")))?;
+            .map_err(|e| CredentialError::InvalidCredentials(format!("invalid JWT header: {e}")))?;
         let kid = header
             .kid
             .as_ref()
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("JWT header missing kid".into()))?;
+            .ok_or_else(|| CredentialError::InvalidCredentials("JWT header missing kid".into()))?;
         let jwk = jwks
             .find(kid)
-            .ok_or_else(|| AuthCalloutError::CredentialVerification(format!("no JWK for kid {kid}")))?;
+            .ok_or_else(|| CredentialError::InvalidCredentials(format!("no JWK for kid {kid}")))?;
         let auds: Vec<&str> = self.expected_id_token_audiences.iter().map(String::as_str).collect();
         let mut validation = Validation::new(header.alg);
         validation.set_issuer(&[self.issuer.as_str()]);
         validation.set_audience(&auds);
         let decoding_key = Self::decoding_key_for_jwk(jwk)?;
         let token_data = decode::<serde_json::Value>(token.as_str(), &decoding_key, &validation)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("OIDC token validation failed: {e}")))?;
+            .map_err(|e| CredentialError::InvalidCredentials(format!("OIDC token validation failed: {e}")))?;
         let sub_str = token_data
             .claims
             .get("sub")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("OIDC token missing sub".into()))?;
-        let sub = ExternalSubject::new(sub_str).map_err(|e| {
-            AuthCalloutError::CredentialVerification(format!("invalid external subject in OIDC token: {e}"))
-        })?;
+            .ok_or_else(|| CredentialError::InvalidCredentials("OIDC token missing sub".into()))?;
+        let sub = ExternalSubject::new(sub_str)
+            .map_err(|e| CredentialError::InvalidCredentials(format!("invalid external subject in OIDC token: {e}")))?;
         let data = spicedb_principal_from_oidc_claims(&token_data.claims);
         let caller_id = derive_caller_id(sub_str, account)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
+            .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
         let nats_permissions = IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
@@ -348,7 +352,10 @@ mod tests {
         let err = rt
             .block_on(v.verify_internal(&BearerToken::new("x.y.z"), &AudienceAccount::new("acct")))
             .unwrap_err();
-        assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
+        assert!(matches!(
+            err,
+            AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        ));
     }
 
     #[tokio::test]
@@ -447,7 +454,10 @@ mod tests {
             .verify_internal(&BearerToken::new(bad), &AudienceAccount::new("acct"))
             .await
             .unwrap_err();
-        assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
+        assert!(matches!(
+            err,
+            AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        ));
     }
 
     #[tokio::test]

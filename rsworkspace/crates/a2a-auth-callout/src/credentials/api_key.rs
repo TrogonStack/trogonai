@@ -48,10 +48,25 @@ impl std::error::Error for ApiKeyError {
 
 impl From<ApiKeyError> for AuthCalloutError {
     fn from(e: ApiKeyError) -> Self {
-        // Preserve the typed source via the std::error::Error chain rather
-        // than collapsing to a string. CredentialVerification is the right
-        // bucket; the source() chain still surfaces the inner JwtError.
-        Self::CredentialVerification(e.to_string())
+        // Variant-to-variant — DenialCategory derives the wire response
+        // category from the typed CredentialError tag, not from substring
+        // matching on a stringified message.
+        match e {
+            ApiKeyError::Empty => {
+                crate::error::CredentialError::InvalidRequest("API key must not be empty".into()).into()
+            }
+            ApiKeyError::Unknown => {
+                crate::error::CredentialError::InvalidCredentials("API key not found".into()).into()
+            }
+            ApiKeyError::CallerIdDerivation(je) => {
+                crate::error::CredentialError::InvalidCredentials(format!("API key caller_id derivation failed: {je}"))
+                    .into()
+            }
+            ApiKeyError::AudienceMismatch { requested, registered } => crate::error::CredentialError::InvalidRequest(
+                format!("API key audience mismatch: requested={requested:?} registered={registered:?}"),
+            )
+            .into(),
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use super::NkeyPublic;
 use crate::account_resolver::RequestedAccount;
 use crate::credentials::mtls::ClientCertPem;
-use crate::error::AuthCalloutError;
+use crate::error::{AuthCalloutError, CredentialError};
 
 /// Decoded inner authorization-request JWT (`nats` claims + standard JWT fields).
 #[derive(Clone)]
@@ -54,7 +54,7 @@ impl ServerAuthRequestClaims {
                 if tag.is_empty() { None } else { Some(tag) }
             });
         let hint = hint.ok_or_else(|| {
-            AuthCalloutError::CredentialVerification(
+            CredentialError::InvalidCredentials(
                 "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)"
                     .into(),
             )

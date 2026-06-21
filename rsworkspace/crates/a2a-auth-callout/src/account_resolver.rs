@@ -41,7 +41,14 @@ impl std::error::Error for AccountResolverError {}
 
 impl From<AccountResolverError> for AuthCalloutError {
     fn from(value: AccountResolverError) -> Self {
-        Self::CredentialVerification(value.to_string())
+        // Variant-to-variant routing — no string matching on the failure
+        // message, the category is determined by the typed enum tag.
+        match value {
+            AccountResolverError::EmptyRequest => {
+                crate::error::CredentialError::InvalidRequest("requested account is empty".into()).into()
+            }
+            AccountResolverError::Unknown(name) => crate::error::CredentialError::UnknownAccount(name).into(),
+        }
     }
 }
 
