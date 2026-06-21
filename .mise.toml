@@ -1,12 +1,14 @@
 [tools]
 buf = "1.70.0"
+"cargo:cargo-dylint" = "6.0.1"
+"cargo:dylint-link" = "6.0.1"
 "cargo:protoc-gen-buffa" = "0.7.0"
 "cargo:protoc-gen-buffa-packaging" = "0.7.0"
 node = "26.3.0"
 pnpm = "11.5.1"
 python = "3.14.5"
 uv = "0.11.18"
-rust = { version = "1.96.0", profile = "default" }
+rust = { version = "1.96.0", profile = "minimal", components = "rustfmt,clippy,llvm-tools-preview" }
 
 [tasks.dev]
 description = "Start development environment"

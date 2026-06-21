@@ -1,9 +1,9 @@
 name: Setup Rust
-description: Install the mise-pinned Rust toolchain and optional rustup components
+description: Install the mise-pinned Rust toolchain and required rustup components
 
 inputs:
-  components:
-    description: Comma-separated rustup components to ensure are installed (e.g. llvm-tools-preview)
+  dylint-toolchain-dir:
+    description: Directory containing the rust-toolchain.toml for repo Dylint rules
     required: false
     default: ''
 
@@ -12,8 +12,37 @@ runs:
   steps:
     - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
 
-    - if: inputs.components != ''
+    - name: Install Rust components
       shell: bash
-      env:
-        COMPONENTS: ${{ inputs.components }}
-      run: rustup component add ${COMPONENTS//,/ }
+      run: |
+        rustup component add rustfmt clippy llvm-tools-preview \
+          --toolchain "${RUSTUP_TOOLCHAIN:-$(rustup show active-toolchain | awk '{print $1}')}"
+
+    - name: Install Dylint Rust components
+      shell: bash
+      run: |
+        dylint_toolchain_input="${{ inputs.dylint-toolchain-dir }}"
+        if [[ -n "$dylint_toolchain_input" ]]; then
+          if [[ "$dylint_toolchain_input" = /* ]]; then
+            dylint_toolchain_dir="$dylint_toolchain_input"
+          else
+            dylint_toolchain_dir="${GITHUB_WORKSPACE:-$PWD}/$dylint_toolchain_input"
+          fi
+
+          if [[ ! -f "$dylint_toolchain_dir/rust-toolchain.toml" ]]; then
+            echo "::error::Dylint rust-toolchain.toml not found in $dylint_toolchain_dir"
+            exit 1
+          fi
+
+          mapfile -t dylint_toolchain_config < <(
+            TOOLCHAIN_FILE="$dylint_toolchain_dir/rust-toolchain.toml" python -c 'import os, sys, tomllib; toolchain = tomllib.load(open(os.environ["TOOLCHAIN_FILE"], "rb"))["toolchain"]; sys.stdout.write("\n".join([toolchain["channel"], *toolchain.get("components", [])]) + "\n")'
+          )
+
+          dylint_toolchain="${dylint_toolchain_config[0]}"
+          dylint_components=("${dylint_toolchain_config[@]:1}")
+
+          rustup toolchain install "$dylint_toolchain" --profile minimal
+          if [[ ${#dylint_components[@]} -gt 0 ]]; then
+            rustup component add "${dylint_components[@]}" --toolchain "$dylint_toolchain"
+          fi
+        fi

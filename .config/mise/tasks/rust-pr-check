@@ -46,18 +46,32 @@ step() {
 # 1. fmt --check — mirrors CI 'Check formatting'.
 step "fmt-check" cargo fmt --all -- --check
 
-# 2. clippy from a clean cache — workspace lints (deny warnings, unwrap_used,
+# 2. Repo-owned policy lints.
+mapfile -t DYLINT_TOOLCHAIN_CONFIG < <(
+    TOOLCHAIN_FILE="dylints/trogon_lints/rust-toolchain.toml" python -c 'import os, sys, tomllib; toolchain = tomllib.load(open(os.environ["TOOLCHAIN_FILE"], "rb"))["toolchain"]; sys.stdout.write("\n".join([toolchain["channel"], *toolchain.get("components", [])]) + "\n")'
+)
+DYLINT_TOOLCHAIN="${DYLINT_TOOLCHAIN_CONFIG[0]}"
+DYLINT_COMPONENTS=("${DYLINT_TOOLCHAIN_CONFIG[@]:1}")
+
+step "repo-rust-policy-lint-toolchain" rustup toolchain install "$DYLINT_TOOLCHAIN" --profile minimal
+if [[ ${#DYLINT_COMPONENTS[@]} -gt 0 ]]; then
+    step "repo-rust-policy-lint-components" rustup component add "${DYLINT_COMPONENTS[@]}" --toolchain "$DYLINT_TOOLCHAIN"
+fi
+step "repo-rust-policy-lint-tests" bash -c 'cd dylints/trogon_lints && rustup run "$1" cargo test' _ "$DYLINT_TOOLCHAIN"
+step "repo-rust-policy-lints" env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Derror-string-comparison' rustup run "$DYLINT_TOOLCHAIN" cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features
+
+# 3. clippy from a clean cache — workspace lints (deny warnings, unwrap_used,
 #    expect_used, panic) only fire on a real rebuild; cached builds skip them.
 step "clean-crate" cargo clean -p "$CRATE"
 step "clippy" cargo clippy -p "$CRATE" --all-targets --all-features
 
-# 3. Unit tests.
+# 4. Unit tests.
 step "test" cargo test -p "$CRATE" --all-targets
 
-# 4. doc tests — CI runs these too.
+# 5. doc tests — CI runs these too.
 step "doc-test" cargo test -p "$CRATE" --doc
 
-# 5. Coverage gate — delegate to rust-coverage-check which runs cargo cov +
+# 6. Coverage gate — delegate to rust-coverage-check which runs cargo cov +
 #    pycobertura diff against the main baseline (same comparison CI uses for
 #    the "new uncovered statements" failure mode).
 cd "$ROOT"
