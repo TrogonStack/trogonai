@@ -585,13 +585,14 @@ fn sse_plan(method: &str, body: &Value, req_id: ReqId) -> Result<SseConsumePlan,
     }
 }
 
-fn assert_jsonrpc_gateway_ok(slice: &[u8]) -> Result<(), BridgeError> {
-    let v: Value = serde_json::from_slice(slice).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
-    if v.get("error").is_some() {
-        let detail = serde_json::to_string(&v["error"]).unwrap_or_else(|_| "{}".into());
-        return Err(BridgeError::JsonRpcUpstream(detail));
-    }
-    Ok(())
+/// True when the gateway unary reply is a well-formed JSON-RPC error
+/// envelope. Streaming and unary paths both forward this envelope as
+/// HTTP 200 with the JSON-RPC body intact (mirroring `a2a-nats-http`)
+/// rather than escalating it to HTTP 502 at the bridge layer.
+fn gateway_reply_is_jsonrpc_error(slice: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(slice)
+        .map(|v| v.get("error").is_some())
+        .unwrap_or(false)
 }
 
 pub fn gateway_router(state: AppState) -> Router {
@@ -643,7 +644,19 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
             .publisher
             .publish_unary_to_gateway(&subject, &jwt, nats_headers, body.as_ref())
             .await?;
-        assert_jsonrpc_gateway_ok(&unary_reply)?;
+        if gateway_reply_is_jsonrpc_error(&unary_reply) {
+            // Match the unary path / a2a-nats-http: a JSON-RPC error
+            // from the gateway is the caller's failure to read in the
+            // returned envelope, not a bridge-layer transport failure.
+            // Drop the SSE stream we just attached and return the
+            // envelope verbatim as HTTP 200.
+            drop(payloads);
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(unary_reply))
+                .map_err(|e| BridgeError::NatsPublish(e.to_string()));
+        }
         let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads);
         return Ok(Sse::new(merged).keep_alive(KeepAlive::default()).into_response());
     }
