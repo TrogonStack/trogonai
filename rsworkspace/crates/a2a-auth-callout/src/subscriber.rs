@@ -105,17 +105,21 @@ impl<D: AuthDispatcher> Subscriber<D> {
             let wire = Arc::clone(&self.wire);
 
             tokio::spawn(async move {
-                match dispatcher.dispatch(request.clone()).await {
-                    Ok(user_jwt) => {
-                        if let Err(e) = publish_success(&client, &reply, &wire, &request, user_jwt).await {
-                            error!(error = %e, "failed to publish auth callout response");
-                        }
-                    }
+                let publish_result = match dispatcher.dispatch(request.clone()).await {
+                    Ok(user_jwt) => publish_success(&client, &reply, &wire, &request, user_jwt).await,
                     Err(e) => {
                         warn!(error = %e, "auth callout denied; sending error reply");
-                        if let Err(pub_err) = publish_denial(&client, &reply, &wire, &request, e.to_string()).await {
-                            error!(error = %pub_err, "failed to publish auth callout denial");
-                        }
+                        publish_denial(&client, &reply, &wire, &request, e.to_string()).await
+                    }
+                };
+                if let Err(pub_err) = publish_result {
+                    error!(error = %pub_err, "failed to publish auth callout reply; sending empty fallback so the connect fails fast");
+                    // Same rationale as the decode-failure path — without a
+                    // reply on the inbox the NATS server hangs the connect
+                    // until timeout. An empty payload is treated as
+                    // malformed and denies the connect immediately.
+                    if let Err(e) = client.publish(reply, Vec::new().into()).await {
+                        error!(error = %e, "failed to publish empty fallback reply");
                     }
                 }
             });
