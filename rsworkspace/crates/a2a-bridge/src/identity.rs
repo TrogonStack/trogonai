@@ -38,7 +38,11 @@ impl CallerHttpsAuth {
 
 impl fmt::Display for CallerHttpsAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(self.as_str())
+        // The wrapped value carries the raw `Authorization` header — Bearer
+        // tokens, Basic credentials, etc. Redact in Display so accidental
+        // tracing/log interpolation can't leak the secret. Callers that
+        // genuinely need the value go through `as_str` / `into_inner`.
+        f.pad("<redacted>")
     }
 }
 
@@ -46,8 +50,22 @@ impl fmt::Display for CallerHttpsAuth {
 pub struct BridgeUserJwt(String);
 
 impl BridgeUserJwt {
-    pub fn new(token: impl Into<String>) -> Self {
-        Self(token.into())
+    /// Wrap a minted user JWT after validating compact-JWT shape. Mirrors
+    /// the gate in `a2a_auth_callout::MintedUserJwt::new` so a malformed
+    /// value can't be smuggled past this boundary and only fail later when
+    /// the bridge tries to decode it.
+    pub fn new(token: impl Into<String>) -> Result<Self, BridgeError> {
+        let token = token.into().trim().to_owned();
+        if token.is_empty() {
+            return Err(BridgeError::Mint("minted user JWT must be non-empty".into()));
+        }
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 || parts.iter().any(|p| p.is_empty()) {
+            return Err(BridgeError::Mint(
+                "minted user JWT must be a compact 3-segment JWT".into(),
+            ));
+        }
+        Ok(Self(token))
     }
 
     pub fn as_str(&self) -> &str {
@@ -62,6 +80,32 @@ impl BridgeUserJwt {
 impl fmt::Display for BridgeUserJwt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("<redacted>")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caller_https_auth_display_redacts() {
+        let auth = CallerHttpsAuth::new("Bearer secret-token");
+        assert_eq!(format!("{auth}"), "<redacted>");
+        assert_eq!(auth.as_str(), "Bearer secret-token");
+    }
+
+    #[test]
+    fn bridge_user_jwt_rejects_empty_and_non_three_segment() {
+        assert!(BridgeUserJwt::new("").is_err());
+        assert!(BridgeUserJwt::new("a.b").is_err());
+        assert!(BridgeUserJwt::new("a..c").is_err());
+        assert!(BridgeUserJwt::new("a.b.c").is_ok());
+    }
+
+    #[test]
+    fn bridge_user_jwt_display_redacts() {
+        let jwt = BridgeUserJwt::new("h.p.s").expect("valid shape");
+        assert_eq!(format!("{jwt}"), "<redacted>");
     }
 }
 
