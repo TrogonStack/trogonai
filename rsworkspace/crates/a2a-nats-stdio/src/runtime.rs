@@ -19,6 +19,7 @@ pub enum RuntimeError {
     InvalidPrefix(A2aPrefixError),
     InvalidAgentId(AgentIdError),
     NatsConnect(ConnectError),
+    IoLoop(std::io::Error),
 }
 
 impl fmt::Display for RuntimeError {
@@ -28,6 +29,7 @@ impl fmt::Display for RuntimeError {
             Self::InvalidPrefix(_) => write!(f, "invalid A2A prefix"),
             Self::InvalidAgentId(_) => write!(f, "invalid agent id"),
             Self::NatsConnect(_) => write!(f, "NATS connection failed"),
+            Self::IoLoop(_) => write!(f, "stdio loop failed"),
         }
     }
 }
@@ -38,6 +40,7 @@ impl std::error::Error for RuntimeError {
             Self::InvalidPrefix(e) => Some(e),
             Self::InvalidAgentId(e) => Some(e),
             Self::NatsConnect(e) => Some(e),
+            Self::IoLoop(e) => Some(e),
             Self::MissingAgentId => None,
         }
     }
@@ -107,9 +110,9 @@ pub async fn run() -> Result<(), RuntimeError> {
     let client = A2aClient::new(validated.prefix, validated.agent_id, nats_client, js_client)
         .with_operation_timeout(config.operation_timeout());
 
-    run_io_loop(client, tokio::io::stdin(), tokio::io::stdout(), shutdown_signal()).await;
-
-    Ok(())
+    run_io_loop(client, tokio::io::stdin(), tokio::io::stdout(), shutdown_signal())
+        .await
+        .map_err(RuntimeError::IoLoop)
 }
 
 #[cfg(coverage)]
@@ -196,6 +199,13 @@ mod tests {
     #[cfg(coverage)]
     async fn coverage_run_stub_is_callable() {
         super::run().await.unwrap();
+    }
+
+    #[test]
+    fn runtime_error_display_and_source_for_io_loop() {
+        let e = RuntimeError::IoLoop(std::io::Error::other("nope"));
+        assert_eq!(e.to_string(), "stdio loop failed");
+        assert!(std::error::Error::source(&e).is_some());
     }
 
     #[test]

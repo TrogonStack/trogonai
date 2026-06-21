@@ -99,7 +99,14 @@ pub async fn dispatch_request<N, J>(
                 Ok((bootstrap, mut stream)) => {
                     let result = serde_json::to_value(&bootstrap).unwrap_or(Value::Null);
                     let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
-                    let _ = tx.send(bootstrap_frame).await;
+                    // If the bootstrap response can't reach stdout there is no
+                    // point pumping the JetStream loop — the caller never saw
+                    // the opening `result` and would interpret subsequent
+                    // notifications as unsolicited. Bail before consuming the
+                    // stream so events stay on the server.
+                    if tx.send(bootstrap_frame).await.is_err() {
+                        return;
+                    }
 
                     while let Some(item) = stream.next().await {
                         match item {
@@ -207,7 +214,12 @@ pub async fn dispatch_request<N, J>(
                 Ok((snapshot, mut stream)) => {
                     let result = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
                     let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
-                    let _ = tx.send(bootstrap_frame).await;
+                    // Same rationale as message/stream — without the snapshot
+                    // landing on stdout, the caller has no anchor to attach
+                    // the resubscribe notifications to.
+                    if tx.send(bootstrap_frame).await.is_err() {
+                        return;
+                    }
 
                     while let Some(item) = stream.next().await {
                         match item {

@@ -16,12 +16,16 @@ const CHANNEL_CAP: usize = 128;
 /// otherwise create unbounded RPC/network work and memory pressure.
 const MAX_INFLIGHT_DISPATCH: usize = 64;
 
+/// Returns `Err` when the stdout writer task failed (broken pipe, write/flush
+/// error). Callers should propagate so the process exits non-zero — a stdio
+/// bridge whose downstream parent stopped reading should not pretend success.
 pub async fn run_io_loop<N, J, R, W>(
     client: A2aClient<N, J>,
     stdin: R,
     mut stdout: W,
     shutdown: impl std::future::Future<Output = ()>,
-) where
+) -> std::io::Result<()>
+where
     N: RequestClient + Clone + Send + Sync + 'static,
     J: JetStreamGetStream + Clone + Send + Sync + 'static,
     JsMessageOf<J>: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
@@ -35,24 +39,24 @@ pub async fn run_io_loop<N, J, R, W>(
 {
     let (frame_tx, mut frame_rx) = mpsc::channel::<OutboundFrame>(CHANNEL_CAP);
 
-    let writer_task = tokio::spawn(async move {
+    let mut writer_task = tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
             match serde_json::to_string(&frame) {
                 Ok(json) => {
                     if let Err(e) = stdout.write_all(json.as_bytes()).await {
                         error!(error = %e, "stdout write failed");
-                        return;
+                        return Err(e);
                     }
                     if let Err(e) = stdout.write_all(b"\n").await {
                         error!(error = %e, "stdout write failed");
-                        return;
+                        return Err(e);
                     }
                     // Flush per frame so a piped parent doesn't deadlock
                     // waiting on a libc full-buffer that never drains until
                     // the next line on stdin closes the loop.
                     if let Err(e) = stdout.flush().await {
                         error!(error = %e, "stdout flush failed");
-                        return;
+                        return Err(e);
                     }
                 }
                 Err(e) => {
@@ -60,6 +64,7 @@ pub async fn run_io_loop<N, J, R, W>(
                 }
             }
         }
+        Ok::<(), std::io::Error>(())
     });
 
     let client = Arc::new(client);
@@ -74,6 +79,10 @@ pub async fn run_io_loop<N, J, R, W>(
     // cleanly (drain in-flight RPCs).
     let mut shutdown_requested = false;
 
+    // Set when the writer task exits — the loop must stop spawning dispatches
+    // whose responses would land in a closed channel. None until detected.
+    let mut writer_err: Option<std::io::Error> = None;
+
     'outer: loop {
         tokio::select! {
             // `biased;` keeps shutdown priority once the signal fires — without
@@ -84,6 +93,18 @@ pub async fn run_io_loop<N, J, R, W>(
             biased;
             _ = &mut shutdown => {
                 debug!("io_loop received shutdown signal");
+                shutdown_requested = true;
+                break 'outer;
+            }
+            res = &mut writer_task => {
+                // Writer died — no point reading more stdin or dispatching;
+                // responses would be silently dropped. Record the error and
+                // tear down with abort semantics.
+                writer_err = Some(match res {
+                    Ok(Ok(())) => std::io::Error::other("writer task exited unexpectedly"),
+                    Ok(Err(e)) => e,
+                    Err(join_err) => std::io::Error::other(join_err.to_string()),
+                });
                 shutdown_requested = true;
                 break 'outer;
             }
@@ -160,7 +181,16 @@ pub async fn run_io_loop<N, J, R, W>(
     }
     while dispatch_tasks.join_next().await.is_some() {}
     drop(frame_tx);
-    let _ = writer_task.await;
+    // Already consumed via `&mut writer_task` if the writer-died branch fired;
+    // otherwise await the writer's natural end and surface any I/O error.
+    if let Some(e) = writer_err {
+        return Err(e);
+    }
+    match writer_task.await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(join_err) => Err(std::io::Error::other(join_err.to_string())),
+    }
 }
 
 /// Split JSON-syntax failures (`-32700` Parse error) from envelope-shape
@@ -234,7 +264,7 @@ mod tests {
         let (_stdout_reader, stdout_writer) = tokio::io::duplex(1024);
         drop(_stdin_writer);
 
-        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+        let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
     }
 
     #[tokio::test]
@@ -245,7 +275,7 @@ mod tests {
         let (stdin_reader, _stdin_writer) = tokio::io::duplex(1024);
         let (_stdout_reader, stdout_writer) = tokio::io::duplex(1024);
 
-        run_io_loop(client, stdin_reader, stdout_writer, std::future::ready(())).await;
+        let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::ready(())).await;
     }
 
     #[tokio::test]
@@ -265,7 +295,7 @@ mod tests {
             .unwrap();
         drop(stdin_writer);
 
-        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+        let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
 
         let mut buf = vec![0u8; 4096];
         let n = stdout_reader.read(&mut buf).await.unwrap();
@@ -288,7 +318,7 @@ mod tests {
         stdin_writer.write_all(request).await.unwrap();
         drop(stdin_writer);
 
-        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+        let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
 
         let mut buf = vec![0u8; 4096];
         let n = stdout_reader.read(&mut buf).await.unwrap();
@@ -308,7 +338,7 @@ mod tests {
         stdin_writer.write_all(b"not valid json\n").await.unwrap();
         drop(stdin_writer);
 
-        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+        let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
 
         let mut buf = vec![0u8; 4096];
         let n = stdout_reader.read(&mut buf).await.unwrap();
@@ -329,7 +359,7 @@ mod tests {
         stdin_writer.write_all(b"{\"id\":1}\n").await.unwrap();
         drop(stdin_writer);
 
-        run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
+        let _ = run_io_loop(client, stdin_reader, stdout_writer, std::future::pending::<()>()).await;
 
         let mut buf = vec![0u8; 4096];
         let n = stdout_reader.read(&mut buf).await.unwrap();
@@ -408,7 +438,7 @@ mod tests {
         }
     }
 
-    async fn run_with_failing_writer(writes_until_fail: usize, fail_on_flush: bool) {
+    async fn run_with_failing_writer(writes_until_fail: usize, fail_on_flush: bool) -> std::io::Result<()> {
         let nats = AdvancedMockNatsClient::new();
         nats.set_response("a2a.agents.bot.tasks.get", task_response("t-fw"));
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
@@ -424,22 +454,25 @@ mod tests {
         stdin_writer.write_all(req).await.unwrap();
         drop(stdin_writer);
 
-        run_io_loop(client, stdin_reader, writer, std::future::pending::<()>()).await;
+        run_io_loop(client, stdin_reader, writer, std::future::pending::<()>()).await
     }
 
     #[tokio::test]
     async fn writer_task_handles_payload_write_failure() {
-        run_with_failing_writer(0, false).await;
+        let res = run_with_failing_writer(0, false).await;
+        assert!(res.is_err(), "writer failure must propagate as Err");
     }
 
     #[tokio::test]
     async fn writer_task_handles_newline_write_failure() {
-        run_with_failing_writer(1, false).await;
+        let res = run_with_failing_writer(1, false).await;
+        assert!(res.is_err(), "writer failure must propagate as Err");
     }
 
     #[tokio::test]
     async fn writer_task_handles_flush_failure() {
-        run_with_failing_writer(usize::MAX, true).await;
+        let res = run_with_failing_writer(usize::MAX, true).await;
+        assert!(res.is_err(), "writer failure must propagate as Err");
     }
 
     // AsyncRead that surfaces an error on first poll_read. Covers the
@@ -460,7 +493,7 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let (_stdout_reader, stdout_writer) = tokio::io::duplex(1024);
-        run_io_loop(client, FailingReader, stdout_writer, std::future::pending::<()>()).await;
+        let _ = run_io_loop(client, FailingReader, stdout_writer, std::future::pending::<()>()).await;
     }
 
     #[tokio::test]
