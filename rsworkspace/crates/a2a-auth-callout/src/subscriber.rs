@@ -50,9 +50,17 @@ impl<D: AuthDispatcher> Subscriber<D> {
     }
 
     pub async fn run(self) -> Result<(), AuthCalloutError> {
+        // Use a queue subscription so replicas form an HA group on a single
+        // worker queue — plain `subscribe` would deliver each
+        // $SYS.REQ.USER.AUTH request to every replica and have all of them
+        // publish to the same reply subject, racing each other for one
+        // server request and producing unpredictable client connect outcomes.
+        // The queue name is operator-overridable but defaults to a constant
+        // so two callout deployments at the same scope share it.
+        let queue = std::env::var("AUTH_CALLOUT_QUEUE_GROUP").unwrap_or_else(|_| "a2a-auth-callout".to_string());
         let mut sub = self
             .client
-            .subscribe(AUTH_CALLOUT_SUBJECT)
+            .queue_subscribe(AUTH_CALLOUT_SUBJECT, queue)
             .await
             .map_err(|e| AuthCalloutError::Subscribe(e.to_string()))?;
 
