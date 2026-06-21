@@ -74,9 +74,23 @@ where
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
             match client.message_stream(&req).await {
-                Ok((_bootstrap, stream)) => {
+                Ok((bootstrap, stream)) => {
+                    // Mirror tasks/resubscribe and the stdio bridge: emit the
+                    // unary `SendMessageResponse` as the opening JSON-RPC
+                    // `result` so the caller has a task handle to attach the
+                    // subsequent JetStream notifications to.
+                    let bootstrap_event = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id.clone(),
+                        "result": bootstrap,
+                    });
+                    let bootstrap_sse = futures::stream::once(async move {
+                        Ok::<Event, Infallible>(
+                            Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
+                        )
+                    });
                     let sse_stream = typed_event_stream_to_sse(stream, id);
-                    sse_response(sse_stream)
+                    sse_response(bootstrap_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),
             }

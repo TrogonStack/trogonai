@@ -109,7 +109,22 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
     match client.message_stream(&req).await {
-        Ok((_bootstrap, stream)) => sse_response(typed_event_stream_to_sse(stream, Value::Null)),
+        Ok((bootstrap, stream)) => {
+            // Mirror the JSON-RPC handler: emit the unary SendMessageResponse
+            // as the first SSE frame so REST callers get the task handle that
+            // anchors the subsequent JetStream notifications.
+            let bootstrap_event = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "result": bootstrap,
+            });
+            let bootstrap_sse = futures::stream::once(async move {
+                Ok::<Event, std::convert::Infallible>(
+                    Event::default().data(serde_json::to_string(&bootstrap_event).unwrap_or_default()),
+                )
+            });
+            sse_response(bootstrap_sse.chain(typed_event_stream_to_sse(stream, Value::Null)))
+        }
         Err(e) => rest_error_response(&e),
     }
 }
