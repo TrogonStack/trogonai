@@ -585,6 +585,22 @@ mod tests {
         assert_eq!(err.id, RpcId::Null);
     }
 
+    #[tokio::test]
+    async fn writer_task_err_covers_every_variant() {
+        let kind = writer_task_err(Ok(Ok(()))).to_string();
+        assert!(kind.contains("writer task exited"), "unexpected: {kind}");
+        let io_err = writer_task_err(Ok(Err(std::io::Error::other("boom"))));
+        assert_eq!(io_err.to_string(), "boom");
+        // Force a JoinError by aborting a spawned task and joining it.
+        let handle = tokio::spawn(async move { std::future::pending::<std::io::Result<()>>().await });
+        handle.abort();
+        let join_err = handle.await;
+        assert!(join_err.is_err());
+        let err = writer_task_err(join_err);
+        // io::Error from JoinError is wrapped via io::Error::other.
+        assert!(err.get_ref().is_some());
+    }
+
     #[test]
     fn parse_inbound_rejects_missing_or_wrong_jsonrpc_version() {
         // Missing `jsonrpc` field → -32600.
