@@ -20,7 +20,13 @@ pub fn signing_key_source_from_process_env() -> Result<Arc<dyn SigningKeySource>
         "file" => {
             let current = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PATH")
                 .map_err(|_| AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_KEY_PATH"))?;
-            let previous = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH").ok();
+            // Treat an unset *or* empty `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH`
+            // as "no previous key" — same convention the env source uses for
+            // `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS`, so operators don't have
+            // to delete the var to disable the previous slot.
+            let previous = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH")
+                .ok()
+                .filter(|s| !s.is_empty());
             Ok(Arc::new(FileSigningKeySource::new(current, previous.as_deref())?))
         }
         "vault" => Err(AuthCalloutError::VaultNotConfigured),

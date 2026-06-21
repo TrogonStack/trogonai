@@ -119,11 +119,17 @@ pub(crate) fn mint_nats_user_jwt(
 
     let nats_value = serde_json::to_value(&user).map_err(|e| JwtError::Encode(e.to_string()))?;
 
+    // NATS-style JWTs hash the *final* claim body to derive `jti`: the body
+    // already has the real `iss` set and `jti` left empty, so plug `iss` in
+    // first, then hash, then fill `jti` for the signed payload. Hashing
+    // before setting `iss` would yield a `jti` that downstream NATS JWT
+    // validators reject even though our local signature check would pass.
+    let issuer_public = material.issuer_public();
     let payload_template = NatsUserJwtPayload {
         aud: Some(claims.aud.as_str()),
         exp: Some(exp_secs),
         iat: iat_secs as u64,
-        iss: String::new(),
+        iss: issuer_public.clone(),
         jti: String::new(),
         sub: user_subject.as_str(),
         nbf: Some(iat_secs),
@@ -140,7 +146,6 @@ pub(crate) fn mint_nats_user_jwt(
     let jti = BASE32_NOPAD.encode(&hasher.finalize());
 
     let payload = NatsUserJwtPayload {
-        iss: material.issuer_public(),
         jti,
         ..payload_template
     };
