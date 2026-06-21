@@ -245,16 +245,12 @@ where
     match client.agent_card().await {
         Ok(card) => Json(card).into_response(),
         Err(e) => {
-            // Mirror the JSON-RPC error envelope shape used by REST `get_card`
-            // and successful card responses so JSON clients always see the
-            // same content-type and can parse errors instead of getting a
-            // bare text body on failure.
+            // Share the REST status mapping so the well-known card and
+            // /v1/card return the same HTTP status + JSON shape for the same
+            // ClientError (extended card not configured → 404, invalid agent
+            // response → 502, etc.) instead of bucketing everything as 500.
             let (code, message) = client_error_to_jsonrpc_code(&e);
-            let status = if code == a2a_nats::error::AGENT_UNAVAILABLE {
-                StatusCode::SERVICE_UNAVAILABLE
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
+            let status = crate::rest::http_status_for_jsonrpc_code(code);
             let body = serde_json::json!({
                 "error": { "code": code, "message": message }
             });

@@ -258,7 +258,15 @@ where
 {
     let task_id = match A2aTaskId::new(id) {
         Ok(t) => t,
-        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => {
+            // Match the other REST routes — return JSON {"error":{code, message}}
+            // so clients can parse the failure uniformly instead of getting a
+            // bare text body for this one path.
+            let body = serde_json::json!({
+                "error": { "code": -32602, "message": e.to_string() }
+            });
+            return (StatusCode::BAD_REQUEST, Json(body)).into_response();
+        }
     };
     match client.tasks_resubscribe(&task_id, q.last_event_id.unwrap_or(0)).await {
         Ok((snapshot, stream)) => {
@@ -397,7 +405,7 @@ where
     }
 }
 
-fn rest_error_response(err: &ClientError) -> Response {
+pub(crate) fn rest_error_response(err: &ClientError) -> Response {
     let (code, message) = client_error_to_jsonrpc_code(err);
     let status = http_status_for_jsonrpc_code(code);
     let body = serde_json::json!({
@@ -406,7 +414,7 @@ fn rest_error_response(err: &ClientError) -> Response {
     (status, Json(body)).into_response()
 }
 
-fn http_status_for_jsonrpc_code(code: i32) -> StatusCode {
+pub(crate) fn http_status_for_jsonrpc_code(code: i32) -> StatusCode {
     use a2a_nats::error::*;
     match code {
         TASK_NOT_FOUND => StatusCode::NOT_FOUND,
