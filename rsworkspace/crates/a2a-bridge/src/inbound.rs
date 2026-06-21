@@ -359,16 +359,20 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Some(item) = messages_stream.next().await {
                 match item {
                     Ok(js_message) => {
                         let chunk = Bytes::clone(&js_message.message.payload);
-                        if let Err(ack_err) = js_message.ack().await {
-                            let _ = tx.send(Err(BridgeError::JetStreamConsume(ack_err.to_string())));
+                        // Enqueue BEFORE acking — if the SSE client
+                        // already disconnected the receiver is closed
+                        // and we want JetStream to redeliver this event
+                        // to the next consumer rather than dropping it.
+                        if tx.send(Ok(chunk)).is_err() {
                             break;
                         }
-                        if tx.send(Ok(chunk)).is_err() {
+                        if let Err(ack_err) = js_message.ack().await {
+                            let _ = tx.send(Err(BridgeError::JetStreamConsume(ack_err.to_string())));
                             break;
                         }
                     }
@@ -380,17 +384,36 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
             }
         });
 
-        Ok(Box::pin(RxPollStream(rx)))
+        Ok(Box::pin(RxPollStream {
+            rx,
+            handle: Some(handle),
+        }))
     }
 }
 
-struct RxPollStream(tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BridgeError>>);
+struct RxPollStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, BridgeError>>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
 
 impl Stream for RxPollStream {
     type Item = Result<Bytes, BridgeError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.0.poll_recv(cx)
+        self.rx.poll_recv(cx)
+    }
+}
+
+impl Drop for RxPollStream {
+    fn drop(&mut self) {
+        // Cancel the JetStream pull task when the SSE stream is dropped
+        // (HTTPS client disconnect, axum tearing down the response,
+        // etc.) — otherwise the task can sit blocked on the next
+        // message and keep the NATS connection + ephemeral consumer
+        // alive until JetStream times out.
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
     }
 }
 
@@ -605,17 +628,22 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let req_id = json_rpc_corr_id(&v);
 
     if is_sse_jsonrpc_method(method) {
-        let nats_headers = gateway_publish_headers(req_id.clone(), &jwt)?;
+        // Attach the JetStream consumer BEFORE the gateway unary
+        // publish. The events stream uses interest retention, so any
+        // task event the gateway emits before a consumer exists is
+        // dropped at the stream — flipping the order here would create
+        // a window where the very first task events vanish.
+        let plan = sse_plan(method, &v, req_id.clone())?;
+        let payloads = state
+            .jetstream
+            .task_event_payload_stream(&jwt, &state.prefix, plan)
+            .await?;
+        let nats_headers = gateway_publish_headers(req_id, &jwt)?;
         let unary_reply = state
             .publisher
             .publish_unary_to_gateway(&subject, &jwt, nats_headers, body.as_ref())
             .await?;
         assert_jsonrpc_gateway_ok(&unary_reply)?;
-        let plan = sse_plan(method, &v, req_id)?;
-        let payloads = state
-            .jetstream
-            .task_event_payload_stream(&jwt, &state.prefix, plan)
-            .await?;
         let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads);
         return Ok(Sse::new(merged).keep_alive(KeepAlive::default()).into_response());
     }

@@ -49,12 +49,15 @@ impl HarnessGatewayUnary {
 
     #[must_use]
     pub fn last_caller_jwt_present(&self) -> bool {
-        self.last_caller_jwt_present.lock().ok().is_some_and(|g| *g)
+        // Poisoned mutex means a panic landed elsewhere — propagate
+        // by panicking here so the test surfaces the root cause
+        // instead of silently reading "no jwt".
+        *self.last_caller_jwt_present.lock().expect("harness mutex poisoned")
     }
 
     #[must_use]
     pub fn last_subject(&self) -> Option<String> {
-        self.last_subject.lock().ok().and_then(|g| (*g).clone())
+        self.last_subject.lock().expect("harness mutex poisoned").clone()
     }
 }
 
@@ -67,13 +70,9 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         headers: async_nats::HeaderMap,
         _payload: Bytes,
     ) -> Result<Bytes, BridgeError> {
-        if let Ok(mut guard) = self.last_subject.lock() {
-            *guard = Some(subject.to_owned());
-        }
+        *self.last_subject.lock().expect("harness mutex poisoned") = Some(subject.to_owned());
         let jwt_present = headers.get(CALLER_JWT_HEADER_NAME).is_some();
-        if let Ok(mut guard) = self.last_caller_jwt_present.lock() {
-            *guard = jwt_present;
-        }
+        *self.last_caller_jwt_present.lock().expect("harness mutex poisoned") = jwt_present;
 
         let gateway_prefix = format!("{}.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
         let method_dots = subject.strip_prefix(&gateway_prefix).unwrap_or("message.send");
