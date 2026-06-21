@@ -39,7 +39,22 @@ impl ServerAuthRequestClaims {
                     })?;
                 (None, Some(key))
             }
-            Some(BridgeAuthScheme::Oidc) | None => (request.user_jwt.clone(), None),
+            Some(BridgeAuthScheme::Oidc) => {
+                // OIDC must carry a user_jwt — otherwise dispatcher's
+                // material-based inference would fall back to mTLS if a
+                // client_cert_pem happens to be present, silently
+                // authenticating the connection via a different scheme
+                // than the caller declared.
+                let jwt = request
+                    .user_jwt
+                    .clone()
+                    .filter(|j| !j.trim().is_empty())
+                    .ok_or_else(|| {
+                        AuthCalloutError::CredentialVerification("OIDC scheme but user_jwt is missing or blank".into())
+                    })?;
+                (Some(jwt), None)
+            }
+            None => (request.user_jwt.clone(), None),
             Some(BridgeAuthScheme::MTls) => (None, None),
         };
 
