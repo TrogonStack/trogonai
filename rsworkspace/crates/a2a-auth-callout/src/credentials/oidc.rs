@@ -34,8 +34,14 @@ impl OidcIssuerUrl {
 pub struct OidcClientId(String);
 
 impl OidcClientId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+    pub fn new(id: impl Into<String>) -> Result<Self, AuthCalloutError> {
+        let s = id.into();
+        if s.trim().is_empty() {
+            return Err(AuthCalloutError::CredentialVerification(
+                "OIDC client ID must not be empty".into(),
+            ));
+        }
+        Ok(Self(s))
     }
 
     #[allow(dead_code)]
@@ -81,7 +87,12 @@ impl JwksOidcVerifier {
         issuer: OidcIssuerUrl,
         expected_id_token_audiences: Vec<String>,
     ) -> Result<Self, AuthCalloutError> {
+        // Bound discovery + JWKS fetches so a misbehaving IdP can't hang the
+        // verifier indefinitely. 10s is well above any healthy IdP RTT and
+        // still well below typical NATS auth-callout deadlines.
         let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
         let uri = format!("{}/.well-known/openid-configuration", issuer.as_str());
@@ -94,10 +105,33 @@ impl JwksOidcVerifier {
             .json()
             .await
             .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
+        // Refuse a discovery doc whose `issuer` claim doesn't match the one
+        // we asked for — the doc is fetched off the network and a MITM /
+        // misconfigured DNS could redirect us at an attacker's IdP.
+        let doc_issuer = doc
+            .get("issuer")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AuthCalloutError::CredentialVerification("missing issuer in OIDC discovery".into()))?;
+        if doc_issuer.trim_end_matches('/') != issuer.as_str().trim_end_matches('/') {
+            return Err(AuthCalloutError::CredentialVerification(format!(
+                "OIDC discovery issuer mismatch: configured={:?} discovered={:?}",
+                issuer.as_str(),
+                doc_issuer
+            )));
+        }
         let jwks_uri = doc
             .get("jwks_uri")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AuthCalloutError::CredentialVerification("missing jwks_uri in OIDC discovery".into()))?;
+        // Constrain jwks_uri to the issuer's origin so a tampered discovery
+        // doc can't point us at attacker-controlled JWKS while tokens still
+        // claim the expected `iss`.
+        if !same_origin(jwks_uri, issuer.as_str()) {
+            return Err(AuthCalloutError::CredentialVerification(format!(
+                "OIDC jwks_uri {jwks_uri:?} is outside issuer origin {:?}",
+                issuer.as_str()
+            )));
+        }
         Ok(Self {
             issuer,
             expected_id_token_audiences,
@@ -107,7 +141,38 @@ impl JwksOidcVerifier {
             },
         })
     }
+}
 
+/// True if `candidate_url` and `expected_url` share scheme + host + port.
+/// Used to keep OIDC `jwks_uri` co-located with the configured issuer so a
+/// tampered discovery doc can't redirect JWKS fetches to an attacker origin.
+fn same_origin(candidate_url: &str, expected_url: &str) -> bool {
+    let cand = match url_origin(candidate_url) {
+        Some(o) => o,
+        None => return false,
+    };
+    match url_origin(expected_url) {
+        Some(exp) => cand == exp,
+        None => false,
+    }
+}
+
+fn url_origin(s: &str) -> Option<(String, String, Option<String>)> {
+    // Lightweight scheme://host[:port] parser — we deliberately don't pull in
+    // a full URL crate just for this check.
+    let (scheme, rest) = s.split_once("://")?;
+    let host_port = rest.split('/').next().unwrap_or("");
+    let (host, port) = match host_port.rsplit_once(':') {
+        Some((h, p)) if !h.contains('[') || h.ends_with(']') => (h.to_owned(), Some(p.to_owned())),
+        _ => (host_port.to_owned(), None),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase(), port))
+}
+
+impl JwksOidcVerifier {
     pub(crate) async fn fetch_jwks(&self) -> Result<JwkSet, AuthCalloutError> {
         match &self.jwks {
             JwksSource::Remote { jwks_uri, http } => {
@@ -376,7 +441,11 @@ mod tests {
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/.well-known/openid-configuration"))
             .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
-                format!(r#"{{"jwks_uri":"{}/jwks"}}"#, mock_srv.uri(),),
+                format!(
+                    r#"{{"issuer":"{}","jwks_uri":"{}/jwks"}}"#,
+                    mock_srv.uri(),
+                    mock_srv.uri()
+                ),
                 "application/json",
             ))
             .mount(&mock_srv)
@@ -393,5 +462,53 @@ mod tests {
             .expect("discover");
         let jwks = v.fetch_jwks().await.expect("jwks");
         assert!(jwks.keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discover_rejects_jwks_uri_outside_issuer_origin() {
+        let mock_srv = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/.well-known/openid-configuration"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+                format!(
+                    r#"{{"issuer":"{}","jwks_uri":"https://attacker.example.com/jwks"}}"#,
+                    mock_srv.uri()
+                ),
+                "application/json",
+            ))
+            .mount(&mock_srv)
+            .await;
+        let issuer = OidcIssuerUrl::parse(mock_srv.uri()).unwrap();
+        let res = JwksOidcVerifier::discover(issuer, vec!["aud".into()]).await;
+        let Err(err) = res else {
+            panic!("expected origin mismatch error");
+        };
+        assert!(err.to_string().contains("outside issuer origin"));
+    }
+
+    #[tokio::test]
+    async fn discover_rejects_mismatched_issuer_claim() {
+        let mock_srv = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/.well-known/openid-configuration"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+                r#"{"issuer":"https://other.example.com","jwks_uri":"https://other.example.com/jwks"}"#,
+                "application/json",
+            ))
+            .mount(&mock_srv)
+            .await;
+        let issuer = OidcIssuerUrl::parse(mock_srv.uri()).unwrap();
+        let res = JwksOidcVerifier::discover(issuer, vec!["aud".into()]).await;
+        let Err(err) = res else {
+            panic!("expected issuer mismatch error");
+        };
+        assert!(err.to_string().contains("issuer mismatch"));
+    }
+
+    #[test]
+    fn oidc_client_id_rejects_empty_and_whitespace() {
+        assert!(OidcClientId::new("").is_err());
+        assert!(OidcClientId::new("   ").is_err());
+        assert!(OidcClientId::new("good-client").is_ok());
     }
 }

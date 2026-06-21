@@ -101,10 +101,32 @@ impl X509MtlsVerifier {
             ));
         }
 
+        // Refuse to mint for a CA or intermediate that someone presented as
+        // an "end entity" — only certs explicitly marked non-CA can be the
+        // client identity. RFC 5280 §4.2.1.9: basicConstraints.cA=false (or
+        // absent) means end-entity. We treat "absent" as end-entity since
+        // it's the common shape for client certs.
+        if let Ok(Some(bc)) = leaf.basic_constraints()
+            && bc.value.ca
+        {
+            return Err(AuthCalloutError::CredentialVerification(
+                "client certificate is a CA, expected end-entity".into(),
+            ));
+        }
+
+        let asn1_now = ASN1Time::from(now);
         let mut trusted = false;
         for ca in &cas {
             if leaf.issuer() != ca.subject() {
                 continue;
+            }
+            // Reject expired or not-yet-valid trust anchors — the anchor list
+            // is operator-supplied and may rotate; an expired CA shouldn't
+            // still mint identities just because it's pinned.
+            if !ca.validity().is_valid_at(asn1_now) {
+                return Err(AuthCalloutError::CredentialVerification(
+                    "trust anchor certificate is not valid at verification time".into(),
+                ));
             }
             leaf.verify_signature(Some(&ca.tbs_certificate.subject_pki))
                 .map_err(|e| AuthCalloutError::CredentialVerification(format!("certificate signature: {e}")))?;

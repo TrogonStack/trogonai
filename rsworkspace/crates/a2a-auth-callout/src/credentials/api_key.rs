@@ -6,12 +6,21 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 use crate::error::AuthCalloutError;
-use crate::jwt::{AudienceAccount, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, derive_caller_id};
+use crate::jwt::{AudienceAccount, ExternalSubject, JwtError, SpiceDbPrincipal, UserJwtClaims, derive_caller_id};
 
 #[derive(Debug)]
 pub enum ApiKeyError {
     Empty,
     Unknown,
+    /// `derive_caller_id` rejected the registry entry's external_subject —
+    /// preserves the upstream JwtError instead of stringifying it.
+    CallerIdDerivation(JwtError),
+    /// The caller-supplied audience didn't match the registry entry's
+    /// audience for this API key.
+    AudienceMismatch {
+        requested: String,
+        registered: String,
+    },
 }
 
 impl fmt::Display for ApiKeyError {
@@ -19,14 +28,29 @@ impl fmt::Display for ApiKeyError {
         match self {
             Self::Empty => f.write_str("API key must not be empty"),
             Self::Unknown => f.write_str("API key not found in registry"),
+            Self::CallerIdDerivation(_) => f.write_str("API key caller_id derivation failed"),
+            Self::AudienceMismatch { requested, registered } => write!(
+                f,
+                "API key audience mismatch: requested={requested:?} registered={registered:?}"
+            ),
         }
     }
 }
 
-impl std::error::Error for ApiKeyError {}
+impl std::error::Error for ApiKeyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::CallerIdDerivation(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
 impl From<ApiKeyError> for AuthCalloutError {
     fn from(e: ApiKeyError) -> Self {
+        // Preserve the typed source via the std::error::Error chain rather
+        // than collapsing to a string. CredentialVerification is the right
+        // bucket; the source() chain still surfaces the inner JwtError.
         Self::CredentialVerification(e.to_string())
     }
 }
@@ -93,7 +117,15 @@ impl ApiKeyRegistry {
 #[deprecated(note = "transitional only; remove after OIDC migration")]
 #[async_trait::async_trait]
 pub trait ApiKeyVerifier: Send + Sync + 'static {
-    async fn verify(&self, api_key: &str) -> Result<UserJwtClaims, AuthCalloutError>;
+    /// `requested_audience` is the account the connection asked to land in.
+    /// API key verifiers reject a key whose registry entry's audience doesn't
+    /// match — sibling verifiers (mTLS, OIDC) already drive `aud` from the
+    /// connection's resolved audience, so this brings api_key in line.
+    async fn verify(
+        &self,
+        api_key: &str,
+        requested_audience: &AudienceAccount,
+    ) -> Result<UserJwtClaims, AuthCalloutError>;
 }
 
 #[allow(deprecated)]
@@ -111,19 +143,31 @@ impl HmacApiKeyVerifier {
 #[allow(deprecated)]
 #[async_trait::async_trait]
 impl ApiKeyVerifier for HmacApiKeyVerifier {
-    async fn verify(&self, api_key: &str) -> Result<UserJwtClaims, AuthCalloutError> {
-        let key = ApiKey::new(api_key).map_err(AuthCalloutError::from)?;
-        let entry = self
-            .registry
-            .lookup(&key)
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("unknown API key".into()))?;
+    async fn verify(
+        &self,
+        api_key: &str,
+        requested_audience: &AudienceAccount,
+    ) -> Result<UserJwtClaims, AuthCalloutError> {
+        let key = ApiKey::new(api_key)?;
+        let entry = self.registry.lookup(&key).ok_or(ApiKeyError::Unknown)?;
+        // mTLS/OIDC drive `aud` from the connection's resolved AudienceAccount,
+        // not from registry state. Reject a key whose registry audience
+        // doesn't match what the connection is requesting so a leaked key
+        // can't mint a JWT for an account the client never asked for.
+        if entry.audience != *requested_audience {
+            return Err(ApiKeyError::AudienceMismatch {
+                requested: requested_audience.as_str().to_owned(),
+                registered: entry.audience.as_str().to_owned(),
+            }
+            .into());
+        }
         let caller_id = derive_caller_id(entry.external_subject.as_str(), &entry.audience)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
+            .map_err(ApiKeyError::CallerIdDerivation)?;
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: entry.external_subject.clone(),
-            aud: entry.audience.clone(),
+            aud: requested_audience.clone(),
             data: entry.spicedb_principal.clone(),
             caller_id,
             nats_permissions,
@@ -152,8 +196,9 @@ mod tests {
         let registry = Arc::new(make_registry());
         #[allow(deprecated)]
         let verifier = HmacApiKeyVerifier::new(registry);
+        let aud = AudienceAccount::new("nats-acct-1");
         #[allow(deprecated)]
-        let err = verifier.verify("not-registered").await.unwrap_err();
+        let err = verifier.verify("not-registered", &aud).await.unwrap_err();
         assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
     }
 
@@ -166,11 +211,27 @@ mod tests {
         let registry = Arc::new(registry);
         #[allow(deprecated)]
         let verifier = HmacApiKeyVerifier::new(registry);
+        let aud = AudienceAccount::new("nats-acct-1");
         #[allow(deprecated)]
-        let claims = verifier.verify("my-secret-key").await.unwrap();
+        let claims = verifier.verify("my-secret-key", &aud).await.unwrap();
         assert_eq!(claims.sub.as_str(), "alice@example.com");
         assert_eq!(claims.aud.as_str(), "nats-acct-1");
         assert_eq!(claims.data.0["spicedb_subject"], "user/alice");
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_audience_mismatch() {
+        let mut registry = make_registry();
+        let key = ApiKey::new("my-secret-key").unwrap();
+        registry.register(&key, sample_entry());
+        let registry = Arc::new(registry);
+        #[allow(deprecated)]
+        let verifier = HmacApiKeyVerifier::new(registry);
+        let other = AudienceAccount::new("nats-acct-evil");
+        #[allow(deprecated)]
+        let err = verifier.verify("my-secret-key", &other).await.unwrap_err();
+        assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
+        assert!(err.to_string().contains("audience mismatch"));
     }
 
     #[test]
