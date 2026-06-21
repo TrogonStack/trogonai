@@ -1,15 +1,25 @@
 #![doc = include_str!("../README.md")]
-#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(
+    any(test, feature = "test-support"),
+    allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
 
+pub mod account_resolver;
 pub mod bridge_mint;
 pub mod caller_jwt_header;
 pub mod denial_category;
+pub mod denial_claims;
 pub mod denial_reason;
 pub mod error;
 pub mod jwt;
 pub mod permissions;
 pub mod signing_key_source;
 pub mod wire;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
+pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
 
 pub use bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
 pub use caller_jwt_header::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue};
