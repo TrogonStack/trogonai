@@ -476,6 +476,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn message_stream_returns_when_bootstrap_send_fails() {
+        // Drop the receiver before dispatch so the bootstrap send hits the
+        // closed-channel branch — the handler must return without consuming
+        // the JetStream loop (which would ack events the caller never saw).
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agents.bot.message.stream", send_message_response_bytes("ms-drop"));
+
+        let js = MockJetStreamConsumerFactory::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.add_consumer(consumer);
+        drop(tx);
+
+        let client = make_client(nats, js);
+        let (chan_tx, chan_rx) = mpsc::channel(16);
+        drop(chan_rx);
+        // Should return promptly — if the bootstrap-drop check is missing,
+        // this would hang waiting on the JetStream loop.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            dispatch_request(
+                &client,
+                RpcId::Number(4),
+                "message/stream",
+                json!({"message": {"messageId": "m-drop", "role": "ROLE_USER", "parts": []}}),
+                &chan_tx,
+            ),
+        )
+        .await
+        .expect("dispatch must exit when bootstrap send fails");
+    }
+
+    #[tokio::test]
+    async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agents.bot.tasks.resubscribe", task_response("rsub-drop"));
+
+        let js = MockJetStreamConsumerFactory::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.add_consumer(consumer);
+        drop(tx);
+
+        let client = make_client(nats, js);
+        let (chan_tx, chan_rx) = mpsc::channel(16);
+        drop(chan_rx);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            dispatch_request(
+                &client,
+                RpcId::Number(5),
+                "tasks/resubscribe",
+                json!({"id": "rsub-drop", "lastSeq": 0}),
+                &chan_tx,
+            ),
+        )
+        .await
+        .expect("dispatch must exit when bootstrap send fails");
+    }
+
+    #[tokio::test]
     async fn message_stream_emits_bootstrap_then_events() {
         let nats = AdvancedMockNatsClient::new();
         nats.set_response("a2a.agents.bot.message.stream", send_message_response_bytes("ms2"));
@@ -993,7 +1052,8 @@ mod tests {
     fn make_with_id_overwrites_error_id_and_passes_through_non_error_frames() {
         let from_parse_helper = OutboundFrame::Error(OutboundError::new(RpcId::Null, INVALID_PARAMS, "x".into()));
         let target_id = RpcId::Number(42);
-        if let OutboundFrame::Error(e) = super::make_with_id(from_parse_helper, &target_id) {
+        let rewritten = super::make_with_id(from_parse_helper, &target_id);
+        if let OutboundFrame::Error(e) = rewritten {
             assert_eq!(e.id, RpcId::Number(42));
         }
         // Non-Error variants pass through unchanged — there's nothing to rewrite.
@@ -1002,7 +1062,8 @@ mod tests {
             "message/stream",
             Value::Null,
         ));
-        if let OutboundFrame::Notification(n) = super::make_with_id(notif, &target_id) {
+        let passed = super::make_with_id(notif, &target_id);
+        if let OutboundFrame::Notification(n) = passed {
             assert_eq!(n.id, RpcId::Number(1));
         }
     }
