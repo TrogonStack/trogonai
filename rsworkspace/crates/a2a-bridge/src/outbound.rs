@@ -115,11 +115,22 @@ impl JsonHttpPost for ReqwestJsonHttpPoster {
             .send()
             .await
             .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))?;
-        response
+        // A 4xx/5xx body is not a valid JSON-RPC reply — forwarding it
+        // would let callers misread an upstream failure as a successful
+        // agent response. Capture status before consuming the body so
+        // the error message is actionable.
+        let status = response.status();
+        let bytes = response
             .bytes()
             .await
-            .map(|b| b.to_vec())
-            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))
+            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))?;
+        if !status.is_success() {
+            return Err(BridgeError::UpstreamHttps(format!(
+                "upstream HTTPS returned {status}: {}",
+                String::from_utf8_lossy(&bytes)
+            )));
+        }
+        Ok(bytes.to_vec())
     }
 }
 

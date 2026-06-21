@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::time::timeout;
 
 use a2a_auth_callout::{BridgeMintRequest, BridgeMintResponse};
 
@@ -145,12 +144,14 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
             connect_opts: None,
         };
         let bytes = serde_json::to_vec(&envelope).map_err(|e: serde_json::Error| BridgeError::Serialize(e))?;
-        let mint = self
+        // The wire impl owns the deadline (e.g. AsyncNatsAuthMintWire's
+        // request_timeout) — wrapping a fixed 30s timeout here would
+        // mask longer wire configs and surface a different error
+        // message on short timeouts.
+        let reply = self
             .wire
-            .roundtrip_message(self.mint_subject.to_string(), BytesPayload(bytes));
-        let reply = timeout(Duration::from_secs(30), mint)
-            .await
-            .map_err(|_| BridgeError::Mint("auth mint client deadline exceeded".into()))??;
+            .roundtrip_message(self.mint_subject.to_string(), BytesPayload(bytes))
+            .await?;
 
         let response: BridgeMintResponse =
             serde_json::from_slice(&reply).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
