@@ -6,10 +6,14 @@ use crate::jwt::JwtError;
 #[derive(Debug)]
 pub enum AuthCalloutError {
     Connect(String),
-    Subscribe(String),
+    /// Subscribing to `$SYS.REQ.USER.AUTH` failed — wraps the typed
+    /// async_nats subscribe error so the source chain isn't lost.
+    Subscribe(async_nats::SubscribeError),
     Deserialize(serde_json::Error),
     Serialize(serde_json::Error),
-    Reply(String),
+    /// Publishing a reply on the auth-callout inbox failed — wraps the
+    /// typed async_nats publish error.
+    Reply(async_nats::PublishError),
     CredentialVerification(String),
     Jwt(JwtError),
     WireFormat(String),
@@ -33,10 +37,10 @@ impl fmt::Display for AuthCalloutError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Connect(msg) => write!(f, "NATS connect failed: {msg}"),
-            Self::Subscribe(msg) => write!(f, "subscribe to auth callout subject failed: {msg}"),
+            Self::Subscribe(_) => f.write_str("subscribe to auth callout subject failed"),
             Self::Deserialize(_) => f.write_str("failed to deserialize auth callout request"),
             Self::Serialize(_) => f.write_str("failed to serialize auth callout response"),
-            Self::Reply(msg) => write!(f, "failed to publish auth callout reply: {msg}"),
+            Self::Reply(_) => f.write_str("failed to publish auth callout reply"),
             Self::CredentialVerification(msg) => write!(f, "credential verification failed: {msg}"),
             Self::Jwt(_) => f.write_str("JWT operation failed"),
             Self::WireFormat(msg) => write!(f, "auth callout wire format error: {msg}"),
@@ -59,6 +63,8 @@ impl std::error::Error for AuthCalloutError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Deserialize(e) | Self::Serialize(e) => Some(e),
+            Self::Subscribe(e) => Some(e),
+            Self::Reply(e) => Some(e),
             Self::Jwt(e) => Some(e),
             Self::KeyLoadIo { source, .. } => Some(source),
             Self::KeyLoadUtf8(e) => Some(e),
@@ -84,11 +90,12 @@ mod tests {
 
     #[test]
     fn display_subscribe() {
-        assert!(
-            AuthCalloutError::Subscribe("denied".into())
-                .to_string()
-                .contains("auth callout subject")
-        );
+        use std::error::Error;
+        let e = AuthCalloutError::Subscribe(async_nats::SubscribeError::new(
+            async_nats::SubscribeErrorKind::InvalidSubject,
+        ));
+        assert!(e.to_string().contains("auth callout subject"));
+        assert!(Error::source(&e).is_some());
     }
 
     #[test]
@@ -166,11 +173,10 @@ mod tests {
                 .to_string()
                 .contains("serialize auth callout response")
         );
-        assert!(
-            AuthCalloutError::Reply("x".into())
-                .to_string()
-                .contains("publish auth callout reply")
-        );
+        let reply_err = AuthCalloutError::Reply(async_nats::PublishError::new(
+            async_nats::client::PublishErrorKind::InvalidSubject,
+        ));
+        assert!(reply_err.to_string().contains("publish auth callout reply"));
         assert!(
             AuthCalloutError::WireFormat("x".into())
                 .to_string()

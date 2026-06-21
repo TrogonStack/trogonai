@@ -70,7 +70,9 @@ mod tests {
             DenialCategory::ServiceUnavailable
         );
         assert_eq!(
-            DenialCategory::from_auth_callout_error(&AuthCalloutError::Subscribe("x".into())),
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::Subscribe(async_nats::SubscribeError::new(
+                async_nats::SubscribeErrorKind::InvalidSubject,
+            ))),
             DenialCategory::InternalError
         );
         assert_eq!(
@@ -86,7 +88,9 @@ mod tests {
             DenialCategory::InternalError
         );
         assert_eq!(
-            DenialCategory::from_auth_callout_error(&AuthCalloutError::Reply("x".into())),
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::Reply(async_nats::PublishError::new(
+                async_nats::client::PublishErrorKind::InvalidSubject,
+            ))),
             DenialCategory::InternalError
         );
         assert_eq!(

@@ -62,7 +62,7 @@ impl<D: AuthDispatcher> Subscriber<D> {
             .client
             .queue_subscribe(AUTH_CALLOUT_SUBJECT, queue)
             .await
-            .map_err(|e| AuthCalloutError::Subscribe(e.to_string()))?;
+            .map_err(AuthCalloutError::Subscribe)?;
 
         info!(subject = AUTH_CALLOUT_SUBJECT, "auth callout subscriber started");
 
@@ -108,8 +108,26 @@ impl<D: AuthDispatcher> Subscriber<D> {
                 let publish_result = match dispatcher.dispatch(request.clone()).await {
                     Ok(user_jwt) => publish_success(&client, &reply, &wire, &request, user_jwt).await,
                     Err(e) => {
-                        warn!(error = %e, "auth callout denied; sending error reply");
-                        publish_denial(&client, &reply, &wire, &request, e.to_string()).await
+                        // Log the full typed error server-side so operators
+                        // can debug, but only send the opaque DenialCategory
+                        // string on the wire — leaking internal verification
+                        // / configuration text to the client lets attackers
+                        // probe for misconfig and diverges from the
+                        // DenialReason contract this crate already defines.
+                        warn!(error = %e, "auth callout denied; sending opaque category reply");
+                        let category = crate::denial_category::DenialCategory::from_auth_callout_error(&e);
+                        let reason = match crate::denial_reason::DenialReason::new(category) {
+                            Ok(r) => r,
+                            Err(re) => {
+                                error!(error = %re, "denial reason construction failed; using internal_error");
+                                #[allow(clippy::expect_used)]
+                                crate::denial_reason::DenialReason::new(
+                                    crate::denial_category::DenialCategory::InternalError,
+                                )
+                                .expect("internal_error reason is non-empty")
+                            }
+                        };
+                        publish_denial(&client, &reply, &wire, &request, reason.as_str().to_owned()).await
                     }
                 };
                 if let Err(pub_err) = publish_result {
@@ -141,7 +159,7 @@ async fn publish_success(
     client
         .publish(reply.to_string(), payload.into())
         .await
-        .map_err(|e| AuthCalloutError::Reply(e.to_string()))
+        .map_err(AuthCalloutError::Reply)
 }
 
 async fn publish_denial(
@@ -155,5 +173,5 @@ async fn publish_denial(
     client
         .publish(reply.to_string(), payload.into())
         .await
-        .map_err(|e| AuthCalloutError::Reply(e.to_string()))
+        .map_err(AuthCalloutError::Reply)
 }
