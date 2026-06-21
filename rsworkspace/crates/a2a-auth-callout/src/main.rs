@@ -199,8 +199,19 @@ async fn main() {
 
     info!("auth callout subscriber running");
 
-    if let Err(e) = subscriber.run().await {
-        tracing::error!(error = %e, "auth callout subscriber exited with error");
-        std::process::exit(1);
+    // `Subscriber::run` returns `Ok(())` when the NATS subscription closes
+    // (connection drop, shutdown, etc.) — that is never a healthy steady
+    // state for this process, so exit non-zero in both arms so the
+    // orchestrator restarts the pod instead of treating the silent exit
+    // as a clean shutdown.
+    match subscriber.run().await {
+        Ok(()) => {
+            tracing::error!("auth callout subscriber exited cleanly; NATS subscription closed");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "auth callout subscriber exited with error");
+            std::process::exit(1);
+        }
     }
 }
