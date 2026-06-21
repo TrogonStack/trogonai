@@ -6,6 +6,7 @@ version = 4
 name = "a2a-auth-callout"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "async-trait",
  "base64 0.22.1",
  "data-encoding",

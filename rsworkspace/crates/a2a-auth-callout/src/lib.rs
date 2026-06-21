@@ -11,6 +11,7 @@ pub mod credentials;
 pub mod denial_category;
 pub mod denial_claims;
 pub mod denial_reason;
+pub mod dispatcher;
 pub mod error;
 pub mod jwt;
 pub mod permissions;
