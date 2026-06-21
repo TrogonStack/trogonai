@@ -1,0 +1,165 @@
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:26:5
+   |
+LL |     error.to_string().contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+   = note: `#[warn(error_string_comparison)]` on by default
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:31:5
+   |
+LL |     message == "domain failure"
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:36:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:41:5
+   |
+LL |     whole.contains("domain") || inner.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:41:33
+   |
+LL |     whole.contains("domain") || inner.contains("domain")
+   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:47:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:51:5
+   |
+LL |     "domain failure".contains(&error.to_string())
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:56:9
+   |
+LL |         message.contains("domain")
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:68:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:76:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:81:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:86:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:91:22
+   |
+LL |     let closure = || message.contains("domain");
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:97:5
+   |
+LL |     message.contains("domain")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:101:13
+   |
+LL |     assert!(error.to_string().contains("caller_id"));
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:105:13
+   |
+LL |     assert!(DomainError.to_string().contains("domain"));
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:109:5
+   |
+LL | /     error
+LL | |         .to_string()
+LL | |         .contains("domain")
+   | |___________________________^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:116:9
+   |
+LL |         error.to_string().contains("decode")
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:117:16
+   |
+LL |             || error.to_string().contains("verify")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: error display string used for a semantic comparison
+  --> $DIR/main.rs:118:16
+   |
+LL |             || error.to_string().contains("signature")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: compare typed error variants, typed categories, or value objects instead
+
+warning: 20 warnings emitted
+

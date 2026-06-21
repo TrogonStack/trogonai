@@ -1000,6 +1000,34 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    struct DefaultDeliveryMessage;
+
+    impl DeliveredMessage for DefaultDeliveryMessage {
+        async fn ack(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn term(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn retry(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn delivered_message_defaults_describe_first_delivery() {
+        let message = DefaultDeliveryMessage;
+
+        assert!(!message.is_redelivery());
+        assert_eq!(message.delivery_count(), 1);
+        assert_eq!(message.ack().await, Ok(()));
+        assert_eq!(message.term().await, Ok(()));
+        assert_eq!(message.retry().await, Ok(()));
+    }
+
     #[tokio::test]
     async fn settlement_panic_does_not_abort_dispatcher() {
         let (processor, _kv, _execution) = build();
