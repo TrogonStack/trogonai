@@ -216,11 +216,18 @@ impl GatewayUnaryPublish for AsyncNatsTokenGatewayUnary {
             .connect(&self.servers[..])
             .await
             .map_err(|e| BridgeError::NatsPublish(e.to_string()))?;
-        client
-            .request_with_headers(subject.to_owned(), headers, payload)
-            .await
-            .map_err(|e| BridgeError::NatsPublish(e.to_string()))
-            .map(|reply| reply.payload)
+        // request_with_headers itself has no deadline — without this
+        // wrapper a hung gateway responder blocks the inbound HTTPS
+        // request indefinitely and the configured RPC timeout is silently
+        // ignored.
+        tokio::time::timeout(
+            self.timeout,
+            client.request_with_headers(subject.to_owned(), headers, payload),
+        )
+        .await
+        .map_err(|_| BridgeError::NatsPublish(format!("gateway RPC exceeded {:?}", self.timeout)))?
+        .map_err(|e| BridgeError::NatsPublish(e.to_string()))
+        .map(|reply| reply.payload)
     }
 }
 
@@ -542,11 +549,9 @@ fn resub_task_and_seq(body: &Value) -> Result<(A2aTaskId, u64), BridgeError> {
     Ok((task_id, extract_last_sequence(params).unwrap_or(0)))
 }
 
-fn sse_plan(method: &str, body: &Value) -> Result<SseConsumePlan, BridgeError> {
+fn sse_plan(method: &str, body: &Value, req_id: ReqId) -> Result<SseConsumePlan, BridgeError> {
     match method {
-        "message/stream" => Ok(SseConsumePlan::MessageStreamBootstrap {
-            req_id: json_rpc_corr_id(body),
-        }),
+        "message/stream" => Ok(SseConsumePlan::MessageStreamBootstrap { req_id }),
         "tasks/resubscribe" => {
             let (task_id, last_seq) = resub_task_and_seq(body)?;
             Ok(SseConsumePlan::TasksResubscribe { task_id, last_seq })
@@ -592,15 +597,21 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
         return Err(BridgeError::MissingJsonRpcMethod);
     };
     let subject = build_gateway_subject(&state.prefix, agent_id.as_str(), method);
+    // The correlation id must be computed ONCE per request — for
+    // streaming methods the gateway publish and the JetStream consumer
+    // must agree on the same ReqId; computing it twice when the
+    // JSON-RPC id is absent/null minted two fresh ReqIds and SSE never
+    // delivered task events.
+    let req_id = json_rpc_corr_id(&v);
 
     if is_sse_jsonrpc_method(method) {
-        let nats_headers = gateway_publish_headers(json_rpc_corr_id(&v), &jwt)?;
+        let nats_headers = gateway_publish_headers(req_id.clone(), &jwt)?;
         let unary_reply = state
             .publisher
             .publish_unary_to_gateway(&subject, &jwt, nats_headers, body.as_ref())
             .await?;
         assert_jsonrpc_gateway_ok(&unary_reply)?;
-        let plan = sse_plan(method, &v)?;
+        let plan = sse_plan(method, &v, req_id)?;
         let payloads = state
             .jetstream
             .task_event_payload_stream(&jwt, &state.prefix, plan)
@@ -611,12 +622,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
 
     let reply = state
         .publisher
-        .publish_unary_to_gateway(
-            &subject,
-            &jwt,
-            gateway_publish_headers(json_rpc_corr_id(&v), &jwt)?,
-            body.as_ref(),
-        )
+        .publish_unary_to_gateway(&subject, &jwt, gateway_publish_headers(req_id, &jwt)?, body.as_ref())
         .await?;
     Response::builder()
         .status(StatusCode::OK)
