@@ -41,4 +41,6 @@ pub use signing_key_source::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
     SigningKeySource, StaticSigningKeySource, VaultSigningKeySource, signing_key_source_from_process_env,
 };
+pub use subscriber::{DenialPublisherConfig, Subscriber};
+pub use wire::AuthCalloutWireCodec;
 pub use wire::{NkeyPublic, NkeySeed, XkeyPublic};
