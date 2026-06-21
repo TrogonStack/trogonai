@@ -28,13 +28,20 @@ impl NkeyPublic {
         &self.0
     }
 
+    /// Verify a `$SYS.REQ.USER.AUTH` request JWT was signed by *this* NkeyPublic.
+    /// The previous shape only verified that whatever `iss` the JWT itself
+    /// claimed had a matching signature — a forged request signed by an
+    /// arbitrary NKey would pass. Now we require the JWT's `iss` to equal the
+    /// configured server-issuer NkeyPublic before signature checks even run.
     pub(crate) fn verify_jwt_issuer(&self, token: &str) -> Result<Claims<AuthRequest>, AuthCalloutError> {
-        let _ = self;
-        decode_server_auth_request_jwt(token)
+        decode_server_auth_request_jwt(token, self)
     }
 }
 
-fn decode_server_auth_request_jwt(token: &str) -> Result<Claims<AuthRequest>, AuthCalloutError> {
+fn decode_server_auth_request_jwt(
+    token: &str,
+    expected_issuer: &NkeyPublic,
+) -> Result<Claims<AuthRequest>, AuthCalloutError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(AuthCalloutError::WireFormat("invalid JWT segment count".into()));
@@ -56,6 +63,15 @@ fn decode_server_auth_request_jwt(token: &str) -> Result<Claims<AuthRequest>, Au
         .get("iss")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AuthCalloutError::WireFormat("authorization request JWT missing iss".into()))?;
+
+    // Pin issuer identity *before* verifying the signature — the signature
+    // alone proves the holder of *some* signing key signed the token, not
+    // that the configured server signed it.
+    if iss != expected_issuer.as_str() {
+        return Err(AuthCalloutError::WireFormat(format!(
+            "authorization request issuer {iss:?} does not match configured server issuer"
+        )));
+    }
 
     let kp = KeyPair::from_public_key(iss)
         .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request issuer NKey: {e}")))?;

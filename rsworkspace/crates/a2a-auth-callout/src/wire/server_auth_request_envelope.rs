@@ -76,13 +76,21 @@ fn jwt_payload_nats_section(token: &str) -> Result<serde_json::Value, AuthCallou
 impl ServerAuthRequestEnvelope {
     pub fn decode_from_message(
         payload: Vec<u8>,
-        _headers: Option<&async_nats::HeaderMap>,
+        headers: Option<&async_nats::HeaderMap>,
         server_issuer: &NkeyPublic,
         account_xkey_seed: Option<&NkeySeed>,
         server_xkey_public: Option<&XkeyPublic>,
     ) -> Result<ServerAuthRequestClaims, AuthCalloutError> {
-        let _ = _headers;
-        Self::from_bytes(payload).decode(server_issuer, account_xkey_seed, server_xkey_public)
+        // Encrypted callout requests carry the per-request server XKey on the
+        // `Nats-Server-Xkey` NATS header; the static `server_xkey_public`
+        // arg is the legacy/fallback config knob. Header wins so live
+        // nats-server traffic decrypts correctly.
+        let header_xkey = headers
+            .and_then(|h| h.get(super::AUTH_REQUEST_XKEY_HEADER))
+            .map(|v| XkeyPublic::parse(v.as_str()))
+            .transpose()?;
+        let effective_server_xkey = header_xkey.as_ref().or(server_xkey_public);
+        Self::from_bytes(payload).decode(server_issuer, account_xkey_seed, effective_server_xkey)
     }
 }
 

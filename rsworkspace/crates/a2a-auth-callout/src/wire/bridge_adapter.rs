@@ -5,16 +5,25 @@ use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 
 use super::ServerAuthRequestClaims;
+use crate::account_resolver::RequestedAccount;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeMintRequest};
 use crate::error::AuthCalloutError;
 
 impl ServerAuthRequestClaims {
     /// Synthetic authorization claims for `a2a.bridge.auth.callout.request` (not server-signed).
     pub fn from_bridge_mint(request: BridgeMintRequest) -> Result<Self, AuthCalloutError> {
-        let account = request
+        // Route the bridge account through the same RequestedAccount value
+        // object the dispatcher uses for the NATS path — keeps the shape
+        // consistent and means a blank/whitespace account is rejected with
+        // a typed AccountResolverError instead of slipping through and
+        // failing later during dispatch.
+        let raw_account = request
             .account
-            .filter(|a| !a.trim().is_empty())
             .ok_or_else(|| AuthCalloutError::CredentialVerification("bridge mint request missing account".into()))?;
+        // The validated RequestedAccount is the boundary type; we keep the
+        // string form for the synthetic JSON body but the validation has
+        // happened by the time it gets here.
+        let account = RequestedAccount::new(raw_account.trim())?.as_str().to_owned();
 
         let (jwt, auth_token) = match request.connect_opts.as_ref().and_then(|o| o.auth_scheme) {
             Some(BridgeAuthScheme::ApiKey) => {
@@ -22,9 +31,10 @@ impl ServerAuthRequestClaims {
                     .connect_opts
                     .as_ref()
                     .and_then(|o| o.api_key.clone())
+                    .filter(|k| !k.trim().is_empty())
                     .ok_or_else(|| {
                         AuthCalloutError::CredentialVerification(
-                            "API-key scheme but connect_opts.api_key missing".into(),
+                            "API-key scheme but connect_opts.api_key is missing or blank".into(),
                         )
                     })?;
                 (None, Some(key))

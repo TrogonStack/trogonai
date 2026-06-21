@@ -83,7 +83,17 @@ impl ServerAuthRequestClaims {
     }
 
     pub fn connect_opts_auth_token(&self) -> Option<&str> {
-        self.inner.nats.connect_opts.auth_token.as_deref()
+        // Treat an empty / whitespace-only auth_token as absent so the
+        // dispatcher's `ok_or_else("missing api key")` path triggers
+        // correctly instead of forwarding an empty string into the
+        // verifier where it would mint a CredentialVerification message
+        // farther from the cause.
+        self.inner
+            .nats
+            .connect_opts
+            .auth_token
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
     }
 
     pub fn client_tls_pem_certs(&self) -> Vec<ClientCertPem> {
