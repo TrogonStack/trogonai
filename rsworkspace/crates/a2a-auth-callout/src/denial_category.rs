@@ -118,4 +118,49 @@ mod tests {
         assert!(!category.as_str().contains("signature"));
         assert!(!category.as_str().contains("kid"));
     }
+
+    #[test]
+    fn as_str_covers_every_variant() {
+        assert_eq!(DenialCategory::InvalidCredentials.as_str(), "invalid_credentials");
+        assert_eq!(DenialCategory::UnknownAccount.as_str(), "unknown_account");
+        assert_eq!(DenialCategory::InvalidRequest.as_str(), "invalid_request");
+        assert_eq!(DenialCategory::VerifierUnavailable.as_str(), "verifier_unavailable");
+        assert_eq!(DenialCategory::InternalError.as_str(), "internal_error");
+        assert_eq!(DenialCategory::ServiceUnavailable.as_str(), "service_unavailable");
+    }
+
+    #[test]
+    fn wire_format_and_internal_map_to_internal_error() {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::WireFormat("x".into())),
+            DenialCategory::InternalError
+        );
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::Internal("x".into())),
+            DenialCategory::InternalError
+        );
+    }
+
+    #[test]
+    fn credential_message_request_missing_account_is_invalid_request() {
+        let err = AuthCalloutError::CredentialVerification("request missing account".into());
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&err),
+            DenialCategory::InvalidRequest
+        );
+        let err = AuthCalloutError::CredentialVerification("no credential material in request".into());
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&err),
+            DenialCategory::InvalidRequest
+        );
+    }
+
+    #[test]
+    fn credential_message_scheme_missing_is_invalid_request() {
+        let err = AuthCalloutError::CredentialVerification("api_key scheme but apikey is missing".into());
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&err),
+            DenialCategory::InvalidRequest
+        );
+    }
 }

@@ -90,4 +90,31 @@ mod tests {
     fn source_for_connect_is_none() {
         assert!(AuthCalloutError::Connect("x".into()).source().is_none());
     }
+
+    #[test]
+    fn display_covers_remaining_variants() {
+        let de = serde_json::from_str::<String>("x").unwrap_err();
+        assert!(
+            AuthCalloutError::Deserialize(de)
+                .to_string()
+                .contains("deserialize auth callout request")
+        );
+        let se = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        assert!(
+            AuthCalloutError::Serialize(se)
+                .to_string()
+                .contains("serialize auth callout response")
+        );
+        assert!(
+            AuthCalloutError::Reply("x".into())
+                .to_string()
+                .contains("publish auth callout reply")
+        );
+        assert!(
+            AuthCalloutError::WireFormat("x".into())
+                .to_string()
+                .contains("wire format")
+        );
+        assert!(AuthCalloutError::Internal("x".into()).to_string().contains("internal"));
+    }
 }
