@@ -16,6 +16,7 @@ pub mod error;
 pub mod jwt;
 pub mod permissions;
 pub mod signing_key_source;
+pub mod subscriber;
 pub mod wire;
 
 #[cfg(any(test, feature = "test-support"))]
