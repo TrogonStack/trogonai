@@ -1,0 +1,563 @@
+mod nats_permission_claims;
+mod nats_user_jwt;
+mod user_jwt_subject;
+
+use std::fmt;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
+
+pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
+pub use nats_user_jwt::decode_nats_user_payload;
+pub use user_jwt_subject::UserJwtSubject;
+
+use crate::error::AuthCalloutError;
+use crate::permissions::IssuedPermissions;
+use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, SigningKeySource};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AccountName(String);
+
+// Same wire-vs-constructor concern as CallerId/ExternalSubject — derived
+// Deserialize would let an empty account slip through, and `aud=""` doesn't
+// round-trip through `verify_with_material` (which treats empty/missing
+// audience as invalid).
+impl<'de> Deserialize<'de> for AccountName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::try_new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl AccountName {
+    /// Reject empty inputs. Existing callers that don't care can use
+    /// `AccountName::new(...)` which returns the constructed type but only
+    /// after the same validation — kept inline so the cost is a single
+    /// branch with an explicit fail-closed.
+    pub fn new(name: impl Into<String>) -> Self {
+        let s = name.into();
+        debug_assert!(!s.is_empty(), "AccountName::new called with empty string");
+        Self(s)
+    }
+
+    pub fn try_new(name: impl Into<String>) -> Result<Self, JwtError> {
+        let s = name.into();
+        if s.is_empty() {
+            return Err(JwtError::Decode("account name must be non-empty".into()));
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AccountName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+pub type AudienceAccount = AccountName;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct ExternalSubject(String);
+
+// Custom Deserialize so JSON-sourced subjects run through the same validator
+// as `ExternalSubject::new` — derived transparent Deserialize would let an
+// empty `sub` slip into UserJwtClaims, mint with `ext_sub=""`, then fail
+// verify because `ExternalSubject::new("")` rejects it.
+impl<'de> Deserialize<'de> for ExternalSubject {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl ExternalSubject {
+    pub fn new(subject: impl Into<String>) -> Result<Self, JwtError> {
+        let s = subject.into();
+        if s.is_empty() {
+            return Err(JwtError::InvalidExternalSubject);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct CallerId(String);
+
+impl CallerId {
+    pub fn new(segment: impl Into<String>) -> Result<Self, JwtError> {
+        let s = segment.into();
+        validate_caller_segment(&s).map(|()| Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+// Custom Deserialize so JSON-sourced caller ids run through the same segment
+// validator as `CallerId::new` — derived transparent Deserialize would let a
+// wildcard or dotted id slip in via UserJwtClaims and end up interpolated
+// into NATS subject patterns (`_INBOX.{caller}.>`, etc.).
+impl<'de> Deserialize<'de> for CallerId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
+    if s.is_empty() {
+        return Err(JwtError::InvalidCallerId);
+    }
+    // Reject anything that would break out of a NATS subject segment — the
+    // caller id is interpolated into `_INBOX.{caller}.>`, `a2a.push.{caller}.>`
+    // and similar patterns, so dots and NATS wildcards (`*` / `>`) would
+    // expand the subscribe scope. Also reject whitespace which collapses
+    // visually identical ids into different strings.
+    if s.contains('.') || s.contains('*') || s.contains('>') || s.chars().any(char::is_whitespace) {
+        return Err(JwtError::InvalidCallerId);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SpiceDbSubject(String);
+
+impl SpiceDbSubject {
+    pub fn new(subject: impl Into<String>) -> Self {
+        Self(subject.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SpiceDbPrincipal(pub Value);
+
+impl SpiceDbPrincipal {
+    pub fn new(subject: impl Into<String>) -> Self {
+        Self(json!({ "spicedb_subject": subject.into() }))
+    }
+
+    pub fn spicedb_subject(&self) -> Option<SpiceDbSubject> {
+        self.0
+            .get("spicedb_subject")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(SpiceDbSubject::new)
+    }
+}
+
+/// HS256 User JWT minted for bridge/gateway consumption (inner `nats.jwt` on wire responses).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MintedUserJwt(String);
+
+impl MintedUserJwt {
+    /// Wrap a token after validating compact-JWT shape (three non-empty
+    /// dot-separated segments, non-empty input after trimming). Mirrors the
+    /// gate in `a2a-identity-types::MintedUserJwt` so a malformed value can't
+    /// be smuggled into `CallerJwtHeaderValue::from_minted` and only fail
+    /// later when the bridge tries to decode it.
+    pub fn new(token: impl Into<String>) -> Result<Self, JwtError> {
+        let token = token.into().trim().to_owned();
+        if token.is_empty() {
+            return Err(JwtError::Decode("minted user JWT must be non-empty".into()));
+        }
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 || parts.iter().any(|p| p.is_empty()) {
+            return Err(JwtError::Decode(
+                "minted user JWT must be a compact 3-segment JWT".into(),
+            ));
+        }
+        Ok(Self(token))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    pub fn ensure_fresh(&self) -> Result<(), JwtError> {
+        let payload = decode_nats_user_payload(self.as_str())?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(JwtError::SystemTime)?
+            .as_secs();
+        let now_i64 = i64::try_from(now).map_err(|_| JwtError::IssuedAtOutOfRange)?;
+        let exp = payload
+            .get("exp")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| JwtError::Decode("user JWT missing exp".into()))?;
+        if exp <= now_i64 {
+            return Err(JwtError::Decode("user JWT expired".into()));
+        }
+        if let Some(nbf) = payload.get("nbf").and_then(Value::as_i64)
+            && nbf > now_i64
+        {
+            return Err(JwtError::Decode("user JWT not yet valid".into()));
+        }
+        Ok(())
+    }
+}
+
+// Boxing is conditional because `Vec<u8>` is only present under cfg(test),
+// outside tests the Nkey variant is the only one and boxing isn't needed.
+#[cfg_attr(test, allow(clippy::large_enum_variant))]
+enum SigningKeyInner {
+    Nkey(nkeys::KeyPair),
+    #[cfg(test)]
+    HmacSecret(Vec<u8>),
+}
+
+// `Clone` can't return `Result`; re-parsing the seed we just emitted is
+// infallible by construction, so the `expect` is documented and intentional.
+#[allow(clippy::expect_used)]
+impl Clone for SigningKeyInner {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Nkey(kp) => {
+                let seed = kp.seed().unwrap_or_default();
+                Self::Nkey(nkeys::KeyPair::from_seed(&seed).expect("clone SigningKey"))
+            }
+            #[cfg(test)]
+            Self::HmacSecret(s) => Self::HmacSecret(s.clone()),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct SigningKey(SigningKeyInner);
+
+impl fmt::Debug for SigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SigningKey")
+    }
+}
+
+impl SigningKey {
+    pub fn from_seed(seed: impl AsRef<str>) -> Result<Self, JwtError> {
+        nkeys::KeyPair::from_seed(seed.as_ref())
+            .map(|kp| Self(SigningKeyInner::Nkey(kp)))
+            .map_err(|e| JwtError::InvalidSigningSeed(e.to_string()))
+    }
+
+    #[cfg(test)]
+    pub fn from_secret(secret: &[u8]) -> Self {
+        Self(SigningKeyInner::HmacSecret(secret.to_vec()))
+    }
+
+    pub(crate) fn keypair(&self) -> &nkeys::KeyPair {
+        match &self.0 {
+            SigningKeyInner::Nkey(kp) => kp,
+            #[cfg(test)]
+            SigningKeyInner::HmacSecret(_) => panic!("from_secret SigningKey has no nkey keypair"),
+        }
+    }
+
+    /// Returns a `jsonwebtoken::EncodingKey` for HS256 signing using the raw seed bytes.
+    pub fn encoding_key(&self) -> jsonwebtoken::EncodingKey {
+        match &self.0 {
+            SigningKeyInner::Nkey(kp) => {
+                // The seed bytes are used as the HMAC secret for HS256 denial JWTs.
+                let seed_bytes = kp.seed().unwrap_or_default();
+                jsonwebtoken::EncodingKey::from_secret(seed_bytes.as_bytes())
+            }
+            #[cfg(test)]
+            SigningKeyInner::HmacSecret(s) => jsonwebtoken::EncodingKey::from_secret(s),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum JwtError {
+    Encode(String),
+    Decode(String),
+    SystemTime(std::time::SystemTimeError),
+    InvalidCallerId,
+    InvalidExternalSubject,
+    IssuedAtOutOfRange,
+    NoSigningKeyForKid,
+    InvalidSigningSeed(String),
+}
+
+impl fmt::Display for JwtError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Encode(e) => write!(f, "JWT encode error: {e}"),
+            Self::Decode(e) => write!(f, "JWT decode error: {e}"),
+            Self::SystemTime(e) => write!(f, "system time error: {e}"),
+            Self::InvalidCallerId => f.write_str("caller_id invalid for NATS subject token"),
+            Self::InvalidExternalSubject => f.write_str("external subject must be non-empty"),
+            Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
+            Self::NoSigningKeyForKid => f.write_str("no accepted signing key matched token kid"),
+            Self::InvalidSigningSeed(e) => write!(f, "invalid account signing seed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for JwtError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SystemTime(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<JwtError> for AuthCalloutError {
+    fn from(value: JwtError) -> Self {
+        Self::Jwt(value)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserJwtClaims {
+    pub kid: KeyVersion,
+    pub sub: ExternalSubject,
+    pub aud: AccountName,
+    pub data: SpiceDbPrincipal,
+    pub caller_id: CallerId,
+    pub nats_permissions: IssuedPermissions,
+}
+
+impl UserJwtClaims {
+    pub fn mint(
+        &self,
+        material: &MintingMaterial,
+        user_subject: &UserJwtSubject,
+        issued_at: SystemTime,
+        ttl: Duration,
+    ) -> Result<MintedUserJwt, JwtError> {
+        nats_user_jwt::mint_nats_user_jwt(self, material, user_subject, issued_at, ttl)
+    }
+
+    pub fn verify_with_source(token: &str, source: &dyn SigningKeySource) -> Result<Self, JwtError> {
+        nats_user_jwt::verify_nats_user_jwt_with_source(token, source)
+    }
+
+    pub fn verify_with_handles(token: &str, handles: &[SigningKeyHandle]) -> Result<Self, JwtError> {
+        nats_user_jwt::verify_nats_user_jwt(token, handles)
+    }
+
+    pub fn verify_minted_user_jwt(
+        token: &str,
+        source: &dyn SigningKeySource,
+        expected_aud: &AccountName,
+    ) -> Result<Self, JwtError> {
+        let claims = Self::verify_with_source(token, source)?;
+        if claims.aud.as_str() != expected_aud.as_str() {
+            return Err(JwtError::Decode(
+                "user JWT audience does not match gateway account".into(),
+            ));
+        }
+        let payload = decode_nats_user_payload(token)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(JwtError::SystemTime)?
+            .as_secs();
+        let now_i64 = i64::try_from(now).map_err(|_| JwtError::IssuedAtOutOfRange)?;
+        let exp = payload
+            .get("exp")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| JwtError::Decode("user JWT missing exp".into()))?;
+        if exp <= now_i64 {
+            return Err(JwtError::Decode("user JWT expired".into()));
+        }
+        if let Some(nbf) = payload.get("nbf").and_then(serde_json::Value::as_i64)
+            && nbf > now_i64
+        {
+            return Err(JwtError::Decode("user JWT not yet valid".into()));
+        }
+        Ok(claims)
+    }
+
+    #[cfg(test)]
+    fn mint_for_test_ttl(
+        &self,
+        material: &MintingMaterial,
+        user_subject: &UserJwtSubject,
+        ttl: Duration,
+    ) -> Result<MintedUserJwt, JwtError> {
+        self.mint(
+            material,
+            user_subject,
+            std::time::UNIX_EPOCH + Duration::from_secs(1_000),
+            ttl,
+        )
+    }
+}
+
+/// Reads `caller_id` from a freshly minted User JWT without signature verification.
+///
+/// The bridge uses this only on tokens it just received from the auth callout mint path.
+pub fn caller_id_from_minted_jwt(token: &str) -> Result<CallerId, JwtError> {
+    let payload: serde_json::Value = nats_user_jwt::decode_nats_user_payload(token)?;
+    let caller_id = payload
+        .get("caller_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| JwtError::Decode("minted user JWT missing caller_id".into()))?;
+    CallerId::new(caller_id)
+}
+
+#[allow(dead_code)]
+pub(crate) fn derive_caller_id(external_sub: &str, tenant: &AccountName) -> Result<CallerId, JwtError> {
+    let mut hasher = Sha256::new();
+    hasher.update(external_sub.as_bytes());
+    hasher.update(b"|");
+    hasher.update(tenant.as_str().as_bytes());
+    let digest = hasher.finalize();
+    CallerId::new(hex::encode(&digest[..16]))
+}
+
+#[allow(dead_code)]
+pub(crate) fn spicedb_bundle_for_opaque(principal_hint: impl Into<Value>) -> SpiceDbPrincipal {
+    SpiceDbPrincipal(principal_hint.into())
+}
+
+#[allow(dead_code)]
+pub(crate) fn spicedb_principal_from_oidc_claims(claims: &Value) -> SpiceDbPrincipal {
+    if let Some(p) = claims.get("spicedb_principal") {
+        SpiceDbPrincipal(p.clone())
+    } else if let Some(sub) = claims.get("sub") {
+        SpiceDbPrincipal(json!({ "spicedb_subject": sub }))
+    } else {
+        SpiceDbPrincipal(json!({}))
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn external_subject_from_der(prefix: &str, cert_der: &[u8]) -> Result<ExternalSubject, JwtError> {
+    let mut hasher = Sha256::new();
+    hasher.update(cert_der);
+    ExternalSubject::new(format!("{}|{}", prefix, hex::encode(hasher.finalize())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
+    use nkeys::KeyPair;
+    use serde_json::json;
+
+    #[test]
+    fn mint_decodes_expected_claims() {
+        let issuer = KeyPair::new_account();
+        let issuer_seed = issuer.seed().expect("issuer seed");
+        let user = KeyPair::new_user();
+        let material = MintingMaterial::new(
+            SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+            KeyVersion::new("test").unwrap(),
+        );
+        let caller_id = CallerId::new("caller1").unwrap();
+        let claims = UserJwtClaims {
+            kid: material.version().clone(),
+            sub: ExternalSubject::new("alice").unwrap(),
+            aud: AccountName::new("tenant-acme"),
+            data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
+        };
+        let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+        let token = claims
+            .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
+            .unwrap();
+        let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
+        let decoded = UserJwtClaims::verify_with_handles(token.as_str(), &[handle]).unwrap();
+        // `sub` round-trips the caller-supplied ExternalSubject ("alice"),
+        // independent of the SpiceDB principal which can carry a different
+        // shape ("user/alice"). See nats_user_jwt::ext_sub.
+        assert_eq!(decoded.sub.as_str(), "alice");
+        assert_eq!(decoded.aud.as_str(), "tenant-acme");
+        assert_eq!(decoded.caller_id.as_str(), "caller1");
+        assert_eq!(decoded.data.spicedb_subject().unwrap().as_str(), "user/alice");
+    }
+
+    #[test]
+    fn mint_rejects_wrong_verification_key() {
+        let issuer_a = KeyPair::new_account();
+        let issuer_a_seed = issuer_a.seed().expect("issuer seed");
+        let issuer_b = KeyPair::new_account();
+        let issuer_b_seed = issuer_b.seed().expect("issuer b seed");
+        let user = KeyPair::new_user();
+        let material = MintingMaterial::new(
+            SigningKey::from_seed(&issuer_a_seed).unwrap().keypair().clone(),
+            KeyVersion::new("test").unwrap(),
+        );
+        let caller_id = CallerId::new("cid").unwrap();
+        let claims = UserJwtClaims {
+            kid: material.version().clone(),
+            sub: ExternalSubject::new("s").unwrap(),
+            aud: AudienceAccount::new("a"),
+            data: SpiceDbPrincipal(json!({})),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
+        };
+        let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+        let token = claims
+            .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
+            .unwrap();
+        let wrong = SigningKeyHandle::new(
+            KeyVersion::new("test").unwrap(),
+            SigningKey::from_seed(&issuer_b_seed).unwrap(),
+        );
+        assert!(UserJwtClaims::verify_with_handles(token.as_str(), &[wrong]).is_err());
+    }
+
+    #[test]
+    fn caller_id_rejects_dots() {
+        assert!(CallerId::new("a.b").unwrap_err().to_string().contains("caller_id"));
+    }
+
+    #[test]
+    fn external_subject_requires_non_empty() {
+        assert!(
+            ExternalSubject::new("")
+                .unwrap_err()
+                .to_string()
+                .contains("external subject")
+        );
+    }
+
+    #[test]
+    fn spicedb_principal_prefers_custom_claim() {
+        let v = json!({ "sub": "x", "spicedb_principal": { "kind": "special" } });
+        let p = spicedb_principal_from_oidc_claims(&v);
+        assert_eq!(p.0["kind"], "special");
+    }
+
+    #[test]
+    fn spicedb_subject_accessor_reads_claim() {
+        let p = SpiceDbPrincipal::new("user/alice");
+        assert_eq!(p.spicedb_subject().unwrap().as_str(), "user/alice");
+    }
+
+    #[test]
+    fn spicedb_subject_accessor_absent_when_missing_or_empty() {
+        assert!(SpiceDbPrincipal(json!({})).spicedb_subject().is_none());
+        assert!(
+            SpiceDbPrincipal(json!({"spicedb_subject": ""}))
+                .spicedb_subject()
+                .is_none()
+        );
+    }
+}

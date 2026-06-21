@@ -1,0 +1,91 @@
+use std::sync::Once;
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use tracing::warn;
+
+#[cfg(test)]
+static ENV_DEV_WARN_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+use crate::error::AuthCalloutError;
+use crate::jwt::SigningKey;
+
+use super::SigningKeySource;
+use super::key_version::KeyVersion;
+use super::signing_key_handle::SigningKeyHandle;
+
+static ENV_DEV_WARN_ONCE: Once = Once::new();
+
+const VERSION_CURRENT: &str = "current";
+const VERSION_PREVIOUS: &str = "previous";
+
+#[derive(Debug)]
+pub struct EnvSigningKeySource {
+    current: SigningKeyHandle,
+    previous: Option<SigningKeyHandle>,
+}
+
+impl EnvSigningKeySource {
+    pub fn from_env() -> Result<Self, AuthCalloutError> {
+        let current_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
+            .map_err(|_| AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET"))?;
+        Self::from_secrets(current_secret)
+    }
+
+    /// Constructor that takes the current secret directly. Lets the loader
+    /// resolve a fallback (e.g. `AUTH_CALLOUT_ISSUER_NKEY_SEED`) without
+    /// mutating the process environment.
+    pub fn from_secrets(current_secret: String) -> Result<Self, AuthCalloutError> {
+        ENV_DEV_WARN_ONCE.call_once(|| {
+            #[cfg(test)]
+            ENV_DEV_WARN_COUNT.fetch_add(1, Ordering::SeqCst);
+            warn!("AUTH_CALLOUT_SIGNING_SECRET env custody is dev-only; use file or vault in production");
+        });
+        // `KeyVersion::new` only rejects empty / illegal-char strings; the
+        // VERSION_CURRENT / VERSION_PREVIOUS constants are validated at
+        // compile time, so a failure here would be a code bug, not runtime.
+        #[allow(clippy::expect_used)]
+        let current = SigningKeyHandle::new(
+            KeyVersion::new(VERSION_CURRENT).expect("static version"),
+            signing_key_from_secret(&current_secret)?,
+        );
+
+        let previous = match std::env::var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            None => None,
+            Some(secret) => {
+                #[allow(clippy::expect_used)]
+                let version = KeyVersion::new(VERSION_PREVIOUS).expect("static version");
+                Some(SigningKeyHandle::new(version, signing_key_from_secret(&secret)?))
+            }
+        };
+
+        Ok(Self { current, previous })
+    }
+}
+
+fn signing_key_from_secret(secret: &str) -> Result<SigningKey, AuthCalloutError> {
+    SigningKey::from_seed(secret.trim()).map_err(AuthCalloutError::Jwt)
+}
+
+impl SigningKeySource for EnvSigningKeySource {
+    fn current(&self) -> SigningKeyHandle {
+        self.current.clone()
+    }
+
+    fn accepted(&self) -> Vec<SigningKeyHandle> {
+        let mut keys = vec![self.current.clone()];
+        if let Some(prev) = &self.previous {
+            keys.push(prev.clone());
+        }
+        keys
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_env_dev_warn_count() -> usize {
+    ENV_DEV_WARN_COUNT.load(Ordering::SeqCst)
+}
