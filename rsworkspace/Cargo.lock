@@ -38,6 +38,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-bridge"
+version = "0.1.0"
+dependencies = [
+ "a2a-auth-callout",
+ "a2a-nats",
+ "serde_json",
+]
+
+[[package]]
 name = "a2a-identity-types"
 version = "0.1.0"
 dependencies = [

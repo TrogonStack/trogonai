@@ -1,0 +1,19 @@
+[package]
+name = "a2a-bridge"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "HTTPS ↔ NATS A2A sidecar: caller identity, error surface, and routing scaffolds"
+publish = false
+
+[lib]
+name = "a2a_bridge"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-auth-callout = { workspace = true }
+a2a-nats = { workspace = true }
+serde_json = { workspace = true }
