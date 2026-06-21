@@ -76,6 +76,10 @@ impl ApiKey {
 pub struct ApiKeyDigest([u8; 32]);
 
 impl ApiKeyDigest {
+    // `Hmac::new_from_slice` only errors for InvalidLength on KeyInit impls
+    // that disallow it; `Hmac<Sha256>` accepts any key length, so the result
+    // is statically infallible. Documented and intentional.
+    #[allow(clippy::expect_used)]
     fn compute(api_key: &ApiKey, hmac_secret: &[u8]) -> Self {
         let mut mac = Hmac::<Sha256>::new_from_slice(hmac_secret).expect("HMAC accepts any key length");
         mac.update(api_key.as_str().as_bytes());

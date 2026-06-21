@@ -45,17 +45,24 @@ impl X509MtlsVerifier {
         Self { anchors }
     }
 
-    fn leaf_der(pem: &str) -> Result<Vec<u8>, AuthCalloutError> {
+    /// Collect every CERTIFICATE block in the client PEM in order. The first
+    /// is the leaf; any remaining are intermediates between leaf and a
+    /// configured trust anchor.
+    fn chain_ders(pem: &str) -> Result<Vec<Vec<u8>>, AuthCalloutError> {
+        let mut out = Vec::new();
         for pem_result in Pem::iter_from_buffer(pem.as_bytes()) {
             let pem =
                 pem_result.map_err(|e| AuthCalloutError::CredentialVerification(format!("PEM parse error: {e}")))?;
             if pem.label.to_uppercase().contains("CERTIFICATE") {
-                return Ok(pem.contents);
+                out.push(pem.contents);
             }
         }
-        Err(AuthCalloutError::CredentialVerification(
-            "client certificate PEM contained no CERTIFICATE block".into(),
-        ))
+        if out.is_empty() {
+            return Err(AuthCalloutError::CredentialVerification(
+                "client certificate PEM contained no CERTIFICATE block".into(),
+            ));
+        }
+        Ok(out)
     }
 
     fn anchor_pems(bundle: &str) -> Result<Vec<Pem>, AuthCalloutError> {
@@ -89,9 +96,18 @@ impl X509MtlsVerifier {
         account: &AudienceAccount,
         now: OffsetDateTime,
     ) -> Result<UserJwtClaims, AuthCalloutError> {
-        let leaf_der = Self::leaf_der(cert.as_str())?;
-        let (_, leaf) = X509Certificate::from_der(&leaf_der)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid leaf certificate: {e}")))?;
+        let chain_ders = Self::chain_ders(cert.as_str())?;
+        let leaf_der = chain_ders[0].clone();
+        let chain: Vec<X509Certificate<'_>> = chain_ders
+            .iter()
+            .map(|d| {
+                X509Certificate::from_der(d)
+                    .map(|(_, c)| c)
+                    .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid client chain cert: {e}")))
+            })
+            .collect::<Result<_, _>>()?;
+        let leaf = &chain[0];
+        let intermediates = &chain[1..];
         let anchor_pems = Self::anchor_pems(self.anchors.as_str())?;
         let cas = Self::parse_cas(&anchor_pems)?;
 
@@ -115,30 +131,46 @@ impl X509MtlsVerifier {
         }
 
         let asn1_now = ASN1Time::from(now);
+        // Walk leaf → intermediates → trust anchor. At each step, find a
+        // currently-valid issuer (preferring trust anchors so a chain that
+        // could short-circuit to a configured anchor does so) and verify
+        // the signature. The walk caps at chain.len()+1 hops to bound the
+        // loop independently of input length.
+        let mut current = leaf;
         let mut trusted = false;
-        // Several anchors may share the same subject during CA rotation —
-        // don't bail on the first expired or signature-mismatched one; keep
-        // scanning so a still-valid sibling anchor can vouch for the leaf.
-        for ca in &cas {
-            if leaf.issuer() != ca.subject() {
-                continue;
-            }
-            if !ca.validity().is_valid_at(asn1_now) {
-                continue;
-            }
-            if leaf.verify_signature(Some(&ca.tbs_certificate.subject_pki)).is_ok() {
+        for _ in 0..=chain.len() {
+            // If the current cert is itself a configured trust anchor
+            // (subject + key match) we're done.
+            if cas.iter().any(|ca| {
+                ca.subject() == current.subject()
+                    && ca.tbs_certificate.subject_pki == current.tbs_certificate.subject_pki
+            }) {
                 trusted = true;
                 break;
             }
+            // Look in trust anchors first, then in supplied intermediates.
+            let issuer = cas.iter().chain(intermediates.iter()).find(|c| {
+                c.subject() == current.issuer()
+                    && c.validity().is_valid_at(asn1_now)
+                    && current.verify_signature(Some(&c.tbs_certificate.subject_pki)).is_ok()
+            });
+            let Some(issuer) = issuer else { break };
+            if cas.iter().any(|ca| {
+                ca.subject() == issuer.subject() && ca.tbs_certificate.subject_pki == issuer.tbs_certificate.subject_pki
+            }) {
+                trusted = true;
+                break;
+            }
+            current = issuer;
         }
 
         if !trusted {
             return Err(AuthCalloutError::CredentialVerification(
-                "client certificate is not issued by a configured trust anchor".into(),
+                "client certificate does not chain to a configured trust anchor".into(),
             ));
         }
 
-        let sub = ExternalSubject::from_x509(&leaf, &leaf_der)
+        let sub = ExternalSubject::from_x509(leaf, &leaf_der)
             .map_err(|e| AuthCalloutError::CredentialVerification(format!("mTLS subject extraction failed: {e}")))?;
         let data = spicedb_bundle_for_opaque(serde_json::json!({
             "spicedb_subject": sub.as_str(),

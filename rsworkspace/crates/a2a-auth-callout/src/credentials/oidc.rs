@@ -90,9 +90,15 @@ impl JwksOidcVerifier {
         // Bound discovery + JWKS fetches so a misbehaving IdP can't hang the
         // verifier indefinitely. 10s is well above any healthy IdP RTT and
         // still well below typical NATS auth-callout deadlines.
+        //
+        // Disable redirects so a same-origin `jwks_uri` can't 302 the JWKS
+        // fetch off to an attacker-controlled host after origin validation
+        // passed at discovery time. The IdP needs to serve JWKS from the
+        // same origin directly.
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .connect_timeout(std::time::Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| AuthCalloutError::CredentialVerification(e.to_string()))?;
         let uri = format!("{}/.well-known/openid-configuration", issuer.as_str());
