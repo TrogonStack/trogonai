@@ -43,7 +43,13 @@ version = "0.1.0"
 dependencies = [
  "a2a-auth-callout",
  "a2a-nats",
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "nkeys",
+ "reqwest",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
