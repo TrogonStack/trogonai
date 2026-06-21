@@ -21,7 +21,8 @@ impl CallerJwtHeaderValue {
         if token.is_empty() {
             return Err(JwtError::Decode("caller JWT header value is empty".into()));
         }
-        if token.split('.').count() != 3 {
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 || parts.iter().any(|p| p.is_empty()) {
             return Err(JwtError::Decode("caller JWT header value is not a compact JWT".into()));
         }
         Ok(Self(token))

@@ -56,7 +56,7 @@ impl ExternalSubject {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct CallerId(String);
 
@@ -71,8 +71,27 @@ impl CallerId {
     }
 }
 
+// Custom Deserialize so JSON-sourced caller ids run through the same segment
+// validator as `CallerId::new` — derived transparent Deserialize would let a
+// wildcard or dotted id slip in via UserJwtClaims and end up interpolated
+// into NATS subject patterns (`_INBOX.{caller}.>`, etc.).
+impl<'de> Deserialize<'de> for CallerId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
-    if s.is_empty() || s.contains('.') {
+    if s.is_empty() {
+        return Err(JwtError::InvalidCallerId);
+    }
+    // Reject anything that would break out of a NATS subject segment — the
+    // caller id is interpolated into `_INBOX.{caller}.>`, `a2a.push.{caller}.>`
+    // and similar patterns, so dots and NATS wildcards (`*` / `>`) would
+    // expand the subscribe scope. Also reject whitespace which collapses
+    // visually identical ids into different strings.
+    if s.contains('.') || s.contains('*') || s.contains('>') || s.chars().any(char::is_whitespace) {
         return Err(JwtError::InvalidCallerId);
     }
     Ok(())
