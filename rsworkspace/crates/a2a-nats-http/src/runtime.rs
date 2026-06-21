@@ -17,9 +17,9 @@ const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
-    #[error("A2A_AGENT_ID environment variable is required")]
+    #[error("{} environment variable is required", ENV_AGENT_ID)]
     MissingAgentId,
-    #[error("A2A_GATEWAY_CALLER_JWT is required when A2A_USE_GATEWAY is enabled")]
+    #[error("{} is required when {} is enabled", ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY)]
     MissingGatewayCallerJwt,
     #[error("invalid gateway caller JWT")]
     InvalidGatewayCallerJwt(#[source] JwtError),
