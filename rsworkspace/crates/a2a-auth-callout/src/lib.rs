@@ -7,6 +7,7 @@
 pub mod account_resolver;
 pub mod bridge_mint;
 pub mod caller_jwt_header;
+pub mod credentials;
 pub mod denial_category;
 pub mod denial_claims;
 pub mod denial_reason;
