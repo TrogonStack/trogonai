@@ -18,22 +18,33 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
 jsonwebtoken = { workspace = true }
 nats-jwt-rs = { workspace = true }
 nkeys = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true }
+rustls-webpki = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 time = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
+x509-parser = { version = "=0.16.0", features = ["verify"] }
 data-encoding = "=2.10.0"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+rand = { workspace = true }
+rcgen = "=0.13.2"
+rsa = { version = "=0.9.7", features = ["pem"] }
+wiremock = { workspace = true }
 
 [features]
 test-support = []
