@@ -56,9 +56,10 @@ impl CalloutDispatcher {
         if request.connect_opts_auth_token().is_some() {
             return Ok(AuthScheme::ApiKey);
         }
-        Err(AuthCalloutError::CredentialVerification(
-            "no credential material in authorization request".into(),
-        ))
+        Err(
+            crate::error::CredentialError::InvalidRequest("no credential material in authorization request".into())
+                .into(),
+        )
     }
 }
 
@@ -69,48 +70,53 @@ impl AuthDispatcher for CalloutDispatcher {
         let account = self.config.account_resolver.resolve(&requested)?;
 
         let scheme = self.select_scheme(&request)?;
-        let claims =
-            match scheme {
-                AuthScheme::Oidc => {
-                    let verifier = self.config.oidc.as_ref().ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification("OIDC verifier not configured".into())
-                    })?;
-                    let token = request
-                        .connect_opts_jwt()
-                        .or_else(|| request.connect_opts_opaque_pass())
-                        .ok_or_else(|| {
-                            AuthCalloutError::CredentialVerification(
-                                "OIDC scheme but connect_opts.jwt and connect_opts.pass missing".into(),
-                            )
-                        })?;
-                    verifier.verify(&BearerToken::new(token.to_owned()), &account).await?
-                }
-                AuthScheme::MTls => {
-                    let verifier = self.config.mtls.as_ref().ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification("mTLS verifier not configured".into())
-                    })?;
-                    let pem = request.primary_client_cert().ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification("mTLS scheme but client_tls certs missing".into())
-                    })?;
-                    verifier.verify(&pem, &account).await?
-                }
-                AuthScheme::ApiKey => {
-                    #[allow(deprecated)]
-                    let verifier = self.config.api_key.as_ref().ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification("API-key verifier not configured".into())
-                    })?;
-                    let key = request.connect_opts_auth_token().ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification(
-                            "API-key scheme but connect_opts.auth_token missing".into(),
+        let claims = match scheme {
+            AuthScheme::Oidc => {
+                let verifier = self
+                    .config
+                    .oidc
+                    .as_ref()
+                    .ok_or(crate::error::CredentialError::VerifierUnavailable { scheme: "OIDC" })?;
+                let token = request
+                    .connect_opts_jwt()
+                    .or_else(|| request.connect_opts_opaque_pass())
+                    .ok_or_else(|| {
+                        crate::error::CredentialError::InvalidRequest(
+                            "OIDC scheme but connect_opts.jwt and connect_opts.pass missing".into(),
                         )
                     })?;
-                    // ApiKeyVerifier::verify now takes the resolved account
-                    // directly and refuses mismatches itself, so the explicit
-                    // post-check that was here is now redundant.
-                    #[allow(deprecated)]
-                    verifier.verify(key, &account).await?
-                }
-            };
+                verifier.verify(&BearerToken::new(token.to_owned()), &account).await?
+            }
+            AuthScheme::MTls => {
+                let verifier = self
+                    .config
+                    .mtls
+                    .as_ref()
+                    .ok_or(crate::error::CredentialError::VerifierUnavailable { scheme: "mTLS" })?;
+                let pem = request.primary_client_cert().ok_or_else(|| {
+                    crate::error::CredentialError::InvalidRequest("mTLS scheme but client_tls certs missing".into())
+                })?;
+                verifier.verify(&pem, &account).await?
+            }
+            AuthScheme::ApiKey => {
+                #[allow(deprecated)]
+                let verifier = self
+                    .config
+                    .api_key
+                    .as_ref()
+                    .ok_or(crate::error::CredentialError::VerifierUnavailable { scheme: "API-key" })?;
+                let key = request.connect_opts_auth_token().ok_or_else(|| {
+                    crate::error::CredentialError::InvalidRequest(
+                        "API-key scheme but connect_opts.auth_token missing".into(),
+                    )
+                })?;
+                // ApiKeyVerifier::verify now takes the resolved account
+                // directly and refuses mismatches itself, so the explicit
+                // post-check that was here is now redundant.
+                #[allow(deprecated)]
+                verifier.verify(key, &account).await?
+            }
+        };
 
         let user_nkey = request.user_nkey()?;
         let user_subject = UserJwtSubject::from_user_nkey(user_nkey);
@@ -156,7 +162,7 @@ pub(crate) mod tests {
     #[async_trait::async_trait]
     impl AuthDispatcher for AlwaysDenyDispatcher {
         async fn dispatch(&self, _request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
-            Err(AuthCalloutError::CredentialVerification("stub: always deny".into()))
+            Err(crate::error::CredentialError::InvalidCredentials("stub: always deny".into()).into())
         }
     }
 

@@ -3,6 +3,43 @@ use std::path::PathBuf;
 
 use crate::jwt::JwtError;
 
+/// Typed reason a credential verifier rejected a caller. Replaces the
+/// previous `String` payload on `AuthCalloutError::CredentialVerification`
+/// so the denial category is derivable from the variant tag, not from
+/// substring-matching the error message.
+#[derive(Debug)]
+pub enum CredentialError {
+    /// The caller requested an account that isn't in the allowlist (or
+    /// otherwise doesn't resolve).
+    UnknownAccount(String),
+    /// The configured verifier for a scheme is missing or not initialized.
+    VerifierUnavailable { scheme: &'static str },
+    /// The request shape was wrong before the verifier could even try
+    /// (missing required fields, empty material, scheme/material mismatch).
+    InvalidRequest(String),
+    /// The verifier ran and refused the credential material itself.
+    InvalidCredentials(String),
+}
+
+impl fmt::Display for CredentialError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownAccount(name) => write!(f, "requested account {name:?} not allowlisted"),
+            Self::VerifierUnavailable { scheme } => write!(f, "{scheme} verifier not configured"),
+            Self::InvalidRequest(msg) => write!(f, "credential request invalid: {msg}"),
+            Self::InvalidCredentials(msg) => write!(f, "credential verification failed: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for CredentialError {}
+
+impl From<CredentialError> for AuthCalloutError {
+    fn from(e: CredentialError) -> Self {
+        AuthCalloutError::CredentialVerification(e)
+    }
+}
+
 #[derive(Debug)]
 pub enum AuthCalloutError {
     Connect(String),
@@ -14,7 +51,7 @@ pub enum AuthCalloutError {
     /// Publishing a reply on the auth-callout inbox failed — wraps the
     /// typed async_nats publish error.
     Reply(async_nats::PublishError),
-    CredentialVerification(String),
+    CredentialVerification(CredentialError),
     Jwt(JwtError),
     WireFormat(String),
     Internal(String),
@@ -41,7 +78,7 @@ impl fmt::Display for AuthCalloutError {
             Self::Deserialize(_) => f.write_str("failed to deserialize auth callout request"),
             Self::Serialize(_) => f.write_str("failed to serialize auth callout response"),
             Self::Reply(_) => f.write_str("failed to publish auth callout reply"),
-            Self::CredentialVerification(msg) => write!(f, "credential verification failed: {msg}"),
+            Self::CredentialVerification(e) => write!(f, "{e}"),
             Self::Jwt(_) => f.write_str("JWT operation failed"),
             Self::WireFormat(msg) => write!(f, "auth callout wire format error: {msg}"),
             Self::Internal(msg) => write!(f, "internal error: {msg}"),
@@ -65,6 +102,7 @@ impl std::error::Error for AuthCalloutError {
             Self::Deserialize(e) | Self::Serialize(e) => Some(e),
             Self::Subscribe(e) => Some(e),
             Self::Reply(e) => Some(e),
+            Self::CredentialVerification(e) => Some(e),
             Self::Jwt(e) => Some(e),
             Self::KeyLoadIo { source, .. } => Some(source),
             Self::KeyLoadUtf8(e) => Some(e),
@@ -100,11 +138,9 @@ mod tests {
 
     #[test]
     fn display_credential_verification() {
-        assert!(
-            AuthCalloutError::CredentialVerification("bad token".into())
-                .to_string()
-                .contains("credential verification")
-        );
+        let e = AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials("bad token".into()));
+        assert!(e.to_string().contains("credential verification"));
+        assert!(std::error::Error::source(&e).is_some());
     }
 
     #[test]

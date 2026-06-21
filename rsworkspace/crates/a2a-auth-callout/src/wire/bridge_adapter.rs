@@ -7,7 +7,7 @@ use nats_jwt_rs::authorization::AuthRequest;
 use super::ServerAuthRequestClaims;
 use crate::account_resolver::RequestedAccount;
 use crate::bridge_mint::{BridgeAuthScheme, BridgeMintRequest};
-use crate::error::AuthCalloutError;
+use crate::error::{AuthCalloutError, CredentialError};
 
 impl ServerAuthRequestClaims {
     /// Synthetic authorization claims for `a2a.bridge.auth.callout.request` (not server-signed).
@@ -19,7 +19,7 @@ impl ServerAuthRequestClaims {
         // failing later during dispatch.
         let raw_account = request
             .account
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("bridge mint request missing account".into()))?;
+            .ok_or_else(|| CredentialError::InvalidRequest("bridge mint request missing account".into()))?;
         // The validated RequestedAccount is the boundary type; we keep the
         // string form for the synthetic JSON body but the validation has
         // happened by the time it gets here.
@@ -33,7 +33,7 @@ impl ServerAuthRequestClaims {
                     .and_then(|o| o.api_key.clone())
                     .filter(|k| !k.trim().is_empty())
                     .ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification(
+                        CredentialError::InvalidRequest(
                             "API-key scheme but connect_opts.api_key is missing or blank".into(),
                         )
                     })?;
@@ -50,7 +50,7 @@ impl ServerAuthRequestClaims {
                     .clone()
                     .filter(|j| !j.trim().is_empty())
                     .ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification("OIDC scheme but user_jwt is missing or blank".into())
+                        CredentialError::InvalidRequest("OIDC scheme but user_jwt is missing or blank".into())
                     })?;
                 (Some(jwt), None)
             }

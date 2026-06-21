@@ -4,7 +4,7 @@ use x509_parser::prelude::FromDer;
 use x509_parser::prelude::X509Certificate;
 use x509_parser::time::ASN1Time;
 
-use crate::error::AuthCalloutError;
+use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{
     AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, external_subject_from_der,
     spicedb_bundle_for_opaque,
@@ -51,15 +51,14 @@ impl X509MtlsVerifier {
     fn chain_ders(pem: &str) -> Result<Vec<Vec<u8>>, AuthCalloutError> {
         let mut out = Vec::new();
         for pem_result in Pem::iter_from_buffer(pem.as_bytes()) {
-            let pem =
-                pem_result.map_err(|e| AuthCalloutError::CredentialVerification(format!("PEM parse error: {e}")))?;
+            let pem = pem_result.map_err(|e| CredentialError::InvalidCredentials(format!("PEM parse error: {e}")))?;
             if pem.label.to_uppercase().contains("CERTIFICATE") {
                 out.push(pem.contents);
             }
         }
         if out.is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
-                "client certificate PEM contained no CERTIFICATE block".into(),
+                CredentialError::InvalidCredentials("client certificate PEM contained no CERTIFICATE block".into()),
             ));
         }
         Ok(out)
@@ -67,7 +66,11 @@ impl X509MtlsVerifier {
 
     fn anchor_pems(bundle: &str) -> Result<Vec<Pem>, AuthCalloutError> {
         Pem::iter_from_buffer(bundle.as_bytes())
-            .map(|r| r.map_err(|e| AuthCalloutError::CredentialVerification(format!("trust anchor PEM: {e}"))))
+            .map(|r| {
+                r.map_err(|e| -> AuthCalloutError {
+                    CredentialError::InvalidCredentials(format!("trust anchor PEM: {e}")).into()
+                })
+            })
             .collect()
     }
 
@@ -79,12 +82,12 @@ impl X509MtlsVerifier {
             }
             let x509 = pem
                 .parse_x509()
-                .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid trust anchor cert DER: {e}")))?;
+                .map_err(|e| CredentialError::InvalidCredentials(format!("invalid trust anchor cert DER: {e}")))?;
             out.push(x509);
         }
         if out.is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
-                "trust anchor bundle contained no certificates".into(),
+                CredentialError::InvalidCredentials("trust anchor bundle contained no certificates".into()),
             ));
         }
         Ok(out)
@@ -103,7 +106,7 @@ impl X509MtlsVerifier {
             .map(|d| {
                 X509Certificate::from_der(d)
                     .map(|(_, c)| c)
-                    .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid client chain cert: {e}")))
+                    .map_err(|e| CredentialError::InvalidCredentials(format!("invalid client chain cert: {e}")))
             })
             .collect::<Result<_, _>>()?;
         let leaf = &chain[0];
@@ -113,7 +116,9 @@ impl X509MtlsVerifier {
 
         if !leaf.validity().is_valid_at(ASN1Time::from(now)) {
             return Err(AuthCalloutError::CredentialVerification(
-                "client certificate validity window does not include verification time".into(),
+                CredentialError::InvalidCredentials(
+                    "client certificate validity window does not include verification time".into(),
+                ),
             ));
         }
 
@@ -126,7 +131,7 @@ impl X509MtlsVerifier {
             && bc.value.ca
         {
             return Err(AuthCalloutError::CredentialVerification(
-                "client certificate is a CA, expected end-entity".into(),
+                CredentialError::InvalidCredentials("client certificate is a CA, expected end-entity".into()),
             ));
         }
 
@@ -166,18 +171,20 @@ impl X509MtlsVerifier {
 
         if !trusted {
             return Err(AuthCalloutError::CredentialVerification(
-                "client certificate does not chain to a configured trust anchor".into(),
+                CredentialError::InvalidCredentials(
+                    "client certificate does not chain to a configured trust anchor".into(),
+                ),
             ));
         }
 
         let sub = ExternalSubject::from_x509(leaf, &leaf_der)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("mTLS subject extraction failed: {e}")))?;
+            .map_err(|e| CredentialError::InvalidCredentials(format!("mTLS subject extraction failed: {e}")))?;
         let data = spicedb_bundle_for_opaque(serde_json::json!({
             "spicedb_subject": sub.as_str(),
             "mtls": true,
         }));
         let caller_id = derive_caller_id(sub.as_str(), account)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
+            .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
 
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
@@ -200,11 +207,16 @@ impl ExternalSubjectExt for ExternalSubject {
         let dn = leaf.subject().to_string();
         if dn.is_empty() {
             return external_subject_from_der("mtls", leaf_der).map_err(|e| {
-                AuthCalloutError::CredentialVerification(format!("fallback subject encoding failed: {e}"))
+                AuthCalloutError::from(CredentialError::InvalidCredentials(format!(
+                    "fallback subject encoding failed: {e}"
+                )))
             });
         }
-        ExternalSubject::new(dn)
-            .map_err(|e| AuthCalloutError::CredentialVerification(format!("invalid external subject from DN: {e}")))
+        ExternalSubject::new(dn).map_err(|e| {
+            AuthCalloutError::from(CredentialError::InvalidCredentials(format!(
+                "invalid external subject from DN: {e}"
+            )))
+        })
     }
 }
 
@@ -229,7 +241,10 @@ mod tests {
     fn rejects_empty_trust_bundle() {
         let empty: Vec<Pem> = Vec::new();
         let err = X509MtlsVerifier::parse_cas(&empty).unwrap_err();
-        assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
+        assert!(matches!(
+            err,
+            AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        ));
         let _ = X509MtlsVerifier::new(TrustAnchorPem::new(""));
     }
 
@@ -294,6 +309,9 @@ mod tests {
             .verify(&ClientCertPem::new(ee.pem()), &AudienceAccount::new("a"))
             .await
             .unwrap_err();
-        assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
+        assert!(matches!(
+            err,
+            AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        ));
     }
 }
