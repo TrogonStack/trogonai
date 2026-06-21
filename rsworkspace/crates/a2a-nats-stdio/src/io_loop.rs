@@ -41,27 +41,28 @@ where
 
     let mut writer_task = tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
-            match serde_json::to_string(&frame) {
-                Ok(json) => {
-                    if let Err(e) = stdout.write_all(json.as_bytes()).await {
-                        error!(error = %e, "stdout write failed");
-                        return Err(e);
-                    }
-                    if let Err(e) = stdout.write_all(b"\n").await {
-                        error!(error = %e, "stdout write failed");
-                        return Err(e);
-                    }
-                    // Flush per frame so a piped parent doesn't deadlock
-                    // waiting on a libc full-buffer that never drains until
-                    // the next line on stdin closes the loop.
-                    if let Err(e) = stdout.flush().await {
-                        error!(error = %e, "stdout flush failed");
-                        return Err(e);
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "frame serialization failed");
-                }
+            // serde_json::to_string failing means the dispatch task already
+            // enqueued a frame the caller will never see. Surface it as an
+            // io::Error so the main loop tears down instead of letting the
+            // stdin caller hang waiting for a reply that was silently dropped.
+            let json = serde_json::to_string(&frame).map_err(|e| {
+                error!(error = %e, "frame serialization failed");
+                std::io::Error::other(e)
+            })?;
+            if let Err(e) = stdout.write_all(json.as_bytes()).await {
+                error!(error = %e, "stdout write failed");
+                return Err(e);
+            }
+            if let Err(e) = stdout.write_all(b"\n").await {
+                error!(error = %e, "stdout write failed");
+                return Err(e);
+            }
+            // Flush per frame so a piped parent doesn't deadlock waiting on a
+            // libc full-buffer that never drains until the next line on stdin
+            // closes the loop.
+            if let Err(e) = stdout.flush().await {
+                error!(error = %e, "stdout flush failed");
+                return Err(e);
             }
         }
         Ok::<(), std::io::Error>(())
@@ -82,6 +83,9 @@ where
     // Set when the writer task exits — the loop must stop spawning dispatches
     // whose responses would land in a closed channel. None until detected.
     let mut writer_err: Option<std::io::Error> = None;
+    // Surface stdin read failures / JoinSet failures alongside the writer
+    // result so callers see the first real error rather than a silent Ok.
+    let mut loop_err: Option<std::io::Error> = None;
 
     'outer: loop {
         tokio::select! {
@@ -103,7 +107,7 @@ where
                 writer_err = Some(match res {
                     Ok(Ok(())) => std::io::Error::other("writer task exited unexpectedly"),
                     Ok(Err(e)) => e,
-                    Err(join_err) => std::io::Error::other(join_err.to_string()),
+                    Err(join_err) => std::io::Error::other(join_err),
                 });
                 shutdown_requested = true;
                 break 'outer;
@@ -112,6 +116,8 @@ where
                 match line {
                     Err(e) => {
                         error!(error = %e, "stdin read error");
+                        loop_err = Some(e);
+                        shutdown_requested = true;
                         break 'outer;
                     }
                     Ok(None) => {
@@ -179,17 +185,30 @@ where
     if shutdown_requested {
         dispatch_tasks.abort_all();
     }
-    while dispatch_tasks.join_next().await.is_some() {}
+    while let Some(res) = dispatch_tasks.join_next().await {
+        // Aborted joins surface as JoinError on signal-driven teardown; only
+        // record join errors when shutdown wasn't requested so we don't
+        // mistake our own abort for a real failure.
+        if !shutdown_requested {
+            if let Err(join_err) = res {
+                loop_err.get_or_insert_with(|| std::io::Error::other(join_err));
+            }
+        }
+    }
     drop(frame_tx);
-    // Already consumed via `&mut writer_task` if the writer-died branch fired;
-    // otherwise await the writer's natural end and surface any I/O error.
+
+    // Surface the first real failure: writer error > loop error > writer
+    // join result. A successful writer is the no-op success path.
     if let Some(e) = writer_err {
+        return Err(e);
+    }
+    if let Some(e) = loop_err {
         return Err(e);
     }
     match writer_task.await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(e),
-        Err(join_err) => Err(std::io::Error::other(join_err.to_string())),
+        Err(join_err) => Err(std::io::Error::other(join_err)),
     }
 }
 
@@ -208,6 +227,17 @@ fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), Outbou
         .get("id")
         .and_then(|v| serde_json::from_value::<RpcId>(v.clone()).ok())
         .unwrap_or(RpcId::Null);
+    // InboundRequest deserializes only `id`/`method`/`params`, so a missing or
+    // wrong `jsonrpc` would otherwise dispatch as a real call. JSON-RPC 2.0
+    // requires the version field exactly equal to "2.0".
+    if !matches!(value.get("jsonrpc"), Some(serde_json::Value::String(v)) if v == "2.0") {
+        warn!("JSON-RPC envelope has missing or wrong version");
+        return Err(OutboundError::new(
+            salvaged_id,
+            -32600,
+            "invalid request: missing or unsupported jsonrpc version".to_string(),
+        ));
+    }
     let req: InboundRequest = serde_json::from_value(value).map_err(|e| {
         warn!(error = %e, "JSON-RPC envelope is invalid");
         OutboundError::new(salvaged_id, -32600, format!("invalid request: {e}"))
@@ -518,13 +548,28 @@ mod tests {
 
     #[test]
     fn parse_inbound_preserves_id_on_envelope_failure() {
-        let err = parse_inbound(r#"{"id":42}"#).unwrap_err();
+        let err = parse_inbound(r#"{"jsonrpc":"2.0","id":42}"#).unwrap_err();
         assert_eq!(err.id, RpcId::Number(42));
-        let err = parse_inbound(r#"{"id":"corr-7"}"#).unwrap_err();
+        let err = parse_inbound(r#"{"jsonrpc":"2.0","id":"corr-7"}"#).unwrap_err();
         assert_eq!(err.id, RpcId::String("corr-7".into()));
         let err = parse_inbound(r#"{"jsonrpc":"2.0"}"#).unwrap_err();
         assert_eq!(err.id, RpcId::Null);
-        let err = parse_inbound(r#"{"id":[1,2,3]}"#).unwrap_err();
+        let err = parse_inbound(r#"{"jsonrpc":"2.0","id":[1,2,3]}"#).unwrap_err();
         assert_eq!(err.id, RpcId::Null);
+    }
+
+    #[test]
+    fn parse_inbound_rejects_missing_or_wrong_jsonrpc_version() {
+        // Missing `jsonrpc` field → -32600.
+        let err = parse_inbound(r#"{"id":1,"method":"tasks/get","params":{}}"#).unwrap_err();
+        assert_eq!(err.error.code, -32600);
+        assert_eq!(err.id, RpcId::Number(1));
+        // Wrong version → -32600.
+        let err = parse_inbound(r#"{"jsonrpc":"1.0","id":2,"method":"tasks/get","params":{}}"#).unwrap_err();
+        assert_eq!(err.error.code, -32600);
+        assert_eq!(err.id, RpcId::Number(2));
+        // Non-string version → -32600.
+        let err = parse_inbound(r#"{"jsonrpc":2.0,"id":3}"#).unwrap_err();
+        assert_eq!(err.error.code, -32600);
     }
 }
