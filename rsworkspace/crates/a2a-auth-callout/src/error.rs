@@ -1,4 +1,3 @@
-use std::fmt;
 use std::path::PathBuf;
 
 use crate::jwt::JwtError;
@@ -7,32 +6,23 @@ use crate::jwt::JwtError;
 /// previous `String` payload on `AuthCalloutError::CredentialVerification`
 /// so the denial category is derivable from the variant tag, not from
 /// substring-matching the error message.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
     /// The caller requested an account that isn't in the allowlist (or
     /// otherwise doesn't resolve).
+    #[error("requested account {0:?} not allowlisted")]
     UnknownAccount(String),
     /// The configured verifier for a scheme is missing or not initialized.
+    #[error("{scheme} verifier not configured")]
     VerifierUnavailable { scheme: &'static str },
     /// The request shape was wrong before the verifier could even try
     /// (missing required fields, empty material, scheme/material mismatch).
+    #[error("credential request invalid: {0}")]
     InvalidRequest(String),
     /// The verifier ran and refused the credential material itself.
+    #[error("credential verification failed: {0}")]
     InvalidCredentials(String),
 }
-
-impl fmt::Display for CredentialError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownAccount(name) => write!(f, "requested account {name:?} not allowlisted"),
-            Self::VerifierUnavailable { scheme } => write!(f, "{scheme} verifier not configured"),
-            Self::InvalidRequest(msg) => write!(f, "credential request invalid: {msg}"),
-            Self::InvalidCredentials(msg) => write!(f, "credential verification failed: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for CredentialError {}
 
 impl From<CredentialError> for AuthCalloutError {
     fn from(e: CredentialError) -> Self {
@@ -40,75 +30,49 @@ impl From<CredentialError> for AuthCalloutError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AuthCalloutError {
+    #[error("NATS connect failed: {0}")]
     Connect(String),
     /// Subscribing to `$SYS.REQ.USER.AUTH` failed — wraps the typed
     /// async_nats subscribe error so the source chain isn't lost.
-    Subscribe(async_nats::SubscribeError),
-    Deserialize(serde_json::Error),
-    Serialize(serde_json::Error),
+    #[error("subscribe to auth callout subject failed")]
+    Subscribe(#[source] async_nats::SubscribeError),
+    #[error("failed to deserialize auth callout request")]
+    Deserialize(#[source] serde_json::Error),
+    #[error("failed to serialize auth callout response")]
+    Serialize(#[source] serde_json::Error),
     /// Publishing a reply on the auth-callout inbox failed — wraps the
     /// typed async_nats publish error.
-    Reply(async_nats::PublishError),
-    CredentialVerification(CredentialError),
-    Jwt(JwtError),
+    #[error("failed to publish auth callout reply")]
+    Reply(#[source] async_nats::PublishError),
+    #[error("{0}")]
+    CredentialVerification(#[source] CredentialError),
+    #[error("JWT operation failed")]
+    Jwt(#[source] JwtError),
+    #[error("auth callout wire format error: {0}")]
     WireFormat(String),
+    #[error("internal error: {0}")]
     Internal(String),
     /// Required process-edge environment variable was missing.
+    #[error("required environment variable {0} is not set")]
     MissingEnvVar(&'static str),
     /// `AUTH_CALLOUT_SIGNING_KEY_SOURCE` named a backend that doesn't exist.
+    #[error("unknown AUTH_CALLOUT_SIGNING_KEY_SOURCE: {0} (expected env, file, or vault)")]
     UnknownSigningKeySource(String),
     /// `vault` custody isn't wired yet; the loader rejects it explicitly.
+    #[error("AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault is not wired yet")]
     VaultNotConfigured,
     /// Reading a signing-key file from disk failed.
+    #[error("failed to read signing key at {}", .path.display())]
     KeyLoadIo {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
     /// A signing-key file's bytes weren't valid UTF-8.
-    KeyLoadUtf8(std::str::Utf8Error),
-}
-
-impl fmt::Display for AuthCalloutError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Connect(msg) => write!(f, "NATS connect failed: {msg}"),
-            Self::Subscribe(_) => f.write_str("subscribe to auth callout subject failed"),
-            Self::Deserialize(_) => f.write_str("failed to deserialize auth callout request"),
-            Self::Serialize(_) => f.write_str("failed to serialize auth callout response"),
-            Self::Reply(_) => f.write_str("failed to publish auth callout reply"),
-            Self::CredentialVerification(e) => write!(f, "{e}"),
-            Self::Jwt(_) => f.write_str("JWT operation failed"),
-            Self::WireFormat(msg) => write!(f, "auth callout wire format error: {msg}"),
-            Self::Internal(msg) => write!(f, "internal error: {msg}"),
-            Self::MissingEnvVar(name) => write!(f, "required environment variable {name} is not set"),
-            Self::UnknownSigningKeySource(kind) => {
-                write!(
-                    f,
-                    "unknown AUTH_CALLOUT_SIGNING_KEY_SOURCE: {kind} (expected env, file, or vault)"
-                )
-            }
-            Self::VaultNotConfigured => f.write_str("AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault is not wired yet"),
-            Self::KeyLoadIo { path, .. } => write!(f, "failed to read signing key at {}", path.display()),
-            Self::KeyLoadUtf8(_) => f.write_str("signing key file must be UTF-8 NKey seed"),
-        }
-    }
-}
-
-impl std::error::Error for AuthCalloutError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Deserialize(e) | Self::Serialize(e) => Some(e),
-            Self::Subscribe(e) => Some(e),
-            Self::Reply(e) => Some(e),
-            Self::CredentialVerification(e) => Some(e),
-            Self::Jwt(e) => Some(e),
-            Self::KeyLoadIo { source, .. } => Some(source),
-            Self::KeyLoadUtf8(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("signing key file must be UTF-8 NKey seed")]
+    KeyLoadUtf8(#[source] std::str::Utf8Error),
 }
 
 #[cfg(test)]

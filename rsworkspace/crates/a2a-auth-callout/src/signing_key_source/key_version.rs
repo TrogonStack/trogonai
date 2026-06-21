@@ -6,20 +6,11 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct KeyVersion(String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum KeyVersionError {
+    #[error("key version must be non-empty")]
     Empty,
 }
-
-impl fmt::Display for KeyVersionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("key version must be non-empty"),
-        }
-    }
-}
-
-impl std::error::Error for KeyVersionError {}
 
 impl KeyVersion {
     pub fn new(version: impl Into<String>) -> Result<Self, KeyVersionError> {

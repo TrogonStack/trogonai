@@ -16,6 +16,7 @@ workspace = true
 [dependencies]
 a2a = { workspace = true }
 a2a-nats = { workspace = true }
+thiserror = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }

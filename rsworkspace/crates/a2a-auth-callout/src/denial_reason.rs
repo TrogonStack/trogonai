@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::denial_category::DenialCategory;
 
 const MAX_LEN: usize = 256;
@@ -8,22 +6,13 @@ const MAX_LEN: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenialReason(String);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DenialReasonError {
+    #[error("denial reason must be non-empty")]
     Empty,
+    #[error("denial reason must be at most {MAX_LEN} characters")]
     TooLong,
 }
-
-impl fmt::Display for DenialReasonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("denial reason must be non-empty"),
-            Self::TooLong => write!(f, "denial reason must be at most {MAX_LEN} characters"),
-        }
-    }
-}
-
-impl std::error::Error for DenialReasonError {}
 
 impl DenialReason {
     pub fn new(category: DenialCategory) -> Result<Self, DenialReasonError> {

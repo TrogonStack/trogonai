@@ -13,40 +13,20 @@ use trogon_std::env::ReadEnv;
 
 pub const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("A2A_AGENT_ID env var is required but not set")]
     MissingAgentId,
-    InvalidAgentId(AgentIdError),
-    InvalidPrefix(a2a_nats::A2aPrefixError),
-    NatsConnect(trogon_nats::ConnectError),
-    Provision(a2a_nats::jetstream::ProvisionError),
-    Bridge(a2a_nats::server::BridgeError),
-}
-
-impl std::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingAgentId => write!(f, "A2A_AGENT_ID env var is required but not set"),
-            Self::InvalidAgentId(_) => write!(f, "invalid agent id"),
-            Self::InvalidPrefix(_) => write!(f, "invalid A2A prefix"),
-            Self::NatsConnect(_) => write!(f, "NATS connection failed"),
-            Self::Provision(_) => write!(f, "JetStream provisioning failed"),
-            Self::Bridge(_) => write!(f, "bridge error"),
-        }
-    }
-}
-
-impl std::error::Error for RuntimeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::MissingAgentId => None,
-            Self::InvalidAgentId(e) => Some(e),
-            Self::InvalidPrefix(e) => Some(e),
-            Self::NatsConnect(e) => Some(e),
-            Self::Provision(e) => Some(e),
-            Self::Bridge(e) => Some(e),
-        }
-    }
+    #[error("invalid agent id")]
+    InvalidAgentId(#[source] AgentIdError),
+    #[error("invalid A2A prefix")]
+    InvalidPrefix(#[source] a2a_nats::A2aPrefixError),
+    #[error("NATS connection failed")]
+    NatsConnect(#[source] trogon_nats::ConnectError),
+    #[error("JetStream provisioning failed")]
+    Provision(#[source] a2a_nats::jetstream::ProvisionError),
+    #[error("bridge error")]
+    Bridge(#[source] a2a_nats::server::BridgeError),
 }
 
 /// Validated, ready-to-use configuration assembled from environment variables.

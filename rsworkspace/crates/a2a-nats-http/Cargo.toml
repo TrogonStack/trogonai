@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 a2a-identity-types = { workspace = true }
+thiserror = { workspace = true }
 a2a-nats = { workspace = true }
 a2a = { workspace = true }
 async-compat = { workspace = true }

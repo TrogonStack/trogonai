@@ -5,45 +5,24 @@
 //! `cfg(not(coverage))` because `trogon-nats::NatsJetStreamClient` is excluded
 //! during coverage builds.
 
-use std::fmt;
-
 use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 use trogon_nats::connect::ConnectError;
 use trogon_std::env::ReadEnv;
 
 pub(crate) const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("A2A_AGENT_ID environment variable is required")]
     MissingAgentId,
-    InvalidPrefix(A2aPrefixError),
-    InvalidAgentId(AgentIdError),
-    NatsConnect(ConnectError),
-    IoLoop(std::io::Error),
-}
-
-impl fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingAgentId => write!(f, "A2A_AGENT_ID environment variable is required"),
-            Self::InvalidPrefix(_) => write!(f, "invalid A2A prefix"),
-            Self::InvalidAgentId(_) => write!(f, "invalid agent id"),
-            Self::NatsConnect(_) => write!(f, "NATS connection failed"),
-            Self::IoLoop(_) => write!(f, "stdio loop failed"),
-        }
-    }
-}
-
-impl std::error::Error for RuntimeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidPrefix(e) => Some(e),
-            Self::InvalidAgentId(e) => Some(e),
-            Self::NatsConnect(e) => Some(e),
-            Self::IoLoop(e) => Some(e),
-            Self::MissingAgentId => None,
-        }
-    }
+    #[error("invalid A2A prefix")]
+    InvalidPrefix(#[source] A2aPrefixError),
+    #[error("invalid agent id")]
+    InvalidAgentId(#[source] AgentIdError),
+    #[error("NATS connection failed")]
+    NatsConnect(#[source] ConnectError),
+    #[error("stdio loop failed")]
+    IoLoop(#[source] std::io::Error),
 }
 
 impl From<A2aPrefixError> for RuntimeError {

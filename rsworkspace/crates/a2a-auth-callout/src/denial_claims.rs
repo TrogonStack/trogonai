@@ -1,4 +1,3 @@
-use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{Algorithm, Header, encode};
@@ -12,20 +11,11 @@ use crate::jwt::SigningKey;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalloutIssuer(String);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CalloutIssuerError {
+    #[error("callout issuer must be non-empty")]
     Empty,
 }
-
-impl fmt::Display for CalloutIssuerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("callout issuer must be non-empty"),
-        }
-    }
-}
-
-impl std::error::Error for CalloutIssuerError {}
 
 impl CalloutIssuer {
     pub fn new(issuer: impl Into<String>) -> Result<Self, CalloutIssuerError> {
@@ -44,20 +34,11 @@ impl CalloutIssuer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerAudience(String);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ServerAudienceError {
+    #[error("server audience must be non-empty")]
     Empty,
 }
-
-impl fmt::Display for ServerAudienceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("server audience must be non-empty"),
-        }
-    }
-}
-
-impl std::error::Error for ServerAudienceError {}
 
 impl ServerAudience {
     pub fn new(audience: impl Into<String>) -> Result<Self, ServerAudienceError> {
@@ -76,20 +57,11 @@ impl ServerAudience {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserNkeySubject(String);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum UserNkeySubjectError {
+    #[error("user nkey subject must be non-empty")]
     Empty,
 }
-
-impl fmt::Display for UserNkeySubjectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("user nkey subject must be non-empty"),
-        }
-    }
-}
-
-impl std::error::Error for UserNkeySubjectError {}
 
 impl UserNkeySubject {
     pub fn new(subject: impl Into<String>) -> Result<Self, UserNkeySubjectError> {
@@ -114,31 +86,14 @@ pub struct DenialClaims {
     pub request_jti: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DenialClaimsError {
-    Encode(jsonwebtoken::errors::Error),
-    SystemTime(std::time::SystemTimeError),
+    #[error("denial JWT encode error: {0}")]
+    Encode(#[source] jsonwebtoken::errors::Error),
+    #[error("system time error: {0}")]
+    SystemTime(#[source] std::time::SystemTimeError),
+    #[error("issued-at timestamp out of portable range")]
     IssuedAtOutOfRange,
-}
-
-impl fmt::Display for DenialClaimsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Encode(e) => write!(f, "denial JWT encode error: {e}"),
-            Self::SystemTime(e) => write!(f, "system time error: {e}"),
-            Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
-        }
-    }
-}
-
-impl std::error::Error for DenialClaimsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Encode(e) => Some(e),
-            Self::SystemTime(e) => Some(e),
-            _ => None,
-        }
-    }
 }
 
 impl From<DenialClaimsError> for AuthCalloutError {

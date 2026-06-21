@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 
 use hmac::{Hmac, Mac};
@@ -8,42 +7,23 @@ use sha2::Sha256;
 use crate::error::AuthCalloutError;
 use crate::jwt::{AudienceAccount, ExternalSubject, JwtError, SpiceDbPrincipal, UserJwtClaims, derive_caller_id};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ApiKeyError {
+    #[error("API key must not be empty")]
     Empty,
+    #[error("API key not found in registry")]
     Unknown,
     /// `derive_caller_id` rejected the registry entry's external_subject —
     /// preserves the upstream JwtError instead of stringifying it.
-    CallerIdDerivation(JwtError),
+    #[error("API key caller_id derivation failed")]
+    CallerIdDerivation(#[source] JwtError),
     /// The caller-supplied audience didn't match the registry entry's
     /// audience for this API key.
+    #[error("API key audience mismatch: requested={requested:?} registered={registered:?}")]
     AudienceMismatch {
         requested: String,
         registered: String,
     },
-}
-
-impl fmt::Display for ApiKeyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("API key must not be empty"),
-            Self::Unknown => f.write_str("API key not found in registry"),
-            Self::CallerIdDerivation(_) => f.write_str("API key caller_id derivation failed"),
-            Self::AudienceMismatch { requested, registered } => write!(
-                f,
-                "API key audience mismatch: requested={requested:?} registered={registered:?}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ApiKeyError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::CallerIdDerivation(e) => Some(e),
-            _ => None,
-        }
-    }
 }
 
 impl From<ApiKeyError> for AuthCalloutError {

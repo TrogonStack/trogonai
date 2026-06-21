@@ -22,9 +22,24 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", self.fmt_errors())]
 pub struct TelemetryShutdownError {
     errors: Vec<TelemetryProviderShutdownError>,
+}
+
+impl TelemetryShutdownError {
+    fn fmt_errors(&self) -> String {
+        let mut out = String::from("failed to shutdown OpenTelemetry providers:\n");
+        for error in &self.errors {
+            out.push_str(&format!("  - {error}"));
+            if let Some(source) = error.source() {
+                out.push_str(&format!(": {source}"));
+            }
+            out.push('\n');
+        }
+        out
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -45,22 +60,6 @@ pub enum TelemetryProviderShutdownError {
         source: anyhow::Error,
     },
 }
-
-impl std::fmt::Display for TelemetryShutdownError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "failed to shutdown OpenTelemetry providers:")?;
-        for error in &self.errors {
-            write!(f, "  - {error}")?;
-            if let Some(source) = error.source() {
-                write!(f, ": {source}")?;
-            }
-            writeln!(f)?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for TelemetryShutdownError {}
 
 fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
     service_name: ServiceName,
