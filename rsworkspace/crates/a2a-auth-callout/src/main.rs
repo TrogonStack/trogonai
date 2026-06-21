@@ -7,6 +7,7 @@ use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
 use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier};
 use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
+use a2a_auth_callout::error::AuthCalloutError;
 use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
 use a2a_auth_callout::{
     AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
@@ -30,18 +31,16 @@ fn split_env_list(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn env_required(name: &str) -> Result<String, String> {
-    std::env::var(name).map_err(|_| format!("{name} is required"))
+fn env_required(name: &'static str) -> Result<String, AuthCalloutError> {
+    std::env::var(name).map_err(|_| AuthCalloutError::MissingEnvVar(name))
 }
 
-fn load_nkey_seed_env(name: &str) -> Result<NkeySeed, String> {
-    let raw = env_required(name)?;
-    NkeySeed::parse(raw).map_err(|e| e.to_string())
+fn load_nkey_seed_env(name: &'static str) -> Result<NkeySeed, AuthCalloutError> {
+    NkeySeed::parse(env_required(name)?)
 }
 
-fn load_nkey_public_env(name: &str) -> Result<NkeyPublic, String> {
-    let raw = env_required(name)?;
-    NkeyPublic::parse(raw).map_err(|e| e.to_string())
+fn load_nkey_public_env(name: &'static str) -> Result<NkeyPublic, AuthCalloutError> {
+    NkeyPublic::parse(env_required(name)?)
 }
 
 async fn build_oidc_verifier() -> Option<Arc<dyn OidcVerifier>> {
@@ -92,7 +91,7 @@ async fn main() {
     let signing_key_source = match signing_key_source_from_process_env() {
         Ok(s) => s,
         Err(e) => {
-            tracing::error!(error = %e, "AUTH_CALLOUT_ISSUER is invalid");
+            tracing::error!(error = %e, "invalid signing key source configuration");
             std::process::exit(1);
         }
     };
@@ -101,11 +100,16 @@ async fn main() {
         tracing::error!("AUTH_CALLOUT_ALLOWED_ACCOUNTS must list at least one tenant account");
         std::process::exit(1);
     }
-    let user_jwt_ttl = std::env::var("AUTH_CALLOUT_USER_JWT_TTL_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or_else(|| Duration::from_secs(DEFAULT_USER_JWT_TTL_SECS));
+    let user_jwt_ttl = match std::env::var("AUTH_CALLOUT_USER_JWT_TTL_SECS") {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(secs) => Duration::from_secs(secs),
+            Err(e) => {
+                tracing::error!(error = %e, raw = %raw, "invalid AUTH_CALLOUT_USER_JWT_TTL_SECS");
+                std::process::exit(1);
+            }
+        },
+        Err(_) => Duration::from_secs(DEFAULT_USER_JWT_TTL_SECS),
+    };
 
     let server_issuer = match load_nkey_public_env("AUTH_CALLOUT_SERVER_NKEY_PUBLIC") {
         Ok(k) => k,
@@ -121,12 +125,11 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let account_xkey_seed = std::env::var("AUTH_CALLOUT_XKEY_SEED")
+    let account_xkey_seed = match std::env::var("AUTH_CALLOUT_XKEY_SEED")
         .ok()
         .map(NkeySeed::parse)
         .transpose()
-        .map_err(|e| e.to_string());
-    let account_xkey_seed = match account_xkey_seed {
+    {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "invalid AUTH_CALLOUT_XKEY_SEED");
@@ -134,12 +137,11 @@ async fn main() {
         }
     };
 
-    let server_xkey_public = std::env::var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
+    let server_xkey_public = match std::env::var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
         .ok()
         .map(XkeyPublic::parse)
         .transpose()
-        .map_err(|e| e.to_string());
-    let server_xkey_public = match server_xkey_public {
+    {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "invalid AUTH_CALLOUT_SERVER_XKEY_PUBLIC");
@@ -165,7 +167,13 @@ async fn main() {
     let mtls = build_mtls_verifier();
 
     if oidc.is_none() && mtls.is_none() {
-        warn!("no credential verifiers configured; all dispatch attempts will be denied");
+        // A process that boots with zero verifiers looks healthy but
+        // denies every callout — keep the failure mode loud and
+        // consistent with the other required-config exits above.
+        tracing::error!(
+            "no credential verifiers configured; set AUTH_CALLOUT_OIDC_ISSUER and/or AUTH_CALLOUT_MTLS_TRUST_ANCHORS"
+        );
+        std::process::exit(1);
     }
 
     info!(nats_url = %nats_url, accounts = ?allowed_accounts, "connecting to NATS for auth callout");

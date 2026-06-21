@@ -1,4 +1,12 @@
 //! Live `nats-server` 2.14.x auth-callout integration tests (task #8).
+//!
+//! These tests intentionally use `async_nats` directly instead of the
+//! `trogon-nats` abstraction layer because `trogon-nats` currently only
+//! exposes static credential auth (nkey / user-password / token) and the
+//! callout flow needs `ConnectOptions::with_auth_callback` to drive the
+//! server-side challenge/response — a capability `trogon-nats` does not
+//! re-export today. Extending `trogon-nats` to expose callback-based auth
+//! would let this harness move back behind the abstraction.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
@@ -315,7 +323,7 @@ fn test_jwks_and_encoding_key(rng: &mut OsRng) -> (JwkSet, EncodingKey) {
     let jwk = Jwk {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
-            key_operations: Some(vec![KeyOperations::Sign]),
+            key_operations: Some(vec![KeyOperations::Verify]),
             key_id: Some("test-kid".into()),
             ..Default::default()
         },
