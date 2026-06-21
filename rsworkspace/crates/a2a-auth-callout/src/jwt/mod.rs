@@ -17,12 +17,37 @@ use crate::error::AuthCalloutError;
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, SigningKeySource};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AccountName(String);
 
+// Same wire-vs-constructor concern as CallerId/ExternalSubject — derived
+// Deserialize would let an empty account slip through, and `aud=""` doesn't
+// round-trip through `verify_with_material` (which treats empty/missing
+// audience as invalid).
+impl<'de> Deserialize<'de> for AccountName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::try_new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 impl AccountName {
+    /// Reject empty inputs. Existing callers that don't care can use
+    /// `AccountName::new(...)` which returns the constructed type but only
+    /// after the same validation — kept inline so the cost is a single
+    /// branch with an explicit fail-closed.
     pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
+        let s = name.into();
+        debug_assert!(!s.is_empty(), "AccountName::new called with empty string");
+        Self(s)
+    }
+
+    pub fn try_new(name: impl Into<String>) -> Result<Self, JwtError> {
+        let s = name.into();
+        if s.is_empty() {
+            return Err(JwtError::Decode("account name must be non-empty".into()));
+        }
+        Ok(Self(s))
     }
 
     pub fn as_str(&self) -> &str {
@@ -145,8 +170,23 @@ impl SpiceDbPrincipal {
 pub struct MintedUserJwt(String);
 
 impl MintedUserJwt {
-    pub fn new(token: impl Into<String>) -> Self {
-        Self(token.into())
+    /// Wrap a token after validating compact-JWT shape (three non-empty
+    /// dot-separated segments, non-empty input after trimming). Mirrors the
+    /// gate in `a2a-identity-types::MintedUserJwt` so a malformed value can't
+    /// be smuggled into `CallerJwtHeaderValue::from_minted` and only fail
+    /// later when the bridge tries to decode it.
+    pub fn new(token: impl Into<String>) -> Result<Self, JwtError> {
+        let token = token.into().trim().to_owned();
+        if token.is_empty() {
+            return Err(JwtError::Decode("minted user JWT must be non-empty".into()));
+        }
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 || parts.iter().any(|p| p.is_empty()) {
+            return Err(JwtError::Decode(
+                "minted user JWT must be a compact 3-segment JWT".into(),
+            ));
+        }
+        Ok(Self(token))
     }
 
     pub fn as_str(&self) -> &str {

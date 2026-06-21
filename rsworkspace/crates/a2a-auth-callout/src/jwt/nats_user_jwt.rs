@@ -124,6 +124,12 @@ pub(crate) fn mint_nats_user_jwt(
     // first, then hash, then fill `jti` for the signed payload. Hashing
     // before setting `iss` would yield a `jti` that downstream NATS JWT
     // validators reject even though our local signature check would pass.
+    // Reject empty audience up front rather than emitting `aud=""` that
+    // verify_with_material would then refuse — a mint that can't verify is
+    // worse than a mint that fails loud.
+    if claims.aud.as_str().is_empty() {
+        return Err(JwtError::Decode("account name must be non-empty".into()));
+    }
     let issuer_public = material.issuer_public();
     let payload_template = NatsUserJwtPayload {
         aud: Some(claims.aud.as_str()),
@@ -164,7 +170,7 @@ pub(crate) fn mint_nats_user_jwt(
         .sign(signing_input.as_bytes())
         .map_err(|e| JwtError::Encode(e.to_string()))?;
     let signature = URL_SAFE_NO_PAD.encode(sig);
-    Ok(MintedUserJwt::new(format!("{signing_input}.{signature}")))
+    MintedUserJwt::new(format!("{signing_input}.{signature}"))
 }
 
 pub(crate) fn verify_nats_user_jwt(token: &str, handles: &[SigningKeyHandle]) -> Result<UserJwtClaims, JwtError> {
