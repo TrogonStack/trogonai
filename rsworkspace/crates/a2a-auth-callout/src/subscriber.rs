@@ -87,7 +87,15 @@ impl<D: AuthDispatcher> Subscriber<D> {
             let request = match self.wire.decode_request(msg.payload.to_vec(), msg.headers.as_ref()) {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!(error = %e, "failed to decode auth callout request; dropping");
+                    warn!(error = %e, "failed to decode auth callout request; publishing empty reply so the NATS server fails the connect fast");
+                    // The NATS server keeps the request open until it gets a
+                    // reply on the inbox. An empty payload is treated as a
+                    // malformed authorization response and the server
+                    // immediately denies the connect — far better than the
+                    // client stalling until the server-side timeout.
+                    if let Err(pub_err) = self.client.publish(reply.clone(), Vec::new().into()).await {
+                        error!(error = %pub_err, "failed to publish empty denial reply for undecodable request");
+                    }
                     continue;
                 }
             };
