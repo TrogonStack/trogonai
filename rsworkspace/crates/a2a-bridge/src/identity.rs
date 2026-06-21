@@ -19,8 +19,17 @@ impl MintedCallerId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CallerHttpsAuth(String);
+
+impl fmt::Debug for CallerHttpsAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Debug must not leak the raw Authorization value either —
+        // tracing/log macros use the `?` field syntax which routes
+        // through Debug, not Display.
+        f.debug_tuple("CallerHttpsAuth").field(&"<redacted>").finish()
+    }
+}
 
 impl CallerHttpsAuth {
     pub fn new(raw: impl Into<String>) -> Self {
@@ -46,8 +55,14 @@ impl fmt::Display for CallerHttpsAuth {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct BridgeUserJwt(String);
+
+impl fmt::Debug for BridgeUserJwt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("BridgeUserJwt").field(&"<redacted>").finish()
+    }
+}
 
 impl BridgeUserJwt {
     /// Wrap a minted user JWT after validating compact-JWT shape. Mirrors
@@ -106,6 +121,19 @@ mod tests {
     fn bridge_user_jwt_display_redacts() {
         let jwt = BridgeUserJwt::new("h.p.s").expect("valid shape");
         assert_eq!(format!("{jwt}"), "<redacted>");
+    }
+
+    #[test]
+    fn debug_does_not_leak_secrets() {
+        let auth = CallerHttpsAuth::new("Bearer secret-token");
+        let auth_dbg = format!("{auth:?}");
+        assert!(!auth_dbg.contains("secret-token"), "{auth_dbg}");
+        assert!(auth_dbg.contains("<redacted>"), "{auth_dbg}");
+
+        let jwt = BridgeUserJwt::new("hhh.ppp.sss").expect("valid shape");
+        let jwt_dbg = format!("{jwt:?}");
+        assert!(!jwt_dbg.contains("hhh"), "{jwt_dbg}");
+        assert!(jwt_dbg.contains("<redacted>"), "{jwt_dbg}");
     }
 }
 
