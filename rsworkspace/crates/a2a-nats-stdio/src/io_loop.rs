@@ -104,11 +104,7 @@ where
                 // Writer died — no point reading more stdin or dispatching;
                 // responses would be silently dropped. Record the error and
                 // tear down with abort semantics.
-                writer_err = Some(match res {
-                    Ok(Ok(())) => std::io::Error::other("writer task exited unexpectedly"),
-                    Ok(Err(e)) => e,
-                    Err(join_err) => std::io::Error::other(join_err),
-                });
+                writer_err = Some(writer_task_err(res));
                 shutdown_requested = true;
                 break 'outer;
             }
@@ -135,10 +131,17 @@ where
                             Ok(t) => t,
                             Err(err) => {
                                 // Outbound channel may be full while writer is
-                                // back-pressured; keep shutdown responsive.
+                                // back-pressured. Poll the writer handle so
+                                // its death also unsticks us, and stay
+                                // responsive to shutdown.
                                 tokio::select! {
                                     biased;
                                     _ = &mut shutdown => {
+                                        shutdown_requested = true;
+                                        break 'outer;
+                                    }
+                                    res = &mut writer_task => {
+                                        writer_err = Some(writer_task_err(res));
                                         shutdown_requested = true;
                                         break 'outer;
                                     }
@@ -150,11 +153,18 @@ where
 
                         // Acquire a dispatch slot before spawning so a fast
                         // producer can't create unbounded in-flight RPC work.
-                        // Poll shutdown alongside acquire so a saturated
-                        // semaphore doesn't strand the signal.
+                        // Poll shutdown and writer-death alongside acquire so
+                        // a saturated semaphore (e.g. permits held by
+                        // long-lived streams) doesn't strand either signal
+                        // when stdout breaks or shutdown fires.
                         let permit = tokio::select! {
                             biased;
                             _ = &mut shutdown => {
+                                shutdown_requested = true;
+                                break 'outer;
+                            }
+                            res = &mut writer_task => {
+                                writer_err = Some(writer_task_err(res));
                                 shutdown_requested = true;
                                 break 'outer;
                             }
@@ -216,6 +226,16 @@ where
         (Err(e), _) => Err(e),
         (Ok(()), Some(e)) => Err(e),
         (Ok(()), None) => Ok(()),
+    }
+}
+
+/// Collapse the writer task's `Result<Result<(), io::Error>, JoinError>` into a
+/// single `io::Error`. Used by every select arm that polls `&mut writer_task`.
+fn writer_task_err(res: Result<std::io::Result<()>, tokio::task::JoinError>) -> std::io::Error {
+    match res {
+        Ok(Ok(())) => std::io::Error::other("writer task exited unexpectedly"),
+        Ok(Err(e)) => e,
+        Err(join_err) => std::io::Error::other(join_err),
     }
 }
 
