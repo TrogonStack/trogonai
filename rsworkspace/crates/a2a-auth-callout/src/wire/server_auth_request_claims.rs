@@ -55,7 +55,7 @@ impl ServerAuthRequestClaims {
             });
         let hint = hint.ok_or_else(|| {
             CredentialError::InvalidCredentials(
-                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag).into()"
+                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)"
                     .into(),
             )
         })?;
