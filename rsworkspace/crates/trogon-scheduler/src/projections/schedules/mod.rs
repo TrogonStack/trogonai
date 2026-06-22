@@ -164,6 +164,11 @@ fn apply(
 /// the read model's own `projections_v1` copies (see [`twin`]) and stamped with
 /// the initial folded fields.
 fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::Schedule, ScheduleTransitionError> {
+    let Some(status) = created.status.clone().into_option() else {
+        return Err(ScheduleTransitionError::MalformedEvent {
+            context: "created event has no status",
+        });
+    };
     let Some(schedule) = created.schedule.clone().into_option() else {
         return Err(ScheduleTransitionError::MalformedEvent {
             context: "created event has no schedule",
@@ -181,10 +186,7 @@ fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::Schedule,
     };
     Ok(projections_v1::Schedule {
         schedule_id: created.schedule_id.clone(),
-        status: match created.status.clone().into_option() {
-            Some(status) => MessageField::some(twin::status_to_projection(status)),
-            None => MessageField::none(),
-        },
+        status: MessageField::some(twin::status_to_projection(status)),
         completed: Some(false),
         next_occurrence_at: MessageField::none(),
         last_occurrence_at: MessageField::none(),
@@ -247,10 +249,12 @@ mod twin {
                 EventScheduleKind::Every(every) => {
                     ViewScheduleKind::Every(Box::new(projections_v1::schedule_spec::Every { every: every.every }))
                 }
-                EventScheduleKind::Cron(cron) => ViewScheduleKind::Cron(Box::new(projections_v1::schedule_spec::Cron {
-                    expr: cron.expr,
-                    timezone: cron.timezone,
-                })),
+                EventScheduleKind::Cron(cron) => {
+                    ViewScheduleKind::Cron(Box::new(projections_v1::schedule_spec::Cron {
+                        expr: cron.expr,
+                        timezone: cron.timezone,
+                    }))
+                }
                 EventScheduleKind::Rrule(rrule) => {
                     ViewScheduleKind::Rrule(Box::new(projections_v1::schedule_spec::RRule {
                         dtstart: rrule.dtstart,
@@ -478,20 +482,18 @@ where
     write_read_model_checkpoint(&bucket, target).await
 }
 
-/// True for a current-scheme read-model key — a 32-character lowercase-hex token
-/// produced by [`read_model_key`].
-fn is_derived_read_model_key(key: &str) -> bool {
-    key.len() == 32 && key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-/// Deletes legacy read-model entries (keys that are neither the checkpoint key
-/// nor a current derived key).
+/// Deletes legacy read-model entries — any key that is not the checkpoint and
+/// whose stored value is not a current-scheme entry (see
+/// [`read_model_entry_is_current`]).
 ///
-/// Intentionally conservative: it never deletes a current-scheme derived key.
-/// That keeps the sweep safe even if another instance is concurrently creating a
-/// schedule during a rolling restart — a brand-new derived key is left untouched
-/// rather than being mistaken for an orphan and removed. Stale *derived* keys are
-/// instead cleared by the fold itself (a `ScheduleRemoved` projects a delete), so
+/// Classifying by content rather than key shape means a pre-v2 raw schedule id
+/// that happens to be 32 lowercase-hex characters can no longer masquerade as a
+/// current key and survive cleanup.
+///
+/// Still conservative against the rolling-restart race: a schedule a peer creates
+/// concurrently is written under its own derived key, so its value decodes and
+/// re-derives to that same key and is kept. Stale *derived* entries are otherwise
+/// cleared by the fold itself (a `ScheduleRemoved` projects a delete), so
 /// completeness does not depend on this sweep.
 async fn sweep_legacy_read_model_keys(bucket: &kv::Store) -> Result<(), SchedulerError> {
     let mut keys = bucket
@@ -501,7 +503,7 @@ async fn sweep_legacy_read_model_keys(bucket: &kv::Store) -> Result<(), Schedule
     while let Some(result) = keys.next().await {
         let key = result
             .map_err(|source| SchedulerError::kv_source("failed to read schedules read-model key for sweep", source))?;
-        if key == SCHEDULES_CHECKPOINT_KEY || is_derived_read_model_key(&key) {
+        if key == SCHEDULES_CHECKPOINT_KEY || read_model_entry_is_current(bucket, &key).await? {
             continue;
         }
         bucket
@@ -512,6 +514,26 @@ async fn sweep_legacy_read_model_keys(bucket: &kv::Store) -> Result<(), Schedule
     }
 
     Ok(())
+}
+
+/// True when `key` holds a current-scheme entry: its value decodes to a view
+/// whose own `schedule_id` re-derives (via [`read_model_key`]) back to `key`.
+///
+/// A missing or undecodable value, or one whose derived key differs, is not
+/// current. By sweep time the fold has already rewritten every live schedule
+/// under its correct key, so any such entry is a legacy or orphaned row.
+async fn read_model_entry_is_current(bucket: &kv::Store, key: &str) -> Result<bool, SchedulerError> {
+    let Some(value) = bucket
+        .get(key.to_string())
+        .await
+        .map_err(|source| SchedulerError::kv_source("failed to read schedules read-model entry for sweep", source))?
+    else {
+        return Ok(false);
+    };
+    match <projections_v1::Schedule as buffa::Message>::decode_from_slice(&value) {
+        Ok(view) => Ok(read_model_key(&view.schedule_id) == key),
+        Err(_) => Ok(false),
+    }
 }
 
 /// Folds one catch-up message into `states`, writing any resulting KV change.
@@ -544,17 +566,34 @@ async fn fold_catch_up_message(
         // read model, skip without disturbing state.
         return Ok(());
     };
-    let stream_id = match schedule_id_from_event_subject(event.stream_id()) {
-        Ok(id) => id,
+    let subject_token = match read_model_token_from_event_subject(event.stream_id()) {
+        Ok(token) => token,
         Err(source) => {
             tracing::warn!(%source, "skipping schedule event with unrecognized subject during read-model catch-up");
             return Ok(());
         }
     };
-    let change = match apply_event_to_read_model_state(states, &stream_id, &decoded) {
+    // The subject carries the schedule's derived routing token, not the raw id;
+    // the raw id lives in the event payload. Recover it from the payload and
+    // confirm it routes to this subject, so a misrouted event can never fold into
+    // another schedule's view — and so `apply`'s id check matches the stream id
+    // instead of rejecting every replayed event.
+    let Some(schedule_id) = event_schedule_id(&decoded) else {
+        tracing::warn!(%subject_token, "skipping schedule event without a payload schedule id during read-model catch-up");
+        return Ok(());
+    };
+    if read_model_key(schedule_id) != subject_token {
+        tracing::warn!(
+            %subject_token,
+            %schedule_id,
+            "skipping schedule event whose payload id does not route to its subject during read-model catch-up"
+        );
+        return Ok(());
+    }
+    let change = match apply_event_to_read_model_state(states, schedule_id, &decoded) {
         Ok(change) => change,
         Err(source) => {
-            tracing::warn!(schedule_id = %stream_id, %source, "skipping invalid schedule transition during read-model catch-up");
+            tracing::warn!(%schedule_id, %source, "skipping invalid schedule transition during read-model catch-up");
             return Ok(());
         }
     };
@@ -606,12 +645,9 @@ fn decode_recorded_delivery_message(message: &async_nats::jetstream::Message) ->
     // its JetStream metadata, not in the direct-get headers that
     // `StreamMessage::try_from` expects, so build the stream message from
     // `info()` rather than reparsing headers that are absent here.
-    let info = message.info().map_err(|source| {
-        SchedulerError::event_source(
-            "failed to read schedule event delivery metadata",
-            std::io::Error::other(source.to_string()),
-        )
-    })?;
+    let info = message
+        .info()
+        .map_err(|source| SchedulerError::event_source("failed to read schedule event delivery metadata", source))?;
     let stream_message = async_nats::jetstream::message::StreamMessage {
         subject: message.subject.clone(),
         sequence: info.stream_sequence,
@@ -638,7 +674,7 @@ fn event_message_sequence(message: &jetstream::Message, context: &'static str) -
     message
         .info()
         .map(|info| info.stream_sequence)
-        .map_err(|source| SchedulerError::event_source(context, std::io::Error::other(source.to_string())))
+        .map_err(|source| SchedulerError::event_source(context, source))
 }
 
 /// Reads the prior stored view for a schedule so the live path can fold new
@@ -654,12 +690,7 @@ async fn read_projected_view(bucket: &kv::Store, id: &str) -> Result<Option<proj
 
     <projections_v1::Schedule as buffa::Message>::decode_from_slice(&value)
         .map(Some)
-        .map_err(|source| {
-            SchedulerError::kv_source(
-                "failed to decode projected schedule view",
-                std::io::Error::other(source.to_string()),
-            )
-        })
+        .map_err(|source| SchedulerError::kv_source("failed to decode projected schedule view", source))
 }
 
 async fn read_read_model_checkpoint(bucket: &kv::Store) -> Result<u64, SchedulerError> {
@@ -757,25 +788,27 @@ fn apply_event_to_read_model_state(
     Ok(change)
 }
 
-fn schedule_id_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
-    // The id round-trips losslessly: the live key is derived from the raw id and
-    // the event subject is exactly `EVENTS_SUBJECT_PREFIX + id`, so stripping the
-    // prefix recovers it verbatim (including dots/slashes/non-ASCII the domain
-    // allows). The projection must never reject an id the command layer accepted
-    // and durably appended, or the read model would diverge from the event log.
-    let raw_id = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
+/// Extracts a schedule event subject's derived routing token — the 32-hex
+/// `key.simple()` the publisher appends as the subject's last segment.
+///
+/// The subject is `EVENTS_SUBJECT_PREFIX + {derived key}`, never the raw schedule
+/// id, so this cannot recover the id; the raw id is read from the event payload.
+/// The token is used only to confirm an event routes to the schedule named in its
+/// payload before that event is folded.
+fn read_model_token_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
+    let token = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
         SchedulerError::event_source(
-            "failed to derive schedule stream id from event subject",
+            "failed to derive schedule routing token from event subject",
             std::io::Error::other(subject.to_string()),
         )
     })?;
-    if raw_id.is_empty() {
+    if token.is_empty() {
         return Err(SchedulerError::event_source(
-            "schedule event subject has an empty schedule id",
+            "schedule event subject has an empty routing token",
             std::io::Error::other(subject.to_string()),
         ));
     }
-    Ok(raw_id.to_string())
+    Ok(token.to_string())
 }
 
 #[cfg(test)]
