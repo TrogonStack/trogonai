@@ -1,4 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+// Generated protobuf code (`gen/*`) and the thin wrappers over it are emitted
+// as inline module trees by the proto codegen; the policy does not apply here.
+#![allow(inline_module_block)]
 
 #[allow(clippy::all)]
 #[path = "gen/mod.rs"]

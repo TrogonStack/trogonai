@@ -8,6 +8,7 @@ pub mod subscriptions;
 
 pub use stream::{AcpStream, StreamAssignment};
 
+#[allow(inline_module_block)]
 pub mod agent {
     pub use super::global::{
         AuthenticateSubject, ExtNotifySubject, ExtSubject, InitializeSubject, LogoutSubject, SessionListSubject,
@@ -19,6 +20,7 @@ pub mod agent {
     }
 }
 
+#[allow(inline_module_block)]
 pub mod session {
     pub mod agent {
         pub use super::super::commands::{

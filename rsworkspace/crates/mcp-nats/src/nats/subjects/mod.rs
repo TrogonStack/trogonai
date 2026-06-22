@@ -3,6 +3,7 @@ pub mod markers;
 pub mod server;
 pub mod subscriptions;
 
+#[allow(inline_module_block)]
 pub mod mcp_server {
     pub use super::server::{
         CallToolSubject, CancelTaskSubject, CancelledSubject, CompleteSubject, ElicitationCompletedSubject,
@@ -18,6 +19,7 @@ pub mod mcp_server {
     }
 }
 
+#[allow(inline_module_block)]
 pub mod mcp_client {
     pub use super::client::{
         CancelledSubject, CreateElicitationSubject, CreateMessageSubject, InitializedSubject, ListRootsSubject,
