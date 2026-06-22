@@ -3,6 +3,7 @@ pub mod markers;
 pub mod server;
 pub mod subscriptions;
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod mcp_server {
     pub use super::server::{
         CallToolSubject, CancelTaskSubject, CancelledSubject, CompleteSubject, ElicitationCompletedSubject,
@@ -18,6 +19,7 @@ pub mod mcp_server {
     }
 }
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod mcp_client {
     pub use super::client::{
         CancelledSubject, CreateElicitationSubject, CreateMessageSubject, InitializedSubject, ListRootsSubject,

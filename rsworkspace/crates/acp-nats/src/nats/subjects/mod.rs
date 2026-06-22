@@ -8,6 +8,7 @@ pub mod subscriptions;
 
 pub use stream::{AcpStream, StreamAssignment};
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod agent {
     pub use super::global::{
         AuthenticateSubject, ExtNotifySubject, ExtSubject, InitializeSubject, LogoutSubject, SessionListSubject,
@@ -19,6 +20,7 @@ pub mod agent {
     }
 }
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod session {
     pub mod agent {
         pub use super::super::commands::{

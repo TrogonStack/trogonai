@@ -736,6 +736,7 @@ fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual:
     }
 }
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 mod private {
     use crate::{Decider, Events};
 

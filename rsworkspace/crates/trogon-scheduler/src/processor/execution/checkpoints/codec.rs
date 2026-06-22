@@ -255,6 +255,7 @@ fn checkpoint_outcome_from_proto(
 /// type, so only the outer wrappers need mapping; this avoids the
 /// encode-then-decode pass a wire transcode would add to every checkpoint
 /// read and write.
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 mod twin {
     use trogonai_proto::scheduler::schedules::{checkpoints_v1, v1};
 
