@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use async_nats::jetstream::{
     self,
@@ -492,65 +492,56 @@ where
         return Ok(());
     }
 
-    // Remove entries written under the pre-v2 (raw schedule id) key scheme so a
-    // listing cannot return a stale duplicate after the upgrade.
-    sweep_legacy_read_model_keys(&bucket).await?;
+    // Reconcile the bucket against the freshly folded state. This catch-up replays
+    // the full event log from empty, so `states` is authoritative for which
+    // schedules should have a row. Deleting every current entry that is not one of
+    // them removes both pre-v2 (raw schedule id) rows and any stale row whose
+    // updating events were skipped during the fold, so a clean rebuild never leaves
+    // an outdated projection behind.
+    let live_keys: HashSet<String> = states
+        .values()
+        .filter_map(|state| match state {
+            ScheduleStreamState::Present(view) => Some(read_model_key(&view.schedule_id)),
+            ScheduleStreamState::Initial | ScheduleStreamState::Deleted(_) => None,
+        })
+        .collect();
+    reconcile_read_model_keys(&bucket, &live_keys).await?;
 
     write_read_model_checkpoint(&bucket, target).await
 }
 
-/// Deletes legacy read-model entries — any key that is not the checkpoint and
-/// whose stored value is not a current-scheme entry (see
-/// [`read_model_entry_is_current`]).
+/// Reconciles the bucket to the freshly folded state: deletes every entry that is
+/// neither the checkpoint nor one of `live_keys` (the derived keys of the
+/// schedules the rebuild folded as present).
 ///
-/// Classifying by content rather than key shape means a pre-v2 raw schedule id
-/// that happens to be 32 lowercase-hex characters can no longer masquerade as a
-/// current key and survive cleanup.
+/// Because catch-up replays the full event log from empty, `live_keys` is the
+/// authoritative set of rows that should exist. Deleting the rest removes pre-v2
+/// raw-id rows and any stale row whose updating events were skipped during the
+/// fold, so a clean rebuild can never leave an outdated projection behind.
 ///
-/// Still conservative against the rolling-restart race: a schedule a peer creates
-/// concurrently is written under its own derived key, so its value decodes and
-/// re-derives to that same key and is kept. Stale *derived* entries are otherwise
-/// cleared by the fold itself (a `ScheduleRemoved` projects a delete), so
-/// completeness does not depend on this sweep.
-async fn sweep_legacy_read_model_keys(bucket: &kv::Store) -> Result<(), SchedulerError> {
-    let mut keys = bucket
-        .keys()
-        .await
-        .map_err(|source| SchedulerError::kv_source("failed to list schedules read-model keys for sweep", source))?;
+/// This trades the earlier shape-only conservatism for correctness, so it relies
+/// on the single-active-writer invariant (see the module docs): with a concurrent
+/// writer — a misconfigured rolling restart — it could delete a row a peer just
+/// created, which that peer's next event or restart re-creates.
+async fn reconcile_read_model_keys(bucket: &kv::Store, live_keys: &HashSet<String>) -> Result<(), SchedulerError> {
+    let mut keys = bucket.keys().await.map_err(|source| {
+        SchedulerError::kv_source("failed to list schedules read-model keys for reconcile", source)
+    })?;
     while let Some(result) = keys.next().await {
-        let key = result
-            .map_err(|source| SchedulerError::kv_source("failed to read schedules read-model key for sweep", source))?;
-        if key == SCHEDULES_CHECKPOINT_KEY || read_model_entry_is_current(bucket, &key).await? {
+        let key = result.map_err(|source| {
+            SchedulerError::kv_source("failed to read schedules read-model key for reconcile", source)
+        })?;
+        if key == SCHEDULES_CHECKPOINT_KEY || live_keys.contains(&key) {
             continue;
         }
         bucket
             .delete(key.clone())
             .await
-            .map_err(|source| SchedulerError::kv_source("failed to delete legacy read-model key", source))?;
-        tracing::warn!(%key, "deleted legacy schedules read-model entry during catch-up sweep");
+            .map_err(|source| SchedulerError::kv_source("failed to delete stale read-model key", source))?;
+        tracing::warn!(%key, "deleted stale schedules read-model entry during catch-up reconcile");
     }
 
     Ok(())
-}
-
-/// True when `key` holds a current-scheme entry: its value decodes to a view
-/// whose own `schedule_id` re-derives (via [`read_model_key`]) back to `key`.
-///
-/// A missing or undecodable value, or one whose derived key differs, is not
-/// current. By sweep time the fold has already rewritten every live schedule
-/// under its correct key, so any such entry is a legacy or orphaned row.
-async fn read_model_entry_is_current(bucket: &kv::Store, key: &str) -> Result<bool, SchedulerError> {
-    let Some(value) = bucket
-        .get(key.to_string())
-        .await
-        .map_err(|source| SchedulerError::kv_source("failed to read schedules read-model entry for sweep", source))?
-    else {
-        return Ok(false);
-    };
-    match <projections_v1::ScheduleProjection as buffa::Message>::decode_from_slice(&value) {
-        Ok(view) => Ok(read_model_key(&view.schedule_id) == key),
-        Err(_) => Ok(false),
-    }
 }
 
 /// Folds one catch-up message into `states`, writing any resulting KV change.

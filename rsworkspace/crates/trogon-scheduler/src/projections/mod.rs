@@ -4,7 +4,7 @@
 //! # Boundary
 //!
 //! This module is the **write side** only: it folds `v1` event protos straight
-//! into the stored `projections.v1.Schedule` proto and owns that storage layout
+//! into the stored `projections.v1.ScheduleProjection` proto and owns that storage layout
 //! (bucket, key scheme, checkpoint — see [`schedules::storage`]). It depends on
 //! the event/view protos, the shared error type, and the shared events stream —
 //! never on the read model or the queries. Reading the stored proto back out and
@@ -28,19 +28,22 @@
 //!
 //! ## Safety net for the rolling-restart overlap
 //!
-//! A rolling deploy briefly runs two instances. The projection is built to
-//! degrade gracefully, not corrupt, during that window:
+//! A rolling deploy briefly runs two instances. Most of the projection degrades
+//! gracefully, not corrupts, during that window:
 //! - Catch-up early-returns when the checkpoint is current, so a booting instance
-//!   does not rebuild (or sweep) in steady state.
+//!   does not rebuild (or reconcile) in steady state.
 //! - The checkpoint only advances contiguously, so a racing writer can stall it
 //!   (forcing a harmless re-fold) but never advance it past an unprojected event.
-//! - The legacy-key sweep never deletes a current derived key, so a schedule a
-//!   peer just created cannot be swept away.
 //! - A live projection failure never fails the durable append and never advances
 //!   the checkpoint, so any divergence self-heals on the next clean start.
 //!
-//! The residual is a transient stale schedule (e.g. a status that lags by one
-//! event) that resolves on the schedule's next event or the next restart.
+//! The one step that genuinely depends on the single-writer invariant is the
+//! catch-up reconcile: it deletes any current row absent from the freshly folded
+//! state, so during an overlap it could delete a row a peer just created. That
+//! row is re-created by the peer's next event or restart.
+//!
+//! The residual is a transient stale (or briefly missing) schedule that resolves
+//! on the schedule's next event or the next restart.
 
 mod schedules;
 
