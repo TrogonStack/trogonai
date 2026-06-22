@@ -25,7 +25,7 @@ use storage::{SCHEDULES_CHECKPOINT_KEY, get_or_create_schedules_bucket, read_mod
 pub(crate) mod storage;
 
 // The schedules read-model projection: it folds the schedule event stream
-// (`v1` event protos) directly into the stored KV view (`projections_v1::Schedule`
+// (`v1` event protos) directly into the stored KV view (`projections_v1::ScheduleProjection`
 // protos). It deals only in protobuf — event proto in, KV proto out — and has no
 // dependency on the read-model value objects or the query side. Decoding the
 // stored proto back into the read model that callers see lives in `crate::queries`.
@@ -33,7 +33,7 @@ pub(crate) mod storage;
 /// A change to apply to the KV bucket for a single schedule.
 #[derive(Clone, PartialEq)]
 enum ProjectionChange {
-    Upsert(projections_v1::Schedule),
+    Upsert(projections_v1::ScheduleProjection),
     Delete(String),
 }
 
@@ -41,7 +41,7 @@ enum ProjectionChange {
 #[derive(Clone, PartialEq)]
 enum ScheduleStreamState {
     Initial,
-    Present(projections_v1::Schedule),
+    Present(projections_v1::ScheduleProjection),
     Deleted(String),
 }
 
@@ -167,7 +167,7 @@ fn apply(
 /// schedule/delivery/message definitions as `v1` protos, which are folded into
 /// the read model's own `projections_v1` copies (see [`twin`]) and stamped with
 /// the initial folded fields.
-fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::Schedule, ScheduleTransitionError> {
+fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::ScheduleProjection, ScheduleTransitionError> {
     let Some(status) = created.status.clone().into_option() else {
         return Err(ScheduleTransitionError::MalformedEvent {
             context: "created event has no status",
@@ -188,13 +188,13 @@ fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::Schedule,
             context: "created event has no message",
         });
     };
-    Ok(projections_v1::Schedule {
+    Ok(projections_v1::ScheduleProjection {
         schedule_id: created.schedule_id.clone(),
         status: MessageField::some(twin::status_to_projection(status)),
         completed: Some(false),
         next_occurrence_at: MessageField::none(),
         last_occurrence_at: MessageField::none(),
-        schedule: MessageField::some(twin::schedule_spec_to_projection(schedule)),
+        schedule: MessageField::some(twin::schedule_to_projection(schedule)),
         delivery: MessageField::some(twin::delivery_to_projection(delivery)),
         message: MessageField::some(twin::message_to_projection(message)),
     })
@@ -224,7 +224,7 @@ mod twin {
 
     use projections_v1::__buffa::oneof::delivery::Kind as ViewDeliveryKind;
     use projections_v1::__buffa::oneof::delivery::nats_message::source::Kind as ViewSourceKind;
-    use projections_v1::__buffa::oneof::schedule_spec::Kind as ViewScheduleKind;
+    use projections_v1::__buffa::oneof::schedule::Kind as ViewScheduleKind;
     use projections_v1::__buffa::oneof::schedule_status::Kind as ViewStatusKind;
     use v1::__buffa::oneof::delivery::Kind as EventDeliveryKind;
     use v1::__buffa::oneof::delivery::nats_message::source::Kind as EventSourceKind;
@@ -244,30 +244,24 @@ mod twin {
         }
     }
 
-    pub(super) fn schedule_spec_to_projection(value: v1::Schedule) -> projections_v1::ScheduleSpec {
-        projections_v1::ScheduleSpec {
+    pub(super) fn schedule_to_projection(value: v1::Schedule) -> projections_v1::Schedule {
+        projections_v1::Schedule {
             kind: value.kind.map(|kind| match kind {
-                EventScheduleKind::At(at) => {
-                    ViewScheduleKind::At(Box::new(projections_v1::schedule_spec::At { at: at.at }))
-                }
+                EventScheduleKind::At(at) => ViewScheduleKind::At(Box::new(projections_v1::schedule::At { at: at.at })),
                 EventScheduleKind::Every(every) => {
-                    ViewScheduleKind::Every(Box::new(projections_v1::schedule_spec::Every { every: every.every }))
+                    ViewScheduleKind::Every(Box::new(projections_v1::schedule::Every { every: every.every }))
                 }
-                EventScheduleKind::Cron(cron) => {
-                    ViewScheduleKind::Cron(Box::new(projections_v1::schedule_spec::Cron {
-                        expr: cron.expr,
-                        timezone: cron.timezone,
-                    }))
-                }
-                EventScheduleKind::Rrule(rrule) => {
-                    ViewScheduleKind::Rrule(Box::new(projections_v1::schedule_spec::RRule {
-                        dtstart: rrule.dtstart,
-                        rrule: rrule.rrule,
-                        timezone: rrule.timezone,
-                        rdate: rrule.rdate,
-                        exdate: rrule.exdate,
-                    }))
-                }
+                EventScheduleKind::Cron(cron) => ViewScheduleKind::Cron(Box::new(projections_v1::schedule::Cron {
+                    expr: cron.expr,
+                    timezone: cron.timezone,
+                })),
+                EventScheduleKind::Rrule(rrule) => ViewScheduleKind::Rrule(Box::new(projections_v1::schedule::RRule {
+                    dtstart: rrule.dtstart,
+                    rrule: rrule.rrule,
+                    timezone: rrule.timezone,
+                    rdate: rrule.rdate,
+                    exdate: rrule.exdate,
+                })),
             }),
         }
     }
@@ -358,8 +352,8 @@ fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) 
     }
 }
 
-impl From<projections_v1::Schedule> for ScheduleStreamState {
-    fn from(view: projections_v1::Schedule) -> Self {
+impl From<projections_v1::ScheduleProjection> for ScheduleStreamState {
+    fn from(view: projections_v1::ScheduleProjection) -> Self {
         Self::Present(view)
     }
 }
@@ -551,7 +545,7 @@ async fn read_model_entry_is_current(bucket: &kv::Store, key: &str) -> Result<bo
     else {
         return Ok(false);
     };
-    match <projections_v1::Schedule as buffa::Message>::decode_from_slice(&value) {
+    match <projections_v1::ScheduleProjection as buffa::Message>::decode_from_slice(&value) {
         Ok(view) => Ok(read_model_key(&view.schedule_id) == key),
         Err(_) => Ok(false),
     }
@@ -700,7 +694,10 @@ fn event_message_sequence(message: &jetstream::Message, context: &'static str) -
 
 /// Reads the prior stored view for a schedule so the live path can fold new
 /// events onto it. Works purely in proto; `get` returns `None` for a tombstone.
-async fn read_projected_view(bucket: &kv::Store, id: &str) -> Result<Option<projections_v1::Schedule>, SchedulerError> {
+async fn read_projected_view(
+    bucket: &kv::Store,
+    id: &str,
+) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
     let Some(value) = bucket
         .get(read_model_key(id))
         .await
@@ -709,7 +706,7 @@ async fn read_projected_view(bucket: &kv::Store, id: &str) -> Result<Option<proj
         return Ok(None);
     };
 
-    <projections_v1::Schedule as buffa::Message>::decode_from_slice(&value)
+    <projections_v1::ScheduleProjection as buffa::Message>::decode_from_slice(&value)
         .map(Some)
         .map_err(|source| SchedulerError::kv_source("failed to decode projected schedule view", source))
 }
@@ -963,14 +960,14 @@ mod tests {
         }
     }
 
-    fn present(state: ScheduleStreamState) -> projections_v1::Schedule {
+    fn present(state: ScheduleStreamState) -> projections_v1::ScheduleProjection {
         match state {
             ScheduleStreamState::Present(view) => view,
             other => panic!("expected present schedule, got {other:?}"),
         }
     }
 
-    fn is_paused(view: &projections_v1::Schedule) -> bool {
+    fn is_paused(view: &projections_v1::ScheduleProjection) -> bool {
         matches!(
             view.status.as_option().and_then(|status| status.kind.as_ref()),
             Some(ViewStatusKind::Paused(_))
@@ -989,7 +986,7 @@ mod tests {
         // the read model's own projection copies.
         assert_eq!(
             view.schedule.into_option(),
-            created.schedule.into_option().map(twin::schedule_spec_to_projection)
+            created.schedule.into_option().map(twin::schedule_to_projection)
         );
         assert_eq!(
             view.delivery.into_option(),
@@ -1181,7 +1178,7 @@ mod tests {
         // What the projection writes must decode back to an equal view.
         let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
         let encoded = buffa::Message::encode_to_vec(&view);
-        let decoded = <projections_v1::Schedule as buffa::Message>::decode_from_slice(&encoded).unwrap();
+        let decoded = <projections_v1::ScheduleProjection as buffa::Message>::decode_from_slice(&encoded).unwrap();
         assert_eq!(decoded, view);
     }
 }

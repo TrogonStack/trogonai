@@ -2,9 +2,9 @@
 
 include!("trogonai.scheduler.schedules.projections.v1.delivery.rs");
 include!("trogonai.scheduler.schedules.projections.v1.message.rs");
-include!("trogonai.scheduler.schedules.projections.v1.schedule_spec.rs");
-include!("trogonai.scheduler.schedules.projections.v1.schedule_status.rs");
 include!("trogonai.scheduler.schedules.projections.v1.schedule.rs");
+include!("trogonai.scheduler.schedules.projections.v1.schedule_status.rs");
+include!("trogonai.scheduler.schedules.projections.v1.schedule_projection.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -24,11 +24,13 @@ pub mod __buffa {
         use super::*;
         include!("trogonai.scheduler.schedules.projections.v1.delivery.__view.rs");
         include!("trogonai.scheduler.schedules.projections.v1.message.__view.rs");
-        include!("trogonai.scheduler.schedules.projections.v1.schedule_spec.__view.rs");
+        include!("trogonai.scheduler.schedules.projections.v1.schedule.__view.rs");
         include!(
             "trogonai.scheduler.schedules.projections.v1.schedule_status.__view.rs"
         );
-        include!("trogonai.scheduler.schedules.projections.v1.schedule.__view.rs");
+        include!(
+            "trogonai.scheduler.schedules.projections.v1.schedule_projection.__view.rs"
+        );
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
@@ -36,7 +38,7 @@ pub mod __buffa {
                 "trogonai.scheduler.schedules.projections.v1.delivery.__view_oneof.rs"
             );
             include!(
-                "trogonai.scheduler.schedules.projections.v1.schedule_spec.__view_oneof.rs"
+                "trogonai.scheduler.schedules.projections.v1.schedule.__view_oneof.rs"
             );
             include!(
                 "trogonai.scheduler.schedules.projections.v1.schedule_status.__view_oneof.rs"
@@ -47,7 +49,7 @@ pub mod __buffa {
         #[allow(unused_imports)]
         use super::*;
         include!("trogonai.scheduler.schedules.projections.v1.delivery.__oneof.rs");
-        include!("trogonai.scheduler.schedules.projections.v1.schedule_spec.__oneof.rs");
+        include!("trogonai.scheduler.schedules.projections.v1.schedule.__oneof.rs");
         include!(
             "trogonai.scheduler.schedules.projections.v1.schedule_status.__oneof.rs"
         );
@@ -62,15 +64,15 @@ pub mod __buffa {
         );
         reg.register_json_any(super::__MESSAGE_JSON_ANY);
         reg.register_json_any(super::__HEADER_JSON_ANY);
-        reg.register_json_any(super::__SCHEDULE_SPEC_JSON_ANY);
-        reg.register_json_any(super::schedule_spec::__AT_JSON_ANY);
-        reg.register_json_any(super::schedule_spec::__EVERY_JSON_ANY);
-        reg.register_json_any(super::schedule_spec::__CRON_JSON_ANY);
-        reg.register_json_any(super::schedule_spec::__R_RULE_JSON_ANY);
+        reg.register_json_any(super::__SCHEDULE_JSON_ANY);
+        reg.register_json_any(super::schedule::__AT_JSON_ANY);
+        reg.register_json_any(super::schedule::__EVERY_JSON_ANY);
+        reg.register_json_any(super::schedule::__CRON_JSON_ANY);
+        reg.register_json_any(super::schedule::__R_RULE_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_STATUS_JSON_ANY);
         reg.register_json_any(super::schedule_status::__SCHEDULED_JSON_ANY);
         reg.register_json_any(super::schedule_status::__PAUSED_JSON_ANY);
-        reg.register_json_any(super::__SCHEDULE_JSON_ANY);
+        reg.register_json_any(super::__SCHEDULE_PROJECTION_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -86,16 +88,16 @@ pub use self::__buffa::view::HeaderView;
 #[doc(inline)]
 pub use self::__buffa::view::HeaderOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::ScheduleSpecView;
+pub use self::__buffa::view::ScheduleView;
 #[doc(inline)]
-pub use self::__buffa::view::ScheduleSpecOwnedView;
+pub use self::__buffa::view::ScheduleOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleStatusView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleStatusOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::ScheduleView;
+pub use self::__buffa::view::ScheduleProjectionView;
 #[doc(inline)]
-pub use self::__buffa::view::ScheduleOwnedView;
+pub use self::__buffa::view::ScheduleProjectionOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;
