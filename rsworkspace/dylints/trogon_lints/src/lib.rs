@@ -5,6 +5,7 @@ extern crate rustc_lint;
 extern crate rustc_session;
 
 mod error_string_comparison;
+mod inline_module_block;
 mod manual_error_impl;
 
 use rustc_hir::{Expr, Item, LetStmt};
@@ -15,7 +16,7 @@ dylint_linting::dylint_library!();
 #[unsafe(no_mangle)]
 pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore) {
     dylint_linting::init_config(sess);
-    lint_store.register_lints(&[ERROR_STRING_COMPARISON, MANUAL_ERROR_IMPL]);
+    lint_store.register_lints(&[ERROR_STRING_COMPARISON, INLINE_MODULE_BLOCK, MANUAL_ERROR_IMPL]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
 }
 
@@ -51,6 +52,45 @@ rustc_session::declare_lint! {
     pub ERROR_STRING_COMPARISON,
     Warn,
     "error display strings must not drive behavior",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects inline modules declared with a body block (`mod foo { ... }`)
+    /// instead of being backed by their own file (`mod foo;`).
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Module bodies belong in files. Inline blocks bury structure inside an
+    /// unrelated file, grow without bound, and make navigation depend on
+    /// scrolling rather than the file tree. A file-per-module layout keeps the
+    /// physical structure and the module structure in sync. A child module in
+    /// its own file still reaches the parent module's private items, so the
+    /// usual reason to inline `#[cfg(test)] mod tests { ... }` does not apply.
+    ///
+    /// ### Example
+    ///
+    /// ```rust
+    /// mod twin {
+    ///     pub fn run() {}
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust
+    /// // in twin.rs
+    /// pub fn run() {}
+    /// ```
+    ///
+    /// ```rust
+    /// // in the parent
+    /// mod twin;
+    /// ```
+    pub INLINE_MODULE_BLOCK,
+    Warn,
+    "declare modules in their own file with `mod foo;`, not inline `mod foo { ... }`",
 }
 
 rustc_session::declare_lint! {
@@ -106,11 +146,12 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     }
 
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
+        inline_module_block::check_item(cx, item);
         manual_error_impl::check_item(cx, item);
     }
 }
 
-rustc_session::impl_lint_pass!(TrogonLints => [ERROR_STRING_COMPARISON, MANUAL_ERROR_IMPL]);
+rustc_session::impl_lint_pass!(TrogonLints => [ERROR_STRING_COMPARISON, INLINE_MODULE_BLOCK, MANUAL_ERROR_IMPL]);
 
 #[test]
 fn ui() {
