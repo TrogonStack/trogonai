@@ -21,7 +21,7 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream, Stream};
 use serde_json::{Value, json};
 
-use a2a_nats::constants::REQ_ID_HEADER;
+use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
 use a2a_nats::jetstream::consumers::{resubscribe_consumer, stream_events_consumer};
 use a2a_nats::jetstream::streams::events_stream_name;
 use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
@@ -486,20 +486,29 @@ fn sse_from_bootstrap_and_payloads(
     Box::pin(head.chain(tail_mapped))
 }
 
-fn gateway_req_headers(correlation: ReqId) -> Result<async_nats::HeaderMap, BridgeError> {
+fn gateway_req_headers(correlation: ReqId, caller_id: Option<&str>) -> Result<async_nats::HeaderMap, BridgeError> {
     let mut map = async_nats::HeaderMap::new();
     let value = correlation.as_str();
     map.insert(REQ_ID_HEADER, async_nats::header::HeaderValue::from(value));
-
+    // Forward the external caller id (HTTP `x-a2a-caller-id`) onto the
+    // NATS request as `X-A2a-Caller-Id` so gateway audits, spans, and
+    // caller-scoped routing can see who called even though the bridge
+    // itself authenticates with the minted user JWT.
+    if let Some(raw) = caller_id {
+        let name = async_nats::header::HeaderName::from_static(GATEWAY_CALLER_ID_HEADER);
+        map.insert(name, async_nats::header::HeaderValue::from(raw));
+    }
     Ok(map)
 }
 
-/// Gateway publish headers propagate JSON-RPC correlation and the auth-callout minted User JWT.
+/// Gateway publish headers propagate JSON-RPC correlation, optional external caller id,
+/// and the auth-callout minted user JWT.
 pub fn gateway_publish_headers(
     correlation: ReqId,
     caller_jwt: &BridgeUserJwt,
+    caller_id: Option<&str>,
 ) -> Result<async_nats::HeaderMap, BridgeError> {
-    let mut map = gateway_req_headers(correlation)?;
+    let mut map = gateway_req_headers(correlation, caller_id)?;
     let minted = MintedUserJwt::new(caller_jwt.as_str()).map_err(|e| BridgeError::Mint(e.to_string()))?;
     let header_value = CallerJwtHeaderValue::from_minted(&minted);
     let nats_name = async_nats::header::HeaderName::from_static(CALLER_JWT_HEADER_NAME);
@@ -513,6 +522,15 @@ fn caller_auth_from(headers: &HeaderMap) -> Result<CallerHttpsAuth, BridgeError>
         .and_then(|v| v.to_str().ok())
         .ok_or(BridgeError::MissingAuthorization)?;
     Ok(CallerHttpsAuth::new(raw.to_owned()))
+}
+
+fn caller_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(GATEWAY_CALLER_ID_HTTP)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 fn agent_header_parse(headers: &HeaderMap) -> Result<BridgeAgentId, BridgeError> {
@@ -536,7 +554,11 @@ fn json_rpc_corr_id(payload: &Value) -> ReqId {
 }
 
 fn extract_last_sequence(params: &Value) -> Option<u64> {
+    // Direct cursor keys — `lastSeq` is the canonical name used by
+    // `a2a-nats-http` and `a2a-nats-stdio`; the others are
+    // backwards-compatible aliases the SDK has accepted over time.
     for key in [
+        "lastSeq",
         "last_known_sequence_number",
         "lastSequence",
         "last_sequence",
@@ -544,18 +566,29 @@ fn extract_last_sequence(params: &Value) -> Option<u64> {
         "resume_from_sequence",
         "resumeFromSeq",
     ] {
-        if let Some(v) = params.get(key) {
-            if let Some(n) = v.as_u64() {
-                return Some(n);
-            }
-            if let Some(s) = v.as_str()
-                && let Ok(parsed) = s.parse::<u64>()
-            {
+        if let Some(parsed) = read_u64_field(params, key) {
+            return Some(parsed);
+        }
+    }
+    // Older clients pass the resume point under SSE-style
+    // `metadata.lastEventId`; honor it so reconnects don't replay or
+    // skip events for those callers.
+    if let Some(metadata) = params.get("metadata") {
+        for key in ["lastEventId", "last_event_id"] {
+            if let Some(parsed) = read_u64_field(metadata, key) {
                 return Some(parsed);
             }
         }
     }
     None
+}
+
+fn read_u64_field(value: &Value, key: &str) -> Option<u64> {
+    let field = value.get(key)?;
+    if let Some(n) = field.as_u64() {
+        return Some(n);
+    }
+    field.as_str()?.parse::<u64>().ok()
 }
 
 fn resub_task_and_seq(body: &Value) -> Result<(A2aTaskId, u64), BridgeError> {
@@ -615,6 +648,7 @@ fn bridge_error_into_response(e: BridgeError) -> Response {
 pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppState) -> Result<Response, BridgeError> {
     let caller_auth = caller_auth_from(&headers)?;
     let agent_id = agent_header_parse(&headers)?;
+    let caller_id = caller_id_from_headers(&headers);
     let jwt = state.auth.mint(&caller_auth).await?;
     let v: Value = serde_json::from_slice(&body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
     let Some(method) = v.get("method").and_then(Value::as_str) else {
@@ -639,7 +673,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
             .jetstream
             .task_event_payload_stream(&jwt, &state.prefix, plan)
             .await?;
-        let nats_headers = gateway_publish_headers(req_id, &jwt)?;
+        let nats_headers = gateway_publish_headers(req_id, &jwt, caller_id.as_deref())?;
         let unary_reply = state
             .publisher
             .publish_unary_to_gateway(&subject, &jwt, nats_headers, body.as_ref())
@@ -655,7 +689,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
                 .status(StatusCode::OK)
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(axum::body::Body::from(unary_reply))
-                .map_err(|e| BridgeError::NatsPublish(e.to_string()));
+                .map_err(|e| BridgeError::ResponseBuild(e.to_string()));
         }
         let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads);
         return Ok(Sse::new(merged).keep_alive(KeepAlive::default()).into_response());
@@ -663,13 +697,18 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
 
     let reply = state
         .publisher
-        .publish_unary_to_gateway(&subject, &jwt, gateway_publish_headers(req_id, &jwt)?, body.as_ref())
+        .publish_unary_to_gateway(
+            &subject,
+            &jwt,
+            gateway_publish_headers(req_id, &jwt, caller_id.as_deref())?,
+            body.as_ref(),
+        )
         .await?;
     Response::builder()
         .status(StatusCode::OK)
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(reply))
-        .map_err(|e| BridgeError::NatsPublish(e.to_string()))
+        .map_err(|e| BridgeError::ResponseBuild(e.to_string()))
 }
 
 #[cfg(test)]
@@ -679,5 +718,20 @@ mod tests {
     #[test]
     fn default_a2a_prefix_constructs() {
         assert_eq!(default_a2a_prefix().as_str(), "a2a");
+    }
+
+    #[test]
+    fn extract_last_sequence_reads_canonical_and_legacy_keys() {
+        let last_seq = serde_json::json!({"lastSeq": 7});
+        assert_eq!(extract_last_sequence(&last_seq), Some(7));
+
+        let metadata_last_event_id = serde_json::json!({"metadata": {"lastEventId": "42"}});
+        assert_eq!(extract_last_sequence(&metadata_last_event_id), Some(42));
+
+        let resume_string = serde_json::json!({"resume_from_sequence": "13"});
+        assert_eq!(extract_last_sequence(&resume_string), Some(13));
+
+        let missing = serde_json::json!({"unrelated": 99});
+        assert_eq!(extract_last_sequence(&missing), None);
     }
 }
