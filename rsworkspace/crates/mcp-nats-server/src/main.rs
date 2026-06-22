@@ -14,7 +14,7 @@ use crate::constants::MCP_ENDPOINT;
 
 use anyhow::Result;
 
-#[allow(inline_module_block)]
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 mod runtime {
     use std::collections::HashMap;
     use std::io;
