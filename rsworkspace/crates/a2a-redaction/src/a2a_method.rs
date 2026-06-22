@@ -29,7 +29,7 @@ pub enum A2aMethod {
     PushNotificationList,
     #[serde(rename = "tasks/pushNotificationConfig/delete")]
     PushNotificationDelete,
-    #[serde(rename = "agent/card")]
+    #[serde(rename = "agent/getAuthenticatedExtendedCard")]
     AgentCard,
 }
 
@@ -46,7 +46,7 @@ impl A2aMethod {
             Self::PushNotificationGet => "tasks/pushNotificationConfig/get",
             Self::PushNotificationList => "tasks/pushNotificationConfig/list",
             Self::PushNotificationDelete => "tasks/pushNotificationConfig/delete",
-            Self::AgentCard => "agent/card",
+            Self::AgentCard => "agent/getAuthenticatedExtendedCard",
         }
     }
 
