@@ -449,6 +449,11 @@ where
     // the fold was fully clean, so a later start re-folds and repairs rather than
     // declaring an incomplete rebuild complete.
     let mut clean = true;
+    // The checkpoint may only advance once the fold has actually reached `target`.
+    // The message stream can end early (returning `None`) before the tail is
+    // drained; without this flag the post-loop code would still checkpoint at
+    // `target` and permanently skip the unfolded `(last folded, target]` gap.
+    let mut reached_target = false;
 
     while let Some(message) = messages.next().await {
         let message = message.map_err(|source| {
@@ -471,11 +476,21 @@ where
                 target = fresh.state.last_sequence;
                 continue;
             }
+            reached_target = true;
             break;
         }
     }
 
-    if !clean {
+    if !clean || !reached_target {
+        // The rebuild is incomplete (a KV write failed, or the stream ended before
+        // the tail). Leave the checkpoint behind so the next start re-folds and
+        // self-heals rather than declaring catch-up complete with a gap.
+        if !reached_target {
+            tracing::warn!(
+                target,
+                "schedules read-model catch-up ended before reaching the stream tail; will re-fold on next start"
+            );
+        }
         return Ok(());
     }
 
