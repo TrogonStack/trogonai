@@ -107,6 +107,16 @@ jobs:
         with:
           tool: cargo-llvm-cov,nextest
 
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build decider components for sim fixtures
+        run: |
+          cargo component build -p trogon-light-decider --target wasm32-unknown-unknown --release
+          cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
+          cargo component build -p trogon-decider-spike --target wasm32-unknown-unknown --release
+        working-directory: rsworkspace
+
       - name: Run documentation tests
         run: cargo test --doc
         working-directory: rsworkspace
@@ -154,5 +164,59 @@ jobs:
           cache-workspace-crates: true
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release --workspace --exclude trogon-light-decider --exclude trogon-schedules-decider --exclude trogon-decider-spike
         working-directory: rsworkspace
+
+  wasm-decider:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install cargo-component and wasm-tools
+        run: |
+          cargo install cargo-component --locked --version 0.21.1
+          cargo install wasm-tools --locked --version 1.250.0
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: rsworkspace -> target
+          save-if: always
+
+      - name: Build Light decider component
+        run: cargo component build -p trogon-light-decider --target wasm32-unknown-unknown --release
+        working-directory: rsworkspace
+
+      - name: Build schedules decider component
+        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
+        working-directory: rsworkspace
+
+      - name: Assert zero imports and validate
+        run: |
+          for WASM in rsworkspace/target/wasm32-unknown-unknown/release/trogon_light_decider.wasm rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm; do
+            wasm-tools component wit "$WASM" | tee /tmp/wit.txt
+            if grep -E '^[[:space:]]*import ' /tmp/wit.txt; then
+              echo "component declares imports: $WASM"
+              exit 1
+            fi
+            wasm-tools validate "$WASM"
+          done
+
+      - name: Run decider-test suites
+        run: |
+          cd rsworkspace
+          cargo test -p trogon-decider-sim --test light --test schedules --features test-support
+          cargo test -p trogon-decider-guest-macros --test compile_fail
+          cargo build -p trogon-decider-test --release
+          ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_light_decider.wasm cli/trogon-decider-test/light.yaml
+          ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm cli/trogon-decider-test/schedules.yaml

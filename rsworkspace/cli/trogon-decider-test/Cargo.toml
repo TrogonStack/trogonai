@@ -1,0 +1,27 @@
+[package]
+name = "trogon-decider-test"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "decider-test"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+trogon-decider = { workspace = true }
+trogon-decider-sim = { workspace = true }
+trogon-decider-wit = { workspace = true, features = ["host"] }
+trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["light", "schedules"] }

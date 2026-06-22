@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "cli/trogon-decider-test"]
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -28,6 +28,11 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 jsonrpc-nats = { path = "crates/jsonrpc-nats" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
+trogon-decider = { version = "0.1.0", path = "crates/trogon-decider" }
+trogon-decider-wit = { path = "crates/trogon-decider-wit" }
+trogon-decider-guest-macros = { path = "crates/trogon-decider-guest-macros" }
+trogon-decider-guest-sdk = { path = "crates/trogon-decider-guest-sdk" }
+trogon-decider-sim = { path = "crates/trogon-decider-sim" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-identity-types = { path = "crates/trogon-identity-types" }
 trogon-service-config = { path = "crates/trogon-service-config" }
@@ -102,6 +107,10 @@ tempfile = "=3.27.0"
 time = "=0.3.47"
 url = "=2.5.8"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
+prost-reflect = "=0.14.7"
+serde_yaml = "=0.9.34"
+wasmtime-wasi = "=29.0.1"
+wit-bindgen = "=0.41.0"
 
 # Auth callout
 hex = "=0.4.3"

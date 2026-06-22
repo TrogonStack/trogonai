@@ -28,3 +28,12 @@ pub use v1::__buffa::oneof::delivery::nats_message::source::Kind as SourceKind;
 pub use v1::__buffa::oneof::schedule::Kind as ScheduleKind;
 pub use v1::__buffa::oneof::schedule_event::Event as ScheduleEventCase;
 pub use v1::__buffa::oneof::schedule_status::Kind as ScheduleStatusKind;
+
+/// Stable type URLs for scheduler command envelopes.
+pub const CREATE_SCHEDULE_TYPE_URL: &str = v1::CreateScheduleCommand::TYPE_URL;
+pub const PAUSE_SCHEDULE_TYPE_URL: &str = v1::PauseScheduleCommand::TYPE_URL;
+pub const REMOVE_SCHEDULE_TYPE_URL: &str = v1::RemoveScheduleCommand::TYPE_URL;
+pub const RESUME_SCHEDULE_TYPE_URL: &str = v1::ResumeScheduleCommand::TYPE_URL;
+
+/// Stable type URL for the [`state_v1::State`] snapshot schema version tag.
+pub const SCHEDULES_STATE_SCHEMA_VERSION: &str = state_v1::State::TYPE_URL;

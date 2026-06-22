@@ -1,0 +1,53 @@
+error: failed to read path for WIT [$WORKSPACE/target/tests/trybuild/trogon-decider-guest-macros/../trogon-decider-wit/wit]
+
+       Caused by:
+         No such file or directory (os error 2)
+  --> tests/ui/bundle_mismatched_event.rs:50:1
+   |
+50 | / export_decider!(
+51 | |     TurnOnCommand {
+52 | |         type_url = TURN_ON_TYPE_URL,
+53 | |         proto = v1::TurnOn,
+...  |
+64 | |     },
+65 | | );
+   | |_^
+   |
+   = note: this error originates in the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find module or crate `exports` in this scope
+  --> tests/ui/bundle_mismatched_event.rs:50:1
+   |
+50 | / export_decider!(
+51 | |     TurnOnCommand {
+52 | |         type_url = TURN_ON_TYPE_URL,
+53 | |         proto = v1::TurnOn,
+...  |
+64 | |     },
+65 | | );
+   | |_^ use of unresolved module or unlinked crate `exports`
+   |
+   = help: if you wanted to use a crate named `exports`, use `cargo add exports` to add it to your `Cargo.toml`
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `export` in `__trogon_decider_bindings`
+  --> tests/ui/bundle_mismatched_event.rs:50:1
+   |
+50 | / export_decider!(
+51 | |     TurnOnCommand {
+52 | |         type_url = TURN_ON_TYPE_URL,
+53 | |         proto = v1::TurnOn,
+...  |
+64 | |     },
+65 | | );
+   | |_^ could not find `export` in `__trogon_decider_bindings`
+   |
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `WritePrecondition`
+ --> tests/ui/bundle_mismatched_event.rs:1:41
+  |
+1 | use trogon_decider::{Decider, Decision, WritePrecondition};
+  |                                         ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

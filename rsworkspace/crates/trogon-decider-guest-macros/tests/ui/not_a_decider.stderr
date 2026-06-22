@@ -1,0 +1,77 @@
+error: failed to read path for WIT [$WORKSPACE/target/tests/trybuild/trogon-decider-guest-macros/../trogon-decider-wit/wit]
+
+       Caused by:
+         No such file or directory (os error 2)
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+   |
+   = note: this error originates in the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find module or crate `exports` in this scope
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ use of unresolved module or unlinked crate `exports`
+   |
+   = help: if you wanted to use a crate named `exports`, use `cargo add exports` to add it to your `Cargo.toml`
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `export` in `__trogon_decider_bindings`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ could not find `export` in `__trogon_decider_bindings`
+   |
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `TurnOnCommand`
+ --> tests/ui/not_a_decider.rs:2:31
+  |
+2 | use trogonai_proto::example::{TurnOnCommand, TURN_ON_TYPE_URL, LIGHT_STATE_SCHEMA_VERSION};
+  |                               ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)

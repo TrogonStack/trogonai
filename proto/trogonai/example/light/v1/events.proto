@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.example.light.v1;
+
+import "trogonai/example/light/v1/light_turned_on.proto";
+
+message LightEvent {
+  oneof event {
+    LightTurnedOn light_turned_on = 1;
+  }
+}

@@ -1,0 +1,37 @@
+package trogon:decider@0.1.0;
+
+interface handler {
+  record any-envelope { %type: string, payload: list<u8> }
+  record command-envelope { %type: string, payload: list<u8> }
+  record domain-error { code: string, message: string }
+
+  variant write-precondition { any, stream-exists, no-stream }
+  record command-spec {
+    command-type: string,
+    write-precondition: option<write-precondition>,
+  }
+  record module-descriptor {
+    name: string,
+    version: string,
+    commands: list<command-spec>,
+  }
+
+  variant decide-error {
+    rejected(domain-error),
+    faulted(domain-error),
+  }
+
+  descriptor: func() -> module-descriptor;
+  stream-id: func(command: command-envelope) -> result<string, domain-error>;
+
+  resource session {
+    constructor(snapshot: option<list<u8>>);
+    evolve: func(events: list<any-envelope>) -> result<_, domain-error>;
+    decide: func(command: command-envelope) -> result<list<any-envelope>, decide-error>;
+    snapshot: func() -> option<list<u8>>;
+  }
+}
+
+world decider {
+  export handler;
+}

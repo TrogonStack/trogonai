@@ -1,8 +1,7 @@
 use buffa::{Message as _, MessageField};
-use trogon_decider_runtime::{
-    EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, SnapshotPayloadData, SnapshotPayloadDecode,
-    SnapshotPayloadEncode,
-};
+use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType};
+#[cfg(feature = "runtime-snapshot")]
+use trogon_decider_runtime::{SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode};
 
 use super::*;
 
@@ -380,6 +379,7 @@ fn event_type_rejects_missing_event_case() {
     ));
 }
 
+#[cfg(feature = "runtime-snapshot")]
 #[test]
 fn state_snapshot_round_trips_through_snapshot_traits() {
     let state = state_v1::State {
@@ -399,6 +399,7 @@ fn state_snapshot_round_trips_through_snapshot_traits() {
     assert_eq!(decoded, state);
 }
 
+#[cfg(feature = "runtime-snapshot")]
 #[test]
 fn state_snapshot_type_uses_generated_full_name() {
     assert_eq!(
@@ -407,6 +408,7 @@ fn state_snapshot_type_uses_generated_full_name() {
     );
 }
 
+#[cfg(feature = "runtime-snapshot")]
 #[test]
 fn state_snapshot_decode_preserves_payload_decode_errors() {
     let error = <state_v1::State as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(b"\0")).unwrap_err();

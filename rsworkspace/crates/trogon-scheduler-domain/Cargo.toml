@@ -1,0 +1,32 @@
+[package]
+name = "trogon-scheduler-domain"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["schedule-validation"]
+schedule-validation = ["dep:chrono-tz", "dep:rrule"]
+runtime-snapshot = ["dep:trogon-decider-runtime", "trogonai-proto/runtime-snapshot", "trogonai-proto/runtime-host"]
+
+[dependencies]
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = { version = "0.10", optional = true }
+cron = "0.15"
+rrule = { version = "0.14", optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+trogon-decider = { workspace = true }
+trogon-decider-runtime = { workspace = true, optional = true }
+trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }
+
+[dev-dependencies]
+proptest = "1"
+trogon-decider = { workspace = true, features = ["test-support"] }
