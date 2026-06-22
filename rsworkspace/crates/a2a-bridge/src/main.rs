@@ -41,43 +41,18 @@ async fn run() -> Result<(), BootstrapError> {
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum BootstrapError {
+    #[error("BRIDGE_LISTEN_ADDR must be a SocketAddr")]
     BadListenAddr,
-    Listen(std::io::Error),
-    Bridge(BridgeError),
+    #[error("bind failed: {0}")]
+    Listen(#[source] std::io::Error),
+    #[error("{0}")]
+    Bridge(#[from] BridgeError),
+    #[error("unknown A2A_BRIDGE_TRANSPORT (use stub or nats): {0}")]
     UnknownTransport(String),
-    Serve(std::io::Error),
-}
-
-impl From<BridgeError> for BootstrapError {
-    fn from(value: BridgeError) -> Self {
-        Self::Bridge(value)
-    }
-}
-
-impl std::fmt::Display for BootstrapError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadListenAddr => write!(f, "BRIDGE_LISTEN_ADDR must be a SocketAddr"),
-            Self::Listen(e) => write!(f, "bind failed: {e}"),
-            Self::Serve(e) => write!(f, "HTTP server failed: {e}"),
-            Self::Bridge(inner) => write!(f, "{inner}"),
-            Self::UnknownTransport(value) => {
-                write!(f, "unknown A2A_BRIDGE_TRANSPORT (use stub or nats): {value}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for BootstrapError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Listen(e) | Self::Serve(e) => Some(e),
-            Self::Bridge(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("HTTP server failed: {0}")]
+    Serve(#[source] std::io::Error),
 }
 
 fn bootstrap_stub_transport(nats_url: &str) -> AppState {
