@@ -17,3 +17,4 @@ workspace = true
 a2a = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }

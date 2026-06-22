@@ -68,7 +68,11 @@ mod tests {
             reference_task_ids: None,
         };
         assert_eq!(
-            serde_json::to_value(r.redact_message(msg.clone(), &SkillId::new("s")).unwrap()).unwrap(),
+            serde_json::to_value(
+                r.redact_message(msg.clone(), &SkillId::new("s").expect("valid"))
+                    .unwrap()
+            )
+            .unwrap(),
             serde_json::to_value(&msg).unwrap()
         );
     }

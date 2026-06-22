@@ -29,7 +29,9 @@ mod tests {
             extensions: None,
             reference_task_ids: None,
         };
-        let out = r.redact_message(msg.clone(), &SkillId::new("skill")).unwrap();
+        let out = r
+            .redact_message(msg.clone(), &SkillId::new("skill").expect("valid"))
+            .unwrap();
         assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(msg).unwrap());
     }
 
@@ -44,7 +46,9 @@ mod tests {
             metadata: None,
             extensions: None,
         };
-        let out = r.redact_artifact(art.clone(), &SkillId::new("skill")).unwrap();
+        let out = r
+            .redact_artifact(art.clone(), &SkillId::new("skill").expect("valid"))
+            .unwrap();
         assert_eq!(serde_json::to_value(out).unwrap(), serde_json::to_value(art).unwrap());
     }
 }

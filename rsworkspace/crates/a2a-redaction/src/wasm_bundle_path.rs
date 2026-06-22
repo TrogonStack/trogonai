@@ -15,6 +15,10 @@ impl WasmBundlePath {
         self.0.as_path()
     }
 
+    // The `SkillId` constructor rejects path separators, `..`, and control
+    // characters, so the join operations below cannot escape the configured
+    // bundle root — the value is safe to interpolate into the filesystem
+    // path by construction.
     pub fn join_skill_wasm(&self, skill: &SkillId) -> PathBuf {
         self.as_path().join(format!("{}.wasm", skill.as_str()))
     }
@@ -53,7 +57,7 @@ mod tests {
     #[test]
     fn skill_wasm_path_appends_slug() {
         let p = WasmBundlePath::new("/b");
-        let got = p.join_skill_wasm(&SkillId::new("risk"));
+        let got = p.join_skill_wasm(&SkillId::new("risk").expect("valid"));
         assert_eq!(got.as_os_str(), "/b/risk.wasm");
     }
 }

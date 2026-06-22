@@ -1,36 +1,22 @@
-use std::fmt;
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RedactionError {
+    #[error("wasm engine initialization failed: {0}")]
     WasmEngine(String),
+    #[error("wasm module compile failed: {0}")]
     WasmModule(String),
+    #[error("wasm module instantiation failed: {0}")]
     WasmInstance(String),
+    #[error("wasm redaction abi mismatch: {0}")]
     WasmAbi(String),
+    #[error("wasm redact_part call failed: {0}")]
     WasmCall(String),
+    #[error("wasm linear memory access failed: {0}")]
     WasmMemory(String),
-    Json(String),
-}
-
-impl fmt::Display for RedactionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::WasmEngine(msg) => write!(f, "wasm engine initialization failed: {msg}"),
-            Self::WasmModule(msg) => write!(f, "wasm module compile failed: {msg}"),
-            Self::WasmInstance(msg) => write!(f, "wasm module instantiation failed: {msg}"),
-            Self::WasmAbi(msg) => write!(f, "wasm redaction abi mismatch: {msg}"),
-            Self::WasmCall(msg) => write!(f, "wasm redact_part call failed: {msg}"),
-            Self::WasmMemory(msg) => write!(f, "wasm linear memory access failed: {msg}"),
-            Self::Json(msg) => write!(f, "json serialization for redaction failed: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for RedactionError {}
-
-impl From<serde_json::Error> for RedactionError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Json(value.to_string())
-    }
+    /// JSON encode/decode of a `Part` payload failed. Preserves the typed
+    /// `serde_json::Error` as `source()` so error chains survive past this
+    /// boundary instead of being flattened to a String.
+    #[error("json serialization for redaction failed: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 #[cfg(test)]
