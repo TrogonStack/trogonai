@@ -3,25 +3,24 @@ edition = "2024";
 package trogonai.scheduler.schedules.projections.v1;
 
 import "google/protobuf/timestamp.proto";
-import "trogonai/scheduler/schedules/v1/delivery.proto";
-import "trogonai/scheduler/schedules/v1/message.proto";
-import "trogonai/scheduler/schedules/v1/schedule.proto";
-import "trogonai/scheduler/schedules/v1/schedule_status.proto";
+import "trogonai/scheduler/schedules/projections/v1/delivery.proto";
+import "trogonai/scheduler/schedules/projections/v1/message.proto";
+import "trogonai/scheduler/schedules/projections/v1/schedule_spec.proto";
+import "trogonai/scheduler/schedules/projections/v1/schedule_status.proto";
 
 // Schedule is the read-model projection of a schedule's current state, folded
 // from the schedule event stream and stored as the value of each entry in the
 // schedules KV bucket.
 //
-// It is intentionally independent of schedules.v1.Schedule (the scheduling
-// strategy, which appears here only as a nested field): this is a derived,
-// rebuildable read view, so its shape evolves on its own under protobuf's field
-// rules. Keeping it in its own package isolates those changes from the event and
-// command schemas.
+// It is a derived, rebuildable read view, so it defines its own status, schedule
+// spec, delivery, and message types rather than embedding the event and command
+// protos. That keeps this storage shape free to evolve under protobuf's field
+// rules in isolation from the schemas it is folded from.
 message Schedule {
   // Stable schedule id; also the schedule stream id.
   string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
   // Current lifecycle status (scheduled or paused).
-  trogonai.scheduler.schedules.v1.ScheduleStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
+  ScheduleStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
   // True once a recurring schedule has run to exhaustion: it stays visible but
   // will never fire again.
   bool completed = 3;
@@ -30,9 +29,9 @@ message Schedule {
   // The most recently recorded occurrence, if any has fired.
   google.protobuf.Timestamp last_occurrence_at = 5;
   // The schedule definition recorded at creation.
-  trogonai.scheduler.schedules.v1.Schedule schedule = 6 [features.field_presence = LEGACY_REQUIRED];
+  ScheduleSpec schedule = 6 [features.field_presence = LEGACY_REQUIRED];
   // The delivery definition recorded at creation.
-  trogonai.scheduler.schedules.v1.Delivery delivery = 7 [features.field_presence = LEGACY_REQUIRED];
+  Delivery delivery = 7 [features.field_presence = LEGACY_REQUIRED];
   // The static message payload and headers recorded at creation.
-  trogonai.scheduler.schedules.v1.Message message = 8 [features.field_presence = LEGACY_REQUIRED];
+  Message message = 8 [features.field_presence = LEGACY_REQUIRED];
 }

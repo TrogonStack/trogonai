@@ -159,45 +159,149 @@ fn apply(
     }
 }
 
-/// Builds the stored view from a `ScheduleCreated` event. The event already
-/// carries the schedule/delivery/message definitions as the same `v1` protos the
-/// view embeds, so this just copies them and stamps the initial folded fields.
+/// Builds the stored view from a `ScheduleCreated` event. The event carries the
+/// schedule/delivery/message definitions as `v1` protos, which are folded into
+/// the read model's own `projections_v1` copies (see [`twin`]) and stamped with
+/// the initial folded fields.
 fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::Schedule, ScheduleTransitionError> {
-    if created.schedule.as_option().is_none() {
+    let Some(schedule) = created.schedule.clone().into_option() else {
         return Err(ScheduleTransitionError::MalformedEvent {
             context: "created event has no schedule",
         });
-    }
-    if created.delivery.as_option().is_none() {
+    };
+    let Some(delivery) = created.delivery.clone().into_option() else {
         return Err(ScheduleTransitionError::MalformedEvent {
             context: "created event has no delivery",
         });
-    }
-    if created.message.as_option().is_none() {
+    };
+    let Some(message) = created.message.clone().into_option() else {
         return Err(ScheduleTransitionError::MalformedEvent {
             context: "created event has no message",
         });
-    }
+    };
     Ok(projections_v1::Schedule {
         schedule_id: created.schedule_id.clone(),
-        status: created.status.clone(),
+        status: match created.status.clone().into_option() {
+            Some(status) => MessageField::some(twin::status_to_projection(status)),
+            None => MessageField::none(),
+        },
         completed: Some(false),
         next_occurrence_at: MessageField::none(),
         last_occurrence_at: MessageField::none(),
-        schedule: created.schedule.clone(),
-        delivery: created.delivery.clone(),
-        message: created.message.clone(),
+        schedule: MessageField::some(twin::schedule_spec_to_projection(schedule)),
+        delivery: MessageField::some(twin::delivery_to_projection(delivery)),
+        message: MessageField::some(twin::message_to_projection(message)),
     })
 }
 
-/// A `ScheduleStatus` proto: `enabled` selects scheduled vs paused.
-fn status_proto(enabled: bool) -> v1::ScheduleStatus {
+/// A projection `ScheduleStatus`: `enabled` selects scheduled vs paused.
+fn status_proto(enabled: bool) -> projections_v1::ScheduleStatus {
     let kind = if enabled {
-        v1::schedule_status::Scheduled {}.into()
+        projections_v1::schedule_status::Scheduled {}.into()
     } else {
-        v1::schedule_status::Paused {}.into()
+        projections_v1::schedule_status::Paused {}.into()
     };
-    v1::ScheduleStatus { kind: Some(kind) }
+    projections_v1::ScheduleStatus { kind: Some(kind) }
+}
+
+/// Folds the `v1` event protos into the read model's own `projections_v1` copies.
+///
+/// The read model owns its storage shape (it does not embed the event protos), so
+/// the schedule spec, delivery, message, and status each map field-for-field into
+/// their projection twin. Only the inbound direction exists here: the projection
+/// is write-only, and the query side decodes the stored proto into its own value
+/// objects rather than back into `v1`.
+mod twin {
+    use buffa::MessageField;
+
+    use crate::{projections_v1, v1};
+
+    use projections_v1::__buffa::oneof::delivery::Kind as ViewDeliveryKind;
+    use projections_v1::__buffa::oneof::delivery::nats_message::source::Kind as ViewSourceKind;
+    use projections_v1::__buffa::oneof::schedule_spec::Kind as ViewScheduleKind;
+    use projections_v1::__buffa::oneof::schedule_status::Kind as ViewStatusKind;
+    use v1::__buffa::oneof::delivery::Kind as EventDeliveryKind;
+    use v1::__buffa::oneof::delivery::nats_message::source::Kind as EventSourceKind;
+    use v1::__buffa::oneof::schedule::Kind as EventScheduleKind;
+    use v1::__buffa::oneof::schedule_status::Kind as EventStatusKind;
+
+    pub(super) fn status_to_projection(value: v1::ScheduleStatus) -> projections_v1::ScheduleStatus {
+        projections_v1::ScheduleStatus {
+            kind: value.kind.map(|kind| match kind {
+                EventStatusKind::Scheduled(_) => {
+                    ViewStatusKind::Scheduled(Box::new(projections_v1::schedule_status::Scheduled {}))
+                }
+                EventStatusKind::Paused(_) => {
+                    ViewStatusKind::Paused(Box::new(projections_v1::schedule_status::Paused {}))
+                }
+            }),
+        }
+    }
+
+    pub(super) fn schedule_spec_to_projection(value: v1::Schedule) -> projections_v1::ScheduleSpec {
+        projections_v1::ScheduleSpec {
+            kind: value.kind.map(|kind| match kind {
+                EventScheduleKind::At(at) => {
+                    ViewScheduleKind::At(Box::new(projections_v1::schedule_spec::At { at: at.at }))
+                }
+                EventScheduleKind::Every(every) => {
+                    ViewScheduleKind::Every(Box::new(projections_v1::schedule_spec::Every { every: every.every }))
+                }
+                EventScheduleKind::Cron(cron) => ViewScheduleKind::Cron(Box::new(projections_v1::schedule_spec::Cron {
+                    expr: cron.expr,
+                    timezone: cron.timezone,
+                })),
+                EventScheduleKind::Rrule(rrule) => {
+                    ViewScheduleKind::Rrule(Box::new(projections_v1::schedule_spec::RRule {
+                        dtstart: rrule.dtstart,
+                        rrule: rrule.rrule,
+                        timezone: rrule.timezone,
+                        rdate: rrule.rdate,
+                        exdate: rrule.exdate,
+                    }))
+                }
+            }),
+        }
+    }
+
+    pub(super) fn delivery_to_projection(value: v1::Delivery) -> projections_v1::Delivery {
+        projections_v1::Delivery {
+            kind: value.kind.map(|kind| match kind {
+                EventDeliveryKind::NatsMessage(nats) => {
+                    ViewDeliveryKind::NatsMessage(Box::new(projections_v1::delivery::NatsMessage {
+                        subject: nats.subject,
+                        ttl: nats.ttl,
+                        source: match nats.source.into_option() {
+                            Some(source) => MessageField::some(projections_v1::delivery::nats_message::Source {
+                                kind: source.kind.map(|kind| match kind {
+                                    EventSourceKind::LatestFromSubject(latest) => ViewSourceKind::LatestFromSubject(
+                                        Box::new(projections_v1::delivery::nats_message::LatestFromSubject {
+                                            subject: latest.subject,
+                                        }),
+                                    ),
+                                }),
+                            }),
+                            None => MessageField::none(),
+                        },
+                    }))
+                }
+            }),
+        }
+    }
+
+    pub(super) fn message_to_projection(value: v1::Message) -> projections_v1::Message {
+        projections_v1::Message {
+            content: value.content,
+            headers: value
+                .headers
+                .into_iter()
+                .map(|header| projections_v1::Header {
+                    name: header.name,
+                    value: header.value,
+                })
+                .collect(),
+        }
+    }
 }
 
 fn validate_event_payload_schedule_id(
@@ -681,8 +785,9 @@ mod tests {
     use chrono::DateTime;
 
     use super::*;
-    use crate::ScheduleStatusKind;
     use crate::v1;
+
+    use projections_v1::__buffa::oneof::schedule_status::Kind as ViewStatusKind;
 
     fn timestamp_from_str(rfc3339: &str) -> Timestamp {
         let dt = DateTime::parse_from_rfc3339(rfc3339).unwrap();
@@ -808,7 +913,7 @@ mod tests {
     fn is_paused(view: &projections_v1::Schedule) -> bool {
         matches!(
             view.status.as_option().and_then(|status| status.kind.as_ref()),
-            Some(ScheduleStatusKind::Paused(_))
+            Some(ViewStatusKind::Paused(_))
         )
     }
 
@@ -820,10 +925,20 @@ mod tests {
         assert_eq!(view.schedule_id, "backup");
         assert_eq!(view.completed, Some(false));
         assert!(view.next_occurrence_at.as_option().is_none());
-        // The definition fields are copied verbatim from the event.
-        assert_eq!(view.schedule, created.schedule);
-        assert_eq!(view.delivery, created.delivery);
-        assert_eq!(view.message, created.message);
+        // The definition fields are folded field-for-field from the event into
+        // the read model's own projection copies.
+        assert_eq!(
+            view.schedule.into_option(),
+            created.schedule.into_option().map(twin::schedule_spec_to_projection)
+        );
+        assert_eq!(
+            view.delivery.into_option(),
+            created.delivery.into_option().map(twin::delivery_to_projection)
+        );
+        assert_eq!(
+            view.message.into_option(),
+            created.message.into_option().map(twin::message_to_projection)
+        );
     }
 
     #[test]

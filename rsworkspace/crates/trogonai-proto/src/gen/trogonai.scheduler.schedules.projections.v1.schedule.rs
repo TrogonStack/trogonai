@@ -5,11 +5,10 @@
 /// from the schedule event stream and stored as the value of each entry in the
 /// schedules KV bucket.
 ///
-/// It is intentionally independent of schedules.v1.Schedule (the scheduling
-/// strategy, which appears here only as a nested field): this is a derived,
-/// rebuildable read view, so its shape evolves on its own under protobuf's field
-/// rules. Keeping it in its own package isolates those changes from the event and
-/// command schemas.
+/// It is a derived, rebuildable read view, so it defines its own status, schedule
+/// spec, delivery, and message types rather than embedding the event and command
+/// protos. That keeps this storage shape free to evolve under protobuf's field
+/// rules in isolation from the schemas it is folded from.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
@@ -27,7 +26,7 @@ pub struct Schedule {
     ///
     /// Field 2: `status`
     #[serde(rename = "status")]
-    pub status: ::buffa::MessageField<super::super::v1::ScheduleStatus>,
+    pub status: ::buffa::MessageField<ScheduleStatus>,
     /// True once a recurring schedule has run to exhaustion: it stays visible but
     /// will never fire again.
     ///
@@ -63,17 +62,17 @@ pub struct Schedule {
     ///
     /// Field 6: `schedule`
     #[serde(rename = "schedule")]
-    pub schedule: ::buffa::MessageField<super::super::v1::Schedule>,
+    pub schedule: ::buffa::MessageField<ScheduleSpec>,
     /// The delivery definition recorded at creation.
     ///
     /// Field 7: `delivery`
     #[serde(rename = "delivery")]
-    pub delivery: ::buffa::MessageField<super::super::v1::Delivery>,
+    pub delivery: ::buffa::MessageField<Delivery>,
     /// The static message payload and headers recorded at creation.
     ///
     /// Field 8: `message`
     #[serde(rename = "message")]
-    pub message: ::buffa::MessageField<super::super::v1::Message>,
+    pub message: ::buffa::MessageField<Message>,
 }
 impl ::core::fmt::Debug for Schedule {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

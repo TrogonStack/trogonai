@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.projections.v1;
+
+// ScheduleStatus is the read model's own copy of a schedule's lifecycle status.
+//
+// It mirrors the command-side status today but is defined here so the read model
+// owns its full storage shape and can evolve under protobuf's field rules without
+// depending on the event or command schemas.
+message ScheduleStatus {
+  // A oneof gives each lifecycle state a place to grow without adding fields
+  // that are invalid for other states.
+  oneof kind {
+    Scheduled scheduled = 1;
+    Paused paused = 2;
+  }
+
+  // Scheduled means the schedule participates in future fire decisions.
+  message Scheduled {}
+
+  // Paused means the schedule keeps its definition without future fires.
+  message Paused {}
+}

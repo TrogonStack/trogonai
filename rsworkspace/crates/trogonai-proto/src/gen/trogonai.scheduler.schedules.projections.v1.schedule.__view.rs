@@ -5,11 +5,10 @@
 /// from the schedule event stream and stored as the value of each entry in the
 /// schedules KV bucket.
 ///
-/// It is intentionally independent of schedules.v1.Schedule (the scheduling
-/// strategy, which appears here only as a nested field): this is a derived,
-/// rebuildable read view, so its shape evolves on its own under protobuf's field
-/// rules. Keeping it in its own package isolates those changes from the event and
-/// command schemas.
+/// It is a derived, rebuildable read view, so it defines its own status, schedule
+/// spec, delivery, and message types rather than embedding the event and command
+/// protos. That keeps this storage shape free to evolve under protobuf's field
+/// rules in isolation from the schemas it is folded from.
 #[derive(Clone, Debug, Default)]
 pub struct ScheduleView<'a> {
     /// Stable schedule id; also the schedule stream id.
@@ -20,7 +19,7 @@ pub struct ScheduleView<'a> {
     ///
     /// Field 2: `status`
     pub status: ::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::ScheduleStatusView<'a>,
+        super::super::__buffa::view::ScheduleStatusView<'a>,
     >,
     /// True once a recurring schedule has run to exhaustion: it stays visible but
     /// will never fire again.
@@ -43,20 +42,18 @@ pub struct ScheduleView<'a> {
     ///
     /// Field 6: `schedule`
     pub schedule: ::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::ScheduleView<'a>,
+        super::super::__buffa::view::ScheduleSpecView<'a>,
     >,
     /// The delivery definition recorded at creation.
     ///
     /// Field 7: `delivery`
     pub delivery: ::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::DeliveryView<'a>,
+        super::super::__buffa::view::DeliveryView<'a>,
     >,
     /// The static message payload and headers recorded at creation.
     ///
     /// Field 8: `message`
-    pub message: ::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::MessageView<'a>,
-    >,
+    pub message: ::buffa::MessageFieldView<super::super::__buffa::view::MessageView<'a>>,
 }
 impl<'a> ScheduleView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -121,7 +118,7 @@ impl<'a> ScheduleView<'a> {
                         Some(existing) => existing._merge_into_view(sub, depth - 1)?,
                         None => {
                             view.status = ::buffa::MessageFieldView::set(
-                                super::super::super::super::v1::__buffa::view::ScheduleStatusView::_decode_depth(
+                                super::super::__buffa::view::ScheduleStatusView::_decode_depth(
                                     sub,
                                     depth - 1,
                                 )?,
@@ -203,7 +200,7 @@ impl<'a> ScheduleView<'a> {
                         Some(existing) => existing._merge_into_view(sub, depth - 1)?,
                         None => {
                             view.schedule = ::buffa::MessageFieldView::set(
-                                super::super::super::super::v1::__buffa::view::ScheduleView::_decode_depth(
+                                super::super::__buffa::view::ScheduleSpecView::_decode_depth(
                                     sub,
                                     depth - 1,
                                 )?,
@@ -227,7 +224,7 @@ impl<'a> ScheduleView<'a> {
                         Some(existing) => existing._merge_into_view(sub, depth - 1)?,
                         None => {
                             view.delivery = ::buffa::MessageFieldView::set(
-                                super::super::super::super::v1::__buffa::view::DeliveryView::_decode_depth(
+                                super::super::__buffa::view::DeliveryView::_decode_depth(
                                     sub,
                                     depth - 1,
                                 )?,
@@ -251,7 +248,7 @@ impl<'a> ScheduleView<'a> {
                         Some(existing) => existing._merge_into_view(sub, depth - 1)?,
                         None => {
                             view.message = ::buffa::MessageFieldView::set(
-                                super::super::super::super::v1::__buffa::view::MessageView::_decode_depth(
+                                super::super::__buffa::view::MessageView::_decode_depth(
                                     sub,
                                     depth - 1,
                                 )?,
@@ -294,7 +291,7 @@ impl<'a> ::buffa::MessageView<'a> for ScheduleView<'a> {
             status: match self.status.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::super::super::v1::ScheduleStatus,
+                        super::super::ScheduleStatus,
                     >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
@@ -319,7 +316,7 @@ impl<'a> ::buffa::MessageView<'a> for ScheduleView<'a> {
             schedule: match self.schedule.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::super::super::v1::Schedule,
+                        super::super::ScheduleSpec,
                     >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
@@ -327,7 +324,7 @@ impl<'a> ::buffa::MessageView<'a> for ScheduleView<'a> {
             delivery: match self.delivery.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::super::super::v1::Delivery,
+                        super::super::Delivery,
                     >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
@@ -335,7 +332,7 @@ impl<'a> ::buffa::MessageView<'a> for ScheduleView<'a> {
             message: match self.message.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::super::super::v1::Message,
+                        super::super::Message,
                     >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
@@ -647,7 +644,7 @@ impl ScheduleOwnedView {
     pub fn status(
         &self,
     ) -> &::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::ScheduleStatusView<'_>,
+        super::super::__buffa::view::ScheduleStatusView<'_>,
     > {
         &self.0.reborrow().status
     }
@@ -687,9 +684,7 @@ impl ScheduleOwnedView {
     #[must_use]
     pub fn schedule(
         &self,
-    ) -> &::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::ScheduleView<'_>,
-    > {
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ScheduleSpecView<'_>> {
         &self.0.reborrow().schedule
     }
     /// The delivery definition recorded at creation.
@@ -698,9 +693,7 @@ impl ScheduleOwnedView {
     #[must_use]
     pub fn delivery(
         &self,
-    ) -> &::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::DeliveryView<'_>,
-    > {
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DeliveryView<'_>> {
         &self.0.reborrow().delivery
     }
     /// The static message payload and headers recorded at creation.
@@ -709,9 +702,7 @@ impl ScheduleOwnedView {
     #[must_use]
     pub fn message(
         &self,
-    ) -> &::buffa::MessageFieldView<
-        super::super::super::super::v1::__buffa::view::MessageView<'_>,
-    > {
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::MessageView<'_>> {
         &self.0.reborrow().message
     }
 }
