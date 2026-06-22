@@ -8,7 +8,7 @@ pub use parsing::{
     ClientNotificationMethod, ClientRequestMethod, ParsedClientSubject, ParsedServerSubject, ServerNotificationMethod,
     ServerRequestMethod, parse_client_subject, parse_server_subject,
 };
-pub use subjects::{markers, mcp_client, mcp_server};
+pub use subjects::markers;
 pub use trogon_nats::{
     FlushClient, FlushPolicy, NatsError, PublishClient, PublishOptions, RequestClient, RetryPolicy, SubscribeClient,
     client, connect, headers_with_trace_context, inject_trace_context,
@@ -47,6 +47,7 @@ mod tests {
     use trogon_nats::AdvancedMockNatsClient;
 
     use super::*;
+    use crate::nats::subjects::server;
     use crate::{McpPeerId, McpPrefix};
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -69,7 +70,7 @@ mod tests {
     #[tokio::test]
     async fn request_with_timeout_uses_typed_subject_string() {
         let nats = AdvancedMockNatsClient::new();
-        let subject = mcp_server::ListToolsSubject::new(&prefix(), &server_id());
+        let subject = server::ListToolsSubject::new(&prefix(), &server_id());
         let response = TestPayload {
             value: "ok".to_string(),
         };
@@ -92,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn request_with_timeout_returns_nats_error_for_missing_response() {
         let nats = AdvancedMockNatsClient::new();
-        let subject = mcp_server::CallToolSubject::new(&prefix(), &server_id());
+        let subject = server::CallToolSubject::new(&prefix(), &server_id());
 
         let result = request_with_timeout::<_, _, TestPayload>(
             &nats,
@@ -110,7 +111,7 @@ mod tests {
     #[tokio::test]
     async fn publish_uses_typed_subject_string() {
         let nats = AdvancedMockNatsClient::new();
-        let subject = mcp_server::ToolListChangedSubject::new(&prefix(), &client_id());
+        let subject = server::ToolListChangedSubject::new(&prefix(), &client_id());
 
         publish(
             &nats,
@@ -133,7 +134,7 @@ mod tests {
     async fn publish_returns_nats_error_when_publish_fails() {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
-        let subject = mcp_server::ResourceUpdatedSubject::new(&prefix(), &client_id());
+        let subject = server::ResourceUpdatedSubject::new(&prefix(), &client_id());
 
         let result = publish(
             &nats,

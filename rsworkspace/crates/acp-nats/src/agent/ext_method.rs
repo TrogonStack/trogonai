@@ -1,7 +1,7 @@
 use super::Bridge;
 use crate::error::map_nats_error;
 use crate::ext_method_name::ExtMethodName;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, global};
 use agent_client_protocol::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -28,7 +28,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     })?;
 
     let nats = bridge.nats();
-    let subject = agent::ExtSubject::new(bridge.config.acp_prefix_ref(), &method_name);
+    let subject = global::ExtSubject::new(bridge.config.acp_prefix_ref(), &method_name);
 
     let result = nats::request_with_timeout::<N, ExtRequest, ExtResponse>(
         nats,

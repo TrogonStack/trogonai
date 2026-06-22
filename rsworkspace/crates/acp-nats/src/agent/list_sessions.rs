@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, global};
 use agent_client_protocol::{ListSessionsRequest, ListSessionsResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -15,7 +15,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!("List sessions request");
 
     let nats = bridge.nats();
-    let subject = agent::SessionListSubject::new(bridge.config.acp_prefix_ref());
+    let subject = global::SessionListSubject::new(bridge.config.acp_prefix_ref());
 
     let result = nats::request_with_timeout::<N, ListSessionsRequest, ListSessionsResponse>(
         nats,

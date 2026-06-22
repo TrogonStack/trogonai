@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use crate::config::Config;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
-    SubscribeClient, session,
+    SubscribeClient, responses,
 };
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
@@ -111,7 +111,7 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
             return;
         }
     };
-    let subject = session::agent::ExtReadySubject::new(prefix, &acp_session_id);
+    let subject = responses::ExtReadySubject::new(prefix, &acp_session_id);
     info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
 
     let message = ExtSessionReady::new(session_id.clone());

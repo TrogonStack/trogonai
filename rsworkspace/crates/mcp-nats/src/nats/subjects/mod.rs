@@ -1,13 +1,11 @@
 pub mod client;
 pub mod markers;
-pub mod mcp_client;
-pub mod mcp_server;
 pub mod server;
 pub mod subscriptions;
 
 #[cfg(test)]
 mod tests {
-    use super::{mcp_client, mcp_server};
+    use super::{client, server, subscriptions};
     use crate::{McpPeerId, McpPrefix};
 
     fn p(s: &str) -> McpPrefix {
@@ -21,7 +19,7 @@ mod tests {
     #[test]
     fn server_initialize_subject_matches_acp_style() {
         assert_eq!(
-            mcp_server::InitializeSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
+            server::InitializeSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
             "mcp.server.filesystem.initialize"
         );
     }
@@ -29,11 +27,11 @@ mod tests {
     #[test]
     fn server_tool_request_subjects_match_mcp_method_groups() {
         assert_eq!(
-            mcp_server::ListToolsSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
+            server::ListToolsSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
             "mcp.server.filesystem.tools.list"
         );
         assert_eq!(
-            mcp_server::CallToolSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
+            server::CallToolSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
             "mcp.server.filesystem.tools.call"
         );
     }
@@ -43,23 +41,23 @@ mod tests {
         let prefix = p("mcp");
         let server = peer("filesystem");
         let subjects = [
-            mcp_server::InitializeSubject::new(&prefix, &server).to_string(),
-            mcp_server::PingSubject::new(&prefix, &server).to_string(),
-            mcp_server::CompleteSubject::new(&prefix, &server).to_string(),
-            mcp_server::SetLoggingLevelSubject::new(&prefix, &server).to_string(),
-            mcp_server::ListPromptsSubject::new(&prefix, &server).to_string(),
-            mcp_server::GetPromptSubject::new(&prefix, &server).to_string(),
-            mcp_server::ListResourcesSubject::new(&prefix, &server).to_string(),
-            mcp_server::ListResourceTemplatesSubject::new(&prefix, &server).to_string(),
-            mcp_server::ReadResourceSubject::new(&prefix, &server).to_string(),
-            mcp_server::SubscribeResourceSubject::new(&prefix, &server).to_string(),
-            mcp_server::UnsubscribeResourceSubject::new(&prefix, &server).to_string(),
-            mcp_server::ListToolsSubject::new(&prefix, &server).to_string(),
-            mcp_server::CallToolSubject::new(&prefix, &server).to_string(),
-            mcp_server::GetTaskSubject::new(&prefix, &server).to_string(),
-            mcp_server::ListTasksSubject::new(&prefix, &server).to_string(),
-            mcp_server::GetTaskResultSubject::new(&prefix, &server).to_string(),
-            mcp_server::CancelTaskSubject::new(&prefix, &server).to_string(),
+            server::InitializeSubject::new(&prefix, &server).to_string(),
+            server::PingSubject::new(&prefix, &server).to_string(),
+            server::CompleteSubject::new(&prefix, &server).to_string(),
+            server::SetLoggingLevelSubject::new(&prefix, &server).to_string(),
+            server::ListPromptsSubject::new(&prefix, &server).to_string(),
+            server::GetPromptSubject::new(&prefix, &server).to_string(),
+            server::ListResourcesSubject::new(&prefix, &server).to_string(),
+            server::ListResourceTemplatesSubject::new(&prefix, &server).to_string(),
+            server::ReadResourceSubject::new(&prefix, &server).to_string(),
+            server::SubscribeResourceSubject::new(&prefix, &server).to_string(),
+            server::UnsubscribeResourceSubject::new(&prefix, &server).to_string(),
+            server::ListToolsSubject::new(&prefix, &server).to_string(),
+            server::CallToolSubject::new(&prefix, &server).to_string(),
+            server::GetTaskSubject::new(&prefix, &server).to_string(),
+            server::ListTasksSubject::new(&prefix, &server).to_string(),
+            server::GetTaskResultSubject::new(&prefix, &server).to_string(),
+            server::CancelTaskSubject::new(&prefix, &server).to_string(),
         ];
 
         assert_eq!(
@@ -89,7 +87,7 @@ mod tests {
     #[test]
     fn server_notifications_target_client_namespace() {
         assert_eq!(
-            mcp_server::ToolListChangedSubject::new(&p("mcp"), &peer("desktop")).to_string(),
+            server::ToolListChangedSubject::new(&p("mcp"), &peer("desktop")).to_string(),
             "mcp.client.desktop.notifications.tools.list_changed"
         );
     }
@@ -99,14 +97,14 @@ mod tests {
         let prefix = p("mcp");
         let client = peer("desktop");
         let subjects = [
-            mcp_server::CancelledSubject::new(&prefix, &client).to_string(),
-            mcp_server::ProgressSubject::new(&prefix, &client).to_string(),
-            mcp_server::LoggingMessageSubject::new(&prefix, &client).to_string(),
-            mcp_server::ResourceUpdatedSubject::new(&prefix, &client).to_string(),
-            mcp_server::ResourceListChangedSubject::new(&prefix, &client).to_string(),
-            mcp_server::ToolListChangedSubject::new(&prefix, &client).to_string(),
-            mcp_server::PromptListChangedSubject::new(&prefix, &client).to_string(),
-            mcp_server::ElicitationCompletedSubject::new(&prefix, &client).to_string(),
+            server::CancelledSubject::new(&prefix, &client).to_string(),
+            server::ProgressSubject::new(&prefix, &client).to_string(),
+            server::LoggingMessageSubject::new(&prefix, &client).to_string(),
+            server::ResourceUpdatedSubject::new(&prefix, &client).to_string(),
+            server::ResourceListChangedSubject::new(&prefix, &client).to_string(),
+            server::ToolListChangedSubject::new(&prefix, &client).to_string(),
+            server::PromptListChangedSubject::new(&prefix, &client).to_string(),
+            server::ElicitationCompletedSubject::new(&prefix, &client).to_string(),
         ];
 
         assert_eq!(
@@ -127,11 +125,11 @@ mod tests {
     #[test]
     fn client_request_subjects_match_mcp_method_groups() {
         assert_eq!(
-            mcp_client::CreateMessageSubject::new(&p("mcp"), &peer("desktop")).to_string(),
+            client::CreateMessageSubject::new(&p("mcp"), &peer("desktop")).to_string(),
             "mcp.client.desktop.sampling.create_message"
         );
         assert_eq!(
-            mcp_client::ListRootsSubject::new(&p("mcp"), &peer("desktop")).to_string(),
+            client::ListRootsSubject::new(&p("mcp"), &peer("desktop")).to_string(),
             "mcp.client.desktop.roots.list"
         );
     }
@@ -142,14 +140,14 @@ mod tests {
         let client = peer("desktop");
         let server = peer("filesystem");
         let subjects = [
-            mcp_client::PingSubject::new(&prefix, &client).to_string(),
-            mcp_client::CreateMessageSubject::new(&prefix, &client).to_string(),
-            mcp_client::ListRootsSubject::new(&prefix, &client).to_string(),
-            mcp_client::CreateElicitationSubject::new(&prefix, &client).to_string(),
-            mcp_client::CancelledSubject::new(&prefix, &server).to_string(),
-            mcp_client::ProgressSubject::new(&prefix, &server).to_string(),
-            mcp_client::InitializedSubject::new(&prefix, &server).to_string(),
-            mcp_client::RootsListChangedSubject::new(&prefix, &server).to_string(),
+            client::PingSubject::new(&prefix, &client).to_string(),
+            client::CreateMessageSubject::new(&prefix, &client).to_string(),
+            client::ListRootsSubject::new(&prefix, &client).to_string(),
+            client::CreateElicitationSubject::new(&prefix, &client).to_string(),
+            client::CancelledSubject::new(&prefix, &server).to_string(),
+            client::ProgressSubject::new(&prefix, &server).to_string(),
+            client::InitializedSubject::new(&prefix, &server).to_string(),
+            client::RootsListChangedSubject::new(&prefix, &server).to_string(),
         ];
 
         assert_eq!(
@@ -170,15 +168,15 @@ mod tests {
     #[test]
     fn wildcards_match_acp_export_pattern() {
         assert_eq!(
-            mcp_server::wildcards::AllServerSubject::new(&p("mcp")).to_string(),
+            subscriptions::AllServerSubject::new(&p("mcp")).to_string(),
             "mcp.server.>"
         );
         assert_eq!(
-            mcp_client::wildcards::AllClientSubject::new(&p("mcp")).to_string(),
+            subscriptions::AllClientSubject::new(&p("mcp")).to_string(),
             "mcp.client.>"
         );
         assert_eq!(
-            mcp_client::wildcards::OneClientSubject::new(&p("mcp"), &peer("desktop")).to_string(),
+            subscriptions::OneClientSubject::new(&p("mcp"), &peer("desktop")).to_string(),
             "mcp.client.desktop.>"
         );
     }

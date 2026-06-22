@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{FlushClient, PublishClient, RequestClient, session};
+use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
 use tracing::{info, instrument};
@@ -31,7 +31,7 @@ where
         Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
     })?;
     let prefix = bridge.config.acp_prefix_ref();
-    let subject = session::agent::LoadSubject::new(prefix, &session_id);
+    let subject = commands::LoadSubject::new(prefix, &session_id);
 
     let result = bridge
         .session_request::<LoadSessionRequest, LoadSessionResponse>(&subject, &args, &session_id)

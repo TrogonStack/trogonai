@@ -1,5 +1,5 @@
 use crate::acp_prefix::AcpPrefix;
-use crate::nats::session;
+use crate::nats::client_ops;
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{
     Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest, KillTerminalResponse,
@@ -66,47 +66,47 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
 #[async_trait::async_trait(?Send)]
 impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<N> {
     async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse> {
-        let s = session::client::SessionRequestPermissionSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::SessionRequestPermissionSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn session_notification(&self, args: SessionNotification) -> Result<()> {
-        let s = session::client::SessionUpdateSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::SessionUpdateSubject::new(self.prefix(), self.session_id());
         self.notify(&s, &args).await
     }
 
     async fn read_text_file(&self, args: ReadTextFileRequest) -> Result<ReadTextFileResponse> {
-        let s = session::client::FsReadTextFileSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::FsReadTextFileSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn write_text_file(&self, args: WriteTextFileRequest) -> Result<WriteTextFileResponse> {
-        let s = session::client::FsWriteTextFileSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::FsWriteTextFileSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn create_terminal(&self, args: CreateTerminalRequest) -> Result<CreateTerminalResponse> {
-        let s = session::client::TerminalCreateSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::TerminalCreateSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn terminal_output(&self, args: TerminalOutputRequest) -> Result<TerminalOutputResponse> {
-        let s = session::client::TerminalOutputSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::TerminalOutputSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn release_terminal(&self, args: ReleaseTerminalRequest) -> Result<ReleaseTerminalResponse> {
-        let s = session::client::TerminalReleaseSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::TerminalReleaseSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn wait_for_terminal_exit(&self, args: WaitForTerminalExitRequest) -> Result<WaitForTerminalExitResponse> {
-        let s = session::client::TerminalWaitForExitSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::TerminalWaitForExitSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 
     async fn kill_terminal(&self, args: KillTerminalRequest) -> Result<KillTerminalResponse> {
-        let s = session::client::TerminalKillSubject::new(self.prefix(), self.session_id());
+        let s = client_ops::TerminalKillSubject::new(self.prefix(), self.session_id());
         self.request(&s, &args).await
     }
 }

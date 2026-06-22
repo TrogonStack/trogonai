@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, FlushClient, PublishClient, session};
+use crate::nats::{self, FlushClient, PublishClient, commands, responses};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
@@ -32,7 +32,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
     })?;
 
     let prefix = bridge.config.acp_prefix_ref();
-    let subject = session::agent::CancelSubject::new(prefix, &session_id);
+    let subject = commands::CancelSubject::new(prefix, &session_id);
 
     let publish_result = nats::publish(
         bridge.nats(),
@@ -53,7 +53,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
         bridge.metrics.record_error("cancel", "cancel_publish_failed");
     }
 
-    let cancelled_subject = session::agent::CancelledSubject::new(prefix, &session_id);
+    let cancelled_subject = responses::CancelledSubject::new(prefix, &session_id);
     if let Err(e) = bridge
         .nats()
         .publish_with_headers(cancelled_subject, async_nats::HeaderMap::new(), bytes::Bytes::new())

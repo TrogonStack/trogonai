@@ -1,10 +1,8 @@
-pub mod agent;
 pub mod client_ops;
 pub mod commands;
 pub mod global;
 pub mod markers;
 pub mod responses;
-pub mod session;
 pub mod stream;
 pub mod subscriptions;
 
@@ -12,7 +10,7 @@ pub use stream::{AcpStream, StreamAssignment};
 
 #[cfg(test)]
 mod tests {
-    use super::{AcpStream, StreamAssignment, agent, session};
+    use super::{AcpStream, StreamAssignment, client_ops, commands, global, responses, subscriptions};
     use crate::acp_prefix::AcpPrefix;
     use crate::ext_method_name::ExtMethodName;
     use crate::req_id::ReqId;
@@ -37,7 +35,7 @@ mod tests {
     #[test]
     fn agent_initialize() {
         assert_eq!(
-            agent::InitializeSubject::new(&p("acp")).to_string(),
+            global::InitializeSubject::new(&p("acp")).to_string(),
             "acp.agent.initialize"
         );
     }
@@ -45,20 +43,20 @@ mod tests {
     #[test]
     fn agent_authenticate() {
         assert_eq!(
-            agent::AuthenticateSubject::new(&p("acp")).to_string(),
+            global::AuthenticateSubject::new(&p("acp")).to_string(),
             "acp.agent.authenticate"
         );
     }
 
     #[test]
     fn agent_logout() {
-        assert_eq!(agent::LogoutSubject::new(&p("acp")).to_string(), "acp.agent.logout");
+        assert_eq!(global::LogoutSubject::new(&p("acp")).to_string(), "acp.agent.logout");
     }
 
     #[test]
     fn agent_session_new() {
         assert_eq!(
-            agent::SessionNewSubject::new(&p("acp")).to_string(),
+            global::SessionNewSubject::new(&p("acp")).to_string(),
             "acp.agent.session.new"
         );
     }
@@ -66,7 +64,7 @@ mod tests {
     #[test]
     fn agent_session_list() {
         assert_eq!(
-            agent::SessionListSubject::new(&p("acp")).to_string(),
+            global::SessionListSubject::new(&p("acp")).to_string(),
             "acp.agent.session.list"
         );
     }
@@ -74,7 +72,7 @@ mod tests {
     #[test]
     fn agent_ext() {
         assert_eq!(
-            agent::ExtSubject::new(&p("acp"), &method("my_tool")).to_string(),
+            global::ExtSubject::new(&p("acp"), &method("my_tool")).to_string(),
             "acp.agent.ext.my_tool"
         );
     }
@@ -82,7 +80,7 @@ mod tests {
     #[test]
     fn agent_ext_dotted() {
         assert_eq!(
-            agent::ExtSubject::new(&p("acp"), &method("vendor.op")).to_string(),
+            global::ExtSubject::new(&p("acp"), &method("vendor.op")).to_string(),
             "acp.agent.ext.vendor.op"
         );
     }
@@ -90,7 +88,7 @@ mod tests {
     #[test]
     fn agent_wildcard_all() {
         assert_eq!(
-            agent::wildcards::GlobalAllSubject::new(&p("acp")).to_string(),
+            subscriptions::GlobalAllSubject::new(&p("acp")).to_string(),
             "acp.agent.>"
         );
     }
@@ -98,7 +96,7 @@ mod tests {
     #[test]
     fn session_agent_load() {
         assert_eq!(
-            session::agent::LoadSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::LoadSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.load"
         );
     }
@@ -106,7 +104,7 @@ mod tests {
     #[test]
     fn session_agent_prompt() {
         assert_eq!(
-            session::agent::PromptSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::PromptSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.prompt"
         );
     }
@@ -114,7 +112,7 @@ mod tests {
     #[test]
     fn session_agent_prompt_wildcard() {
         assert_eq!(
-            session::agent::PromptWildcardSubject::new(&p("acp")).to_string(),
+            subscriptions::PromptWildcardSubject::new(&p("acp")).to_string(),
             "acp.session.*.agent.prompt"
         );
     }
@@ -122,7 +120,7 @@ mod tests {
     #[test]
     fn session_agent_cancel() {
         assert_eq!(
-            session::agent::CancelSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::CancelSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.cancel"
         );
     }
@@ -130,7 +128,7 @@ mod tests {
     #[test]
     fn session_agent_cancelled() {
         assert_eq!(
-            session::agent::CancelledSubject::new(&p("acp"), &sid("s1")).to_string(),
+            responses::CancelledSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.cancelled"
         );
     }
@@ -138,7 +136,7 @@ mod tests {
     #[test]
     fn session_agent_set_mode() {
         assert_eq!(
-            session::agent::SetModeSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::SetModeSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.set_mode"
         );
     }
@@ -146,7 +144,7 @@ mod tests {
     #[test]
     fn session_agent_set_config_option() {
         assert_eq!(
-            session::agent::SetConfigOptionSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::SetConfigOptionSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.set_config_option"
         );
     }
@@ -154,7 +152,7 @@ mod tests {
     #[test]
     fn session_agent_set_model() {
         assert_eq!(
-            session::agent::SetModelSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::SetModelSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.set_model"
         );
     }
@@ -162,7 +160,7 @@ mod tests {
     #[test]
     fn session_agent_fork() {
         assert_eq!(
-            session::agent::ForkSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::ForkSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.fork"
         );
     }
@@ -170,7 +168,7 @@ mod tests {
     #[test]
     fn session_agent_resume() {
         assert_eq!(
-            session::agent::ResumeSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::ResumeSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.resume"
         );
     }
@@ -178,7 +176,7 @@ mod tests {
     #[test]
     fn session_agent_close() {
         assert_eq!(
-            session::agent::CloseSubject::new(&p("acp"), &sid("s1")).to_string(),
+            commands::CloseSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.close"
         );
     }
@@ -186,7 +184,7 @@ mod tests {
     #[test]
     fn session_agent_ext_ready() {
         assert_eq!(
-            session::agent::ExtReadySubject::new(&p("acp"), &sid("s1")).to_string(),
+            responses::ExtReadySubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.ext.ready"
         );
     }
@@ -194,7 +192,7 @@ mod tests {
     #[test]
     fn session_agent_update() {
         assert_eq!(
-            session::agent::UpdateSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
+            responses::UpdateSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
             "acp.session.s1.agent.update.req-abc"
         );
     }
@@ -202,7 +200,7 @@ mod tests {
     #[test]
     fn session_agent_prompt_response() {
         assert_eq!(
-            session::agent::PromptResponseSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
+            responses::PromptResponseSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
             "acp.session.s1.agent.prompt.response.req-abc"
         );
     }
@@ -210,7 +208,7 @@ mod tests {
     #[test]
     fn session_agent_response() {
         assert_eq!(
-            session::agent::ResponseSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
+            responses::ResponseSubject::new(&p("acp"), &sid("s1"), &rid("req-abc")).to_string(),
             "acp.session.s1.agent.response.req-abc"
         );
     }
@@ -218,7 +216,7 @@ mod tests {
     #[test]
     fn session_client_fs_read() {
         assert_eq!(
-            session::client::FsReadTextFileSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::FsReadTextFileSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.fs.read_text_file"
         );
     }
@@ -226,7 +224,7 @@ mod tests {
     #[test]
     fn session_client_fs_write() {
         assert_eq!(
-            session::client::FsWriteTextFileSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::FsWriteTextFileSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.fs.write_text_file"
         );
     }
@@ -234,7 +232,7 @@ mod tests {
     #[test]
     fn session_client_request_permission() {
         assert_eq!(
-            session::client::SessionRequestPermissionSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::SessionRequestPermissionSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.session.request_permission"
         );
     }
@@ -242,7 +240,7 @@ mod tests {
     #[test]
     fn session_client_session_update() {
         assert_eq!(
-            session::client::SessionUpdateSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::SessionUpdateSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.session.update"
         );
     }
@@ -250,7 +248,7 @@ mod tests {
     #[test]
     fn session_client_terminal_create() {
         assert_eq!(
-            session::client::TerminalCreateSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::TerminalCreateSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.terminal.create"
         );
     }
@@ -258,7 +256,7 @@ mod tests {
     #[test]
     fn session_client_terminal_kill() {
         assert_eq!(
-            session::client::TerminalKillSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::TerminalKillSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.terminal.kill"
         );
     }
@@ -266,7 +264,7 @@ mod tests {
     #[test]
     fn session_client_terminal_output() {
         assert_eq!(
-            session::client::TerminalOutputSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::TerminalOutputSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.terminal.output"
         );
     }
@@ -274,7 +272,7 @@ mod tests {
     #[test]
     fn session_client_terminal_release() {
         assert_eq!(
-            session::client::TerminalReleaseSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::TerminalReleaseSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.terminal.release"
         );
     }
@@ -282,7 +280,7 @@ mod tests {
     #[test]
     fn session_client_terminal_wait_for_exit() {
         assert_eq!(
-            session::client::TerminalWaitForExitSubject::new(&p("acp"), &sid("s1")).to_string(),
+            client_ops::TerminalWaitForExitSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.terminal.wait_for_exit"
         );
     }
@@ -290,7 +288,7 @@ mod tests {
     #[test]
     fn session_wildcard_all() {
         assert_eq!(
-            session::wildcards::AllSessionSubject::new(&p("acp")).to_string(),
+            subscriptions::AllSessionSubject::new(&p("acp")).to_string(),
             "acp.session.>"
         );
     }
@@ -298,7 +296,7 @@ mod tests {
     #[test]
     fn session_wildcard_one() {
         assert_eq!(
-            session::wildcards::OneSessionSubject::new(&p("acp"), &sid("s1")).to_string(),
+            subscriptions::OneSessionSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.>"
         );
     }
@@ -306,7 +304,7 @@ mod tests {
     #[test]
     fn session_wildcard_all_agent() {
         assert_eq!(
-            session::wildcards::AllAgentSubject::new(&p("acp")).to_string(),
+            subscriptions::AllAgentSubject::new(&p("acp")).to_string(),
             "acp.session.*.agent.>"
         );
     }
@@ -314,7 +312,7 @@ mod tests {
     #[test]
     fn session_wildcard_all_client() {
         assert_eq!(
-            session::wildcards::AllClientSubject::new(&p("acp")).to_string(),
+            subscriptions::AllClientSubject::new(&p("acp")).to_string(),
             "acp.session.*.client.>"
         );
     }
@@ -322,7 +320,7 @@ mod tests {
     #[test]
     fn session_wildcard_one_agent() {
         assert_eq!(
-            session::wildcards::OneAgentSubject::new(&p("acp"), &sid("s1")).to_string(),
+            subscriptions::OneAgentSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.>"
         );
     }
@@ -330,7 +328,7 @@ mod tests {
     #[test]
     fn session_wildcard_one_client() {
         assert_eq!(
-            session::wildcards::OneClientSubject::new(&p("acp"), &sid("s1")).to_string(),
+            subscriptions::OneClientSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.client.>"
         );
     }
@@ -338,11 +336,11 @@ mod tests {
     #[test]
     fn custom_prefix_global() {
         assert_eq!(
-            agent::InitializeSubject::new(&p("myapp")).to_string(),
+            global::InitializeSubject::new(&p("myapp")).to_string(),
             "myapp.agent.initialize"
         );
         assert_eq!(
-            agent::SessionNewSubject::new(&p("myapp")).to_string(),
+            global::SessionNewSubject::new(&p("myapp")).to_string(),
             "myapp.agent.session.new"
         );
     }
@@ -350,90 +348,90 @@ mod tests {
     #[test]
     fn custom_prefix_session() {
         assert_eq!(
-            session::agent::PromptSubject::new(&p("myapp"), &sid("s1")).to_string(),
+            commands::PromptSubject::new(&p("myapp"), &sid("s1")).to_string(),
             "myapp.session.s1.agent.prompt"
         );
         assert_eq!(
-            session::client::FsReadTextFileSubject::new(&p("myapp"), &sid("s1")).to_string(),
+            client_ops::FsReadTextFileSubject::new(&p("myapp"), &sid("s1")).to_string(),
             "myapp.session.s1.client.fs.read_text_file"
         );
     }
 
     #[test]
     fn stream_assignments() {
-        assert_eq!(session::agent::LoadSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(session::agent::PromptSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(session::agent::CancelSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(session::agent::CloseSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(session::agent::ForkSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(session::agent::ResumeSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(session::agent::SetModeSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::LoadSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::PromptSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::CancelSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::CloseSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::ForkSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::ResumeSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::SetModeSubject::STREAM, Some(AcpStream::Commands));
         assert_eq!(
-            session::agent::SetConfigOptionSubject::STREAM,
+            commands::SetConfigOptionSubject::STREAM,
             Some(AcpStream::Commands)
         );
-        assert_eq!(session::agent::SetModelSubject::STREAM, Some(AcpStream::Commands));
+        assert_eq!(commands::SetModelSubject::STREAM, Some(AcpStream::Commands));
 
-        assert_eq!(agent::InitializeSubject::STREAM, Some(AcpStream::Global));
-        assert_eq!(agent::AuthenticateSubject::STREAM, Some(AcpStream::Global));
-        assert_eq!(agent::LogoutSubject::STREAM, Some(AcpStream::Global));
-        assert_eq!(agent::SessionNewSubject::STREAM, Some(AcpStream::Global));
-        assert_eq!(agent::SessionListSubject::STREAM, None);
-        assert_eq!(agent::ExtSubject::STREAM, Some(AcpStream::GlobalExt));
-        assert_eq!(agent::ExtNotifySubject::STREAM, Some(AcpStream::GlobalExt));
+        assert_eq!(global::InitializeSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(global::AuthenticateSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(global::LogoutSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(global::SessionNewSubject::STREAM, Some(AcpStream::Global));
+        assert_eq!(global::SessionListSubject::STREAM, None);
+        assert_eq!(global::ExtSubject::STREAM, Some(AcpStream::GlobalExt));
+        assert_eq!(global::ExtNotifySubject::STREAM, Some(AcpStream::GlobalExt));
 
-        assert_eq!(session::agent::CancelledSubject::STREAM, Some(AcpStream::Responses));
-        assert_eq!(session::agent::ExtReadySubject::STREAM, Some(AcpStream::Responses));
+        assert_eq!(responses::CancelledSubject::STREAM, Some(AcpStream::Responses));
+        assert_eq!(responses::ExtReadySubject::STREAM, Some(AcpStream::Responses));
         assert_eq!(
-            session::agent::PromptResponseSubject::STREAM,
+            responses::PromptResponseSubject::STREAM,
             Some(AcpStream::Responses)
         );
-        assert_eq!(session::agent::ResponseSubject::STREAM, Some(AcpStream::Responses));
-        assert_eq!(session::agent::UpdateSubject::STREAM, Some(AcpStream::Notifications));
+        assert_eq!(responses::ResponseSubject::STREAM, Some(AcpStream::Responses));
+        assert_eq!(responses::UpdateSubject::STREAM, Some(AcpStream::Notifications));
 
         assert_eq!(
-            session::client::FsReadTextFileSubject::STREAM,
+            client_ops::FsReadTextFileSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
         assert_eq!(
-            session::client::FsWriteTextFileSubject::STREAM,
+            client_ops::FsWriteTextFileSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
         assert_eq!(
-            session::client::SessionRequestPermissionSubject::STREAM,
+            client_ops::SessionRequestPermissionSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
         assert_eq!(
-            session::client::SessionUpdateSubject::STREAM,
+            client_ops::SessionUpdateSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
         assert_eq!(
-            session::client::TerminalCreateSubject::STREAM,
+            client_ops::TerminalCreateSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
-        assert_eq!(session::client::TerminalKillSubject::STREAM, Some(AcpStream::ClientOps));
+        assert_eq!(client_ops::TerminalKillSubject::STREAM, Some(AcpStream::ClientOps));
         assert_eq!(
-            session::client::TerminalOutputSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
-        assert_eq!(
-            session::client::TerminalReleaseSubject::STREAM,
+            client_ops::TerminalOutputSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
         assert_eq!(
-            session::client::TerminalWaitForExitSubject::STREAM,
+            client_ops::TerminalReleaseSubject::STREAM,
+            Some(AcpStream::ClientOps)
+        );
+        assert_eq!(
+            client_ops::TerminalWaitForExitSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
 
-        assert_eq!(session::wildcards::AllAgentSubject::STREAM, None);
-        assert_eq!(session::wildcards::AllAgentExtSubject::STREAM, None);
-        assert_eq!(session::wildcards::AllClientSubject::STREAM, None);
-        assert_eq!(session::wildcards::AllSessionSubject::STREAM, None);
-        assert_eq!(agent::wildcards::GlobalAllSubject::STREAM, None);
-        assert_eq!(session::wildcards::OneAgentSubject::STREAM, None);
-        assert_eq!(session::wildcards::OneClientSubject::STREAM, None);
-        assert_eq!(session::wildcards::OneSessionSubject::STREAM, None);
-        assert_eq!(session::agent::PromptWildcardSubject::STREAM, None);
+        assert_eq!(subscriptions::AllAgentSubject::STREAM, None);
+        assert_eq!(subscriptions::AllAgentExtSubject::STREAM, None);
+        assert_eq!(subscriptions::AllClientSubject::STREAM, None);
+        assert_eq!(subscriptions::AllSessionSubject::STREAM, None);
+        assert_eq!(subscriptions::GlobalAllSubject::STREAM, None);
+        assert_eq!(subscriptions::OneAgentSubject::STREAM, None);
+        assert_eq!(subscriptions::OneClientSubject::STREAM, None);
+        assert_eq!(subscriptions::OneSessionSubject::STREAM, None);
+        assert_eq!(subscriptions::PromptWildcardSubject::STREAM, None);
     }
 
     #[test]
@@ -448,8 +446,8 @@ mod tests {
 
     #[test]
     fn no_overlap_agent_and_session_are_distinct() {
-        let global = agent::wildcards::GlobalAllSubject::new(&p("acp"));
-        let session_agent = session::wildcards::AllAgentSubject::new(&p("acp"));
+        let global = subscriptions::GlobalAllSubject::new(&p("acp"));
+        let session_agent = subscriptions::AllAgentSubject::new(&p("acp"));
 
         assert!(global.to_string().starts_with("acp.agent."));
         assert!(session_agent.to_string().starts_with("acp.session."));
@@ -462,47 +460,47 @@ mod tests {
         let expected = format!("{}.session.{}.agent.", prefix.as_str(), session_id.as_str());
 
         assert!(
-            session::agent::LoadSubject::new(&prefix, &session_id)
+            commands::LoadSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::PromptSubject::new(&prefix, &session_id)
+            commands::PromptSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::CancelSubject::new(&prefix, &session_id)
+            commands::CancelSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::SetModeSubject::new(&prefix, &session_id)
+            commands::SetModeSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::SetConfigOptionSubject::new(&prefix, &session_id)
+            commands::SetConfigOptionSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::SetModelSubject::new(&prefix, &session_id)
+            commands::SetModelSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::ForkSubject::new(&prefix, &session_id)
+            commands::ForkSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::ResumeSubject::new(&prefix, &session_id)
+            commands::ResumeSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::CloseSubject::new(&prefix, &session_id)
+            commands::CloseSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
@@ -515,47 +513,47 @@ mod tests {
         let expected = format!("{}.session.{}.client.", prefix.as_str(), session_id.as_str());
 
         assert!(
-            session::client::FsReadTextFileSubject::new(&prefix, &session_id)
+            client_ops::FsReadTextFileSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::FsWriteTextFileSubject::new(&prefix, &session_id)
+            client_ops::FsWriteTextFileSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::SessionRequestPermissionSubject::new(&prefix, &session_id)
+            client_ops::SessionRequestPermissionSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::SessionUpdateSubject::new(&prefix, &session_id)
+            client_ops::SessionUpdateSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::TerminalCreateSubject::new(&prefix, &session_id)
+            client_ops::TerminalCreateSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::TerminalKillSubject::new(&prefix, &session_id)
+            client_ops::TerminalKillSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::TerminalOutputSubject::new(&prefix, &session_id)
+            client_ops::TerminalOutputSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::TerminalReleaseSubject::new(&prefix, &session_id)
+            client_ops::TerminalReleaseSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
         assert!(
-            session::client::TerminalWaitForExitSubject::new(&prefix, &session_id)
+            client_ops::TerminalWaitForExitSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
         );
@@ -569,74 +567,74 @@ mod tests {
         let sid = sid("s1");
 
         assert_eq!(
-            session::agent::LoadSubject::new(&prefix, &sid).to_subject().as_str(),
+            commands::LoadSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.load"
         );
         assert_eq!(
-            session::agent::CancelSubject::new(&prefix, &sid).to_subject().as_str(),
+            commands::CancelSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.cancel"
         );
         assert_eq!(
-            session::agent::CloseSubject::new(&prefix, &sid).to_subject().as_str(),
+            commands::CloseSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.close"
         );
         assert_eq!(
-            session::agent::ForkSubject::new(&prefix, &sid).to_subject().as_str(),
+            commands::ForkSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.fork"
         );
         assert_eq!(
-            session::agent::ResumeSubject::new(&prefix, &sid).to_subject().as_str(),
+            commands::ResumeSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.resume"
         );
         assert_eq!(
-            session::agent::SetModeSubject::new(&prefix, &sid).to_subject().as_str(),
+            commands::SetModeSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.set_mode"
         );
         assert_eq!(
-            session::agent::SetConfigOptionSubject::new(&prefix, &sid)
+            commands::SetConfigOptionSubject::new(&prefix, &sid)
                 .to_subject()
                 .as_str(),
             "acp.session.s1.agent.set_config_option"
         );
         assert_eq!(
-            session::agent::SetModelSubject::new(&prefix, &sid)
+            commands::SetModelSubject::new(&prefix, &sid)
                 .to_subject()
                 .as_str(),
             "acp.session.s1.agent.set_model"
         );
         // ExtNotifySubject doesn't impl ToSubject — verify via Display
         assert_eq!(
-            agent::ExtNotifySubject::new(&prefix, &method("my_tool")).to_string(),
+            global::ExtNotifySubject::new(&prefix, &method("my_tool")).to_string(),
             "acp.agent.ext.my_tool"
         );
 
         // Subscription subjects
         assert_eq!(
-            session::wildcards::AllSessionSubject::new(&prefix)
+            subscriptions::AllSessionSubject::new(&prefix)
                 .to_subject()
                 .as_str(),
             "acp.session.>"
         );
         assert_eq!(
-            session::wildcards::OneSessionSubject::new(&prefix, &sid)
+            subscriptions::OneSessionSubject::new(&prefix, &sid)
                 .to_subject()
                 .as_str(),
             "acp.session.s1.>"
         );
         assert_eq!(
-            session::wildcards::OneAgentSubject::new(&prefix, &sid)
+            subscriptions::OneAgentSubject::new(&prefix, &sid)
                 .to_subject()
                 .as_str(),
             "acp.session.s1.agent.>"
         );
         assert_eq!(
-            session::wildcards::OneClientSubject::new(&prefix, &sid)
+            subscriptions::OneClientSubject::new(&prefix, &sid)
                 .to_subject()
                 .as_str(),
             "acp.session.s1.client.>"
         );
         assert_eq!(
-            session::agent::PromptWildcardSubject::new(&prefix)
+            subscriptions::PromptWildcardSubject::new(&prefix)
                 .to_subject()
                 .as_str(),
             "acp.session.*.agent.prompt"
@@ -644,7 +642,7 @@ mod tests {
 
         // Response subject
         assert_eq!(
-            session::agent::ResponseSubject::new(&prefix, &sid, &rid("req-abc"))
+            responses::ResponseSubject::new(&prefix, &sid, &rid("req-abc"))
                 .to_subject()
                 .as_str(),
             "acp.session.s1.agent.response.req-abc"
