@@ -17,5 +17,23 @@ LL | |     #[test]
    |
    = help: move the contents into `tests.rs` (or `tests/mod.rs`) and declare it as `mod tests;`
 
-warning: 2 warnings emitted
+warning: inline module `outer` declared with a body block
+  --> $DIR/inline_module_block.rs:15:1
+   |
+LL | / mod outer {
+LL | |     mod inner {
+   | |____^
+   |
+   = help: move the contents into `outer.rs` (or `outer/mod.rs`) and declare it as `mod outer;`
+
+warning: inline module `inner` declared with a body block
+  --> $DIR/inline_module_block.rs:16:5
+   |
+LL | /     mod inner {
+LL | |         pub fn run() {}
+   | |________^
+   |
+   = help: move the contents into `inner.rs` (or `inner/mod.rs`) and declare it as `mod inner;`
+
+warning: 4 warnings emitted
 
