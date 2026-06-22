@@ -5,8 +5,6 @@
 //! `trogon-aauth-verify`; key management in `trogon-aauth-person` /
 //! `trogon-jwks-publisher`.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -230,22 +228,13 @@ impl NatsSignatureEnvelope {
 }
 
 /// Errors returned by AAuth parsing helpers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AAuthParseError {
+    #[error("aauth: missing field {0}")]
     MissingField(&'static str),
+    #[error("aauth: invalid number for {0}")]
     InvalidNumber(&'static str),
 }
-
-impl fmt::Display for AAuthParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AAuthParseError::MissingField(f0) => write!(f, "aauth: missing field {f0}"),
-            AAuthParseError::InvalidNumber(f0) => write!(f, "aauth: invalid number for {f0}"),
-        }
-    }
-}
-
-impl std::error::Error for AAuthParseError {}
 
 #[cfg(test)]
 mod tests {
