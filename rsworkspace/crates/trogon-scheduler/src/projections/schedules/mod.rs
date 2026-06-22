@@ -9,7 +9,7 @@ use buffa::MessageField;
 use futures::StreamExt;
 use trogon_decider_nats::record_stream_message;
 use trogon_decider_runtime::{Event, EventData, EventDecode, StreamEvent, StreamPosition};
-use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
+use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     ScheduleEventCase,
@@ -18,7 +18,7 @@ use crate::{
     projections_v1, v1,
 };
 
-use storage::{SCHEDULES_CHECKPOINT_KEY, open_schedules_bucket, read_model_key};
+use storage::{SCHEDULES_CHECKPOINT_KEY, get_or_create_schedules_bucket, read_model_key};
 
 /// The read model's KV storage contract (bucket, key scheme, checkpoint key),
 /// owned by the projection that defines that layout.
@@ -399,7 +399,9 @@ impl std::error::Error for ScheduleTransitionError {
 
 pub(crate) async fn catch_up_schedules_read_model<J>(js: &J) -> Result<(), SchedulerError>
 where
-    J: JetStreamGetKeyValue<Store = kv::Store> + JetStreamGetStream<Stream = jetstream::stream::Stream>,
+    J: JetStreamCreateKeyValue<Store = kv::Store>
+        + JetStreamGetKeyValue<Store = kv::Store>
+        + JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
     let stream: jetstream::stream::Stream = open_events_stream(js).await?;
     let info = stream.get_info().await.map_err(|source| {
@@ -412,7 +414,7 @@ where
         return Ok(());
     }
 
-    let bucket = open_schedules_bucket(js).await?;
+    let bucket = get_or_create_schedules_bucket(js).await?;
     let checkpoint = read_read_model_checkpoint(&bucket).await?;
     if checkpoint >= info.state.last_sequence {
         return Ok(());

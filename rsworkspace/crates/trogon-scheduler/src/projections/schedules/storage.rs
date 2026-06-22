@@ -8,8 +8,8 @@
 
 #![cfg_attr(coverage, allow(dead_code))]
 
-use async_nats::jetstream::{self, kv};
-use trogon_nats::jetstream::JetStreamGetKeyValue;
+use async_nats::jetstream::kv;
+use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue};
 
 use crate::error::SchedulerError;
 use crate::processor::execution::reconciliation::{ScheduleKey, StreamRoutingId};
@@ -38,20 +38,34 @@ pub(crate) fn read_model_key(schedule_id: &str) -> String {
 }
 
 #[cfg(not(coverage))]
-pub(crate) async fn get_or_create_schedules_bucket(js: &jetstream::Context) -> Result<kv::Store, SchedulerError> {
-    crate::kv::get_or_create(
-        js,
-        kv::Config {
+pub(crate) async fn get_or_create_schedules_bucket<J>(js: &J) -> Result<kv::Store, SchedulerError>
+where
+    J: JetStreamCreateKeyValue<Store = kv::Store> + JetStreamGetKeyValue<Store = kv::Store>,
+{
+    // Provision the bucket on first use (a fresh JetStream, or a first deploy),
+    // then fall back to opening it if a peer created it first. Mirrors the shared
+    // lease-bucket provisioning in `trogon_nats`.
+    match js
+        .create_key_value(kv::Config {
             bucket: SCHEDULES_BUCKET.to_string(),
             history: 5,
             ..Default::default()
-        },
-    )
-    .await
+        })
+        .await
+    {
+        Ok(store) => Ok(store),
+        Err(source) if trogon_nats::jetstream::is_create_key_value_already_exists(&source) => {
+            open_schedules_bucket(js).await
+        }
+        Err(source) => Err(SchedulerError::kv_source("failed to create schedules bucket", source)),
+    }
 }
 
 #[cfg(coverage)]
-pub(crate) async fn get_or_create_schedules_bucket(_js: &jetstream::Context) -> Result<kv::Store, SchedulerError> {
+pub(crate) async fn get_or_create_schedules_bucket<J>(_js: &J) -> Result<kv::Store, SchedulerError>
+where
+    J: JetStreamCreateKeyValue<Store = kv::Store> + JetStreamGetKeyValue<Store = kv::Store>,
+{
     Err(SchedulerError::kv_source(
         "coverage stub does not provision schedules buckets",
         std::io::Error::other(SCHEDULES_BUCKET),
