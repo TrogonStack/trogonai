@@ -17,7 +17,14 @@ pub trait ServerInfoSource {
 
 impl ServerInfoSource for Client {
     fn try_server_info(&self) -> Option<ServerInfo> {
-        Client::try_server_info(self)
+        let info = self.server_info();
+        // async_nats seeds server_info with an empty default until the first
+        // INFO frame arrives; treat default values as not-yet-populated.
+        if info.client_id == 0 && info.server_id.is_empty() {
+            None
+        } else {
+            Some(info)
+        }
     }
 }
 

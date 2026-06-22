@@ -8,7 +8,7 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::constants::NATS_MSG_ID_HEADER;
 use crate::push::CallerId;
 use crate::push::caller_id::sanitize_subject_token;
-use crate::push::dispatcher::DispatchError;
+use crate::push::dispatch_error::DispatchError;
 use crate::push::dlq_dedup::PushDlqDedupGate;
 use crate::push::push_idempotency_key::PushIdempotencyKey;
 use crate::push::status_transition_id::StatusTransitionId;
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
     use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
-    use crate::push::dispatcher::DispatchError;
+    use crate::push::dispatch_error::DispatchError;
     use crate::push::push_notification_target::PushNotificationTargetError;
     use crate::push::resolve_push_dlq_caller_id;
     use crate::push::terminal_push_task_state::TerminalPushTaskState;

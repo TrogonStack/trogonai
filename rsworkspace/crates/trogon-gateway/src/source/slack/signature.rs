@@ -10,6 +10,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub enum SignatureError {
     MissingPrefix,
     InvalidHex(hex::FromHexError),
+    InvalidKey,
     Mismatch,
 }
 
@@ -18,6 +19,7 @@ impl fmt::Display for SignatureError {
         match self {
             SignatureError::MissingPrefix => f.write_str("missing v0= prefix"),
             SignatureError::InvalidHex(_) => f.write_str("invalid hex encoding"),
+            SignatureError::InvalidKey => f.write_str("invalid HMAC key"),
             SignatureError::Mismatch => f.write_str("signature mismatch"),
         }
     }
@@ -48,7 +50,7 @@ pub fn verify(
 
     let expected = hex::decode(hex_sig).map_err(SignatureError::InvalidHex)?;
 
-    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes()).map_err(SignatureError::InvalidKey)?;
+    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes()).map_err(|_| SignatureError::InvalidKey)?;
 
     mac.update(b"v0:");
     mac.update(timestamp.as_bytes());

@@ -58,10 +58,92 @@ pub fn webhook_http_retryable(status: u16) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::push::idempotency_key_header::IdempotencyKeyHeader;
     use crate::push::push_idempotency_key::PushIdempotencyKey;
+    use crate::push::terminal_push_task_state::TerminalPushTaskState;
+
+    pub struct MockPushDispatcher {
+        #[allow(clippy::type_complexity)]
+        pub calls: Arc<
+            Mutex<
+                Vec<(
+                    A2aTaskId,
+                    DeliverySemantics,
+                    TerminalPushTaskState,
+                    TaskPushNotificationConfig,
+                    Vec<u8>,
+                )>,
+            >,
+        >,
+        pub result: Arc<Mutex<Option<Result<(), String>>>>,
+    }
+
+    impl Default for MockPushDispatcher {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl MockPushDispatcher {
+        pub fn new() -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(vec![])),
+                result: Arc::new(Mutex::new(None)),
+            }
+        }
+
+        pub fn fail_with(error: impl Into<String>) -> Self {
+            let d = Self::new();
+            *d.result.lock().unwrap() = Some(Err(error.into()));
+            d
+        }
+
+        #[allow(clippy::type_complexity)]
+        pub fn recorded_calls(
+            &self,
+        ) -> Vec<(
+            A2aTaskId,
+            DeliverySemantics,
+            TerminalPushTaskState,
+            TaskPushNotificationConfig,
+            Vec<u8>,
+        )> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PushDispatcher for MockPushDispatcher {
+        async fn dispatch(
+            &self,
+            task_id: &A2aTaskId,
+            config: &TaskPushNotificationConfig,
+            delivery_semantics: DeliverySemantics,
+            terminal_task_state: TerminalPushTaskState,
+            payload: &[u8],
+        ) -> Result<(), DispatchError> {
+            self.calls.lock().unwrap().push((
+                task_id.clone(),
+                delivery_semantics,
+                terminal_task_state,
+                config.clone(),
+                payload.to_vec(),
+            ));
+            match self.result.lock().unwrap().take() {
+                Some(Err(msg)) => Err(DispatchError::UnexpectedStatus {
+                    status: 500,
+                    url: crate::push::target::WebhookUrl::new(&msg)
+                        .unwrap_or_else(|_| crate::push::target::WebhookUrl::new("https://mock/").unwrap()),
+                }),
+                _ => Ok(()),
+            }
+        }
+    }
+
 
     fn config_with_id(id: Option<&str>) -> TaskPushNotificationConfig {
         TaskPushNotificationConfig {

@@ -1,7 +1,10 @@
 use std::time::Duration;
 
+#[allow(dead_code)]
 pub const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+#[allow(dead_code)]
 pub const NATS_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(50);
+#[allow(dead_code)]
 pub const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
 
 pub const DEFAULT_STREAM_MAX_AGE_SECS: u64 = 604_800;

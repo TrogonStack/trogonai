@@ -12,6 +12,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub enum SignatureError {
     MissingPrefix,
     InvalidHex(hex::FromHexError),
+    InvalidKey,
     Mismatch,
 }
 
@@ -20,6 +21,7 @@ impl fmt::Display for SignatureError {
         match self {
             Self::MissingPrefix => f.write_str("missing sha256= prefix"),
             Self::InvalidHex(_) => f.write_str("invalid hex encoding"),
+            Self::InvalidKey => f.write_str("invalid HMAC key"),
             Self::Mismatch => f.write_str("signature mismatch"),
         }
     }
@@ -29,7 +31,7 @@ impl std::error::Error for SignatureError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidHex(err) => Some(err),
-            Self::MissingPrefix | Self::Mismatch => None,
+            Self::MissingPrefix | Self::InvalidKey | Self::Mismatch => None,
         }
     }
 }
@@ -41,7 +43,7 @@ pub fn verify(secret: &NotionVerificationToken, body: &[u8], signature_header: &
 
     let expected = hex::decode(hex_signature).map_err(SignatureError::InvalidHex)?;
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_str().as_bytes()).map_err(SignatureError::InvalidKey)?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_str().as_bytes()).map_err(|_| SignatureError::InvalidKey)?;
     mac.update(body);
     mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }

@@ -24,6 +24,7 @@ bytes = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 trogon-decider-runtime = { version = "0.1.0", path = "../trogon-decider-runtime" }
 trogon-nats = { version = "0.1.0", path = "../trogon-nats" }
 trogon-std = { version = "0.1.0", path = "../trogon-std", features = ["uuid"] }

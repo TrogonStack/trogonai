@@ -45,7 +45,7 @@ impl std::fmt::Display for ConnectionError {
 
 impl std::error::Error for ConnectionError {}
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum DispatchError {
     #[error("no reply subject")]
     NoReplySubject,

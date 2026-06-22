@@ -1,6 +1,7 @@
 pub mod authentication_header;
 pub mod caller_id;
 pub mod delivery_semantics;
+pub mod dispatch_error;
 pub mod dispatcher;
 pub(crate) mod dlq;
 pub mod dlq_dedup;
@@ -23,10 +24,10 @@ pub use delivery_semantics::{
     merged_request_delivery_semantics, parse_delivery_semantics_value,
     upsert_delivery_semantics_on_push_config_json_object,
 };
+pub use dispatch_error::{DispatchError, DispatchPrepError, JetStreamPublishDispatchError, NatsPublishDispatchError};
 pub use dispatcher::{
-    CompositePushDispatcher, DispatchError, DispatchPrepError, HttpPushDispatcher, JetStreamPublishDispatchError,
-    JetStreamPublishPushDispatcher, NatsPublishDispatchError, NatsPublishPushDispatcher, PushDispatcher,
-    composite_push_dispatcher,
+    CompositePushDispatcher, HttpPushDispatcher, JetStreamPublishPushDispatcher, NatsPublishPushDispatcher,
+    PushDispatcher, composite_push_dispatcher,
 };
 pub use dlq_dedup::PushDlqDedupGate;
 pub use idempotency_key_header::{IdempotencyKeyHeader, IdempotencyKeyHeaderError};

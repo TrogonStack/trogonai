@@ -28,13 +28,13 @@ where
         |p, cfg| crate::source::github::router(p, cfg),
     );
     for integration in &config.slack {
-        if integration.config.webhook().is_none() {
+        let Some(webhook) = integration.config.webhook() else {
             continue;
-        }
+        };
         let path = format!("/sources/slack/{}", integration.id);
         app = app.nest(
             &path,
-            crate::source::slack::router(publisher.clone(), &integration.config),
+            crate::source::slack::router(publisher.clone(), &integration.config, webhook),
         );
         let integration_id = integration.id.as_str();
         info!(

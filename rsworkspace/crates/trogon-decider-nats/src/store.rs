@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::fmt;
 
 use async_nats::jetstream::{self, kv};
 #[cfg(not(coverage))]
@@ -55,7 +56,6 @@ impl OptimisticConcurrencyConflictError {
     }
 }
 
-impl std::error::Error for OptimisticConcurrencyConflictError {}
 
 #[derive(Debug)]
 /// Error raised by [`JetStreamStore`] read, append, and snapshot operations.

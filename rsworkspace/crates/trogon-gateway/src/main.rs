@@ -33,8 +33,6 @@ use trogon_nats::connect;
 #[cfg(not(coverage))]
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore};
 #[cfg(not(coverage))]
-use trogon_nats::{connect, wait_for_server_info};
-#[cfg(not(coverage))]
 use trogon_std::args::{CliArgs, ParseArgs};
 #[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;

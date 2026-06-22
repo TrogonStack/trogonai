@@ -12,6 +12,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub enum SignatureError {
     MissingPrefix,
     InvalidBase64(base64::DecodeError),
+    InvalidKey,
     Mismatch,
 }
 
@@ -20,6 +21,7 @@ impl fmt::Display for SignatureError {
         match self {
             Self::MissingPrefix => f.write_str("missing sha256= prefix"),
             Self::InvalidBase64(_) => f.write_str("invalid base64 encoding"),
+            Self::InvalidKey => f.write_str("invalid HMAC key"),
             Self::Mismatch => f.write_str("signature mismatch"),
         }
     }
@@ -34,8 +36,8 @@ impl std::error::Error for SignatureError {
     }
 }
 
-pub fn crc_response_token(consumer_secret: &str, crc_token: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).expect("HMAC-SHA256 accepts any key length");
+pub fn crc_response_token(consumer_secret: &str, crc_token: &str) -> Result<String, SignatureError> {
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).map_err(|_| SignatureError::InvalidKey)?;
     mac.update(crc_token.as_bytes());
     Ok(format!("sha256={}", STANDARD.encode(mac.finalize().into_bytes())))
 }
@@ -49,7 +51,7 @@ pub fn verify(consumer_secret: &str, body: &[u8], signature_header: &str) -> Res
         .decode(encoded_signature)
         .map_err(SignatureError::InvalidBase64)?;
 
-    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).map_err(SignatureError::InvalidKey)?;
+    let mut mac = HmacSha256::new_from_slice(consumer_secret.as_bytes()).map_err(|_| SignatureError::InvalidKey)?;
     mac.update(body);
     mac.verify_slice(&expected).map_err(|_| SignatureError::Mismatch)
 }
