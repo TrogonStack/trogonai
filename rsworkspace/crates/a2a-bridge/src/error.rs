@@ -31,6 +31,8 @@ pub enum BridgeError {
     CatalogRegistration(String),
     #[error("invalid agent identifier: {0}")]
     InvalidAgent(String),
+    #[error("failed to build HTTP response: {0}")]
+    ResponseBuild(String),
 }
 
 #[cfg(test)]
