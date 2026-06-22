@@ -88,7 +88,7 @@ fn apply(
 
     match (state, &event.event) {
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleCreated(inner))) => {
-            Ok(ScheduleStreamState::Present(build_view(inner)?))
+            Ok(ScheduleStreamState::Present(apply_schedule_created(inner)?))
         }
         (
             ScheduleStreamState::Initial,
@@ -165,11 +165,13 @@ fn apply(
     }
 }
 
-/// Builds the stored view from a `ScheduleCreated` event. The event carries the
+/// Applies a `ScheduleCreated` event into the stored view. The event carries the
 /// schedule/delivery/message definitions as `v1` protos, which are folded into
 /// the read model's own `projections_v1` copies (see [`twin`]) and stamped with
 /// the initial folded fields.
-fn build_view(created: &v1::ScheduleCreated) -> Result<projections_v1::ScheduleProjection, ScheduleTransitionError> {
+fn apply_schedule_created(
+    created: &v1::ScheduleCreated,
+) -> Result<projections_v1::ScheduleProjection, ScheduleTransitionError> {
     let Some(status) = created.status.clone().into_option() else {
         return Err(ScheduleTransitionError::MalformedEvent {
             context: "created event has no status",
