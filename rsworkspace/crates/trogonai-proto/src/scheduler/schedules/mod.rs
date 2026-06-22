@@ -4,6 +4,10 @@ pub mod checkpoints_v1 {
     pub use crate::r#gen::trogonai::scheduler::schedules::checkpoints::v1::*;
 }
 
+pub mod projections_v1 {
+    pub use crate::r#gen::trogonai::scheduler::schedules::projections::v1::*;
+}
+
 pub mod state_v1 {
     pub use crate::r#gen::trogonai::scheduler::schedules::state::v1::*;
 }
