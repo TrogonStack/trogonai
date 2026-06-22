@@ -3,8 +3,9 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 use a2a_bridge::{
     AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
     AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
-    StubInboundGatewayPublish, StubTaskJetStreamPort, default_a2a_prefix, gateway_router,
+    StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
 };
+use a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 
 #[tokio::main]
 async fn main() {
@@ -25,9 +26,16 @@ async fn run() -> Result<(), BootstrapError> {
         .parse()
         .map_err(|_| BootstrapError::BadListenAddr)?;
 
+    // Resolve A2A_PREFIX once before either transport so the bridge
+    // shares its subject namespace with a2a-nats-http / -stdio /
+    // -server — defaulting to "a2a" silently in production would make
+    // any non-default deployment publish to a different gateway
+    // subject and JetStream stream name than the rest of the stack.
+    let prefix = resolve_a2a_prefix()?;
+
     let state = match transport.as_str() {
-        "stub" => bootstrap_stub_transport(&nats_url),
-        "nats" => bootstrap_nats_transport(&nats_url).await?,
+        "stub" => bootstrap_stub_transport(&nats_url, prefix),
+        "nats" => bootstrap_nats_transport(&nats_url, prefix).await?,
         other => return Err(BootstrapError::UnknownTransport(other.into())),
     };
 
@@ -55,23 +63,29 @@ enum BootstrapError {
     Serve(#[source] std::io::Error),
 }
 
-fn bootstrap_stub_transport(nats_url: &str) -> AppState {
+fn resolve_a2a_prefix() -> Result<A2aPrefix, BridgeError> {
+    let raw = env::var(ENV_A2A_PREFIX).unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_string());
+    A2aPrefix::new(raw).map_err(|e| BridgeError::NatsPublish(format!("{ENV_A2A_PREFIX} is invalid: {e}")))
+}
+
+fn bootstrap_stub_transport(nats_url: &str, prefix: A2aPrefix) -> AppState {
     let auth_callout_url = env::var("AUTH_CALLOUT_NATS_URL").unwrap_or_else(|_| nats_url.trim().to_owned());
     tracing::warn!(
         transport = "stub",
         nats_url = %nats_url.trim(),
         auth_callout_url = %auth_callout_url,
+        prefix = %prefix.as_str(),
         "using stub transports; outbound NATS/token paths no-op unless A2A_BRIDGE_TRANSPORT=nats"
     );
     AppState::new(
         Arc::new(StubAuthCalloutClient),
         Arc::new(StubInboundGatewayPublish),
         Arc::new(StubTaskJetStreamPort),
-        default_a2a_prefix(),
+        prefix,
     )
 }
 
-async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeError> {
+async fn bootstrap_nats_transport(nats_raw: &str, prefix: A2aPrefix) -> Result<AppState, BridgeError> {
     let servers = parse_nats_servers(nats_raw);
     if servers.is_empty() {
         return Err(BridgeError::NatsPublish(
@@ -124,6 +138,7 @@ async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeErro
         connect_timeout_secs = connect_timeout.as_secs(),
         mint_wire_secs = mint_wire_timeout.as_secs(),
         gateway_rpc_secs = gateway_rpc_timeout.as_secs(),
+        prefix = %prefix.as_str(),
         "a2a-bridge NATS transports wired (JWT mint JSON + gateway unary + JetStream SSE intake)"
     );
 
@@ -131,7 +146,7 @@ async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeErro
         auth_client,
         Arc::new(unary),
         Arc::new(AsyncNatsTokenTaskJetstream::new(servers.clone(), gateway_rpc_timeout)),
-        default_a2a_prefix(),
+        prefix,
     ))
 }
 
