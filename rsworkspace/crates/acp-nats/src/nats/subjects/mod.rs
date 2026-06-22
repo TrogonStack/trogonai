@@ -366,10 +366,7 @@ mod tests {
         assert_eq!(commands::ForkSubject::STREAM, Some(AcpStream::Commands));
         assert_eq!(commands::ResumeSubject::STREAM, Some(AcpStream::Commands));
         assert_eq!(commands::SetModeSubject::STREAM, Some(AcpStream::Commands));
-        assert_eq!(
-            commands::SetConfigOptionSubject::STREAM,
-            Some(AcpStream::Commands)
-        );
+        assert_eq!(commands::SetConfigOptionSubject::STREAM, Some(AcpStream::Commands));
         assert_eq!(commands::SetModelSubject::STREAM, Some(AcpStream::Commands));
 
         assert_eq!(global::InitializeSubject::STREAM, Some(AcpStream::Global));
@@ -382,42 +379,21 @@ mod tests {
 
         assert_eq!(responses::CancelledSubject::STREAM, Some(AcpStream::Responses));
         assert_eq!(responses::ExtReadySubject::STREAM, Some(AcpStream::Responses));
-        assert_eq!(
-            responses::PromptResponseSubject::STREAM,
-            Some(AcpStream::Responses)
-        );
+        assert_eq!(responses::PromptResponseSubject::STREAM, Some(AcpStream::Responses));
         assert_eq!(responses::ResponseSubject::STREAM, Some(AcpStream::Responses));
         assert_eq!(responses::UpdateSubject::STREAM, Some(AcpStream::Notifications));
 
-        assert_eq!(
-            client_ops::FsReadTextFileSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
-        assert_eq!(
-            client_ops::FsWriteTextFileSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
+        assert_eq!(client_ops::FsReadTextFileSubject::STREAM, Some(AcpStream::ClientOps));
+        assert_eq!(client_ops::FsWriteTextFileSubject::STREAM, Some(AcpStream::ClientOps));
         assert_eq!(
             client_ops::SessionRequestPermissionSubject::STREAM,
             Some(AcpStream::ClientOps)
         );
-        assert_eq!(
-            client_ops::SessionUpdateSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
-        assert_eq!(
-            client_ops::TerminalCreateSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
+        assert_eq!(client_ops::SessionUpdateSubject::STREAM, Some(AcpStream::ClientOps));
+        assert_eq!(client_ops::TerminalCreateSubject::STREAM, Some(AcpStream::ClientOps));
         assert_eq!(client_ops::TerminalKillSubject::STREAM, Some(AcpStream::ClientOps));
-        assert_eq!(
-            client_ops::TerminalOutputSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
-        assert_eq!(
-            client_ops::TerminalReleaseSubject::STREAM,
-            Some(AcpStream::ClientOps)
-        );
+        assert_eq!(client_ops::TerminalOutputSubject::STREAM, Some(AcpStream::ClientOps));
+        assert_eq!(client_ops::TerminalReleaseSubject::STREAM, Some(AcpStream::ClientOps));
         assert_eq!(
             client_ops::TerminalWaitForExitSubject::STREAM,
             Some(AcpStream::ClientOps)
@@ -597,9 +573,7 @@ mod tests {
             "acp.session.s1.agent.set_config_option"
         );
         assert_eq!(
-            commands::SetModelSubject::new(&prefix, &sid)
-                .to_subject()
-                .as_str(),
+            commands::SetModelSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.set_model"
         );
         // ExtNotifySubject doesn't impl ToSubject — verify via Display
@@ -610,9 +584,7 @@ mod tests {
 
         // Subscription subjects
         assert_eq!(
-            subscriptions::AllSessionSubject::new(&prefix)
-                .to_subject()
-                .as_str(),
+            subscriptions::AllSessionSubject::new(&prefix).to_subject().as_str(),
             "acp.session.>"
         );
         assert_eq!(
@@ -622,9 +594,7 @@ mod tests {
             "acp.session.s1.>"
         );
         assert_eq!(
-            subscriptions::OneAgentSubject::new(&prefix, &sid)
-                .to_subject()
-                .as_str(),
+            subscriptions::OneAgentSubject::new(&prefix, &sid).to_subject().as_str(),
             "acp.session.s1.agent.>"
         );
         assert_eq!(
@@ -634,9 +604,7 @@ mod tests {
             "acp.session.s1.client.>"
         );
         assert_eq!(
-            subscriptions::PromptWildcardSubject::new(&prefix)
-                .to_subject()
-                .as_str(),
+            subscriptions::PromptWildcardSubject::new(&prefix).to_subject().as_str(),
             "acp.session.*.agent.prompt"
         );
 

@@ -22,12 +22,10 @@ pub fn schedule_to_checkpoint(value: v1::Schedule) -> checkpoints_v1::Schedule {
             EventScheduleKind::Every(every) => {
                 CheckpointScheduleKind::Every(Box::new(checkpoints_v1::schedule::Every { every: every.every }))
             }
-            EventScheduleKind::Cron(cron) => {
-                CheckpointScheduleKind::Cron(Box::new(checkpoints_v1::schedule::Cron {
-                    expr: cron.expr,
-                    timezone: cron.timezone,
-                }))
-            }
+            EventScheduleKind::Cron(cron) => CheckpointScheduleKind::Cron(Box::new(checkpoints_v1::schedule::Cron {
+                expr: cron.expr,
+                timezone: cron.timezone,
+            })),
             EventScheduleKind::Rrule(rrule) => {
                 CheckpointScheduleKind::Rrule(Box::new(checkpoints_v1::schedule::RRule {
                     dtstart: rrule.dtstart,
@@ -73,13 +71,11 @@ pub fn delivery_to_checkpoint(value: v1::Delivery) -> checkpoints_v1::Delivery {
                     source: match nats.source.into_option() {
                         Some(source) => buffa::MessageField::some(checkpoints_v1::delivery::nats_message::Source {
                             kind: source.kind.map(|kind| match kind {
-                                EventSourceKind::LatestFromSubject(latest) => {
-                                    CheckpointSourceKind::LatestFromSubject(Box::new(
-                                        checkpoints_v1::delivery::nats_message::LatestFromSubject {
-                                            subject: latest.subject,
-                                        },
-                                    ))
-                                }
+                                EventSourceKind::LatestFromSubject(latest) => CheckpointSourceKind::LatestFromSubject(
+                                    Box::new(checkpoints_v1::delivery::nats_message::LatestFromSubject {
+                                        subject: latest.subject,
+                                    }),
+                                ),
                             }),
                         }),
                         None => buffa::MessageField::none(),
@@ -100,13 +96,11 @@ pub fn delivery_from_checkpoint(value: checkpoints_v1::Delivery) -> v1::Delivery
                     source: match nats.source.into_option() {
                         Some(source) => buffa::MessageField::some(v1::delivery::nats_message::Source {
                             kind: source.kind.map(|kind| match kind {
-                                CheckpointSourceKind::LatestFromSubject(latest) => {
-                                    EventSourceKind::LatestFromSubject(Box::new(
-                                        v1::delivery::nats_message::LatestFromSubject {
-                                            subject: latest.subject,
-                                        },
-                                    ))
-                                }
+                                CheckpointSourceKind::LatestFromSubject(latest) => EventSourceKind::LatestFromSubject(
+                                    Box::new(v1::delivery::nats_message::LatestFromSubject {
+                                        subject: latest.subject,
+                                    }),
+                                ),
                             }),
                         }),
                         None => buffa::MessageField::none(),
