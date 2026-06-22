@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::fmt;
 use std::path::Path;
 
 use crate::source::discord::config::DiscordBotToken;
@@ -280,16 +279,17 @@ impl ConfigValidationError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", self.display_errors())]
 pub(crate) struct ValidationErrors(Vec<ConfigValidationError>);
 
-impl fmt::Display for ValidationErrors {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "config validation errors:")?;
+impl ValidationErrors {
+    fn display_errors(&self) -> String {
+        let mut out = String::from("config validation errors:\n");
         for error in &self.0 {
-            writeln!(f, "  - {error}")?;
+            out.push_str(&format!("  - {error}\n"));
         }
-        Ok(())
+        out
     }
 }
 
@@ -300,8 +300,6 @@ impl std::ops::Deref for ValidationErrors {
         &self.0
     }
 }
-
-impl std::error::Error for ValidationErrors {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {

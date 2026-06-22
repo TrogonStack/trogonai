@@ -24,28 +24,13 @@ use crate::server::{
     tasks_list, tasks_resubscribe,
 };
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
     /// Subscribing to the agent wildcard subject failed. The source error from
     /// the NATS client implementation flows through `Error::source` so callers
     /// can downcast without us flattening it into a string.
-    Subscribe(Box<dyn std::error::Error + Send + Sync>),
-}
-
-impl std::fmt::Display for BridgeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Subscribe(_) => write!(f, "subscribe failed"),
-        }
-    }
-}
-
-impl std::error::Error for BridgeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Subscribe(e) => Some(e.as_ref()),
-        }
-    }
+    #[error("subscribe failed")]
+    Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub struct Bridge<H, N, J> {

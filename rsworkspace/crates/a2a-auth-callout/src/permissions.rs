@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use crate::jwt::CallerId;
@@ -19,22 +17,13 @@ impl<'de> Deserialize<'de> for SubjectPattern {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SubjectPatternError {
+    #[error("subject pattern must be non-empty")]
     Empty,
+    #[error("subject pattern must not contain whitespace")]
     Whitespace,
 }
-
-impl fmt::Display for SubjectPatternError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("subject pattern must be non-empty"),
-            Self::Whitespace => f.write_str("subject pattern must not contain whitespace"),
-        }
-    }
-}
-
-impl std::error::Error for SubjectPatternError {}
 
 impl SubjectPattern {
     pub fn new(pattern: impl Into<String>) -> Result<Self, SubjectPatternError> {
@@ -110,36 +99,22 @@ pub struct SubjectAclContext<'a> {
     pub iss: Option<&'a str>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TemplateError {
+    #[error("unknown ACL template placeholder: {{{0}}}")]
     UnknownPlaceholder(String),
+    #[error("ACL template context missing required field: {0}")]
     MissingValue(&'static str),
+    #[error("ACL template has an unclosed '{{' placeholder")]
     UnclosedPlaceholder,
+    #[error("materialized subject is invalid: {0}")]
     InvalidSubject(SubjectPatternError),
     /// A placeholder value contained characters that would break out of the
     /// rendered subject segment (`.`, `*`, `>`, whitespace, or an empty
     /// string).
+    #[error("ACL template placeholder {{{0}}} value would escape its subject segment")]
     InvalidPlaceholderValue(String),
 }
-
-impl fmt::Display for TemplateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownPlaceholder(name) => write!(f, "unknown ACL template placeholder: {{{name}}}"),
-            Self::MissingValue(name) => write!(f, "ACL template context missing required field: {name}"),
-            Self::UnclosedPlaceholder => f.write_str("ACL template has an unclosed '{' placeholder"),
-            Self::InvalidSubject(err) => write!(f, "materialized subject is invalid: {err}"),
-            Self::InvalidPlaceholderValue(name) => {
-                write!(
-                    f,
-                    "ACL template placeholder {{{name}}} value would escape its subject segment"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for TemplateError {}
 
 impl SubjectAclTemplate {
     #[must_use]

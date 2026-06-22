@@ -3,8 +3,6 @@
 // `cfg(not(coverage))` because `trogon-nats::NatsJetStreamClient` is excluded
 // during coverage builds.
 
-use std::fmt;
-
 use a2a_identity_types::JwtError;
 use a2a_nats::{A2aPrefixError, AgentIdError};
 
@@ -17,48 +15,24 @@ const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
 const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
 const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("{} environment variable is required", ENV_AGENT_ID)]
     MissingAgentId,
+    #[error("{} is required when {} is enabled", ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY)]
     MissingGatewayCallerJwt,
-    InvalidGatewayCallerJwt(JwtError),
-    InvalidAgentId(AgentIdError),
-    InvalidPrefix(A2aPrefixError),
-    InvalidBind(std::net::AddrParseError),
-    NatsConnect(trogon_nats::ConnectError),
-    Io(std::io::Error),
-}
-
-impl fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingAgentId => write!(f, "A2A_AGENT_ID environment variable is required"),
-            Self::MissingGatewayCallerJwt => write!(
-                f,
-                "{ENV_GATEWAY_CALLER_JWT} is required when {ENV_USE_GATEWAY} is enabled"
-            ),
-            Self::InvalidGatewayCallerJwt(_) => write!(f, "invalid gateway caller JWT"),
-            Self::InvalidAgentId(_) => write!(f, "invalid agent id"),
-            Self::InvalidPrefix(_) => write!(f, "invalid A2A prefix"),
-            Self::InvalidBind(_) => write!(f, "invalid bind address"),
-            Self::NatsConnect(_) => write!(f, "NATS connection failed"),
-            Self::Io(_) => write!(f, "IO error"),
-        }
-    }
-}
-
-impl std::error::Error for RuntimeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidGatewayCallerJwt(e) => Some(e),
-            Self::InvalidAgentId(e) => Some(e),
-            Self::InvalidPrefix(e) => Some(e),
-            Self::InvalidBind(e) => Some(e),
-            Self::NatsConnect(e) => Some(e),
-            Self::Io(e) => Some(e),
-            Self::MissingAgentId | Self::MissingGatewayCallerJwt => None,
-        }
-    }
+    #[error("invalid gateway caller JWT")]
+    InvalidGatewayCallerJwt(#[source] JwtError),
+    #[error("invalid agent id")]
+    InvalidAgentId(#[source] AgentIdError),
+    #[error("invalid A2A prefix")]
+    InvalidPrefix(#[source] A2aPrefixError),
+    #[error("invalid bind address")]
+    InvalidBind(#[source] std::net::AddrParseError),
+    #[error("NATS connection failed")]
+    NatsConnect(#[source] trogon_nats::ConnectError),
+    #[error("IO error")]
+    Io(#[source] std::io::Error),
 }
 
 #[cfg_attr(coverage, allow(dead_code))]
