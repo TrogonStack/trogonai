@@ -96,6 +96,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-identity-types"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "a2a-lf"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7663,6 +7673,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "trogon-decider",
@@ -7894,6 +7905,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
@@ -7932,6 +7944,7 @@ dependencies = [
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]
@@ -8032,6 +8045,7 @@ dependencies = [
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "thiserror 2.0.18",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

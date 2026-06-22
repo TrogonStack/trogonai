@@ -9,6 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+thiserror = { workspace = true }
 async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv", "object-store", "server_2_11"] }
 bytes = { workspace = true }
 futures = { workspace = true }

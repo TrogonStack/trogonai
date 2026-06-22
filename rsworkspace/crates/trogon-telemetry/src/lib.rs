@@ -21,8 +21,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
-#[derive(Debug, thiserror::Error)]
-#[error("{}", self.fmt_errors())]
+#[derive(Debug)]
 pub struct TelemetryShutdownError {
     errors: Vec<String>,
 }

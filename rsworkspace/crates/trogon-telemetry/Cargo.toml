@@ -9,6 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+thiserror = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
