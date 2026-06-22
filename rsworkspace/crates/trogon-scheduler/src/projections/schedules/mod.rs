@@ -110,6 +110,10 @@ fn apply(
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::SchedulePaused(_))) => {
             view.status = MessageField::some(status_proto(false));
+            // A paused schedule does not participate in future fire decisions, so
+            // it must not advertise a pending occurrence. Resuming re-arms it via a
+            // later `ScheduleOccurrenceScheduled`.
+            view.next_occurrence_at = MessageField::none();
             Ok(ScheduleStreamState::Present(view))
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::ScheduleResumed(_))) => {
@@ -791,17 +795,23 @@ fn apply_event_to_read_model_state(
 /// Extracts a schedule event subject's derived routing token — the 32-hex
 /// `key.simple()` the publisher appends as the subject's last segment.
 ///
-/// The subject is `EVENTS_SUBJECT_PREFIX + {derived key}`, never the raw schedule
-/// id, so this cannot recover the id; the raw id is read from the event payload.
-/// The token is used only to confirm an event routes to the schedule named in its
-/// payload before that event is folded.
+/// The subject is `EVENTS_SUBJECT_PREFIX` then `.` then the derived key (never the
+/// raw schedule id, so this cannot recover the id; the raw id is read from the
+/// event payload). The token is used only to confirm an event routes to the
+/// schedule named in its payload before that event is folded.
 fn read_model_token_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
-    let token = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
+    // Confirm the subject is a schedule event, then take its final dot-segment as
+    // the key. `key.simple()` never contains a dot, so the last segment is always
+    // the whole token — correct whether or not `EVENTS_SUBJECT_PREFIX` itself ends
+    // in a dot (stripping a prefix without the trailing dot would otherwise leave a
+    // leading `.` that never matches the derived KV key).
+    let rest = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
         SchedulerError::event_source(
             "failed to derive schedule routing token from event subject",
             std::io::Error::other(subject.to_string()),
         )
     })?;
+    let token = rest.rsplit('.').next().unwrap_or(rest);
     if token.is_empty() {
         return Err(SchedulerError::event_source(
             "schedule event subject has an empty routing token",
@@ -996,6 +1006,34 @@ mod tests {
             .unwrap(),
         );
         assert!(!is_paused(&resumed));
+    }
+
+    #[test]
+    fn pausing_clears_the_pending_next_occurrence() {
+        let created = apply("backup", initial_state(), &added_event("backup")).unwrap();
+        let scheduled = present(
+            apply(
+                "backup",
+                created,
+                &occurrence_scheduled_event("backup", "2026-06-04T00:00:00+00:00"),
+            )
+            .unwrap(),
+        );
+        assert!(scheduled.next_occurrence_at.as_option().is_some());
+
+        let paused = present(
+            apply(
+                "backup",
+                ScheduleStreamState::Present(scheduled),
+                &paused_event("backup"),
+            )
+            .unwrap(),
+        );
+        assert!(is_paused(&paused));
+        assert!(
+            paused.next_occurrence_at.as_option().is_none(),
+            "pausing clears the pending occurrence"
+        );
     }
 
     #[test]
