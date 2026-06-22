@@ -1,9 +1,10 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-// Generated protobuf code (`gen/*`) and the thin wrappers over it are emitted
-// as inline module trees by the proto codegen; the policy does not apply here.
-#![cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 
+// The generated protobuf tree under `gen/` is emitted as a single file with
+// nested inline modules by `buffa-codegen`; the policy cannot apply to code
+// we do not author, so the allow is scoped to that subtree.
 #[allow(clippy::all)]
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 #[path = "gen/mod.rs"]
 #[cfg(feature = "schedules")]
 mod r#gen;
@@ -18,15 +19,7 @@ pub mod convert;
 pub mod scheduler;
 
 #[cfg(feature = "schedules")]
-pub mod content {
-    pub mod v1alpha1 {
-        pub use crate::r#gen::trogon::content::v1alpha1::*;
-    }
-}
+pub mod content;
 
 #[cfg(feature = "schedules")]
-pub mod google {
-    pub mod r#type {
-        pub use crate::r#gen::google::r#type::*;
-    }
-}
+pub mod google;

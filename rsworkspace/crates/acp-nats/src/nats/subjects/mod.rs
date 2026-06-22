@@ -1,53 +1,14 @@
+pub mod agent;
 pub mod client_ops;
 pub mod commands;
 pub mod global;
 pub mod markers;
 pub mod responses;
+pub mod session;
 pub mod stream;
 pub mod subscriptions;
 
 pub use stream::{AcpStream, StreamAssignment};
-
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod agent {
-    pub use super::global::{
-        AuthenticateSubject, ExtNotifySubject, ExtSubject, InitializeSubject, LogoutSubject, SessionListSubject,
-        SessionNewSubject,
-    };
-
-    pub mod wildcards {
-        pub use super::super::subscriptions::GlobalAllSubject;
-    }
-}
-
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod session {
-    pub mod agent {
-        pub use super::super::commands::{
-            CancelSubject, CloseSubject, ForkSubject, LoadSubject, PromptSubject, ResumeSubject,
-            SetConfigOptionSubject, SetModeSubject, SetModelSubject,
-        };
-        pub use super::super::responses::{
-            CancelledSubject, ExtReadySubject, PromptResponseSubject, ResponseSubject, UpdateSubject,
-        };
-        pub use super::super::subscriptions::PromptWildcardSubject;
-    }
-
-    pub mod client {
-        pub use super::super::client_ops::{
-            FsReadTextFileSubject, FsWriteTextFileSubject, SessionRequestPermissionSubject, SessionUpdateSubject,
-            TerminalCreateSubject, TerminalKillSubject, TerminalOutputSubject, TerminalReleaseSubject,
-            TerminalWaitForExitSubject,
-        };
-    }
-
-    pub mod wildcards {
-        pub use super::super::subscriptions::{
-            AllAgentExtSubject, AllAgentSubject, AllClientSubject, AllSessionSubject, OneAgentSubject,
-            OneClientSubject, OneSessionSubject,
-        };
-    }
-}
 
 #[cfg(test)]
 mod tests {

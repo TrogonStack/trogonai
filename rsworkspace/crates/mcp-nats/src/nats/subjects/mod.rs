@@ -1,35 +1,9 @@
 pub mod client;
 pub mod markers;
+pub mod mcp_client;
+pub mod mcp_server;
 pub mod server;
 pub mod subscriptions;
-
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod mcp_server {
-    pub use super::server::{
-        CallToolSubject, CancelTaskSubject, CancelledSubject, CompleteSubject, ElicitationCompletedSubject,
-        GetPromptSubject, GetTaskResultSubject, GetTaskSubject, InitializeSubject, ListPromptsSubject,
-        ListResourceTemplatesSubject, ListResourcesSubject, ListTasksSubject, ListToolsSubject, LoggingMessageSubject,
-        PingSubject, ProgressSubject, PromptListChangedSubject, ReadResourceSubject, ResourceListChangedSubject,
-        ResourceUpdatedSubject, SetLoggingLevelSubject, SubscribeResourceSubject, ToolListChangedSubject,
-        UnsubscribeResourceSubject,
-    };
-
-    pub mod wildcards {
-        pub use super::super::subscriptions::{AllServerSubject, OneServerSubject};
-    }
-}
-
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-pub mod mcp_client {
-    pub use super::client::{
-        CancelledSubject, CreateElicitationSubject, CreateMessageSubject, InitializedSubject, ListRootsSubject,
-        PingSubject, ProgressSubject, RootsListChangedSubject,
-    };
-
-    pub mod wildcards {
-        pub use super::super::subscriptions::{AllClientSubject, OneClientSubject};
-    }
-}
 
 #[cfg(test)]
 mod tests {
