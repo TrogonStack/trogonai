@@ -110,14 +110,16 @@ fn apply(
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::SchedulePaused(_))) => {
             view.status = MessageField::some(status_proto(false));
-            // A paused schedule does not participate in future fire decisions, so
-            // it must not advertise a pending occurrence. Resuming re-arms it via a
-            // later `ScheduleOccurrenceScheduled`.
-            view.next_occurrence_at = MessageField::none();
+            // Pause retains any pending occurrence: it is durable progress the
+            // command-side state keeps while disabled. Resume is the boundary that
+            // discards an unrecorded paused wakeup (see the `ScheduleResumed` arm).
             Ok(ScheduleStreamState::Present(view))
         }
         (ScheduleStreamState::Present(mut view), Some(ScheduleEventCase::ScheduleResumed(_))) => {
             view.status = MessageField::some(status_proto(true));
+            // Resume discards the unrecorded paused wakeup so scheduling can re-arm
+            // from durable occurrence progress, mirroring the command-side state.
+            view.next_occurrence_at = MessageField::none();
             Ok(ScheduleStreamState::Present(view))
         }
         (ScheduleStreamState::Present(view), Some(ScheduleEventCase::ScheduleRemoved(_))) => {
@@ -1023,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn pausing_clears_the_pending_next_occurrence() {
+    fn pause_retains_and_resume_clears_the_pending_next_occurrence() {
         let created = apply("backup", initial_state(), &added_event("backup")).unwrap();
         let scheduled = present(
             apply(
@@ -1035,6 +1037,7 @@ mod tests {
         );
         assert!(scheduled.next_occurrence_at.as_option().is_some());
 
+        // Pause keeps the pending occurrence (durable progress retained while disabled).
         let paused = present(
             apply(
                 "backup",
@@ -1045,8 +1048,30 @@ mod tests {
         );
         assert!(is_paused(&paused));
         assert!(
-            paused.next_occurrence_at.as_option().is_none(),
-            "pausing clears the pending occurrence"
+            paused.next_occurrence_at.as_option().is_some(),
+            "pausing retains the pending occurrence"
+        );
+
+        // Resume discards the unrecorded paused wakeup so scheduling can re-arm.
+        let resumed = present(
+            apply(
+                "backup",
+                ScheduleStreamState::Present(paused),
+                &v1::ScheduleEvent {
+                    event: Some(
+                        v1::ScheduleResumed {
+                            schedule_id: "backup".to_string(),
+                        }
+                        .into(),
+                    ),
+                },
+            )
+            .unwrap(),
+        );
+        assert!(!is_paused(&resumed));
+        assert!(
+            resumed.next_occurrence_at.as_option().is_none(),
+            "resuming clears the pending occurrence"
         );
     }
 
