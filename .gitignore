@@ -1,8 +1,6 @@
 # Rust
 debug
-target
-# Source module whose name collides with the Cargo build-output ignore above
-!rsworkspace/crates/a2a-nats/src/push/target/
+/rsworkspace/target/
 **/*.rs.bk
 *.pdb
 *.rlib
