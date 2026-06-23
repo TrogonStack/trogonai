@@ -317,6 +317,8 @@ pub enum SkillManifestError {
         #[source]
         source: crate::skill_id::SkillIdError,
     },
+    #[error("skill manifest {path} wasm_path `{wasm_path}` escapes bundle directory (absolute or .. component)", path = path.display())]
+    WasmPathEscapesBundle { path: PathBuf, wasm_path: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -373,7 +375,7 @@ fn parse_manifest_file(path: &Path) -> Result<SkillManifest, SkillManifestError>
         path: path.to_path_buf(),
         field: "wasm_path",
     })?;
-    let wasm_path = WasmBundlePath::new(wasm_path_raw);
+    let wasm_path = validate_wasm_path(path, wasm_path_raw)?;
 
     let applies_to_method = parse_method_matcher(
         raw.applies_to_method.ok_or(SkillManifestError::MissingField {
@@ -413,6 +415,35 @@ fn parse_manifest_file(path: &Path) -> Result<SkillManifest, SkillManifestError>
         category,
         version,
     })
+}
+
+/// Reject manifest `wasm_path` values that could escape the bundle root.
+///
+/// The host loads wasm via `bundle_dir.join(wasm_path)`. Absolute paths and
+/// `..` components must be refused at parse time so an attacker authoring a
+/// manifest can't point the host at arbitrary files outside the configured
+/// bundle directory.
+fn validate_wasm_path(manifest_path: &Path, raw: String) -> Result<WasmBundlePath, SkillManifestError> {
+    use std::path::Component;
+    let candidate = PathBuf::from(&raw);
+    if candidate.is_absolute() {
+        return Err(SkillManifestError::WasmPathEscapesBundle {
+            path: manifest_path.to_path_buf(),
+            wasm_path: raw,
+        });
+    }
+    for component in candidate.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(SkillManifestError::WasmPathEscapesBundle {
+                    path: manifest_path.to_path_buf(),
+                    wasm_path: raw,
+                });
+            }
+        }
+    }
+    Ok(WasmBundlePath::new(candidate))
 }
 
 fn validate_filename(path: &Path, skill_id: &SkillId) -> Result<(), SkillManifestError> {

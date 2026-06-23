@@ -1,34 +1,13 @@
-use std::fmt;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SignatureVerificationError {
+    #[error("skill {skill_id}: missing signature file at {path}")]
     MissingSignatureFile { skill_id: String, path: String },
+    #[error("skill {skill_id}: malformed signature envelope: {detail}")]
     MalformedSignatureFile { skill_id: String, detail: String },
+    #[error("skill {skill_id}: manifest sha256 mismatch")]
     ManifestSha256Mismatch { skill_id: String },
+    #[error("skill {skill_id}: wasm sha256 mismatch")]
     WasmSha256Mismatch { skill_id: String },
+    #[error("skill {skill_id}: ed25519 signature verification failed")]
     SignatureVerificationFailed { skill_id: String },
 }
-
-impl fmt::Display for SignatureVerificationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingSignatureFile { skill_id, path } => {
-                write!(f, "skill {skill_id}: missing signature file at {path}")
-            }
-            Self::MalformedSignatureFile { skill_id, detail } => {
-                write!(f, "skill {skill_id}: malformed signature envelope: {detail}")
-            }
-            Self::ManifestSha256Mismatch { skill_id } => {
-                write!(f, "skill {skill_id}: manifest sha256 mismatch")
-            }
-            Self::WasmSha256Mismatch { skill_id } => {
-                write!(f, "skill {skill_id}: wasm sha256 mismatch")
-            }
-            Self::SignatureVerificationFailed { skill_id } => {
-                write!(f, "skill {skill_id}: ed25519 signature verification failed")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SignatureVerificationError {}

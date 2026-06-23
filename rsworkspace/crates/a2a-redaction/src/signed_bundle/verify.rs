@@ -1,4 +1,5 @@
 use ed25519_dalek::Verifier;
+use sha2::{Digest, Sha256};
 
 use super::digest::Sha256Digest;
 use super::error::SignatureVerificationError;
@@ -6,10 +7,44 @@ use super::manifest::{SIGNED_BUNDLE_VERSION, SignedBundleManifest};
 use super::public_key::Ed25519PublicKey;
 use crate::skill_id::SkillId;
 
-pub fn sign_bundle_digest(manifest_digest: Sha256Digest, wasm_digest: Sha256Digest) -> [u8; 64] {
-    let mut message = [0u8; 64];
-    message[..32].copy_from_slice(manifest_digest.as_bytes());
-    message[32..].copy_from_slice(wasm_digest.as_bytes());
+/// Domain-separation tag the verifier and signer agree on. Including the tag
+/// in the signed message prevents a confused-deputy attack where a signature
+/// produced for some other Ed25519 message could be replayed here.
+const SIGNED_BUNDLE_SIGNATURE_DOMAIN: &[u8] = b"a2a-redaction/signed-bundle/v1";
+
+/// Construct the canonical signed message for a bundle.
+///
+/// The message binds the bundle version, skill id, manifest digest, and wasm
+/// digest together so that swapping the envelope's `skill_id` (or `version`)
+/// while keeping the same manifest+wasm digests invalidates the signature.
+/// Layout:
+///
+/// ```text
+/// SHA256(
+///   domain_tag
+///   || u8(version)
+///   || u32_be(skill_id.len()) || skill_id_bytes
+///   || manifest_digest (32 bytes)
+///   || wasm_digest (32 bytes)
+/// )
+/// ```
+pub fn sign_bundle_digest(
+    version: u32,
+    skill_id: &SkillId,
+    manifest_digest: Sha256Digest,
+    wasm_digest: Sha256Digest,
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(SIGNED_BUNDLE_SIGNATURE_DOMAIN);
+    hasher.update(version.to_be_bytes());
+    let skill_bytes = skill_id.as_str().as_bytes();
+    hasher.update((skill_bytes.len() as u32).to_be_bytes());
+    hasher.update(skill_bytes);
+    hasher.update(manifest_digest.as_bytes());
+    hasher.update(wasm_digest.as_bytes());
+    let out = hasher.finalize();
+    let mut message = [0u8; 32];
+    message.copy_from_slice(&out);
     message
 }
 
@@ -55,7 +90,7 @@ pub fn verify_signed_bundle(
                 skill_id: skill_id.to_string(),
             })?;
     let signature = envelope.signature_bytes(&skill_id)?;
-    let message = sign_bundle_digest(expected_manifest, expected_wasm);
+    let message = sign_bundle_digest(envelope.version, &skill_id, expected_manifest, expected_wasm);
 
     verifying_key
         .verify(&message, &signature.dalek_signature()?)
@@ -83,16 +118,12 @@ mod tests {
         wasm_bytes: &[u8],
         signing_key: &SigningKey,
     ) -> SignedBundleManifest {
+        let sid = SkillId::new(skill_id).expect("test fixture skill id is valid");
         let manifest_digest = Sha256Digest::hash(manifest_bytes);
         let wasm_digest = Sha256Digest::hash(wasm_bytes);
-        let message = sign_bundle_digest(manifest_digest, wasm_digest);
+        let message = sign_bundle_digest(SIGNED_BUNDLE_VERSION, &sid, manifest_digest, wasm_digest);
         let signature = Ed25519Signature::from_bytes(signing_key.sign(&message).to_bytes());
-        SignedBundleManifest::new(
-            &SkillId::new(skill_id).expect("test fixture skill id is valid"),
-            manifest_digest,
-            wasm_digest,
-            signature,
-        )
+        SignedBundleManifest::new(&sid, manifest_digest, wasm_digest, signature)
     }
 
     #[test]
@@ -148,6 +179,23 @@ mod tests {
         envelope.version = 99;
         let err = verify_signed_bundle(&pubkey, manifest, wasm, &envelope).expect_err("bad version");
         assert!(matches!(err, SignatureVerificationError::MalformedSignatureFile { .. }));
+    }
+
+    #[test]
+    fn swapping_envelope_skill_id_invalidates_signature() {
+        // Regression: the signed message now binds skill_id, so re-stamping
+        // the envelope with a different (valid) skill id must fail
+        // verification even though manifest+wasm digests still match.
+        let (pubkey, signing_key) = fixture_keypair();
+        let manifest = br#"{"skill_id":"demo","json_path":"$.x"}"#;
+        let wasm = b"\0asm";
+        let mut envelope = signed_envelope("demo", manifest, wasm, &signing_key);
+        envelope.skill_id = "other-skill".into();
+        let err = verify_signed_bundle(&pubkey, manifest, wasm, &envelope).expect_err("must reject");
+        assert!(matches!(
+            err,
+            SignatureVerificationError::SignatureVerificationFailed { .. }
+        ));
     }
 
     #[test]
