@@ -20,7 +20,7 @@ fn cleanup(path: &Path) {
 #[test]
 fn test_system_fs_nonexistent_file() {
     let fs = SystemFs;
-    assert!(!fs.exists(Path::new("/nonexistent_trogonstd_test_file_12345")));
+    assert!(!fs.exists(&test_path("nonexistent_file")));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn test_generic_function_with_system_fs() {
     }
 
     let fs = SystemFs;
-    assert_eq!(read_config(&fs, Path::new("/nonexistent_12345")), "{}");
+    assert_eq!(read_config(&fs, &test_path("generic_missing")), "{}");
 }
 
 #[test]

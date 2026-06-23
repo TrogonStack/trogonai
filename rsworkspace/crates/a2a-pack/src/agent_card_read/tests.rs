@@ -16,6 +16,7 @@ fn minimal_valid() -> Value {
 fn valid_card_passes_each_source() {
     let card = minimal_valid();
     for source in [
+        AgentCardSource::KvStore,
         AgentCardSource::FederatedImport,
         AgentCardSource::DiscoverResponse,
         AgentCardSource::GatewaySurface,
@@ -54,5 +55,5 @@ fn agent_card_source_as_str_covers_every_variant() {
 #[test]
 fn validate_on_read_returns_error_for_invalid_card() {
     let err = validate_agent_card_on_read(&json!({}), AgentCardSource::KvStore).unwrap_err();
-    assert!(!err.to_string().is_empty());
+    assert!(!err.details().is_empty());
 }

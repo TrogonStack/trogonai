@@ -75,8 +75,8 @@ fn server_request_attributes_follow_http_semantic_conventions() {
         "gateway.test"
     );
     assert_eq!(
-        value_for(&attributes, semconv::SERVER_PORT).unwrap().as_str().as_ref(),
-        "8443"
+        value_for(&attributes, semconv::SERVER_PORT),
+        Some(&opentelemetry::Value::I64(8443))
     );
 }
 
@@ -204,10 +204,7 @@ fn server_response_attributes_follow_http_semantic_conventions() {
     let attributes = server_response_attributes(StatusCode::CREATED);
 
     assert_eq!(
-        value_for(&attributes, semconv::HTTP_RESPONSE_STATUS_CODE)
-            .unwrap()
-            .as_str()
-            .as_ref(),
-        "201"
+        value_for(&attributes, semconv::HTTP_RESPONSE_STATUS_CODE),
+        Some(&opentelemetry::Value::I64(201))
     );
 }
