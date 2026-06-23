@@ -176,4 +176,3 @@ fn set_webhook_endpoint(api_base: &str, bot_token: &str) -> String {
 
 #[cfg(test)]
 mod tests;
-

@@ -199,7 +199,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
     }
 }
 
-#[cfg(test)]
-mod tests;
 #[cfg(all(test, feature = "test-support"))]
 mod integration_tests;
+#[cfg(test)]
+mod tests;

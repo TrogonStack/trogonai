@@ -1,130 +1,130 @@
 use super::*;
-    use crate::telemetry::metrics::Metrics;
+use crate::telemetry::metrics::Metrics;
 
-    #[test]
-    fn has_request_metric_matches_correct_method_and_success() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_request("initialize", 0.01, true);
+#[test]
+fn has_request_metric_matches_correct_method_and_success() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_request("initialize", 0.01, true);
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(has_request_metric(&finished, "initialize", true));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(has_request_metric(&finished, "initialize", true));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_request_metric_rejects_wrong_method() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_request("initialize", 0.01, true);
+#[test]
+fn has_request_metric_rejects_wrong_method() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_request("initialize", 0.01, true);
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_request_metric(&finished, "authenticate", true));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_request_metric(&finished, "authenticate", true));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_request_metric_rejects_wrong_success() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_request("initialize", 0.01, true);
+#[test]
+fn has_request_metric_rejects_wrong_success() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_request("initialize", 0.01, true);
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_request_metric(&finished, "initialize", false));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_request_metric(&finished, "initialize", false));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_request_metric_returns_false_when_empty() {
-        let (provider, exporter) = test_provider();
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_request_metric(&finished, "initialize", true));
-        provider.shutdown().unwrap();
-    }
+#[test]
+fn has_request_metric_returns_false_when_empty() {
+    let (provider, exporter) = test_provider();
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_request_metric(&finished, "initialize", true));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_request_metric_returns_false_for_histogram_metric() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let histogram = meter.f64_histogram("acp.requests").with_description("test").build();
-        histogram.record(1.0, &[]);
+#[test]
+fn has_request_metric_returns_false_for_histogram_metric() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let histogram = meter.f64_histogram("acp.requests").with_description("test").build();
+    histogram.record(1.0, &[]);
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_request_metric(&finished, "initialize", true));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_request_metric(&finished, "initialize", true));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_error_metric_matches_correct_operation_and_reason() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_error("session_validate", "invalid_session_id");
+#[test]
+fn has_error_metric_matches_correct_operation_and_reason() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_error("session_validate", "invalid_session_id");
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(has_error_metric(&finished, "session_validate", "invalid_session_id"));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(has_error_metric(&finished, "session_validate", "invalid_session_id"));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_error_metric_rejects_wrong_operation() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_error("session_validate", "invalid_session_id");
+#[test]
+fn has_error_metric_rejects_wrong_operation() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_error("session_validate", "invalid_session_id");
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(&finished, "wrong_operation", "invalid_session_id"));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_error_metric(&finished, "wrong_operation", "invalid_session_id"));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_error_metric_rejects_wrong_reason() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_error("session_validate", "invalid_session_id");
+#[test]
+fn has_error_metric_rejects_wrong_reason() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_error("session_validate", "invalid_session_id");
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(&finished, "session_validate", "wrong_reason"));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_error_metric(&finished, "session_validate", "wrong_reason"));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_error_metric_returns_false_for_histogram_metric() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let histogram = meter.f64_histogram("acp.errors").with_description("test").build();
-        histogram.record(1.0, &[]);
+#[test]
+fn has_error_metric_returns_false_for_histogram_metric() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let histogram = meter.f64_histogram("acp.errors").with_description("test").build();
+    histogram.record(1.0, &[]);
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_error_metric(&finished, "session_validate", "invalid_session_id"));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_error_metric(&finished, "session_validate", "invalid_session_id"));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_session_ready_error_metric_matches() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_error("session_ready", "session_ready_publish_failed");
+#[test]
+fn has_session_ready_error_metric_matches() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_error("session_ready", "session_ready_publish_failed");
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(has_session_ready_error_metric(&finished));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(has_session_ready_error_metric(&finished));
+    provider.shutdown().unwrap();
+}
 
-    #[test]
-    fn has_session_ready_error_metric_rejects_wrong_operation() {
-        let (provider, exporter) = test_provider();
-        let meter = provider.meter("test");
-        let metrics = Metrics::new(&meter);
-        metrics.record_error("wrong_operation", "session_ready_publish_failed");
+#[test]
+fn has_session_ready_error_metric_rejects_wrong_operation() {
+    let (provider, exporter) = test_provider();
+    let meter = provider.meter("test");
+    let metrics = Metrics::new(&meter);
+    metrics.record_error("wrong_operation", "session_ready_publish_failed");
 
-        let finished = flush_metrics(&provider, &exporter);
-        assert!(!has_session_ready_error_metric(&finished));
-        provider.shutdown().unwrap();
-    }
+    let finished = flush_metrics(&provider, &exporter);
+    assert!(!has_session_ready_error_metric(&finished));
+    provider.shutdown().unwrap();
+}

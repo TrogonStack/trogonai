@@ -318,7 +318,6 @@ fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), Outbou
 #[cfg(all(test, not(coverage)))]
 mod tests;
 
-
 // Stub-call test that runs only under `cfg(coverage)` so the empty-body cov
 // stub of `run_io_loop` gets exercised. Mirrors the runtime::run pattern.
 #[cfg(all(test, coverage))]

@@ -1,287 +1,275 @@
-    use super::*;
-    use mcp_nats::{ClientJsonRpcMessage, ServerJsonRpcMessage};
-    use rmcp::model::{ClientNotification, RequestId, ServerResult};
-    use rmcp::service::{RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
-    use std::marker::PhantomData;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio::sync::{mpsc, oneshot};
+use super::*;
+use mcp_nats::{ClientJsonRpcMessage, ServerJsonRpcMessage};
+use rmcp::model::{ClientNotification, RequestId, ServerResult};
+use rmcp::service::{RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::{mpsc, oneshot};
 
-    struct ChannelTransport<R>
-    where
-        R: ServiceRole,
-    {
-        inbound_rx: mpsc::Receiver<RxJsonRpcMessage<R>>,
-        sent_tx: mpsc::Sender<TxJsonRpcMessage<R>>,
-        closed: Arc<AtomicUsize>,
+struct ChannelTransport<R>
+where
+    R: ServiceRole,
+{
+    inbound_rx: mpsc::Receiver<RxJsonRpcMessage<R>>,
+    sent_tx: mpsc::Sender<TxJsonRpcMessage<R>>,
+    closed: Arc<AtomicUsize>,
+}
+
+type ChannelTransportParts<R> = (
+    ChannelTransport<R>,
+    mpsc::Sender<RxJsonRpcMessage<R>>,
+    mpsc::Receiver<TxJsonRpcMessage<R>>,
+);
+
+type ChannelTransportPartsWithClose<R> = (ChannelTransportParts<R>, Arc<AtomicUsize>);
+
+impl<R> ChannelTransport<R>
+where
+    R: ServiceRole,
+{
+    fn new() -> ChannelTransportParts<R> {
+        Self::new_with_close_counter().0
     }
 
-    type ChannelTransportParts<R> = (
-        ChannelTransport<R>,
-        mpsc::Sender<RxJsonRpcMessage<R>>,
-        mpsc::Receiver<TxJsonRpcMessage<R>>,
-    );
-
-    type ChannelTransportPartsWithClose<R> = (ChannelTransportParts<R>, Arc<AtomicUsize>);
-
-    impl<R> ChannelTransport<R>
-    where
-        R: ServiceRole,
-    {
-        fn new() -> ChannelTransportParts<R> {
-            Self::new_with_close_counter().0
-        }
-
-        fn new_with_close_counter() -> ChannelTransportPartsWithClose<R> {
-            let (inbound_tx, inbound_rx) = mpsc::channel(16);
-            let (sent_tx, sent_rx) = mpsc::channel(16);
-            let closed = Arc::new(AtomicUsize::new(0));
+    fn new_with_close_counter() -> ChannelTransportPartsWithClose<R> {
+        let (inbound_tx, inbound_rx) = mpsc::channel(16);
+        let (sent_tx, sent_rx) = mpsc::channel(16);
+        let closed = Arc::new(AtomicUsize::new(0));
+        (
             (
-                (
-                    Self {
-                        inbound_rx,
-                        sent_tx,
-                        closed: closed.clone(),
-                    },
-                    inbound_tx,
-                    sent_rx,
-                ),
-                closed,
-            )
-        }
+                Self {
+                    inbound_rx,
+                    sent_tx,
+                    closed: closed.clone(),
+                },
+                inbound_tx,
+                sent_rx,
+            ),
+            closed,
+        )
+    }
+}
+
+impl<R> Transport<R> for ChannelTransport<R>
+where
+    R: ServiceRole + 'static,
+{
+    type Error = mpsc::error::SendError<TxJsonRpcMessage<R>>;
+
+    fn send(&mut self, item: TxJsonRpcMessage<R>) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        let sent_tx = self.sent_tx.clone();
+        async move { sent_tx.send(item).await }
     }
 
-    impl<R> Transport<R> for ChannelTransport<R>
-    where
-        R: ServiceRole + 'static,
-    {
-        type Error = mpsc::error::SendError<TxJsonRpcMessage<R>>;
-
-        fn send(
-            &mut self,
-            item: TxJsonRpcMessage<R>,
-        ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
-            let sent_tx = self.sent_tx.clone();
-            async move { sent_tx.send(item).await }
-        }
-
-        async fn receive(&mut self) -> Option<RxJsonRpcMessage<R>> {
-            self.inbound_rx.recv().await
-        }
-
-        async fn close(&mut self) -> Result<(), Self::Error> {
-            self.closed.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
+    async fn receive(&mut self) -> Option<RxJsonRpcMessage<R>> {
+        self.inbound_rx.recv().await
     }
 
-    #[derive(Debug, thiserror::Error)]
-    #[error("close failed")]
-    struct CloseError;
+    async fn close(&mut self) -> Result<(), Self::Error> {
+        self.closed.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
 
-    struct FailingCloseTransport<R>
-    where
-        R: ServiceRole,
-    {
-        role: PhantomData<R>,
+#[derive(Debug, thiserror::Error)]
+#[error("close failed")]
+struct CloseError;
+
+struct FailingCloseTransport<R>
+where
+    R: ServiceRole,
+{
+    role: PhantomData<R>,
+}
+
+impl<R> FailingCloseTransport<R>
+where
+    R: ServiceRole,
+{
+    fn new() -> Self {
+        Self { role: PhantomData }
+    }
+}
+
+impl<R> Transport<R> for FailingCloseTransport<R>
+where
+    R: ServiceRole + 'static,
+{
+    type Error = CloseError;
+
+    fn send(&mut self, _item: TxJsonRpcMessage<R>) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        std::future::ready(Ok(()))
     }
 
-    impl<R> FailingCloseTransport<R>
-    where
-        R: ServiceRole,
-    {
-        fn new() -> Self {
-            Self { role: PhantomData }
-        }
+    async fn receive(&mut self) -> Option<RxJsonRpcMessage<R>> {
+        None
     }
 
-    impl<R> Transport<R> for FailingCloseTransport<R>
-    where
-        R: ServiceRole + 'static,
-    {
-        type Error = CloseError;
-
-        fn send(
-            &mut self,
-            _item: TxJsonRpcMessage<R>,
-        ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
-            std::future::ready(Ok(()))
-        }
-
-        async fn receive(&mut self) -> Option<RxJsonRpcMessage<R>> {
-            None
-        }
-
-        async fn close(&mut self) -> Result<(), Self::Error> {
-            Err(CloseError)
-        }
+    async fn close(&mut self) -> Result<(), Self::Error> {
+        Err(CloseError)
     }
+}
 
-    fn as_json<T: serde::Serialize>(value: &T) -> serde_json::Value {
-        serde_json::to_value(value).unwrap()
-    }
+fn as_json<T: serde::Serialize>(value: &T) -> serde_json::Value {
+    serde_json::to_value(value).unwrap()
+}
 
-    #[tokio::test]
-    async fn forwards_local_client_messages_to_remote_server() {
-        let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, _remote_inbound, mut remote_sent) = ChannelTransport::<RoleClient>::new();
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let bridge = tokio::spawn(run_bridge(local, remote, async {
-            let _ = shutdown_rx.await;
-        }));
-        let message =
-            ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
+#[tokio::test]
+async fn forwards_local_client_messages_to_remote_server() {
+    let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, _remote_inbound, mut remote_sent) = ChannelTransport::<RoleClient>::new();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let bridge = tokio::spawn(run_bridge(local, remote, async {
+        let _ = shutdown_rx.await;
+    }));
+    let message = ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
 
-        local_inbound.send(message.clone()).await.unwrap();
+    local_inbound.send(message.clone()).await.unwrap();
 
-        assert_eq!(as_json(&remote_sent.recv().await.unwrap()), as_json(&message));
-        let _ = shutdown_tx.send(());
-        bridge.await.unwrap().unwrap();
-    }
+    assert_eq!(as_json(&remote_sent.recv().await.unwrap()), as_json(&message));
+    let _ = shutdown_tx.send(());
+    bridge.await.unwrap().unwrap();
+}
 
-    #[tokio::test]
-    async fn forwards_remote_server_messages_to_local_client() {
-        let (local, _local_inbound, mut local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let bridge = tokio::spawn(run_bridge(local, remote, async {
-            let _ = shutdown_rx.await;
-        }));
-        let message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
+#[tokio::test]
+async fn forwards_remote_server_messages_to_local_client() {
+    let (local, _local_inbound, mut local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let bridge = tokio::spawn(run_bridge(local, remote, async {
+        let _ = shutdown_rx.await;
+    }));
+    let message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
 
-        remote_inbound.send(message.clone()).await.unwrap();
+    remote_inbound.send(message.clone()).await.unwrap();
 
-        assert_eq!(as_json(&local_sent.recv().await.unwrap()), as_json(&message));
-        let _ = shutdown_tx.send(());
-        bridge.await.unwrap().unwrap();
-    }
+    assert_eq!(as_json(&local_sent.recv().await.unwrap()), as_json(&message));
+    let _ = shutdown_tx.send(());
+    bridge.await.unwrap().unwrap();
+}
 
-    #[tokio::test]
-    async fn run_bridge_shuts_down_on_signal() {
-        let (local, _local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, _remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
+#[tokio::test]
+async fn run_bridge_shuts_down_on_signal() {
+    let (local, _local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, _remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
 
-        let result = run_bridge(local, remote, std::future::ready(())).await;
+    let result = run_bridge(local, remote, std::future::ready(())).await;
 
-        assert!(result.is_ok());
-    }
+    assert!(result.is_ok());
+}
 
-    #[tokio::test]
-    async fn run_bridge_exits_when_remote_closes() {
-        let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
-        drop(remote_inbound);
+#[tokio::test]
+async fn run_bridge_exits_when_remote_closes() {
+    let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
+    drop(remote_inbound);
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_ok());
-        drop(local_inbound);
-    }
+    assert!(result.is_ok());
+    drop(local_inbound);
+}
 
-    #[tokio::test]
-    async fn run_bridge_exits_when_local_closes() {
-        let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
-        drop(local_inbound);
+#[tokio::test]
+async fn run_bridge_exits_when_local_closes() {
+    let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
+    drop(local_inbound);
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_ok());
-        drop(remote_inbound);
-    }
+    assert!(result.is_ok());
+    drop(remote_inbound);
+}
 
-    #[tokio::test]
-    async fn run_bridge_returns_error_when_remote_send_fails() {
-        let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, _remote_inbound, remote_sent) = ChannelTransport::<RoleClient>::new();
-        drop(remote_sent);
-        let message =
-            ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
-        local_inbound.send(message).await.unwrap();
+#[tokio::test]
+async fn run_bridge_returns_error_when_remote_send_fails() {
+    let (local, local_inbound, _local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, _remote_inbound, remote_sent) = ChannelTransport::<RoleClient>::new();
+    drop(remote_sent);
+    let message = ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
+    local_inbound.send(message).await.unwrap();
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_err());
-    }
+    assert!(result.is_err());
+}
 
-    #[tokio::test]
-    async fn run_bridge_closes_transports_when_remote_send_fails() {
-        let ((local, local_inbound, _local_sent), local_closed) =
-            ChannelTransport::<RoleServer>::new_with_close_counter();
-        let ((remote, _remote_inbound, remote_sent), remote_closed) =
-            ChannelTransport::<RoleClient>::new_with_close_counter();
-        drop(remote_sent);
-        let message =
-            ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
-        local_inbound.send(message).await.unwrap();
+#[tokio::test]
+async fn run_bridge_closes_transports_when_remote_send_fails() {
+    let ((local, local_inbound, _local_sent), local_closed) = ChannelTransport::<RoleServer>::new_with_close_counter();
+    let ((remote, _remote_inbound, remote_sent), remote_closed) =
+        ChannelTransport::<RoleClient>::new_with_close_counter();
+    drop(remote_sent);
+    let message = ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
+    local_inbound.send(message).await.unwrap();
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_err());
-        assert_eq!(local_closed.load(Ordering::SeqCst), 1);
-        assert_eq!(remote_closed.load(Ordering::SeqCst), 1);
-    }
+    assert!(result.is_err());
+    assert_eq!(local_closed.load(Ordering::SeqCst), 1);
+    assert_eq!(remote_closed.load(Ordering::SeqCst), 1);
+}
 
-    #[tokio::test]
-    async fn run_bridge_returns_error_when_local_send_fails() {
-        let (local, _local_inbound, local_sent) = ChannelTransport::<RoleServer>::new();
-        let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
-        drop(local_sent);
-        let message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
-        remote_inbound.send(message).await.unwrap();
+#[tokio::test]
+async fn run_bridge_returns_error_when_local_send_fails() {
+    let (local, _local_inbound, local_sent) = ChannelTransport::<RoleServer>::new();
+    let (remote, remote_inbound, _remote_sent) = ChannelTransport::<RoleClient>::new();
+    drop(local_sent);
+    let message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
+    remote_inbound.send(message).await.unwrap();
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_err());
-    }
+    assert!(result.is_err());
+}
 
-    #[tokio::test]
-    async fn run_bridge_closes_transports_when_local_send_fails() {
-        let ((local, _local_inbound, local_sent), local_closed) =
-            ChannelTransport::<RoleServer>::new_with_close_counter();
-        let ((remote, remote_inbound, _remote_sent), remote_closed) =
-            ChannelTransport::<RoleClient>::new_with_close_counter();
-        drop(local_sent);
-        let message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
-        remote_inbound.send(message).await.unwrap();
+#[tokio::test]
+async fn run_bridge_closes_transports_when_local_send_fails() {
+    let ((local, _local_inbound, local_sent), local_closed) = ChannelTransport::<RoleServer>::new_with_close_counter();
+    let ((remote, remote_inbound, _remote_sent), remote_closed) =
+        ChannelTransport::<RoleClient>::new_with_close_counter();
+    drop(local_sent);
+    let message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
+    remote_inbound.send(message).await.unwrap();
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_err());
-        assert_eq!(local_closed.load(Ordering::SeqCst), 1);
-        assert_eq!(remote_closed.load(Ordering::SeqCst), 1);
-    }
+    assert!(result.is_err());
+    assert_eq!(local_closed.load(Ordering::SeqCst), 1);
+    assert_eq!(remote_closed.load(Ordering::SeqCst), 1);
+}
 
-    #[tokio::test]
-    async fn run_bridge_continues_when_close_fails() {
-        let local = FailingCloseTransport::<RoleServer>::new();
-        let remote = FailingCloseTransport::<RoleClient>::new();
+#[tokio::test]
+async fn run_bridge_continues_when_close_fails() {
+    let local = FailingCloseTransport::<RoleServer>::new();
+    let remote = FailingCloseTransport::<RoleClient>::new();
 
-        let result = run_bridge(local, remote, std::future::pending::<()>()).await;
+    let result = run_bridge(local, remote, std::future::pending::<()>()).await;
 
-        assert!(result.is_ok());
-    }
+    assert!(result.is_ok());
+}
 
-    #[tokio::test]
-    async fn failing_close_transport_send_is_noop() {
-        let mut local = FailingCloseTransport::<RoleServer>::new();
-        let mut remote = FailingCloseTransport::<RoleClient>::new();
-        let server_message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(2));
-        let client_message =
-            ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
+#[tokio::test]
+async fn failing_close_transport_send_is_noop() {
+    let mut local = FailingCloseTransport::<RoleServer>::new();
+    let mut remote = FailingCloseTransport::<RoleClient>::new();
+    let server_message = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(2));
+    let client_message =
+        ClientJsonRpcMessage::notification(ClientNotification::InitializedNotification(Default::default()));
 
-        assert!(local.send(server_message).await.is_ok());
-        assert!(remote.send(client_message).await.is_ok());
-    }
+    assert!(local.send(server_message).await.is_ok());
+    assert!(remote.send(client_message).await.is_ok());
+}
 
-    #[test]
-    fn close_error_display_is_specific() {
-        assert_eq!(CloseError.to_string(), "close failed");
-    }
+#[test]
+fn close_error_display_is_specific() {
+    assert_eq!(CloseError.to_string(), "close failed");
+}
 
-    #[test]
-    #[cfg(coverage)]
-    fn coverage_main_stub_is_callable() {
-        main();
-    }
-
+#[test]
+#[cfg(coverage)]
+fn coverage_main_stub_is_callable() {
+    main();
+}

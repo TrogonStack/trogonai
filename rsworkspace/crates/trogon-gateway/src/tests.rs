@@ -1,4 +1,4 @@
 #[test]
-    fn coverage_stub() {
-        super::main();
-    }
+fn coverage_stub() {
+    super::main();
+}

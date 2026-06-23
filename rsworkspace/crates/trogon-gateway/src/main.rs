@@ -265,6 +265,5 @@ fn main() {}
 #[cfg(test)]
 mod command_tests;
 
-
 #[cfg(all(coverage, test))]
 mod tests;

@@ -71,4 +71,3 @@ pub(crate) fn set_span_error(span: &Span, error: MessagingError) {
 
 #[cfg(test)]
 mod tests;
-

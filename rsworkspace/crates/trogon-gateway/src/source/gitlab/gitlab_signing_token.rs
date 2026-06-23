@@ -62,4 +62,3 @@ impl fmt::Debug for GitLabSigningToken {
 
 #[cfg(test)]
 mod tests;
-

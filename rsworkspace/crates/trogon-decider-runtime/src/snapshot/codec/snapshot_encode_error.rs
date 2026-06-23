@@ -38,4 +38,3 @@ impl<PayloadSource, SnapshotTypeSource> SnapshotEncodeError<PayloadSource, Snaps
 
 #[cfg(test)]
 mod tests;
-

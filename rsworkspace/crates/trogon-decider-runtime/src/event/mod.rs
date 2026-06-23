@@ -37,4 +37,3 @@ pub struct Event {
 
 #[cfg(test)]
 mod tests;
-
