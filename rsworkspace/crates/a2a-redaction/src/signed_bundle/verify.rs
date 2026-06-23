@@ -22,7 +22,7 @@ const SIGNED_BUNDLE_SIGNATURE_DOMAIN: &[u8] = b"a2a-redaction/signed-bundle/v1";
 /// ```text
 /// SHA256(
 ///   domain_tag
-///   || u8(version)
+///   || u32_be(version)
 ///   || u32_be(skill_id.len()) || skill_id_bytes
 ///   || manifest_digest (32 bytes)
 ///   || wasm_digest (32 bytes)
