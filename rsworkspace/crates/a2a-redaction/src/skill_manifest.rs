@@ -311,6 +311,8 @@ pub enum SkillManifestError {
     InvalidCategory { category: String },
     #[error("skill manifest {path} requires at least one applies_to_paths entry", path = path.display())]
     EmptyPaths { path: PathBuf },
+    #[error("skill manifest {path} OneOf matcher requires at least one method", path = path.display())]
+    EmptyMethods { path: PathBuf },
     #[error("skill manifest {path} has invalid skill_id: {source}", path = path.display())]
     InvalidSkillId {
         path: PathBuf,
@@ -468,6 +470,16 @@ fn parse_method_matcher(raw: RawMethodMatcher, path: &Path) -> Result<SkillMetho
             "Any" => Ok(SkillMethodMatcher::Any),
             "OneOf" => {
                 let methods_raw = methods.unwrap_or_default();
+                // Refuse OneOf with no methods. The matcher would never fire
+                // and the skill would silently never apply, which is the
+                // opposite of what the manifest author asked for and
+                // mirrors the parser's existing refusal of empty
+                // applies_to_paths.
+                if methods_raw.is_empty() {
+                    return Err(SkillManifestError::EmptyMethods {
+                        path: path.to_path_buf(),
+                    });
+                }
                 let mut methods = Vec::with_capacity(methods_raw.len());
                 for method in methods_raw {
                     methods.push(parse_method(path, method)?);
