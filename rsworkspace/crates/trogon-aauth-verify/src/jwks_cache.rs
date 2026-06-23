@@ -154,10 +154,15 @@ impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
             if let Some(existing) = guard.get(iss)
                 && existing.is_fresh(now)
             {
-                // A concurrent resolver populated a fresh entry while we were
-                // out; our outcome is no fresher than theirs, so don't write,
-                // but still return our own result to this caller.
-                return outcome;
+                // A concurrent resolver populated a fresh entry while we
+                // were out. Return that entry — NOT our own outcome — so two
+                // concurrent callers cannot disagree about the cache state
+                // (e.g. a transient error here while the peer landed a Hit
+                // would otherwise surface as a phantom failure).
+                return match existing {
+                    CachedEntry::Hit { keys, .. } => Ok(keys.clone()),
+                    CachedEntry::Miss { error, .. } => Err(error.clone()),
+                };
             }
 
             // Bound the map. `iss` is attacker-controlled until signature
@@ -403,6 +408,66 @@ mod tests {
             calls_after > calls_before,
             "follow-up resolve must re-fetch when cache was invalidated; \
              calls_before={calls_before}, calls_after={calls_after}"
+        );
+    }
+
+    #[tokio::test]
+    async fn slow_path_returns_peer_cache_entry_when_one_appears_mid_flight() {
+        // Regression for the medium-severity race: when two callers fetched
+        // the same iss concurrently and a peer landed a fresh Hit first, the
+        // loser used to return its OWN outcome (which could be a transient
+        // error) rather than honor the cached Hit. Verify the slow path now
+        // returns the peer's cached entry instead.
+        use std::sync::Arc;
+        use tokio::sync::oneshot;
+
+        struct GatedInner {
+            gate: std::sync::Mutex<Option<oneshot::Receiver<()>>>,
+        }
+        #[async_trait]
+        impl JwksResolver for GatedInner {
+            async fn resolve(&self, _iss: &str) -> Result<JwkSet, JwksError> {
+                let rx = self.gate.lock().unwrap().take();
+                if let Some(rx) = rx {
+                    let _ = rx.await;
+                }
+                // The "loser" — would have surfaced as a Transport error.
+                Err(JwksError::Transport("transient inner failure".into()))
+            }
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let inner = GatedInner {
+            gate: std::sync::Mutex::new(Some(rx)),
+        };
+        let cache = Arc::new(CachedJwksResolver::new(inner, MockTime::at(0)));
+
+        let loser = {
+            let cache = cache.clone();
+            tokio::spawn(async move { cache.resolve("iss.example").await })
+        };
+
+        // Give the loser a chance to enter inner.resolve and park on the gate.
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+
+        // Simulate a peer winning the race by directly writing a fresh Hit
+        // into the cache map.
+        cache.entries.write().await.insert(
+            "iss.example".to_string(),
+            CachedEntry::Hit {
+                keys: empty_set(),
+                expires_at: 600,
+            },
+        );
+
+        // Release the loser's inner.resolve, which returns Err. The slow
+        // path must observe the peer's Hit and return THAT instead.
+        let _ = tx.send(());
+        let got = loser.await.unwrap();
+        assert!(
+            got.is_ok(),
+            "loser must surface the peer's fresh cached Hit, not its own Err: {got:?}"
         );
     }
 
