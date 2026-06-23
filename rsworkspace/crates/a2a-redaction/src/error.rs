@@ -17,6 +17,18 @@ pub enum RedactionError {
     /// boundary instead of being flattened to a String.
     #[error("json serialization for redaction failed: {0}")]
     Json(#[from] serde_json::Error),
+    /// The Tier-3 wasm guest emitted the `A2A_T3_REFUSE` sentinel; the
+    /// optional payload after the colon is the reason tag (e.g.
+    /// `UnauthorizedDataCategory`). Surfacing this as a typed variant lets
+    /// callers route refusals separately from generic JSON / wasm failures.
+    #[error("tier-3 skill refused redaction{}", .0.as_ref().map(|tag| format!(": {tag}")).unwrap_or_default())]
+    Tier3Refusal(Option<String>),
+    /// Signed-bundle verification failed loading a skill (missing sig,
+    /// malformed envelope, digest mismatch, ed25519 verify failure). The
+    /// typed `SignatureVerificationError` preserves the *kind* of failure
+    /// so callers can route on it instead of pattern-matching error text.
+    #[error("signed bundle verification failed: {0}")]
+    Signature(#[from] crate::signed_bundle::SignatureVerificationError),
 }
 
 #[cfg(test)]
