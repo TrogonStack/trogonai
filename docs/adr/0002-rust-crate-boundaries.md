@@ -80,7 +80,7 @@ Use role suffixes only when they describe a real boundary:
   macros.
 - `-derive` for a procedural macro package whose public role is derive macros.
 - `-server` only for a package whose public role is serving a protocol; if it is
-  production-operated, place it according to the service rules in ADR 0001.
+  production-operated, place it according to the service rules in [ADR 0001](./0001-workspace-runtime-taxonomy.md).
 
 Avoid vague names such as `common`, `utils`, `helpers`, `core`, and `shared`.
 Those names usually mean the actual boundary has not been found yet. Prefer a

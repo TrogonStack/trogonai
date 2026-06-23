@@ -10,7 +10,7 @@ date: 2026-06-23
 ## Context
 
 Several first-party protocols are JSON-RPC 2.0 protocols carried over the NATS
-backbone ([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and A2A. ADR 0003 states that the same JSON-RPC
+backbone ([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and A2A. [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) states that the same JSON-RPC
 lifecycle can run over stdio, a remote endpoint, or the internal backbone, and
 [ADR 0004](./0004-protocol-and-transport-layering.md) places request/response mapping, notifications, and protocol error
 semantics in the protocol-dispatcher layer rather than in domain code.
@@ -115,7 +115,7 @@ fields into headers and places only `result` or `message`/`data` in the body, an
 reassembles the full object when crossing to an edge that speaks JSON-RPC (the
 remote HTTP/WebSocket/SSE listeners and the stdio bridges).
 
-Per ADR 0004, this is the protocol-dispatcher and transport seam. Domain packages
+Per [ADR 0004](./0004-protocol-and-transport-layering.md), this is the protocol-dispatcher and transport seam. Domain packages
 (`acp-nats`, `mcp-nats`, A2A) inject what is genuinely domain-specific and stay
 thin:
 
@@ -125,7 +125,7 @@ thin:
 - typed params and results.
 
 Working name for the shared package is `jsonrpc-nats`, following the
-`<protocol>-<backbone>` pattern in ADR 0003 with JSON-RPC as the protocol.
+`<protocol>-<backbone>` pattern in [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) with JSON-RPC as the protocol.
 
 ## Invariants
 
@@ -176,7 +176,7 @@ These do not block the decision and are resolved during implementation:
 - Extend the A2A signing scheme to cover the control headers before the split is
   used on signed paths.
 - Existing stripped or ad hoc JSON paths migrate when touched, consistent with
-  the migration guidance in ADR 0009.
+  the migration guidance in [ADR 0009](./0009-protocol-buffers-wire-contracts.md).
 
 ## Consequences
 
@@ -197,11 +197,11 @@ These do not block the decision and are resolved during implementation:
 - The change introduces a new shared package and refactors the ACP NATS adapter,
   the ACP runner, and the MCP NATS transport. This is a deliberate short-term cost
   for a stable long-term seam.
-- Any future package naming or restructuring follows the vocabulary in ADR 0003.
+- Any future package naming or restructuring follows the vocabulary in [ADR 0003](./0003-ai-protocol-transport-taxonomy.md).
 
 ## References
 
-- [ADR 0003: AI Protocol Transport Taxonomy](/adr/0003-ai-protocol-transport-taxonomy)
-- [ADR 0004: Protocol and Transport Layering](/adr/0004-protocol-and-transport-layering)
-- [ADR 0009: Protocol Buffers Wire Contracts](/adr/0009-protocol-buffers-wire-contracts)
+- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)
