@@ -71,6 +71,10 @@ Transport correlation and routing metadata are separate, protocol-agnostic
 headers owned by the transport, not part of this table: `X-Req-Id`,
 `X-Session-Id`, `X-Causation-Id`, and trace context.
 
+Requests and notifications are addressed by the method subject. A response carries
+no method; it is addressed to the requester's reply subject for core request/reply
+or to the response stream for JetStream, correlated by `X-Req-Id`.
+
 ### 2. Headers are authoritative; namespaced by owning layer
 
 For fields in the table above, the header (or subject) is the authoritative
@@ -182,6 +186,35 @@ protocol.
 - A batch request is unbundled at the edge into individual messages; the backbone
   carries one JSON-RPC message per NATS message.
 - Model bidirectional protocols as a symmetric peer that can both send and serve.
+
+## Alternatives Considered
+
+### Keep the full JSON-RPC envelope in the body
+
+The body carries the complete message and headers stay thin. This is the most
+compatible option and the simplest codec, and it fixes the error-loss bug on its
+own by keeping `result` exclusive-or `error` in the body. It was rejected because
+infrastructure then cannot route or decide on success, error code, or id without
+unmarshalling the body, which is the routing and middleware leverage this ADR
+exists to provide. It remains the fallback if the codec proves too costly.
+
+### Denormalize: full envelope in the body plus derived header copies
+
+Keep the body authoritative and also project the control fields into headers as
+derived, non-authoritative duplicates. This keeps compatibility and reversibility
+while still exposing headers to middleware. It was rejected because every
+projected field becomes a second home that can drift from the body and needs a
+consistency check, and because middleware acting on a possibly stale or forged
+derived header is unsound for security-adjacent decisions. With a shared codec
+amortized across ACP, MCP, and A2A and real header consumers (error counters, id
+indexes), a single authoritative home for each field is cleaner than maintaining
+duplicates.
+
+### Carry `id` with a separate type-tag header
+
+Store `id` as a bare value plus a `Jsonrpc-Id-Type` header. Rejected in favor of
+the self-describing JSON-literal encoding in §3, which uses one header and cannot
+fall out of sync with a separate type tag.
 
 ## Open Implementation Questions
 
