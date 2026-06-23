@@ -1,19 +1,15 @@
 error: inline module `twin` declared with a body block
-  --> $DIR/inline_module_block.rs:8:1
+  --> $DIR/inline_module_block.rs:4:1
    |
 LL | / mod twin {
 LL | |     pub fn run() {}
    | |____^
    |
    = help: move the contents into `twin.rs` (or `twin/mod.rs`) and declare it as `mod twin;`
-note: the lint level is defined here
-  --> $DIR/inline_module_block.rs:5:9
-   |
-LL | #![deny(inline_module_block)]
-   |         ^^^^^^^^^^^^^^^^^^^
+   = note: `#[deny(inline_module_block)]` on by default
 
 error: inline module `tests` declared with a body block
-  --> $DIR/inline_module_block.rs:13:1
+  --> $DIR/inline_module_block.rs:9:1
    |
 LL | / mod tests {
 LL | |     #[test]
@@ -22,7 +18,7 @@ LL | |     #[test]
    = help: move the contents into `tests.rs` (or `tests/mod.rs`) and declare it as `mod tests;`
 
 error: inline module `outer` declared with a body block
-  --> $DIR/inline_module_block.rs:19:1
+  --> $DIR/inline_module_block.rs:15:1
    |
 LL | / mod outer {
 LL | |     mod inner {
@@ -31,7 +27,7 @@ LL | |     mod inner {
    = help: move the contents into `outer.rs` (or `outer/mod.rs`) and declare it as `mod outer;`
 
 error: inline module `inner` declared with a body block
-  --> $DIR/inline_module_block.rs:20:5
+  --> $DIR/inline_module_block.rs:16:5
    |
 LL | /     mod inner {
 LL | |         pub fn run() {}

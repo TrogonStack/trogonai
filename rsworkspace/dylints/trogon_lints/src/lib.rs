@@ -3,6 +3,7 @@
 extern crate rustc_hir;
 extern crate rustc_lint;
 extern crate rustc_session;
+extern crate rustc_span;
 
 mod error_string_comparison;
 mod inline_module_block;
@@ -68,6 +69,8 @@ rustc_session::declare_lint! {
     /// physical structure and the module structure in sync. A child module in
     /// its own file still reaches the parent module's private items, so the
     /// usual reason to inline `#[cfg(test)] mod tests { ... }` does not apply.
+    /// Generated files (those carrying an `@generated` marker near the top) are
+    /// exempt, since their module layout is dictated by codegen.
     ///
     /// ### Example
     ///
@@ -89,9 +92,7 @@ rustc_session::declare_lint! {
     /// mod twin;
     /// ```
     pub INLINE_MODULE_BLOCK,
-    // TODO: flip to `Deny` once existing inline modules (notably
-    // `#[cfg(test)] mod tests { ... }`) are migrated to their own files.
-    Allow,
+    Deny,
     "declare modules in their own file with `mod foo;`, not inline `mod foo { ... }`",
 }
 

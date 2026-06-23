@@ -16,27 +16,27 @@ lint crate rather than in per-invocation flags.
   derived from `std::error::Error::to_string`.
 - `manual_error_impl` (`deny`): requires deriving `std::error::Error` with
   `thiserror` instead of hand-writing the impl.
-- `inline_module_block` (`allow`, pending migration): requires modules to live
-  in their own file (`mod foo;`) instead of inline blocks (`mod foo { ... }`).
-  Macro-generated modules are exempt; suppress a justified exception with
+- `inline_module_block` (`deny`): requires modules to live in their own file
+  (`mod foo;`) instead of inline blocks (`mod foo { ... }`). Macro-generated
+  modules and `@generated` files (proto codegen, etc.) are exempt; suppress a
+  justified exception with
   `#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]` at the
-  site. It is `allow` by default while existing inline modules are migrated to
-  their own files; flip it to `Deny` in `src/lib.rs` once that is done. As a
-  late (HIR) pass it sees `#[cfg(test)] mod tests { ... }` only when the test
-  target is compiled, i.e. when linting with `--all-targets`.
+  site. As a late (HIR) pass it sees `#[cfg(test)] mod tests { ... }` only when
+  the test target is compiled, i.e. when linting with `--all-targets`.
 
 ## Run
 
 From `rsworkspace/` (the `deny` rules are enforced by their declared default
-level, no flags needed):
+level, no flags needed). This mirrors CI:
 
 ```bash
 env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features
 ```
 
-To audit the inline-module-block backlog before flipping that rule on, enable
-it for the run and include test targets:
+Add `--all-targets` to also lint test targets such as
+`#[cfg(test)] mod tests { ... }`, which a late (HIR) pass only sees when the
+test target is compiled:
 
 ```bash
-env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Dinline-module-block' cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
+env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
 ```

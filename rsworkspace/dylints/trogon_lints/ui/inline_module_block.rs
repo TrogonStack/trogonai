@@ -1,9 +1,5 @@
 // edition:2024
 
-// The lint is `Allow` by default (disabled pending migration); enable it here
-// so the UI test still exercises the detection and `#[allow]` handling.
-#![deny(inline_module_block)]
-
 // Inline module with a body block: this is the violation.
 mod twin {
     pub fn run() {}
@@ -52,5 +48,10 @@ make_mod!(generated);
 // the lint must NOT fire. This is the central negative the policy promises.
 #[path = "auxiliary/file_backed.rs"]
 mod file_backed;
+
+// Generated files (carrying an `@generated` marker near the top) are exempt:
+// the inline module inside this file-backed generated module must NOT fire.
+#[path = "auxiliary/generated.rs"]
+mod generated_file;
 
 fn main() {}

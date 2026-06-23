@@ -1,6 +1,7 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use rustc_hir::{Item, ItemKind};
 use rustc_lint::LateContext;
+use rustc_span::SourceFile;
 
 use crate::INLINE_MODULE_BLOCK;
 
@@ -23,6 +24,13 @@ pub(crate) fn check_item<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
         return;
     }
 
+    // Generated files (proto codegen, etc.) emit inline module trees that are
+    // not hand-authored and must not be reshaped to match this policy. Skip any
+    // file carrying the conventional `@generated` marker near its top.
+    if is_generated(&body_file) {
+        return;
+    }
+
     span_lint_and_then(
         cx,
         INLINE_MODULE_BLOCK,
@@ -34,4 +42,11 @@ pub(crate) fn check_item<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
             ));
         },
     );
+}
+
+fn is_generated(file: &SourceFile) -> bool {
+    let Some(src) = &file.src else {
+        return false;
+    };
+    src.lines().take(5).any(|line| line.contains("@generated"))
 }
