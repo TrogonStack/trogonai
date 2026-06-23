@@ -23,8 +23,13 @@ pub enum TokenError {
     UnsupportedAlg(Algorithm),
     #[error("jwks: {0}")]
     Jwks(#[from] JwksError),
+    /// Wraps the typed `jsonwebtoken` decode/validate error so the source
+    /// chain (and the specific variant from upstream) survives past this
+    /// boundary instead of being flattened to a String.
     #[error("token signature invalid: {0}")]
-    Signature(String),
+    Signature(#[source] jsonwebtoken::errors::Error),
+    #[error("no compatible JWK found for token")]
+    NoCompatibleJwk,
     #[error("token expired")]
     Expired,
     #[error("token not yet valid")]
@@ -92,6 +97,7 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
                 crate::jkt::JktError::MissingKty => "cnf.jwk.kty",
                 crate::jkt::JktError::MissingField(f) => f,
                 crate::jkt::JktError::UnsupportedKty(_) => "cnf.jwk.kty",
+                crate::jkt::JktError::Serialize(_) => "cnf.jwk",
             })
         })?;
         self.assert_freshness(claims.iat, claims.exp)?;
@@ -155,8 +161,8 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         audience: Option<&str>,
     ) -> Result<serde_json::Value, TokenError> {
         let set: JwkSet = self.jwks.resolve(&iss).await?;
-        let jwk = pick_jwk(&set, alg, kid).ok_or_else(|| TokenError::Signature("no compatible JWK".into()))?;
-        let key = DecodingKey::from_jwk(jwk).map_err(|e| TokenError::Signature(e.to_string()))?;
+        let jwk = pick_jwk(&set, alg, kid).ok_or(TokenError::NoCompatibleJwk)?;
+        let key = DecodingKey::from_jwk(jwk).map_err(TokenError::Signature)?;
 
         let mut validation = Validation::new(alg);
         validation.leeway = self.leeway_secs;
@@ -170,13 +176,16 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
                 validation.validate_aud = false;
             }
         }
-        // We do our own iat/exp checks against the supplied clock; jsonwebtoken
-        // uses the system clock unconditionally.
+        // We do our own iat/exp/nbf checks against the supplied clock;
+        // jsonwebtoken uses the system clock unconditionally for all three,
+        // and leaving validate_nbf on would silently route the nbf check
+        // through SystemTime even though the rest of freshness uses the
+        // injected TimeSource.
         validation.validate_exp = false;
+        validation.validate_nbf = false;
         validation.required_spec_claims.remove("exp");
 
-        let data =
-            decode::<serde_json::Value>(jwt, &key, &validation).map_err(|e| TokenError::Signature(e.to_string()))?;
+        let data = decode::<serde_json::Value>(jwt, &key, &validation).map_err(TokenError::Signature)?;
         Ok(data.claims)
     }
 }
@@ -255,11 +264,22 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn assert_freshness_uses_supplied_clock() {
-        let v: TokenVerifier<StaticJwks, SystemTimeSource> = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
-        // 1000 valid window using the system clock; with default leeway the
-        // window 900..1100 should be considered fresh.
-        let _ = v.assert_freshness(900, 1100);
+        let now = Arc::new(std::sync::atomic::AtomicI64::new(1000));
+        let v = TokenVerifier::new(StaticJwks::new(), freshness_clock(now.clone())).with_leeway(0);
 
-        let _ = freshness_clock; // keep helper referenced
+        // Inside the window with no leeway: clock at 1000, claim 900..1100.
+        v.assert_freshness(900, 1100).expect("freshness inside window");
+
+        // Past exp: clock advanced past 1100; with leeway 0 must be Expired.
+        now.store(1201, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(v.assert_freshness(900, 1100), Err(TokenError::Expired)));
+
+        // Before iat: clock dropped to 500 while claim says iat=900.
+        now.store(500, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(v.assert_freshness(900, 1100), Err(TokenError::NotYetValid)));
+
+        // Sanity: SystemTimeSource still typechecks where used by callers.
+        let _system: TokenVerifier<StaticJwks, SystemTimeSource> =
+            TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
     }
 }

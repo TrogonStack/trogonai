@@ -18,8 +18,15 @@ pub trait ReplayStore: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReplayError {
-    #[error("backend: {0}")]
-    Backend(String),
+    /// The in-memory variant: its Mutex got poisoned by a panic on another
+    /// thread. The store cannot recover; callers should treat the request as
+    /// failed-closed.
+    #[error("replay store mutex poisoned")]
+    MutexPoisoned,
+    /// Pluggable backends (NATS JetStream KV, Redis, etc.) surface their own
+    /// typed source error here instead of being flattened to a String.
+    #[error("replay store backend failure")]
+    Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Best-effort in-memory replay protection. Suitable for a single-process gateway
@@ -71,7 +78,7 @@ impl InMemoryReplayStore {
 #[async_trait]
 impl ReplayStore for InMemoryReplayStore {
     async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError> {
-        let mut map = self.inner.lock().map_err(|e| ReplayError::Backend(e.to_string()))?;
+        let mut map = self.inner.lock().map_err(|_| ReplayError::MutexPoisoned)?;
         self.gc(&mut map);
         let expires_at = self.now().saturating_add(i64::from(ttl_secs));
         if map.contains_key(key) {

@@ -13,7 +13,7 @@ pub trait JwksResolver: Send + Sync {
     async fn resolve(&self, iss: &str) -> Result<JwkSet, JwksError>;
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum JwksError {
     #[error("unknown issuer: {0}")]
     UnknownIssuer(String),

@@ -24,8 +24,18 @@ pub const DEFAULT_TTL_SECS: i64 = 600;
 pub const DEFAULT_NEGATIVE_TTL_SECS: i64 = 30;
 
 enum CachedEntry {
-    Hit { keys: JwkSet, expires_at: i64 },
-    Miss { error: String, expires_at: i64 },
+    Hit {
+        keys: JwkSet,
+        expires_at: i64,
+    },
+    /// Preserves the original `JwksError` variant (UnknownIssuer / Transport /
+    /// Malformed) across the negative-TTL window so a replayed cached failure
+    /// reports the same failure kind as the first miss did, instead of being
+    /// flattened to `Transport`.
+    Miss {
+        error: JwksError,
+        expires_at: i64,
+    },
 }
 
 impl CachedEntry {
@@ -90,7 +100,7 @@ impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
         {
             return match entry {
                 CachedEntry::Hit { keys, .. } => Ok(keys.clone()),
-                CachedEntry::Miss { error, .. } => Err(JwksError::Transport(error.clone())),
+                CachedEntry::Miss { error, .. } => Err(error.clone()),
             };
         }
 
@@ -110,7 +120,7 @@ impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
                 guard.insert(
                     iss.to_string(),
                     CachedEntry::Miss {
-                        error: err.to_string(),
+                        error: err.clone(),
                         expires_at: now.saturating_add(self.negative_ttl_secs),
                     },
                 );
@@ -225,6 +235,27 @@ mod tests {
         assert!(matches!(second, Err(JwksError::Transport(_))));
 
         assert_eq!(cache.inner.calls(), 1, "negative cache held the second call");
+    }
+
+    #[tokio::test]
+    async fn cached_miss_preserves_original_variant() {
+        // Regression: previously the cached negative entry stored a `String`
+        // and reconstructed every replay as `JwksError::Transport(...)`,
+        // even when the first miss was `UnknownIssuer` or `Malformed`.
+        let inner = CountingResolver::new(StaticJwks::new());
+        inner.fail_next(JwksError::UnknownIssuer("iss.example".into()));
+        let cache = CachedJwksResolver::new(inner, MockTime::at(0)).with_negative_ttl_secs(60);
+
+        let first = cache.resolve("iss.example").await;
+        assert!(
+            matches!(&first, Err(JwksError::UnknownIssuer(_))),
+            "first miss returns original variant, got {first:?}"
+        );
+        let replayed = cache.resolve("iss.example").await;
+        assert!(
+            matches!(&replayed, Err(JwksError::UnknownIssuer(_))),
+            "cached replay must preserve UnknownIssuer, got {replayed:?}"
+        );
     }
 
     #[tokio::test]

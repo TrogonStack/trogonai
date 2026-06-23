@@ -8,8 +8,12 @@ use crate::time_source::TimeSource;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChallengeError {
+    /// Wraps the typed `jsonwebtoken` encode error so the source chain is
+    /// preserved instead of being flattened to a String.
     #[error("encode: {0}")]
-    Encode(String),
+    Encode(#[from] jsonwebtoken::errors::Error),
+    #[error("ttl overflowed i64 when added to iat ({iat} + {ttl_secs})")]
+    TtlOverflow { iat: i64, ttl_secs: i64 },
 }
 
 /// Inputs to mint a resource challenge token.
@@ -43,7 +47,10 @@ impl<C: TimeSource> ChallengeMinter<C> {
 
     pub fn mint(&self, c: &ResourceChallenge<'_>) -> Result<String, ChallengeError> {
         let iat = self.clock.now();
-        let exp = iat + c.ttl_secs;
+        let exp = iat.checked_add(c.ttl_secs).ok_or(ChallengeError::TtlOverflow {
+            iat,
+            ttl_secs: c.ttl_secs,
+        })?;
 
         #[derive(Serialize)]
         struct Claims<'a> {
@@ -80,7 +87,7 @@ impl<C: TimeSource> ChallengeMinter<C> {
             },
             &self.signing_key,
         )
-        .map_err(|e| ChallengeError::Encode(e.to_string()))
+        .map_err(ChallengeError::from)
     }
 }
 
