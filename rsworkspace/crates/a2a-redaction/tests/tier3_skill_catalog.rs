@@ -86,6 +86,7 @@ fn secrets_redactor_wasm_masks_github_pat_in_message_part() {
 fn json_path_sanitizer_wasm_redacts_denylisted_metadata_field() {
     let host = host_with_skill("json-path-sanitizer", "json_path_sanitizer");
     let part: Part = serde_json::from_value(serde_json::json!({
+        "content": { "kind": "text", "text": "" },
         "metadata": {
             "credentials": "top-secret",
             "note": "visible"

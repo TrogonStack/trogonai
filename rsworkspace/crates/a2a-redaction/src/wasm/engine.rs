@@ -1,6 +1,6 @@
 //! `redact_part(in_ptr,in_len):(out_ptr,out_len)` transports UTF-8 JSON through guest-exported linear `memory`.
 
-use wasmtime::{Engine, Instance, Linker, Module, Store};
+use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
 
 use crate::error::RedactionError;
 
@@ -12,11 +12,33 @@ const GUEST_PAGE_BYTES: usize = 65536;
 /// the linear-memory read. We bound it to the single-page payload window
 /// the guest is allowed to write into in the first place.
 const MAX_GUEST_OUTPUT_BYTES: usize = GUEST_PAGE_BYTES;
+/// Fuel budget for a single `redact_part` call. Wasmtime decrements this per
+/// instruction executed; a guest that loops indefinitely traps with
+/// `OutOfFuel` instead of blocking the caller thread. The value is sized
+/// for the canonical per-part redact workload (one JSON part, scan-and-
+/// replace); the gateway can lift the cap if a skill genuinely needs more.
+const GUEST_FUEL_PER_CALL: u64 = 10_000_000;
+/// Hard cap on a single store's linear-memory growth. The guest already
+/// only writes into one page worth of scratch, but a buggy module could
+/// allocate more pages internally; bound that to keep one bad guest from
+/// pinning the host's RAM.
+const MAX_STORE_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 
 pub(crate) fn new_engine() -> Result<Engine, RedactionError> {
     let mut config = wasmtime::Config::default();
     config.wasm_multi_value(true);
+    // Bound guest CPU time deterministically. Without fuel, a redact_part
+    // guest stuck in an infinite loop would block the synchronous Redactor
+    // trait call indefinitely.
+    config.consume_fuel(true);
     Engine::new(&config).map_err(|e| RedactionError::WasmEngine(e.to_string()))
+}
+
+/// Per-call store state — wraps StoreLimits so wasmtime can enforce the
+/// memory ceiling on `memory.grow` without the host having to check after
+/// the fact.
+struct StoreState {
+    limits: StoreLimits,
 }
 
 pub(crate) fn redact_part_guest(engine: &Engine, module: &Module, payload: &[u8]) -> Result<Vec<u8>, RedactionError> {
@@ -29,8 +51,17 @@ pub(crate) fn redact_part_guest(engine: &Engine, module: &Module, payload: &[u8]
     let in_len = i32::try_from(payload.len())
         .map_err(|_| RedactionError::WasmMemory("payload length does not fit in wasm i32 bounds".into()))?;
 
-    let mut store = Store::new(engine, ());
-    let linker: Linker<()> = Linker::new(engine);
+    let mut store = Store::new(
+        engine,
+        StoreState {
+            limits: StoreLimitsBuilder::new().memory_size(MAX_STORE_MEMORY_BYTES).build(),
+        },
+    );
+    store.limiter(|state| &mut state.limits);
+    store
+        .set_fuel(GUEST_FUEL_PER_CALL)
+        .map_err(|e| RedactionError::WasmEngine(format!("set_fuel: {e}")))?;
+    let linker: Linker<StoreState> = Linker::new(engine);
     let instance: Instance = linker
         .instantiate(&mut store, module)
         .map_err(|e| RedactionError::WasmInstance(e.to_string()))?;

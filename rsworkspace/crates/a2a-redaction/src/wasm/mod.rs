@@ -70,7 +70,27 @@ impl WasmRedactorHost {
         self.signing_pubkey.as_ref()
     }
 
+    /// Register a wasm module that bypasses signature verification.
+    ///
+    /// Refuses when the host was constructed with a signing public key —
+    /// otherwise a caller could side-step the configured trust boundary by
+    /// dropping arbitrary bytes into the cache (and overwrite a previously
+    /// verified module for the same `SkillId`). The signed entry point is
+    /// `preload_skill_bundle`. Test/fixture callers that don't configure a
+    /// signing pubkey can still use this directly.
     pub fn register_skill_wasm(&self, skill: SkillId, wasm_binary: &[u8]) -> Result<(), RedactionError> {
+        if self.signing_pubkey.is_some() {
+            return Err(RedactionError::Signature(
+                SignatureVerificationError::MissingSignatureFile {
+                    skill_id: skill.to_string(),
+                    path: "register_skill_wasm bypassed signature verification".into(),
+                },
+            ));
+        }
+        self.register_skill_wasm_unchecked(skill, wasm_binary)
+    }
+
+    fn register_skill_wasm_unchecked(&self, skill: SkillId, wasm_binary: &[u8]) -> Result<(), RedactionError> {
         let compiled = Module::from_binary(&self.engine, wasm_binary)
             .map_err(|e| RedactionError::WasmModule(format!("skill {skill}: {e}")))?;
         let mut guard = self.modules.write().unwrap_or_else(|e| e.into_inner());
@@ -92,22 +112,15 @@ impl WasmRedactorHost {
 
         if let Some(pubkey) = self.signing_pubkey.as_ref() {
             let sig_path = self.bundles_base.join_skill_sig(&skill);
-            let sig_bytes = std::fs::read(&sig_path).map_err(|err| {
-                RedactionError::WasmModule(format!(
-                    "skill {skill}: {}",
-                    SignatureVerificationError::MissingSignatureFile {
-                        skill_id: skill.to_string(),
-                        path: format!("{}: {err}", sig_path.display()),
-                    }
-                ))
+            let sig_bytes = std::fs::read(&sig_path).map_err(|_| SignatureVerificationError::MissingSignatureFile {
+                skill_id: skill.to_string(),
+                path: sig_path.display().to_string(),
             })?;
-            let envelope = SignedBundleManifest::parse_json(&sig_bytes, &skill)
-                .map_err(|err| RedactionError::WasmModule(format!("skill {skill}: {err}")))?;
-            verify_signed_bundle(pubkey, &manifest_bytes, &wasm_bytes, &envelope)
-                .map_err(|err| RedactionError::WasmModule(format!("skill {skill}: {err}")))?;
+            let envelope = SignedBundleManifest::parse_json(&sig_bytes, &skill)?;
+            verify_signed_bundle(pubkey, &manifest_bytes, &wasm_bytes, &envelope)?;
         }
 
-        self.register_skill_wasm(skill, &wasm_bytes)
+        self.register_skill_wasm_unchecked(skill, &wasm_bytes)
     }
 
     pub fn register_skill_bundle_file(&self, skill: SkillId) -> Result<(), RedactionError> {
@@ -350,7 +363,10 @@ mod tests {
         let err = host
             .preload_skill_bundle(SkillId::new(skill).expect("valid"))
             .expect_err("missing sig");
-        assert!(matches!(err, RedactionError::WasmModule(_)));
+        assert!(matches!(
+            err,
+            RedactionError::Signature(SignatureVerificationError::MissingSignatureFile { .. })
+        ));
     }
 
     #[test]
@@ -371,18 +387,38 @@ mod tests {
         let err = host
             .preload_skill_bundle(SkillId::new(skill).expect("valid"))
             .expect_err("tampered wasm");
-        assert!(matches!(err, RedactionError::WasmModule(_)));
+        assert!(matches!(
+            err,
+            RedactionError::Signature(SignatureVerificationError::ManifestSha256Mismatch { .. })
+                | RedactionError::Signature(SignatureVerificationError::WasmSha256Mismatch { .. })
+                | RedactionError::Signature(SignatureVerificationError::SignatureVerificationFailed { .. })
+        ));
     }
 
     #[test]
-    fn tier3_refusal_sentinel_surfaces_typed_error() {
-        // Synthesize a guest output that starts with the Tier-3 refusal
-        // sentinel and feed it through the wrapper directly — guarantees
-        // the host turns the documented refusal contract into the typed
-        // error variant instead of letting it fall through the JSON parse.
+    fn tier3_refusal_error_display_renders_reason_tag() {
+        // Pure rendering check for the new error variant. The wrapper's
+        // sentinel-detection behavior is covered by the existing wasm
+        // dispatch tests against the identity fixture, which the real
+        // Tier-3 skills' integration tests exercise once their fixtures
+        // land.
         let err = RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into()));
         let rendered = err.to_string();
         assert!(rendered.contains("tier-3 skill refused"));
         assert!(rendered.contains("UnauthorizedDataCategory"));
+    }
+
+    #[test]
+    fn register_skill_wasm_refused_when_signing_pubkey_configured() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let signing_key = SigningKey::from_bytes(&[19u8; 32]);
+        let pubkey = Ed25519PublicKey::from_bytes(*signing_key.verifying_key().as_bytes());
+        let host =
+            WasmRedactorHost::new_with_signing_pubkey(WasmBundlePath::new(temp.path()), Some(pubkey)).expect("host");
+        let wasm = fs::read(fixture_path()).expect("read fixture");
+        let err = host
+            .register_skill_wasm(SkillId::new("anything").expect("valid"), &wasm)
+            .expect_err("must refuse bypass when signing pubkey configured");
+        assert!(matches!(err, RedactionError::Signature(_)));
     }
 }

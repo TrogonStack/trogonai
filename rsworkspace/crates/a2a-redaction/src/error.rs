@@ -23,6 +23,12 @@ pub enum RedactionError {
     /// callers route refusals separately from generic JSON / wasm failures.
     #[error("tier-3 skill refused redaction{}", .0.as_ref().map(|tag| format!(": {tag}")).unwrap_or_default())]
     Tier3Refusal(Option<String>),
+    /// Signed-bundle verification failed loading a skill (missing sig,
+    /// malformed envelope, digest mismatch, ed25519 verify failure). The
+    /// typed `SignatureVerificationError` preserves the *kind* of failure
+    /// so callers can route on it instead of pattern-matching error text.
+    #[error("signed bundle verification failed: {0}")]
+    Signature(#[from] crate::signed_bundle::SignatureVerificationError),
 }
 
 #[cfg(test)]
