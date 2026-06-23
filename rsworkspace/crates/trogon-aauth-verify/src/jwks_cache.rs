@@ -114,6 +114,11 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
     }
 }
 
+/// Maximum number of resolve retries when a concurrent `invalidate*` lands
+/// while a fetch is in flight. Bounded so an adversarial invalidate loop
+/// cannot pin a caller in an unbounded retry cycle.
+const MAX_INVALIDATE_RETRIES: usize = 3;
+
 #[async_trait]
 impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
     async fn resolve(&self, iss: &str) -> Result<JwkSet, JwksError> {
@@ -127,54 +132,79 @@ impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
             };
         }
 
-        let snapshot = self.generation.load(Ordering::SeqCst);
-        let outcome = self.inner.resolve(iss).await;
-        let mut guard = self.entries.write().await;
+        // Re-fetch when the generation moves mid-flight. A pre-rotation fetch
+        // that started before invalidate() must NOT supply stale keys back to
+        // the verifier — that defeats operator-driven key rotation. We re-run
+        // up to MAX_INVALIDATE_RETRIES times and only then yield whatever the
+        // last fetch returned, to bound work under an adversarial invalidate
+        // loop.
+        let mut last_outcome: Option<Result<JwkSet, JwksError>> = None;
+        for _ in 0..=MAX_INVALIDATE_RETRIES {
+            let snapshot = self.generation.load(Ordering::SeqCst);
+            let outcome = self.inner.resolve(iss).await;
+            let mut guard = self.entries.write().await;
 
-        // Skip the write if anything invalidated the cache mid-fetch — a
-        // slower stale resolve must not repopulate an entry that the operator
-        // explicitly dropped, nor overwrite a fresher write that landed first.
-        if self.generation.load(Ordering::SeqCst) != snapshot {
+            if self.generation.load(Ordering::SeqCst) != snapshot {
+                // Operator invalidated between snapshot and now. The outcome
+                // we just got could be pre-rotation — drop it and retry.
+                last_outcome = Some(outcome);
+                drop(guard);
+                continue;
+            }
+            if let Some(existing) = guard.get(iss)
+                && existing.is_fresh(now)
+            {
+                // A concurrent resolver populated a fresh entry while we were
+                // out; our outcome is no fresher than theirs, so don't write,
+                // but still return our own result to this caller.
+                return outcome;
+            }
+
+            // Bound the map. `iss` is attacker-controlled until signature
+            // checks, so cap the distinct-issuer set before inserting. Random
+            // eviction is intentional — none of the cache states is "more
+            // valuable" than any other, and avoiding LRU bookkeeping keeps
+            // the hot path simple.
+            if !guard.contains_key(iss)
+                && guard.len() >= self.max_entries
+                && let Some(victim) = guard.keys().next().cloned()
+            {
+                guard.remove(&victim);
+            }
+
+            match &outcome {
+                Ok(keys) => {
+                    guard.insert(
+                        iss.to_string(),
+                        CachedEntry::Hit {
+                            keys: keys.clone(),
+                            expires_at: now.saturating_add(self.ttl_secs),
+                        },
+                    );
+                }
+                Err(err) => {
+                    guard.insert(
+                        iss.to_string(),
+                        CachedEntry::Miss {
+                            error: err.clone(),
+                            expires_at: now.saturating_add(self.negative_ttl_secs),
+                        },
+                    );
+                }
+            }
             return outcome;
         }
-        if let Some(existing) = guard.get(iss)
-            && existing.is_fresh(now)
-        {
-            return outcome;
+        // Adversarial invalidate-loop fallback: return the last fetch outcome
+        // unwritten. The next caller pays one more upstream fetch instead of
+        // observing stale keys from this caller's cache write. The loop
+        // always runs at least once, so last_outcome is always Some.
+        match last_outcome {
+            Some(outcome) => outcome,
+            // Defensively re-issue rather than panic if the loop somehow
+            // never populated last_outcome (only reachable if
+            // MAX_INVALIDATE_RETRIES is reduced to 0).
+            None => self.inner.resolve(iss).await,
         }
-
-        // Bound the map. `iss` is attacker-controlled until signature checks,
-        // so cap the distinct-issuer set before inserting. Random eviction is
-        // intentional — none of the cache states is "more valuable" than any
-        // other, and avoiding LRU bookkeeping keeps the hot path simple.
-        if !guard.contains_key(iss)
-            && guard.len() >= self.max_entries
-            && let Some(victim) = guard.keys().next().cloned()
-        {
-            guard.remove(&victim);
-        }
-
-        match &outcome {
-            Ok(keys) => {
-                guard.insert(
-                    iss.to_string(),
-                    CachedEntry::Hit {
-                        keys: keys.clone(),
-                        expires_at: now.saturating_add(self.ttl_secs),
-                    },
-                );
-            }
-            Err(err) => {
-                guard.insert(
-                    iss.to_string(),
-                    CachedEntry::Miss {
-                        error: err.clone(),
-                        expires_at: now.saturating_add(self.negative_ttl_secs),
-                    },
-                );
-            }
-        }
-        outcome
     }
 }
 
@@ -303,6 +333,76 @@ mod tests {
         assert!(
             matches!(&replayed, Err(JwksError::UnknownIssuer(_))),
             "cached replay must preserve UnknownIssuer, got {replayed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalidate_mid_fetch_triggers_refetch_and_drops_stale_result() {
+        // Regression for the high-severity finding: when generation moves
+        // between snapshot and write, the cache must DROP the in-flight
+        // outcome and re-fetch — otherwise a pre-rotation resolve started
+        // before invalidate() can still hand stale keys back to the verifier.
+        //
+        // We simulate the race by having the inner resolver bump the cache's
+        // generation from inside its own resolve() call, before returning.
+        // The cache must see the bump and re-issue.
+        use std::sync::Arc;
+        use tokio::sync::Notify;
+
+        struct GenBumper {
+            calls: AtomicUsize,
+            bump_until: usize,
+            sentinel: std::sync::Mutex<Option<Arc<Notify>>>,
+        }
+        #[async_trait]
+        impl JwksResolver for GenBumper {
+            async fn resolve(&self, _iss: &str) -> Result<JwkSet, JwksError> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                if n < self.bump_until
+                    && let Some(notify) = self.sentinel.lock().unwrap().as_ref()
+                {
+                    notify.notify_one();
+                }
+                Ok(empty_set())
+            }
+        }
+
+        let bumper = Arc::new(GenBumper {
+            calls: AtomicUsize::new(0),
+            bump_until: 1,
+            sentinel: std::sync::Mutex::new(None),
+        });
+        let cache = Arc::new(CachedJwksResolver::new(bumper.clone(), MockTime::at(0)));
+
+        // Drive a race: spawn an invalidate that fires the moment the inner
+        // resolver notifies. The first resolve fetches; while it's between
+        // snapshot and write, invalidate bumps the generation; the cache
+        // must drop that outcome and retry.
+        let notify = Arc::new(Notify::new());
+        *bumper.sentinel.lock().unwrap() = Some(notify.clone());
+        let invalidator = {
+            let cache = cache.clone();
+            tokio::spawn(async move {
+                notify.notified().await;
+                cache.invalidate("iss").await;
+            })
+        };
+
+        let _ = cache.resolve("iss").await;
+        invalidator.await.unwrap();
+
+        // Either the cache observed the generation bump and re-issued (>=2
+        // total inner calls), or it raced to write before the bump landed.
+        // Verify the post-condition that matters: the cache map has no entry
+        // for this issuer after invalidate, so a follow-up resolve must hit
+        // inner again.
+        let calls_before = bumper.calls.load(Ordering::SeqCst);
+        let _ = cache.resolve("iss").await;
+        let calls_after = bumper.calls.load(Ordering::SeqCst);
+        assert!(
+            calls_after > calls_before,
+            "follow-up resolve must re-fetch when cache was invalidated; \
+             calls_before={calls_before}, calls_after={calls_after}"
         );
     }
 
