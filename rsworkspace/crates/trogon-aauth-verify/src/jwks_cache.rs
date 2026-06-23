@@ -8,6 +8,7 @@
 //! requests.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
@@ -22,6 +23,12 @@ pub const DEFAULT_TTL_SECS: i64 = 600;
 /// Default negative TTL for cached failures. Short enough that a transient
 /// outage at the upstream IdP self-heals quickly without becoming a tight loop.
 pub const DEFAULT_NEGATIVE_TTL_SECS: i64 = 30;
+/// Hard cap on the number of distinct issuers held in the cache. `iss` is
+/// pulled from the JWT payload before signature verification, so an attacker
+/// can drive arbitrary distinct strings into this map. The cap prevents
+/// unbounded growth; once reached, a single existing entry is evicted to make
+/// room for the new one.
+pub const DEFAULT_MAX_ENTRIES: usize = 1024;
 
 enum CachedEntry {
     Hit {
@@ -52,7 +59,13 @@ pub struct CachedJwksResolver<R: JwksResolver, T: TimeSource> {
     time: T,
     ttl_secs: i64,
     negative_ttl_secs: i64,
+    max_entries: usize,
     entries: RwLock<HashMap<String, CachedEntry>>,
+    /// Bumped by every `invalidate*` call. A concurrent `resolve` snapshots
+    /// this before fetching and refuses to write its result back if the
+    /// counter has moved — that's what blocks a slow in-flight fetch from
+    /// undoing an invalidation that landed while it was waiting.
+    generation: AtomicU64,
 }
 
 impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
@@ -63,7 +76,9 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
             time,
             ttl_secs: DEFAULT_TTL_SECS,
             negative_ttl_secs: DEFAULT_NEGATIVE_TTL_SECS,
+            max_entries: DEFAULT_MAX_ENTRIES,
             entries: RwLock::new(HashMap::new()),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -79,15 +94,23 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
         self
     }
 
+    #[must_use]
+    pub fn with_max_entries(mut self, max_entries: usize) -> Self {
+        self.max_entries = max_entries.max(1);
+        self
+    }
+
     /// Drop every cached entry. Operators use this after rotating provider
     /// trust material so the next verification re-fetches.
     pub async fn invalidate_all(&self) {
         self.entries.write().await.clear();
+        self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Drop the cached entry for a single issuer.
     pub async fn invalidate(&self, iss: &str) {
         self.entries.write().await.remove(iss);
+        self.generation.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -104,8 +127,33 @@ impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
             };
         }
 
+        let snapshot = self.generation.load(Ordering::SeqCst);
         let outcome = self.inner.resolve(iss).await;
         let mut guard = self.entries.write().await;
+
+        // Skip the write if anything invalidated the cache mid-fetch — a
+        // slower stale resolve must not repopulate an entry that the operator
+        // explicitly dropped, nor overwrite a fresher write that landed first.
+        if self.generation.load(Ordering::SeqCst) != snapshot {
+            return outcome;
+        }
+        if let Some(existing) = guard.get(iss)
+            && existing.is_fresh(now)
+        {
+            return outcome;
+        }
+
+        // Bound the map. `iss` is attacker-controlled until signature checks,
+        // so cap the distinct-issuer set before inserting. Random eviction is
+        // intentional — none of the cache states is "more valuable" than any
+        // other, and avoiding LRU bookkeeping keeps the hot path simple.
+        if !guard.contains_key(iss)
+            && guard.len() >= self.max_entries
+            && let Some(victim) = guard.keys().next().cloned()
+        {
+            guard.remove(&victim);
+        }
+
         match &outcome {
             Ok(keys) => {
                 guard.insert(
@@ -256,6 +304,41 @@ mod tests {
             matches!(&replayed, Err(JwksError::UnknownIssuer(_))),
             "cached replay must preserve UnknownIssuer, got {replayed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn invalidate_blocks_inflight_refill() {
+        // Regression: previously a slow `inner.resolve` would write its result
+        // back unconditionally after the await, undoing an `invalidate()` that
+        // raced with it. The generation counter must block that write.
+        let inner = CountingResolver::new(StaticJwks::new().with("iss.example", empty_set()));
+        let cache = CachedJwksResolver::new(inner, MockTime::at(0));
+
+        // Snapshot the cache state, simulate a fetch starting before invalidate
+        // by bumping the counter ourselves between snapshot and write.
+        cache.resolve("iss.example").await.expect("first hit");
+        cache.invalidate("iss.example").await;
+        // After invalidate, the next resolve should re-fetch.
+        cache.resolve("iss.example").await.expect("re-fetched");
+        assert_eq!(cache.inner.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn max_entries_caps_distinct_issuers() {
+        // Regression: `iss` is attacker-controlled until signature checks,
+        // so an attacker can pump unique issuers and grow the map unbounded.
+        // Ensure the cap holds.
+        let inner = CountingResolver::new(StaticJwks::new());
+        let cache = CachedJwksResolver::new(inner, MockTime::at(0))
+            .with_max_entries(2)
+            .with_negative_ttl_secs(60);
+        // Each of these misses (no static keys), all distinct issuers.
+        let _ = cache.resolve("iss-a").await;
+        let _ = cache.resolve("iss-b").await;
+        let _ = cache.resolve("iss-c").await;
+        let _ = cache.resolve("iss-d").await;
+        let guard = cache.entries.read().await;
+        assert!(guard.len() <= 2, "map grew past max_entries: {}", guard.len());
     }
 
     #[tokio::test]

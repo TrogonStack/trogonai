@@ -185,7 +185,19 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         validation.validate_nbf = false;
         validation.required_spec_claims.remove("exp");
 
-        let data = decode::<serde_json::Value>(jwt, &key, &validation).map_err(TokenError::Signature)?;
+        let data = decode::<serde_json::Value>(jwt, &key, &validation).map_err(|e| {
+            // jsonwebtoken collapses every validation failure into the same
+            // error type. Surface InvalidAudience as AudienceMismatch so
+            // operators can tell "wrong aud" from "signature didn't verify"
+            // when triaging — both modes need different remediation.
+            match e.kind() {
+                jsonwebtoken::errors::ErrorKind::InvalidAudience => TokenError::AudienceMismatch {
+                    expected: audience.unwrap_or_default().to_string(),
+                    actual: None,
+                },
+                _ => TokenError::Signature(e),
+            }
+        })?;
         Ok(data.claims)
     }
 }
@@ -281,6 +293,51 @@ mod tests {
         // Sanity: SystemTimeSource still typechecks where used by callers.
         let _system: TokenVerifier<StaticJwks, SystemTimeSource> =
             TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn verify_resource_distinguishes_audience_mismatch_from_signature() {
+        // Regression: jsonwebtoken collapses InvalidAudience into the same
+        // error type as bad signatures. The verifier must surface it as the
+        // typed AudienceMismatch variant so operators can tell the two
+        // failure modes apart.
+        let pem = b"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2\nOF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r\n1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G\n-----END PRIVATE KEY-----\n";
+        let signing = jsonwebtoken::EncodingKey::from_ec_pem(pem).expect("signing key");
+        // The matching public JWK so the signature verifies successfully and
+        // the only remaining failure is the audience mismatch.
+        let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(serde_json::json!({
+            "kty": "EC",
+            "crv": "P-256",
+            "kid": "k1",
+            "alg": "ES256",
+            "use": "sig",
+            "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+            "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY"
+        }))
+        .expect("jwk");
+        let jwks = StaticJwks::new().with("iss.example", jsonwebtoken::jwk::JwkSet { keys: vec![jwk] });
+
+        let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+        header.typ = Some(TYP_RESOURCE.into());
+        header.kid = Some("k1".into());
+        let claims = serde_json::json!({
+            "iss": "iss.example",
+            "aud": "ps.example",
+            "jti": "j1",
+            "iat": 1000,
+            "exp": 9999999999_i64,
+            "dwk": "aa-resource",
+            "agent": "agent-1",
+            "agent_jkt": "abc",
+            "scope": "read",
+        });
+        let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+        let v = TokenVerifier::new(jwks, SystemTimeSource);
+        let err = v.verify_resource(&jwt, "WRONG-AUD").await.unwrap_err();
+        assert!(
+            matches!(&err, TokenError::AudienceMismatch { expected, .. } if expected == "WRONG-AUD"),
+            "got {err:?}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
