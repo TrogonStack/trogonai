@@ -15,3 +15,4 @@ future implementation work.
 - [ADR 0008: OpenTelemetry Observability](/adr/0008-opentelemetry-observability)
 - [ADR 0009: Protocol Buffers Wire Contracts](/adr/0009-protocol-buffers-wire-contracts)
 - [ADR 0010: Unit Tests First, Testcontainers Only When Necessary](/adr/0010-testcontainers-for-infrastructure-tests)
+- [ADR 0011: JSON-RPC over NATS Binding](/adr/0011-jsonrpc-over-nats-binding)
