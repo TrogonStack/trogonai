@@ -92,6 +92,7 @@ where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
 {
     command_tx: mpsc::Sender<ProxyCommand>,
+    operation_timeout: Duration,
     server_info: ServerInfo,
     _nats: std::marker::PhantomData<N>,
 }
@@ -106,9 +107,11 @@ where
 {
     pub fn new(nats: N, config: Config, client_id: McpPeerId, server_id: McpPeerId) -> Self {
         let (command_tx, command_rx) = mpsc::channel(64);
+        let operation_timeout = config.operation_timeout();
         tokio::spawn(run_proxy_worker(nats, config, client_id, server_id, command_rx));
         Self {
             command_tx,
+            operation_timeout,
             server_info: ServerInfo::default(),
             _nats: std::marker::PhantomData,
         }
@@ -134,8 +137,9 @@ where
             })
             .await
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy is unavailable", None))?;
-        response_rx
+        tokio::time::timeout(self.operation_timeout, response_rx)
             .await
+            .map_err(|_| ErrorData::internal_error("MCP NATS proxy timed out waiting for a response", None))?
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy dropped the request", None))?
     }
 
@@ -153,8 +157,9 @@ where
             })
             .await
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy is unavailable", None))?;
-        response_rx
+        tokio::time::timeout(self.operation_timeout, response_rx)
             .await
+            .map_err(|_| ErrorData::internal_error("MCP NATS proxy timed out waiting for the notification", None))?
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy dropped the notification", None))?
     }
 
