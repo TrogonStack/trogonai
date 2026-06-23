@@ -467,7 +467,19 @@ fn parse_method_matcher(raw: RawMethodMatcher, path: &Path) -> Result<SkillMetho
     match raw {
         RawMethodMatcher::Any(value) if value == "Any" => Ok(SkillMethodMatcher::Any),
         RawMethodMatcher::Tagged { kind, methods } => match kind.as_str() {
-            "Any" => Ok(SkillMethodMatcher::Any),
+            "Any" => {
+                // Refuse `{ kind = "Any", methods = [...] }` with a non-empty
+                // methods list. The matcher would silently match everything
+                // and discard the listed methods — the opposite of what the
+                // manifest author asked for.
+                if methods.as_ref().is_some_and(|m| !m.is_empty()) {
+                    return Err(SkillManifestError::InvalidMethod {
+                        path: path.to_path_buf(),
+                        method: "Any matcher must not carry a methods list".into(),
+                    });
+                }
+                Ok(SkillMethodMatcher::Any)
+            }
             "OneOf" => {
                 let methods_raw = methods.unwrap_or_default();
                 // Refuse OneOf with no methods. The matcher would never fire
