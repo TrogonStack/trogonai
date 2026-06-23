@@ -21,6 +21,7 @@ fn accepts_minimal_valid_json() {
 fn rejects_empty_object() {
     let err = validate_agent_card_value(&json!({})).unwrap_err();
     assert!(err.details().iter().any(|detail| detail.contains("name")));
+    assert!(!err.to_string().is_empty());
 }
 
 #[test]
@@ -50,7 +51,11 @@ fn rejects_missing_supported_interfaces_array() {
         "name": "my-agent",
     });
     let err = validate_agent_card_value(&card).unwrap_err();
-    assert!(err.details().iter().any(|detail| detail.contains("supportedInterfaces")));
+    assert!(
+        err.details()
+            .iter()
+            .any(|detail| detail.contains("supportedInterfaces"))
+    );
 }
 
 #[test]

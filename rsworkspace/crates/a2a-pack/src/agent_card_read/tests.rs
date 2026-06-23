@@ -37,8 +37,7 @@ fn schema_violating_card_is_rejected() {
 fn filter_drops_invalid_and_keeps_valid_batch() {
     let good = minimal_valid();
     let bad = json!({ "name": "" });
-    let filtered =
-        filter_agent_cards_on_read(vec![good.clone(), bad, good.clone()], AgentCardSource::FederatedImport);
+    let filtered = filter_agent_cards_on_read(vec![good.clone(), bad, good.clone()], AgentCardSource::FederatedImport);
     assert_eq!(filtered.len(), 2);
     assert_eq!(filtered[0], good);
 }

@@ -15,18 +15,16 @@ fn decode_variant_preserves_detail() {
 }
 
 #[test]
-fn every_variant_is_distinct() {
-    assert!(matches!(JwtError::Decode("oops".into()), JwtError::Decode(_)));
-    assert!(matches!(
+fn every_variant_renders_a_message() {
+    for error in [
+        JwtError::Decode("oops".into()),
         JwtError::SystemTime(system_time_error()),
-        JwtError::SystemTime(_)
-    ));
-    assert!(matches!(JwtError::InvalidCallerId, JwtError::InvalidCallerId));
-    assert!(matches!(
+        JwtError::InvalidCallerId,
         JwtError::InvalidExternalSubject,
-        JwtError::InvalidExternalSubject
-    ));
-    assert!(matches!(JwtError::IssuedAtOutOfRange, JwtError::IssuedAtOutOfRange));
+        JwtError::IssuedAtOutOfRange,
+    ] {
+        assert!(!error.to_string().is_empty());
+    }
 }
 
 #[test]

@@ -10,9 +10,8 @@ fn value_for<'a>(attributes: &'a [KeyValue], key: &str) -> Option<&'a openteleme
 
 #[tokio::test]
 async fn instrument_router_executes_trace_callbacks() {
-    let app = instrument_router(
-        Router::<()>::new().route("/-/liveness", axum::routing::get(|| async { StatusCode::OK })),
-    );
+    let app =
+        instrument_router(Router::<()>::new().route("/-/liveness", axum::routing::get(|| async { StatusCode::OK })));
 
     let response = app
         .oneshot(

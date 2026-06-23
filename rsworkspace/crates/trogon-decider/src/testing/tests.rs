@@ -137,16 +137,12 @@ impl Decider for TestCommand {
             (TestAction::Disable, TestState::Missing) => Err(TestCommandError::JobNotFound {
                 id: command.id.to_string(),
             }),
-            (TestAction::Disable, TestState::Present { enabled: false }) => {
-                Err(TestCommandError::AlreadyDisabled {
-                    id: command.id.to_string(),
-                })
-            }
-            (TestAction::Disable, TestState::Present { enabled: true }) => {
-                Ok(Decision::event(TestEvent::Disabled {
-                    id: command.id.to_string(),
-                }))
-            }
+            (TestAction::Disable, TestState::Present { enabled: false }) => Err(TestCommandError::AlreadyDisabled {
+                id: command.id.to_string(),
+            }),
+            (TestAction::Disable, TestState::Present { enabled: true }) => Ok(Decision::event(TestEvent::Disabled {
+                id: command.id.to_string(),
+            })),
             (TestAction::Remove, TestState::Missing) => Err(TestCommandError::JobNotFound {
                 id: command.id.to_string(),
             }),
