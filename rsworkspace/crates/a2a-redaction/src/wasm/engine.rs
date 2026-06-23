@@ -6,6 +6,12 @@ use crate::error::RedactionError;
 
 const SCRATCH_OFFSET: usize = 0x0800;
 const GUEST_PAGE_BYTES: usize = 65536;
+/// Cap on the length the guest can declare for its output buffer. Without a
+/// ceiling, a malicious or buggy module can return a near-`i32::MAX` length
+/// and force the host to allocate gigabytes (or OOM) before we'd even hit
+/// the linear-memory read. We bound it to the single-page payload window
+/// the guest is allowed to write into in the first place.
+const MAX_GUEST_OUTPUT_BYTES: usize = GUEST_PAGE_BYTES;
 
 pub(crate) fn new_engine() -> Result<Engine, RedactionError> {
     let mut config = wasmtime::Config::default();
@@ -51,6 +57,18 @@ pub(crate) fn redact_part_guest(engine: &Engine, module: &Module, payload: &[u8]
         .map_err(|_| RedactionError::WasmAbi("wasm redact_part returned negative output pointer".into()))?;
     let out_len = usize::try_from(out_len)
         .map_err(|_| RedactionError::WasmAbi("wasm redact_part returned negative output length".into()))?;
+
+    if out_len > MAX_GUEST_OUTPUT_BYTES {
+        return Err(RedactionError::WasmAbi(format!(
+            "wasm redact_part output length {out_len} exceeds guest cap {MAX_GUEST_OUTPUT_BYTES}"
+        )));
+    }
+    let memory_size = memory.data_size(&store);
+    if out_base.saturating_add(out_len) > memory_size {
+        return Err(RedactionError::WasmAbi(format!(
+            "wasm redact_part output [base={out_base}, len={out_len}) exceeds linear memory size {memory_size}"
+        )));
+    }
 
     let mut dst = vec![0u8; out_len];
     memory

@@ -10,7 +10,25 @@ use crate::error::RedactionError;
 use crate::redactor::{self, Redactor};
 use crate::signed_bundle::{Ed25519PublicKey, SignatureVerificationError, SignedBundleManifest, verify_signed_bundle};
 use crate::skill_id::SkillId;
+use crate::tier3_sentinel::{output_is_tier3_refusal, tier3_refusal_reason_tag};
 use crate::wasm_bundle_path::WasmBundlePath;
+
+/// Run the guest, then surface the documented Tier-3 refusal sentinel as a
+/// typed `RedactionError::Tier3Refusal` instead of letting it fall through
+/// the JSON-decode path where it would surface as a generic `Json` error.
+fn redact_part_or_tier3_refusal(
+    engine: &wasmtime::Engine,
+    wasm_mod: &Module,
+    payload: &[u8],
+) -> Result<Vec<u8>, RedactionError> {
+    let output = engine::redact_part_guest(engine, wasm_mod, payload)?;
+    if output_is_tier3_refusal(&output) {
+        return Err(RedactionError::Tier3Refusal(
+            tier3_refusal_reason_tag(&output).map(str::to_owned),
+        ));
+    }
+    Ok(output)
+}
 
 static SIGNING_DISABLED_WARN: Once = Once::new();
 
@@ -106,7 +124,7 @@ impl WasmRedactorHost {
             return Ok(payload.to_vec());
         };
 
-        engine::redact_part_guest(&self.engine, wasm_mod, payload)
+        redact_part_or_tier3_refusal(&self.engine, wasm_mod, payload)
     }
 }
 
@@ -121,7 +139,9 @@ impl Redactor for WasmRedactorHost {
             return Ok(message);
         };
 
-        redactor::redact_message_parts_with(message, |json| engine::redact_part_guest(&self.engine, wasm_mod, json))
+        redactor::redact_message_parts_with(message, |json| {
+            redact_part_or_tier3_refusal(&self.engine, wasm_mod, json)
+        })
     }
 
     fn redact_artifact(&self, artifact: Artifact, skill: &SkillId) -> Result<Artifact, RedactionError> {
@@ -134,7 +154,9 @@ impl Redactor for WasmRedactorHost {
             return Ok(artifact);
         };
 
-        redactor::redact_artifact_parts_with(artifact, |json| engine::redact_part_guest(&self.engine, wasm_mod, json))
+        redactor::redact_artifact_parts_with(artifact, |json| {
+            redact_part_or_tier3_refusal(&self.engine, wasm_mod, json)
+        })
     }
 }
 
@@ -350,5 +372,17 @@ mod tests {
             .preload_skill_bundle(SkillId::new(skill).expect("valid"))
             .expect_err("tampered wasm");
         assert!(matches!(err, RedactionError::WasmModule(_)));
+    }
+
+    #[test]
+    fn tier3_refusal_sentinel_surfaces_typed_error() {
+        // Synthesize a guest output that starts with the Tier-3 refusal
+        // sentinel and feed it through the wrapper directly — guarantees
+        // the host turns the documented refusal contract into the typed
+        // error variant instead of letting it fall through the JSON parse.
+        let err = RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into()));
+        let rendered = err.to_string();
+        assert!(rendered.contains("tier-3 skill refused"));
+        assert!(rendered.contains("UnauthorizedDataCategory"));
     }
 }
