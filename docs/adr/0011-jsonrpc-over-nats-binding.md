@@ -10,156 +10,182 @@ date: 2026-06-23
 ## Context
 
 Several first-party protocols are JSON-RPC 2.0 protocols carried over the NATS
-backbone ([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and A2A. [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) states that the same JSON-RPC
-lifecycle can run over stdio, a remote endpoint, or the internal backbone, and
-[ADR 0004](./0004-protocol-and-transport-layering.md) places request/response mapping, notifications, and protocol error
-semantics in the protocol-dispatcher layer rather than in domain code.
+backbone ([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and
+A2A. [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) states that the same
+JSON-RPC lifecycle can run over stdio, a remote endpoint, or the internal
+backbone, and [ADR 0004](./0004-protocol-and-transport-layering.md) places
+request/response mapping, notifications, and protocol error semantics in the
+protocol-dispatcher layer rather than in domain code.
 
 Today each protocol maps onto NATS independently, and the mappings disagree even
 within one protocol:
 
-- The ACP command path (client to agent: `initialize`, `authenticate`,
-  `session/new`, `session/prompt`, and similar) strips the JSON-RPC envelope. The
-  NATS body is the bare params struct, the method is encoded in the subject, and
-  correlation rides in the `req_id` header. The reply is a bare result struct.
-- The ACP callback path (agent to client: `fs/read_text_file`,
-  `session/request_permission`, `terminal/*`) keeps the full JSON-RPC envelope in
-  the body.
+- The ACP command path (client to agent) strips the JSON-RPC envelope. The NATS
+  body is the bare params struct, the method is the subject, and correlation rides
+  in the `X-Req-Id` header. The reply is a bare result struct.
+- The ACP callback path (agent to client) keeps the full JSON-RPC envelope in the
+  body.
 - MCP over NATS keeps the full JSON-RPC envelope in the body end to end.
 
 Because the command path has no envelope and no explicit discriminator, success
-and failure are distinguished by attempting to deserialize the body as the success
-type and, on failure, re-attempting as a JSON-RPC error. This structural
-discrimination is centralized on the JetStream paths but is absent on the core
-request/reply command handlers, where the reply is typed only as the success type.
-A structured protocol error on those handlers fails to deserialize and collapses
-into a generic internal error, discarding the originating error code and message.
-Authentication rejection is the clearest casualty: the failure is
-indistinguishable from an unavailable agent.
+and failure are told apart by attempting to deserialize the body as the success
+type and, on failure, re-attempting as a JSON-RPC error. This is centralized on
+the JetStream paths but absent on the core request/reply command handlers, where
+the reply is typed only as the success type. A structured protocol error there
+fails to deserialize and collapses into a generic internal error, discarding the
+originating code and message. Authentication rejection is the clearest casualty:
+the failure is indistinguishable from an unavailable agent.
 
-NATS provides correlation (the reply subject for core request/reply, the `req_id`
-header plus a dedicated response consumer for JetStream) and routing (the subject).
-It does not provide success-versus-error semantics. The fix is not to guess from
-the body, and not to leave the whole envelope inline, but to bind each JSON-RPC
-field to the part of the NATS message that fits it, with the success/error
-discriminator made explicit.
+NATS provides correlation (the reply subject for core request/reply, the
+`X-Req-Id` header plus a dedicated response consumer for JetStream) and routing
+(the subject). It does not provide success-versus-error semantics, and it routes
+on subjects and acts on headers without ever reading the body. A useful binding
+should let infrastructure route and make decisions from the subject and headers
+without unmarshalling the payload, while keeping JSON-RPC semantics exact.
 
 This requires one rule for any JSON-RPC protocol on the backbone, not an
 ACP-specific patch.
 
 ## Decision
 
-### 1. Split the JSON-RPC message across the NATS message
+### 1. Bind JSON-RPC to NATS as a binary content-mode codec
 
-A JSON-RPC message is bound to a NATS message across two planes: a control and
-correlation plane (subject and headers) and a semantic payload plane (body). The
-success-versus-error discriminator is explicit, in a header, and is never inferred
-by deserializing the body.
+A JSON-RPC message is mapped onto a NATS message by a lossless codec: the
+control and correlation fields go to the subject and headers, the payload goes to
+the body. This is binary content mode, the same shape CloudEvents uses for its
+binary mode and gRPC uses for status in trailers. The on-NATS form is an encoding
+of the message, not a different message.
 
 | JSON-RPC field | NATS location | Rule |
 | --- | --- | --- |
-| `jsonrpc` (`"2.0"`) | header | Constant protocol-version marker. |
+| `jsonrpc` (`"2.0"`) | none | Constant; omitted on the wire and re-injected on decode. |
 | `method` | subject | Routed by the subject, per existing subject schemes. |
-| `id` | header | Correlation. Present on requests and responses; absent on notifications. |
+| `id` | header `Jsonrpc-Id` | JSON literal (see §3). Absent means notification (request) or `null` (response). |
 | `params` | body | Request payload. |
-| `status` (`ok` or `error`) | header | Authoritative success/error discriminator. New field, not in base JSON-RPC. |
-| `result` | body | Success payload. Present if and only if `status` is `ok`. |
-| `error.code` | header | Machine-routable error code. Present if and only if `status` is `error`. |
+| `status` (`ok` / `error`) | header `Jsonrpc-Status` | Authoritative success/error discriminator. Responses only. Not a base JSON-RPC field. |
+| `result` | body | Success payload. Present iff `Jsonrpc-Status: ok`. |
+| `error.code` | header `Jsonrpc-Error-Code` | Integer. Present iff `Jsonrpc-Status: error`. |
 | `error.message`, `error.data` | body | Human-readable and structured error detail. |
 
-A response body is therefore either the `result` value (`status: ok`) or the
-`{ message, data }` error detail (`status: error`); the header selects which.
+Transport correlation and routing metadata are separate, protocol-agnostic
+headers owned by the transport, not part of this table: `X-Req-Id`,
+`X-Session-Id`, `X-Causation-Id`, and trace context.
 
-This is governed by the JSON-RPC exception in [ADR 0009](./0009-protocol-buffers-wire-contracts.md): ACP, MCP, and JSON-RPC
+### 2. Headers are authoritative; namespaced by owning layer
+
+For fields in the table above, the header (or subject) is the authoritative
+value, not a denormalized copy of something in the body. Infrastructure routes on
+the subject and acts on headers — an error counter on `Jsonrpc-Error-Code`, an
+index on `Jsonrpc-Id`, a dead-letter router or metrics sidecar on
+`Jsonrpc-Status` — without ever unmarshalling the body.
+
+Headers are namespaced by the layer that owns them:
+
+- `Jsonrpc-*` are faithful projections of JSON-RPC fields, owned by the codec.
+- `X-*` are transport correlation and routing, owned by `trogon-nats` and shared
+  across all backbone traffic, including non-JSON-RPC services.
+
+`X-Req-Id` is therefore not named `Jsonrpc-Req-Id`: it is a transport-generated,
+globally unique, subject-safe correlation token, not the JSON-RPC `id`. The two
+are distinct and are not merged. The JSON-RPC `id` is client-chosen, typed,
+echoed back to the client, and unique only per connection; it cannot serve as the
+backbone correlation key (collisions across clients, including before a session
+exists at `initialize`; arbitrary string ids are not subject-safe; notifications
+and null-id responses have no usable id).
+
+### 3. Preserve `id` type with a JSON-literal header
+
+The `id` is stored in `Jsonrpc-Id` as its JSON literal and recovered with a JSON
+parse:
+
+- number `42` -> `Jsonrpc-Id: 42` -> parse -> `42`
+- string `"42"` -> `Jsonrpc-Id: "42"` -> parse -> `"42"`
+- string `"abc"` -> `Jsonrpc-Id: "abc"` -> parse -> `"abc"`
+
+The quotes in the stored literal carry the type, so a numeric `1` and a string
+`"1"` are distinct on the wire. NATS header values permit double quotes (only CR
+and LF are disallowed in a value), so no separate type header is needed. Encoding
+with ASCII escaping keeps the value free of raw control characters.
+
+`null` is represented by the absence of the `Jsonrpc-Id` header, disambiguated
+from a notification by context: a response carries `Jsonrpc-Status`, so an absent
+`Jsonrpc-Id` on a response means `id: null`; a message without `Jsonrpc-Status`
+is a request or notification, so an absent `Jsonrpc-Id` means a notification.
+Requests therefore use a non-null `id`, consistent with JSON-RPC's own guidance.
+
+### 4. Correctness is a codec round-trip invariant; edges reconstruct
+
+The semantic-preservation guarantee reduces to one property of the shared codec:
+for every valid JSON-RPC message `m`, `decode(encode(m))` equals `m`, including
+the `id` type. This is property-tested and fuzzed (numbers, strings,
+numeric-looking strings, large integers, null, unicode string ids, results,
+errors, notifications).
+
+Canonical JSON-RPC is reconstructed only at protocol edges — the remote
+HTTP/WebSocket/SSE listeners and the stdio bridges. The on-NATS encoding is an
+internal wire format; nothing external consumes the raw stream as JSON-RPC. The
+edge holds the original typed `id` while awaiting the reply (correlated by
+`X-Req-Id`), so live request/reply type fidelity holds independent of the header
+encoding.
+
+### 5. Signing covers the authoritative headers and the body
+
+Because `Jsonrpc-Status`, `Jsonrpc-Error-Code`, and `Jsonrpc-Id` are authoritative
+and live only in headers, the A2A signing scheme covers those headers in addition
+to the body. Otherwise the outcome, error code, and id are tamperable on an
+otherwise signed message. Redaction is unaffected: `result`, `message`, `data`,
+and `params` remain in the body where the redaction pipeline operates.
+
+### 6. The codec is a shared, protocol-agnostic layer
+
+The codec is one shared component, not reimplemented per protocol. It owns the
+field mapping and its inverse, the `id` encoding, success-versus-error
+discrimination via `Jsonrpc-Status`, correlation, notification semantics, mapping
+of transport failures to JSON-RPC errors, and edge reconstruction. Domain
+packages (`acp-nats`, `mcp-nats`, A2A) inject what is domain-specific: subject
+routing (method plus context to subject), transport selection (core request/reply
+versus JetStream durable), and typed params and results.
+
+Per [ADR 0004](./0004-protocol-and-transport-layering.md), this is the
+protocol-dispatcher and transport seam. This is governed by the JSON-RPC exception
+in [ADR 0009](./0009-protocol-buffers-wire-contracts.md): ACP, MCP, and JSON-RPC
 have protocol-defined JSON contracts and are not re-encoded as Protocol Buffers.
-
-### 2. The NATS message is the unit of meaning; headers are authoritative for control fields
-
-The interpretable unit is the whole NATS message: subject, headers, and body
-together. The body alone is not self-describing, because `status`, `id`, `code`,
-and `jsonrpc` live only in headers. A consumer must read `status` to interpret the
-body. JetStream persists headers with the message, so a replayed message remains
-fully interpretable; a consumer that reads only the body is incorrect by
-construction.
-
-Each field has exactly one home, per the table above. Fields are not duplicated
-across planes, so there is no dual-source-of-truth to keep consistent.
-
-Sensitive content stays in the body. `result`, `message`, and `data` are the
-fields that can carry paths, identifiers, or internal detail, and they remain in
-the body where the A2A redaction pipeline operates.
-
-### 3. Signing must cover the control headers
-
-Because `status`, `code`, and `id` carry meaning and live only in headers, the
-A2A signing scheme must cover those headers, not only the body. Otherwise the
-success/error outcome, the error code, and the correlation id are tamperable on an
-otherwise signed message.
-
-### 4. The JSON-RPC-to-NATS binding is a shared, protocol-agnostic layer
-
-The binding is factored into one shared component rather than reimplemented per
-protocol. The shared layer owns:
-
-- the field split defined above and its inverse,
-- success-versus-error discrimination via `status`, implemented and tested once,
-- correlation between a request and its reply,
-- notification (no-id, no-reply) semantics,
-- mapping of transport failures (timeout, no responders) to JSON-RPC errors,
-- reconstruction of a full JSON-RPC object at protocol edges.
-
-The layer does not simply serialize an SDK envelope type into the body. SDK types
-such as `rmcp::JsonRpcMessage` and `agent_client_protocol::Response` serialize
-`jsonrpc`, `id`, `result`, and `error` inline; the layer extracts the control
-fields into headers and places only `result` or `message`/`data` in the body, and
-reassembles the full object when crossing to an edge that speaks JSON-RPC (the
-remote HTTP/WebSocket/SSE listeners and the stdio bridges).
-
-Per [ADR 0004](./0004-protocol-and-transport-layering.md), this is the protocol-dispatcher and transport seam. Domain packages
-(`acp-nats`, `mcp-nats`, A2A) inject what is genuinely domain-specific and stay
-thin:
-
-- subject routing: the mapping between a method (with its context, such as a
-  session id) and a NATS subject,
-- transport selection: core request/reply versus JetStream durable,
-- typed params and results.
-
-Working name for the shared package is `jsonrpc-nats`, following the
-`<protocol>-<backbone>` pattern in [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) with JSON-RPC as the protocol.
+Working name for the package is `jsonrpc-nats`, following the
+`<protocol>-<backbone>` pattern in
+[ADR 0003](./0003-ai-protocol-transport-taxonomy.md) with JSON-RPC as the
+protocol.
 
 ## Invariants
 
-- The `jsonrpc` header is `"2.0"`.
-- `status` is `ok` or `error`.
-- `status: ok` implies a `result` body and no `code` header.
-- `status: error` implies a `code` header and a `message` body.
-- An `id` header is present on every request and response, a response `id` equals
-  its request `id`, and a notification has no `id` and receives no reply.
+- `decode(encode(m))` equals `m` for every valid JSON-RPC message, id type
+  included.
+- `jsonrpc` is constant `"2.0"`; it is re-injected on decode.
+- `Jsonrpc-Status` is `ok` or `error` and appears on responses only.
+- `Jsonrpc-Status: ok` implies a `result` body and no `Jsonrpc-Error-Code`.
+- `Jsonrpc-Status: error` implies a `Jsonrpc-Error-Code` header and a `message`
+  body.
+- A response with a missing or invalid `Jsonrpc-Status` is a protocol error.
+- `Jsonrpc-Id` is the id's JSON literal; absent means a notification (no
+  `Jsonrpc-Status`) or `id: null` (response). Requests use a non-null id.
 - The method is carried by the subject.
+- `X-Req-Id` is the transport correlation token and is independent of `Jsonrpc-Id`.
 
 ## Design Rules
 
-- The success/error discriminator is the `status` header. Never infer it by
-  structural deserialization of the body.
-- A field has exactly one home, per the mapping table. Do not duplicate a field
-  across header and body.
-- Reconstruction to and from a full JSON-RPC object happens only at protocol
-  edges, centralized in the shared layer, never ad hoc in domain code.
-- Signing spans the control headers (`status`, `code`, `id`) as well as the body.
-- Model bidirectional protocols as a symmetric peer that can both send requests
-  and notifications and serve incoming ones. Do not split a JSON-RPC peer into
-  fixed client and server roles when the protocol is bidirectional.
+- The success/error discriminator is the `Jsonrpc-Status` header. Never infer it
+  by structural deserialization of the body.
+- Name protocol-field projections `Jsonrpc-*` and transport metadata `X-*`. Do not
+  put a transport field under `Jsonrpc-*` or a JSON-RPC field under `X-*`.
+- Reconstruction to and from canonical JSON-RPC happens only at protocol edges,
+  centralized in the shared codec, never ad hoc in domain code.
+- Signing spans the authoritative `Jsonrpc-*` headers as well as the body.
+- A batch request is unbundled at the edge into individual messages; the backbone
+  carries one JSON-RPC message per NATS message.
+- Model bidirectional protocols as a symmetric peer that can both send and serve.
 
 ## Open Implementation Questions
 
-These do not block the decision and are resolved during implementation:
-
-- The concrete header names and namespace for `jsonrpc`, `id`, `status`, and
-  `code`.
-- Whether the shared layer exposes typed params and results or a canonical
-  envelope value at its API surface, given it must field-split rather than
-  serialize SDK envelope types directly.
-- The exact transport trait that spans core request/reply and JetStream durable
+- The exact transport trait spanning core request/reply and JetStream durable
   delivery.
 - How server-initiated streaming (the ACP prompt notification stream plus its
   final response) and JetStream keepalive acknowledgement compose on top of the
@@ -167,37 +193,36 @@ These do not block the decision and are resolved during implementation:
 
 ## Migration
 
-- Generalize the existing `mcp-nats` NATS transport into the shared layer, adapting
-  it from full-envelope-in-body to the field split.
-- Prove the layer by migrating one ACP command end to end, starting with
+- Generalize the existing `mcp-nats` NATS transport into the shared codec, moving
+  it from full-envelope-in-body to the content-mode encoding.
+- Prove the codec by migrating one ACP command end to end, starting with
   `authenticate`, the handler currently losing structured errors.
-- Roll the remaining ACP command handlers onto the shared layer, then fold
-  `mcp-nats` onto it so ACP and MCP share one transport and one wire mapping.
-- Extend the A2A signing scheme to cover the control headers before the split is
-  used on signed paths.
-- Existing stripped or ad hoc JSON paths migrate when touched, consistent with
-  the migration guidance in [ADR 0009](./0009-protocol-buffers-wire-contracts.md).
+- Roll the remaining ACP command handlers onto the codec, then fold `mcp-nats`
+  onto it so ACP and MCP share one transport and one wire mapping.
+- Extend the A2A signing scheme to cover the authoritative `Jsonrpc-*` headers
+  before the encoding is used on signed paths.
+- Cut over per handler and per subject; a subject never carries the old and new
+  encodings at the same time.
 
 ## Consequences
 
-- Success-versus-error has one correct, tested implementation driven by an explicit
-  header. The class of bugs where a structured protocol error silently degrades to
-  a generic internal error is eliminated.
-- Infrastructure can route, meter, and dead-letter on `status` and `code` without
-  deserializing the body.
-- The body is not independently interpretable; consumers must read the `status`
-  header. This is acceptable because JetStream persists headers with the message.
-- Edges that speak full JSON-RPC must assemble and disassemble the object from
-  subject, headers, and body. The shared layer owns this so edges and domains do
-  not reimplement it.
-- The A2A signing scheme must be extended to cover control headers; otherwise the
-  outcome, error code, and correlation id are tamperable.
-- ACP and MCP share a transport and a wire mapping instead of maintaining separate
-  bindings. A2A and future JSON-RPC protocols inherit the binding.
+- Success-versus-error has one correct, tested implementation driven by an
+  explicit header. The class of bugs where a structured error degrades to a
+  generic internal error is eliminated.
+- Infrastructure routes on subjects and acts on `Jsonrpc-Status`,
+  `Jsonrpc-Error-Code`, and `Jsonrpc-Id` without unmarshalling the body.
+- Each control field has exactly one home, so there is no body/header duplication
+  to keep consistent.
+- The body alone is not interpretable; a consumer reads headers to interpret it.
+  This is acceptable because JetStream persists headers with the message.
+- The codec is core infrastructure on the hot path; its correctness rests on the
+  round-trip property test.
+- The A2A signing scheme must cover the authoritative headers.
+- ACP and MCP share one transport and wire mapping; A2A and future JSON-RPC
+  protocols inherit the codec.
 - The change introduces a new shared package and refactors the ACP NATS adapter,
   the ACP runner, and the MCP NATS transport. This is a deliberate short-term cost
   for a stable long-term seam.
-- Any future package naming or restructuring follows the vocabulary in [ADR 0003](./0003-ai-protocol-transport-taxonomy.md).
 
 ## References
 
