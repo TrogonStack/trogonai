@@ -64,14 +64,21 @@ impl std::fmt::Debug for ProjectionChange {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum ScheduleTransitionError {
+    #[error("schedule event id '{schedule_id}' does not match stream id '{stream_id}'")]
     MismatchedEventScheduleId { stream_id: String, schedule_id: String },
+    #[error("schedule event is malformed: {context}")]
     MalformedEvent { context: &'static str },
+    #[error("job '{id}' already exists")]
     CannotAddExistingSchedule { id: String },
+    #[error("job '{id}' was deleted and cannot be added again")]
     CannotAddDeletedSchedule { id: String },
+    #[error("missing job for state change '{id}'")]
     MissingScheduleForStateChange { id: String },
+    #[error("deleted schedule '{id}' cannot change state")]
     DeletedScheduleForStateChange { id: String },
+    #[error("job '{id}' was already deleted")]
     DeletedScheduleForRemoval { id: String },
 }
 
@@ -359,39 +366,6 @@ fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) 
 impl From<projections_v1::ScheduleProjection> for ScheduleStreamState {
     fn from(view: projections_v1::ScheduleProjection) -> Self {
         Self::Present(view)
-    }
-}
-
-impl std::fmt::Display for ScheduleTransitionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MismatchedEventScheduleId { stream_id, schedule_id } => {
-                write!(
-                    f,
-                    "schedule event id '{schedule_id}' does not match stream id '{stream_id}'"
-                )
-            }
-            Self::MalformedEvent { context } => write!(f, "schedule event is malformed: {context}"),
-            Self::CannotAddExistingSchedule { id } => write!(f, "job '{id}' already exists"),
-            Self::CannotAddDeletedSchedule { id } => {
-                write!(f, "job '{id}' was deleted and cannot be added again")
-            }
-            Self::MissingScheduleForStateChange { id } => {
-                write!(f, "missing job for state change '{id}'")
-            }
-            Self::DeletedScheduleForStateChange { id } => {
-                write!(f, "deleted schedule '{id}' cannot change state")
-            }
-            Self::DeletedScheduleForRemoval { id } => {
-                write!(f, "job '{id}' was already deleted")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ScheduleTransitionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
     }
 }
 
