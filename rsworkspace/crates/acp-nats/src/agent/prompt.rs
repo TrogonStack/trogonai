@@ -13,7 +13,7 @@ use trogon_std::JsonSerialize;
 use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
-use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session};
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 
@@ -113,7 +113,7 @@ where
     // Cancel still uses core NATS — it's a fire-and-forget signal, not persisted.
     let mut cancel_sub = bridge
         .nats
-        .subscribe(session::agent::CancelledSubject::new(prefix, session_id))
+        .subscribe(responses::CancelledSubject::new(prefix, session_id))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe cancelled: {e}")))?;
 
@@ -126,7 +126,7 @@ where
     headers.insert(REQ_ID_HEADER, req_id.as_str());
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
-    let prompt_subject = session::agent::PromptSubject::new(prefix, session_id);
+    let prompt_subject = commands::PromptSubject::new(prefix, session_id);
     js.publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?

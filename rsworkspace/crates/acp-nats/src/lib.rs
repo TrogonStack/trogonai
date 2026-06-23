@@ -24,7 +24,7 @@ pub use client_proxy::NatsClientProxy;
 pub use config::{Config, DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use error::AGENT_UNAVAILABLE;
 pub use ext_method_name::ExtMethodName;
-pub use nats::session::agent::{PromptResponseSubject, ResponseSubject, UpdateSubject};
+pub use nats::responses::{PromptResponseSubject, ResponseSubject, UpdateSubject};
 pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use req_id::ReqId;
 pub use session_id::AcpSessionId;

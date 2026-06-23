@@ -736,32 +736,7 @@ fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual:
     }
 }
 
-#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
-mod private {
-    use crate::{Decider, Events};
-
-    pub trait Sealed<C>
-    where
-        C: Decider,
-    {
-    }
-
-    impl<C, E> Sealed<C> for Events<E>
-    where
-        C: Decider,
-        E: Into<C::Event>,
-    {
-    }
-
-    impl<C> Sealed<C> for Vec<C::Event> where C: Decider {}
-
-    impl<C, E, const N: usize> Sealed<C> for [E; N]
-    where
-        C: Decider,
-        E: Into<C::Event>,
-    {
-    }
-}
+mod private;
 
 #[cfg(test)]
 mod tests {

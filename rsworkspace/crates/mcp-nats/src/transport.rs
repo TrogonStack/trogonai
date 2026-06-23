@@ -44,7 +44,7 @@ where
         client_id: McpPeerId,
         server_id: McpPeerId,
     ) -> Result<Self, NatsTransportError> {
-        let subject = nats::mcp_client::wildcards::OneClientSubject::new(config.prefix(), &client_id);
+        let subject = nats::subjects::subscriptions::OneClientSubject::new(config.prefix(), &client_id);
         Self::new(
             nats,
             config.prefix().clone(),
@@ -67,7 +67,7 @@ where
         server_id: McpPeerId,
         client_id: McpPeerId,
     ) -> Result<Self, NatsTransportError> {
-        let subject = nats::mcp_server::wildcards::OneServerSubject::new(config.prefix(), &server_id);
+        let subject = nats::subjects::subscriptions::OneServerSubject::new(config.prefix(), &server_id);
         Self::new(
             nats,
             config.prefix().clone(),

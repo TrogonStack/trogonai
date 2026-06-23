@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, global};
 use agent_client_protocol::{AuthenticateRequest, AuthenticateResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -21,7 +21,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     let result = nats::request_with_timeout::<N, AuthenticateRequest, AuthenticateResponse>(
         nats,
-        &agent::AuthenticateSubject::new(bridge.config.acp_prefix_ref()),
+        &global::AuthenticateSubject::new(bridge.config.acp_prefix_ref()),
         &args,
         bridge.config.operation_timeout,
     )

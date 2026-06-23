@@ -60,7 +60,7 @@ pub async fn run<
     bridge: Rc<Bridge<N, C, J>>,
     serializer: S,
 ) {
-    let wildcard = crate::nats::session::wildcards::AllClientSubject::new(bridge.config.acp_prefix_ref());
+    let wildcard = crate::nats::subscriptions::AllClientSubject::new(bridge.config.acp_prefix_ref());
     info!("Starting client proxy - subscribing to {}", wildcard);
 
     let mut subscriber = match nats.subscribe(wildcard).await {

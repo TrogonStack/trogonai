@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::ext_method_name::ExtMethodName;
-use crate::nats::{self, FlushClient, PublishClient, agent};
+use crate::nats::{self, FlushClient, PublishClient, global};
 use agent_client_protocol::{Error, ErrorCode, ExtNotification, Result};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
@@ -31,7 +31,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
         Error::new(ErrorCode::InvalidParams.into(), format!("Invalid method name: {}", e))
     })?;
 
-    let subject = agent::ExtNotifySubject::new(bridge.config.acp_prefix_ref(), &method_name);
+    let subject = global::ExtNotifySubject::new(bridge.config.acp_prefix_ref(), &method_name);
 
     let publish_result = nats::publish(
         bridge.nats(),

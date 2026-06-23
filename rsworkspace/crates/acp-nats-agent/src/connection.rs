@@ -1,7 +1,6 @@
 use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
-use acp_nats::nats::agent::wildcards::GlobalAllSubject;
-use acp_nats::nats::session::wildcards::{AllAgentExtSubject, AllAgentSubject};
+use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
 use acp_nats::{AcpPrefix, AcpSessionId, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
 use agent_client_protocol::{

@@ -1,6 +1,6 @@
 use super::Bridge;
 use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use crate::nats::{self, RequestClient, global};
 use agent_client_protocol::{InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -21,7 +21,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!(client = %client_name, "Initialize request");
 
     let nats = bridge.nats();
-    let subject = agent::InitializeSubject::new(bridge.config.acp_prefix_ref());
+    let subject = global::InitializeSubject::new(bridge.config.acp_prefix_ref());
 
     let result = nats::request_with_timeout::<N, InitializeRequest, InitializeResponse>(
         nats,
