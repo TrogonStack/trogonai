@@ -50,7 +50,7 @@ rustc_session::declare_lint! {
     /// # }
     /// ```
     pub ERROR_STRING_COMPARISON,
-    Warn,
+    Deny,
     "error display strings must not drive behavior",
 }
 
@@ -89,7 +89,9 @@ rustc_session::declare_lint! {
     /// mod twin;
     /// ```
     pub INLINE_MODULE_BLOCK,
-    Warn,
+    // TODO: flip to `Deny` once existing inline modules (notably
+    // `#[cfg(test)] mod tests { ... }`) are migrated to their own files.
+    Allow,
     "declare modules in their own file with `mod foo;`, not inline `mod foo { ... }`",
 }
 
@@ -127,7 +129,7 @@ rustc_session::declare_lint! {
     /// }
     /// ```
     pub MANUAL_ERROR_IMPL,
-    Warn,
+    Deny,
     "implement `std::error::Error` with the thiserror derive, not by hand",
 }
 
