@@ -89,6 +89,8 @@ tonic = { version = "=0.14.6", default-features = false, features = ["transport"
 moka = { version = "=0.12.10", features = ["future"] }
 
 # Misc
+ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
+toml = "=0.8.23"
 http = "=1.4.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 sha2 = "=0.10.8"
