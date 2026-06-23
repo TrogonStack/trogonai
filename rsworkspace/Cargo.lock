@@ -190,6 +190,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-redaction"
+version = "0.1.0"
+dependencies = [
+ "a2a-lf",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "acp-nats"
 version = "0.1.0"
 dependencies = [
