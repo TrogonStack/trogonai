@@ -103,14 +103,21 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
     /// Drop every cached entry. Operators use this after rotating provider
     /// trust material so the next verification re-fetches.
     pub async fn invalidate_all(&self) {
-        self.entries.write().await.clear();
+        let mut guard = self.entries.write().await;
+        // Bump the generation BEFORE releasing the write guard. Otherwise a
+        // concurrent resolve waiting on the write lock could acquire it after
+        // `clear()`/`remove()` ran but before `fetch_add` landed, observe the
+        // pre-bump generation, and insert a pre-rotation outcome back into
+        // the cache.
         self.generation.fetch_add(1, Ordering::SeqCst);
+        guard.clear();
     }
 
     /// Drop the cached entry for a single issuer.
     pub async fn invalidate(&self, iss: &str) {
-        self.entries.write().await.remove(iss);
+        let mut guard = self.entries.write().await;
         self.generation.fetch_add(1, Ordering::SeqCst);
+        guard.remove(iss);
     }
 }
 
@@ -122,9 +129,13 @@ const MAX_INVALIDATE_RETRIES: usize = 3;
 #[async_trait]
 impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
     async fn resolve(&self, iss: &str) -> Result<JwkSet, JwksError> {
-        let now = self.time.now();
+        // Sample wall time fresh at every step. The fast read-lock check, the
+        // slow-path freshness check after `inner.resolve`, and the `expires_at`
+        // we write all need to use the wall time AT THAT POINT — otherwise a
+        // slow JWKS fetch (or a long lock wait) lets us serve expired entries
+        // and lets new entries live longer than the configured TTL.
         if let Some(entry) = self.entries.read().await.get(iss)
-            && entry.is_fresh(now)
+            && entry.is_fresh(self.time.now())
         {
             return match entry {
                 CachedEntry::Hit { keys, .. } => Ok(keys.clone()),
@@ -143,6 +154,10 @@ impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {
             let snapshot = self.generation.load(Ordering::SeqCst);
             let outcome = self.inner.resolve(iss).await;
             let mut guard = self.entries.write().await;
+            // Re-sample after the inner.resolve await — that's the only clock
+            // value that the TTL of the entry we're about to write should be
+            // anchored to.
+            let now = self.time.now();
 
             if self.generation.load(Ordering::SeqCst) != snapshot {
                 // Operator invalidated between snapshot and now. The outcome
@@ -504,6 +519,66 @@ mod tests {
         let _ = cache.resolve("iss-d").await;
         let guard = cache.entries.read().await;
         assert!(guard.len() <= 2, "map grew past max_entries: {}", guard.len());
+    }
+
+    #[tokio::test]
+    async fn entry_expiry_anchors_to_clock_after_inner_resolve_not_before() {
+        // Regression: `now` was captured once at the top of resolve() and
+        // reused after the slow inner.resolve await, so on a slow fetch the
+        // entry's expires_at = old_now + ttl outlived the configured TTL by
+        // the duration of the fetch. Verify expires_at uses the post-await
+        // clock value.
+        use std::sync::Arc;
+        use tokio::sync::oneshot;
+
+        struct GatedOk {
+            gate: std::sync::Mutex<Option<oneshot::Receiver<()>>>,
+        }
+        #[async_trait]
+        impl JwksResolver for GatedOk {
+            async fn resolve(&self, _iss: &str) -> Result<JwkSet, JwksError> {
+                // Take the receiver out under the std mutex, then drop the
+                // guard BEFORE awaiting so the future stays Send.
+                let rx_opt = self.gate.lock().unwrap().take();
+                if let Some(rx) = rx_opt {
+                    let _ = rx.await;
+                }
+                Ok(empty_set())
+            }
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let inner = GatedOk {
+            gate: std::sync::Mutex::new(Some(rx)),
+        };
+        let time = MockTime::at(100);
+        let cache = Arc::new(CachedJwksResolver::new(inner, time.clone()).with_ttl_secs(60));
+
+        let fetcher = {
+            let cache = cache.clone();
+            tokio::spawn(async move { cache.resolve("iss").await })
+        };
+
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        // Wall clock advances by 500s during the fetch. The naive impl would
+        // have stamped expires_at = 100 + 60 = 160, the correct one stamps
+        // expires_at = 600 + 60 = 660.
+        time.advance(500);
+
+        let _ = tx.send(());
+        fetcher.await.unwrap().expect("fetch succeeds");
+
+        let entry = cache.entries.read().await;
+        match entry.get("iss") {
+            Some(CachedEntry::Hit { expires_at, .. }) => {
+                assert!(
+                    *expires_at >= 660,
+                    "expires_at must anchor to post-await clock (>=660), got {expires_at}"
+                );
+            }
+            _ => panic!("expected a Hit entry for 'iss'"),
+        }
     }
 
     #[tokio::test]
