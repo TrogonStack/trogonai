@@ -20,17 +20,4 @@ pub enum RedactionError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wasm_engine_variant_carries_underlying_message() {
-        let inner = "module init failed";
-        let wrapped = RedactionError::WasmEngine(inner.to_string());
-        assert!(
-            wrapped.to_string().contains("wasm engine initialization failed"),
-            "{wrapped}"
-        );
-        assert!(wrapped.to_string().contains(inner));
-    }
-}
+mod tests;
