@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::future;
 use std::io;
+use std::time::Duration;
 
 use mcp_nats::{
     ClientJsonRpcMessage, Config, ErrorData, FlushClient, McpPeerId, NatsTransport, PublishClient, RequestClient,
@@ -11,6 +13,7 @@ use rmcp::transport::Transport;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -18,6 +21,11 @@ use crate::allowed_host::AllowedHost;
 
 type ProxyResponse = oneshot::Sender<Result<ServerResult, ErrorData>>;
 type ProxyAck = oneshot::Sender<Result<(), ErrorData>>;
+
+struct PendingEntry {
+    response_tx: ProxyResponse,
+    deadline: Instant,
+}
 
 pub fn streamable_http_config(allowed_hosts: Vec<AllowedHost>) -> StreamableHttpServerConfig {
     let config = StreamableHttpServerConfig::default();
@@ -84,6 +92,7 @@ where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
 {
     command_tx: mpsc::Sender<ProxyCommand>,
+    operation_timeout: Duration,
     server_info: ServerInfo,
     _nats: std::marker::PhantomData<N>,
 }
@@ -98,9 +107,11 @@ where
 {
     pub fn new(nats: N, config: Config, client_id: McpPeerId, server_id: McpPeerId) -> Self {
         let (command_tx, command_rx) = mpsc::channel(64);
+        let operation_timeout = config.operation_timeout();
         tokio::spawn(run_proxy_worker(nats, config, client_id, server_id, command_rx));
         Self {
             command_tx,
+            operation_timeout,
             server_info: ServerInfo::default(),
             _nats: std::marker::PhantomData,
         }
@@ -126,8 +137,9 @@ where
             })
             .await
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy is unavailable", None))?;
-        response_rx
+        tokio::time::timeout(self.operation_timeout, response_rx)
             .await
+            .map_err(|_| ErrorData::internal_error("MCP NATS proxy timed out waiting for a response", None))?
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy dropped the request", None))?
     }
 
@@ -145,8 +157,9 @@ where
             })
             .await
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy is unavailable", None))?;
-        response_rx
+        tokio::time::timeout(self.operation_timeout, response_rx)
             .await
+            .map_err(|_| ErrorData::internal_error("MCP NATS proxy timed out waiting for the notification", None))?
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy dropped the notification", None))?
     }
 
@@ -189,16 +202,18 @@ async fn run_proxy_worker<N>(
             return;
         }
     };
+    let operation_timeout = config.operation_timeout();
     let mut peer = None;
-    let mut pending = HashMap::new();
+    let mut pending: HashMap<RequestId, PendingEntry> = HashMap::new();
 
     loop {
+        let next_deadline = pending.values().map(|entry| entry.deadline).min();
         tokio::select! {
             command = command_rx.recv() => {
                 let Some(command) = command else {
                     break;
                 };
-                handle_proxy_command(command, &mut transport, &mut peer, &mut pending).await;
+                handle_proxy_command(command, &mut transport, &mut peer, &mut pending, operation_timeout).await;
             }
             message = transport.receive() => {
                 let Some(message) = message else {
@@ -206,6 +221,9 @@ async fn run_proxy_worker<N>(
                     break;
                 };
                 handle_remote_message(message, &mut transport, peer.as_ref(), &mut pending).await;
+            }
+            () = wait_for_deadline(next_deadline) => {
+                evict_expired_pending(&mut pending);
             }
         }
     }
@@ -219,7 +237,8 @@ async fn handle_proxy_command<N>(
     command: ProxyCommand,
     transport: &mut NatsTransport<RoleClient, N>,
     peer: &mut Option<Peer<RoleServer>>,
-    pending: &mut HashMap<RequestId, ProxyResponse>,
+    pending: &mut HashMap<RequestId, PendingEntry>,
+    operation_timeout: Duration,
 ) where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     N::RequestError: 'static,
@@ -235,11 +254,19 @@ async fn handle_proxy_command<N>(
         } => {
             *peer = Some(request_peer);
             let message = ClientJsonRpcMessage::request(*request, request_id.clone());
-            pending.insert(request_id.clone(), response_tx);
+            pending.insert(
+                request_id.clone(),
+                PendingEntry {
+                    response_tx,
+                    deadline: Instant::now() + operation_timeout,
+                },
+            );
             if let Err(error) = transport.send(message).await
-                && let Some(response_tx) = pending.remove(&request_id)
+                && let Some(entry) = pending.remove(&request_id)
             {
-                let _ = response_tx.send(Err(ErrorData::internal_error(error.to_string(), None)));
+                let _ = entry
+                    .response_tx
+                    .send(Err(ErrorData::internal_error(error.to_string(), None)));
             }
         }
         ProxyCommand::Notification {
@@ -261,7 +288,7 @@ async fn handle_remote_message<N>(
     message: ServerJsonRpcMessage,
     transport: &mut NatsTransport<RoleClient, N>,
     peer: Option<&Peer<RoleServer>>,
-    pending: &mut HashMap<RequestId, ProxyResponse>,
+    pending: &mut HashMap<RequestId, PendingEntry>,
 ) where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     N::RequestError: 'static,
@@ -270,13 +297,13 @@ async fn handle_remote_message<N>(
 {
     match message {
         ServerJsonRpcMessage::Response(response) => {
-            if let Some(response_tx) = pending.remove(&response.id) {
-                let _ = response_tx.send(Ok(response.result));
+            if let Some(entry) = pending.remove(&response.id) {
+                let _ = entry.response_tx.send(Ok(response.result));
             }
         }
         ServerJsonRpcMessage::Error(error) => {
-            if let Some(response_tx) = pending.remove(&error.id) {
-                let _ = response_tx.send(Err(error.error));
+            if let Some(entry) = pending.remove(&error.id) {
+                let _ = entry.response_tx.send(Err(error.error));
             }
         }
         ServerJsonRpcMessage::Notification(notification) => {
@@ -323,9 +350,33 @@ fn service_error_to_error_data(error: ServiceError) -> ErrorData {
     ErrorData::internal_error(error.to_string(), None)
 }
 
-fn fail_pending(pending: HashMap<RequestId, ProxyResponse>, error: ErrorData) {
-    for response_tx in pending.into_values() {
-        let _ = response_tx.send(Err(error.clone()));
+fn fail_pending(pending: HashMap<RequestId, PendingEntry>, error: ErrorData) {
+    for entry in pending.into_values() {
+        let _ = entry.response_tx.send(Err(error.clone()));
+    }
+}
+
+async fn wait_for_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => future::pending().await,
+    }
+}
+
+fn evict_expired_pending(pending: &mut HashMap<RequestId, PendingEntry>) {
+    let now = Instant::now();
+    let expired = pending
+        .iter()
+        .filter(|(_, entry)| entry.deadline <= now)
+        .map(|(request_id, _)| request_id.clone())
+        .collect::<Vec<_>>();
+    for request_id in expired {
+        if let Some(entry) = pending.remove(&request_id) {
+            let _ = entry.response_tx.send(Err(ErrorData::internal_error(
+                "MCP NATS proxy timed out waiting for a response",
+                None,
+            )));
+        }
     }
 }
 
