@@ -9,26 +9,34 @@ its normal toolchain.
 
 ## Rules
 
-- `error_string_comparison`: prevents semantic checks against strings derived
-  from `std::error::Error::to_string`.
-- `manual_error_impl`: requires deriving `std::error::Error` with `thiserror`
-  instead of hand-writing the impl.
-- `inline_module_block`: requires modules to live in their own file
-  (`mod foo;`) instead of inline blocks (`mod foo { ... }`). Macro-generated
-  modules are exempt; suppress a justified exception with
-  `#[allow(inline_module_block)]` at the site.
+Each rule's default level is declared in `src/lib.rs`, so policy lives in the
+lint crate rather than in per-invocation flags.
+
+- `error_string_comparison` (`deny`): prevents semantic checks against strings
+  derived from `std::error::Error::to_string`.
+- `manual_error_impl` (`deny`): requires deriving `std::error::Error` with
+  `thiserror` instead of hand-writing the impl.
+- `inline_module_block` (`allow`, pending migration): requires modules to live
+  in their own file (`mod foo;`) instead of inline blocks (`mod foo { ... }`).
+  Macro-generated modules are exempt; suppress a justified exception with
+  `#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]` at the
+  site. It is `allow` by default while existing inline modules are migrated to
+  their own files; flip it to `Deny` in `src/lib.rs` once that is done. As a
+  late (HIR) pass it sees `#[cfg(test)] mod tests { ... }` only when the test
+  target is compiled, i.e. when linting with `--all-targets`.
 
 ## Run
 
-From `rsworkspace/`:
+From `rsworkspace/` (the `deny` rules are enforced by their declared default
+level, no flags needed):
 
 ```bash
-env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Derror-string-comparison -Dinline-module-block -Dmanual-error-impl' cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features
+env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features
 ```
 
-To audit existing test-target debt before enabling the stricter gate, add
-`--all-targets` after `--all-features`:
+To audit the inline-module-block backlog before flipping that rule on, enable
+it for the run and include test targets:
 
 ```bash
-env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Derror-string-comparison -Dinline-module-block -Dmanual-error-impl' cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
+env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Dinline-module-block' cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
 ```

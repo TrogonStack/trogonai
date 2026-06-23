@@ -70,7 +70,7 @@ jobs:
         working-directory: rsworkspace/dylints/trogon_lints
 
       - name: Run repo Rust policy lints
-        run: env -u RUSTUP_TOOLCHAIN DYLINT_RUSTFLAGS='-Derror-string-comparison' cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features
+        run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features
         working-directory: rsworkspace
 
       - name: Run clippy

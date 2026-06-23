@@ -1,5 +1,9 @@
 // edition:2024
 
+// The lint is `Allow` by default (disabled pending migration); enable it here
+// so the UI test still exercises the detection and `#[allow]` handling.
+#![deny(inline_module_block)]
+
 // Inline module with a body block: this is the violation.
 mod twin {
     pub fn run() {}
