@@ -13,7 +13,6 @@ pub trait Redactor {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn redact_message_parts_with(
     mut message: Message,
     mut transform_part_json: impl FnMut(&[u8]) -> Result<Vec<u8>, RedactionError>,
@@ -29,7 +28,6 @@ pub(crate) fn redact_message_parts_with(
     Ok(message)
 }
 
-#[allow(dead_code)]
 pub(crate) fn redact_artifact_parts_with(
     mut artifact: Artifact,
     mut transform_part_json: impl FnMut(&[u8]) -> Result<Vec<u8>, RedactionError>,
