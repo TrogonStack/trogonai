@@ -81,6 +81,51 @@ async fn streamable_http_service_routes_initialize_to_nats_server() {
     assert!(body.contains("remote-server"));
 }
 
+#[tokio::test]
+async fn request_fails_when_nats_response_id_never_matches() {
+    let nats = trogon_nats::AdvancedMockNatsClient::new();
+    let _inbound = nats.inject_messages();
+    nats.set_response(
+        "mcp.server.default.initialize",
+        serde_json::to_vec(&ServerJsonRpcMessage::response(
+            ServerResult::InitializeResult(
+                InitializeResult::new(ServerCapabilities::default())
+                    .with_server_info(Implementation::new("remote-server", "1.0.0")),
+            ),
+            NumberOrString::Number(99),
+        ))
+        .unwrap()
+        .into(),
+    );
+    let service = streamable_http_service(
+        nats.clone(),
+        mcp_config().with_operation_timeout(std::time::Duration::from_secs(1)),
+        ClientIdFactory::new(McpPeerId::new("http").unwrap()),
+        McpPeerId::new("default").unwrap(),
+        StreamableHttpServerConfig::default(),
+    );
+    let app = Router::new().route_service("/mcp", service);
+    let body = serde_json::to_vec(&initialize_request()).unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header(header::HOST, "localhost")
+                .header(header::ACCEPT, "application/json, text/event-stream")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response_body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = String::from_utf8(response_body.to_vec()).unwrap();
+    assert!(body.contains("timed out"));
+}
+
 #[test]
 fn client_id_factory_generates_valid_unique_peer_ids() {
     let factory = ClientIdFactory::new(McpPeerId::new("http").unwrap());
