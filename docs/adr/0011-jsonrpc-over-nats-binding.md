@@ -10,9 +10,9 @@ date: 2026-06-23
 ## Context
 
 Several first-party protocols are JSON-RPC 2.0 protocols carried over the NATS
-backbone (ADR 0003): ACP, MCP, and A2A. ADR 0003 states that the same JSON-RPC
+backbone ([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and A2A. ADR 0003 states that the same JSON-RPC
 lifecycle can run over stdio, a remote endpoint, or the internal backbone, and
-ADR 0004 places request/response mapping, notifications, and protocol error
+[ADR 0004](./0004-protocol-and-transport-layering.md) places request/response mapping, notifications, and protocol error
 semantics in the protocol-dispatcher layer rather than in domain code.
 
 Today each protocol maps onto NATS independently, and the mappings disagree even
@@ -70,7 +70,7 @@ by deserializing the body.
 A response body is therefore either the `result` value (`status: ok`) or the
 `{ message, data }` error detail (`status: error`); the header selects which.
 
-This is governed by the JSON-RPC exception in ADR 0009: ACP, MCP, and JSON-RPC
+This is governed by the JSON-RPC exception in [ADR 0009](./0009-protocol-buffers-wire-contracts.md): ACP, MCP, and JSON-RPC
 have protocol-defined JSON contracts and are not re-encoded as Protocol Buffers.
 
 ### 2. The NATS message is the unit of meaning; headers are authoritative for control fields
