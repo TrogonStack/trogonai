@@ -38,6 +38,27 @@ fn mint_returns_ttl_overflow_at_i64_max() {
     );
 }
 
+#[test]
+fn mint_resource_jwt_one_shot_helper() {
+    let pem = b"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2\nOF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r\n1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G\n-----END PRIVATE KEY-----\n";
+    let key = EncodingKey::from_ec_pem(pem).expect("test key");
+    let token = mint_resource_jwt(&key, Algorithm::ES256, 1234, &challenge("jti-3", 60)).expect("one-shot mint");
+    assert_eq!(token.split('.').count(), 3);
+}
+
+#[test]
+fn challenge_error_ttl_overflow_display_mentions_inputs() {
+    let msg = format!(
+        "{}",
+        ChallengeError::TtlOverflow {
+            iat: 100,
+            ttl_secs: 5
+        }
+    );
+    assert!(msg.contains("100"));
+    assert!(msg.contains('5'));
+}
+
 struct FixedClock(i64);
 impl TimeSource for FixedClock {
     fn now(&self) -> i64 {

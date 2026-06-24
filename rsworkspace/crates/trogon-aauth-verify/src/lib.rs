@@ -37,3 +37,6 @@ pub enum VerifyError {
     #[error("policy: {0}")]
     Policy(String),
 }
+
+#[cfg(test)]
+mod tests;

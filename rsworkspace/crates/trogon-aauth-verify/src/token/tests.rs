@@ -181,6 +181,68 @@ async fn iss_of_rejects_malformed_jwt() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_agent_happy_path() {
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AGENT.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "agent-1",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-agent",
+        "cnf": { "jwk": {
+            "kty": "EC", "crv": "P-256",
+            "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
+            "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY"
+        }},
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    let verified = v.verify_agent(&jwt).await.expect("verify_agent");
+    assert_eq!(verified.claims.iss, "iss.example");
+    assert!(!verified.jkt.is_empty());
+}
+
+#[test]
+fn token_error_display_messages_are_distinct() {
+    let cases = [
+        format!("{}", TokenError::BadHeader),
+        format!(
+            "{}",
+            TokenError::WrongTyp {
+                expected: TYP_AGENT,
+                actual: Some("x".into())
+            }
+        ),
+        format!("{}", TokenError::UnsupportedAlg(Algorithm::HS256)),
+        format!("{}", TokenError::NoCompatibleJwk),
+        format!("{}", TokenError::Expired),
+        format!("{}", TokenError::NotYetValid),
+        format!(
+            "{}",
+            TokenError::AudienceMismatch {
+                expected: "a".into(),
+                actual: None
+            }
+        ),
+        format!("{}", TokenError::MissingClaim("c")),
+        format!("{}", TokenError::InvalidClaim("c")),
+    ];
+    for window in cases.windows(2) {
+        assert_ne!(window[0], window[1]);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_agent_returns_no_compatible_jwk_when_set_is_empty() {
     // A typed Err variant per failure mode lets the gateway distinguish
     // "issuer is known but doesn't publish a matching key" (operator
