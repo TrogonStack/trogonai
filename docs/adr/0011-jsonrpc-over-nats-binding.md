@@ -62,9 +62,8 @@ of the message, not a different message.
 | `method` | subject | Routed by the subject, per existing subject schemes. |
 | `id` | header `Jsonrpc-Id` | JSON literal (see §3). Absent means notification (request) or `null` (response). |
 | `params` | body | Request payload. |
-| `status` (`ok` / `error`) | header `Jsonrpc-Status` | Authoritative success/error discriminator. Responses only. Not a base JSON-RPC field. |
-| `result` | body | Success payload. Present iff `Jsonrpc-Status: ok`. |
-| `error.code` | header `Jsonrpc-Error-Code` | Integer. Present iff `Jsonrpc-Status: error`. |
+| `result` | body | Success payload. Present when no `Jsonrpc-Error-Code` is set. |
+| `error.code` | header `Jsonrpc-Error-Code` | Integer. Present only on errors; its presence is the success/error discriminator. |
 | `error.message`, `error.data` | body | Human-readable and structured error detail. |
 
 Correlation and routing metadata are a separate, protocol-agnostic transport
@@ -79,9 +78,8 @@ or to the response stream for JetStream, correlated by the transport.
 
 For the fields in the table above, the header (or subject) is the authoritative
 value, not a denormalized copy of something in the body. Infrastructure routes on
-the subject and acts on headers — an error counter on `Jsonrpc-Error-Code`, an
-index on `Jsonrpc-Id`, a dead-letter router or metrics sidecar on
-`Jsonrpc-Status` — without unmarshalling the body.
+the subject and acts on headers — an error counter or dead-letter router on
+`Jsonrpc-Error-Code`, an index on `Jsonrpc-Id` — without unmarshalling the body.
 
 The codec's headers are named `Jsonrpc-*` to mark them as projections of JSON-RPC
 fields. The JSON-RPC `id` is one such field, and it is not the transport's
@@ -106,10 +104,10 @@ and LF are disallowed in a value), so no separate type header is needed. Encodin
 with ASCII escaping keeps the value free of raw control characters.
 
 `null` is represented by the absence of the `Jsonrpc-Id` header, disambiguated
-from a notification by context: a response carries `Jsonrpc-Status`, so an absent
-`Jsonrpc-Id` on a response means `id: null`; a message without `Jsonrpc-Status`
-is a request or notification, so an absent `Jsonrpc-Id` means a notification.
-Requests therefore use a non-null `id`, consistent with JSON-RPC's own guidance.
+from a notification by the message direction the subject already carries: on a
+response, an absent `Jsonrpc-Id` means `id: null`; on a request, an absent
+`Jsonrpc-Id` means a notification. Requests therefore use a non-null `id`,
+consistent with JSON-RPC's own guidance.
 
 ### 4. Correctness is a codec round-trip invariant; edges reconstruct
 
@@ -128,17 +126,17 @@ encoding.
 
 ### 5. Signing covers the authoritative headers and the body
 
-Because `Jsonrpc-Status`, `Jsonrpc-Error-Code`, and `Jsonrpc-Id` are authoritative
-and live only in headers, the A2A signing scheme covers those headers in addition
-to the body. Otherwise the outcome, error code, and id are tamperable on an
-otherwise signed message. Redaction is unaffected: `result`, `message`, `data`,
+Because `Jsonrpc-Error-Code` and `Jsonrpc-Id` are authoritative and live only in
+headers, the A2A signing scheme covers those headers in addition to the body.
+Otherwise the outcome, error code, and id are tamperable on an otherwise signed
+message. Redaction is unaffected: `result`, `message`, `data`,
 and `params` remain in the body where the redaction pipeline operates.
 
 ### 6. The codec is a shared, protocol-agnostic layer
 
 The codec is one shared component, not reimplemented per protocol. It owns the
 field mapping and its inverse, the `id` encoding, success-versus-error
-discrimination via `Jsonrpc-Status`, correlation, notification semantics, mapping
+discrimination via `Jsonrpc-Error-Code` presence, correlation, notification semantics, mapping
 of transport failures to JSON-RPC errors, and edge reconstruction. Domain
 packages (`acp-nats`, `mcp-nats`, A2A) inject what is domain-specific: subject
 routing (method plus context to subject), transport selection (core request/reply
@@ -158,21 +156,21 @@ protocol.
 - `decode(encode(m))` equals `m` for every valid JSON-RPC message, id type
   included.
 - `jsonrpc` is constant `"2.0"`; it is re-injected on decode.
-- `Jsonrpc-Status` is `ok` or `error` and appears on responses only.
-- `Jsonrpc-Status: ok` implies a `result` body and no `Jsonrpc-Error-Code`.
-- `Jsonrpc-Status: error` implies a `Jsonrpc-Error-Code` header and a `message`
-  body.
-- A response with a missing or invalid `Jsonrpc-Status` is a protocol error.
-- `Jsonrpc-Id` is the id's JSON literal; absent means a notification (no
-  `Jsonrpc-Status`) or `id: null` (response). Requests use a non-null id.
+- A response is an error iff `Jsonrpc-Error-Code` (an integer) is present: an error
+  response has a `message` body, a success response has a `result` body.
+- A response with neither a `result` body nor a `Jsonrpc-Error-Code` is a protocol
+  error.
+- `Jsonrpc-Id` is the id's JSON literal; absent means a notification (request) or
+  `id: null` (response), told apart by the message direction. Requests use a
+  non-null id.
 - The method is carried by the subject.
 - The JSON-RPC `id` is not the transport correlation key; correlation is a
   transport concern outside this codec.
 
 ## Design Rules
 
-- The success/error discriminator is the `Jsonrpc-Status` header. Never infer it
-  by structural deserialization of the body.
+- The success/error discriminator is the presence of the `Jsonrpc-Error-Code`
+  header. Never infer it by structural deserialization of the body.
 - Name the codec's headers `Jsonrpc-*` to mark JSON-RPC field projections. Do not
   place a transport or correlation field under `Jsonrpc-*`.
 - Reconstruction to and from canonical JSON-RPC happens only at protocol edges,
@@ -234,11 +232,12 @@ fall out of sync with a separate type tag.
 
 ## Consequences
 
-- Success-versus-error has one correct, tested implementation driven by an
-  explicit header. The class of bugs where a structured error degrades to a
+- Success-versus-error has one correct, tested implementation driven by the
+  presence of `Jsonrpc-Error-Code`. The class of bugs where a structured error
+  degrades to a
   generic internal error is eliminated.
-- Infrastructure routes on subjects and acts on `Jsonrpc-Status`,
-  `Jsonrpc-Error-Code`, and `Jsonrpc-Id` without unmarshalling the body.
+- Infrastructure routes on subjects and acts on `Jsonrpc-Error-Code` and
+  `Jsonrpc-Id` without unmarshalling the body.
 - Each control field has exactly one home, so there is no body/header duplication
   to keep consistent.
 - The body alone is not interpretable; a consumer reads headers to interpret it.
