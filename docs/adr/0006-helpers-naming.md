@@ -44,4 +44,4 @@ decision to justify vague package, module, file, type, or function names.
 ## References
 
 - [Straw Hat ADR 1146361044: Helper vs Util](https://straw-hat-team.github.io/adr/adrs/1146361044/README.html)
-- [ADR 0002: Rust Crate Boundaries](/adr/0002-rust-crate-boundaries)
+- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)

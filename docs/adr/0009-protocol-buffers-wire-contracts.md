@@ -10,9 +10,9 @@ date: 2026-06-08
 ## Context
 
 The repository already uses Protocol Buffers for generated protocol packages and
-scheduler message contracts. ADR 0003 prefers NATS-backed internal boundaries
+scheduler message contracts. [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) prefers NATS-backed internal boundaries
 when both sides are first-party runtime components, and prefers ConnectRPC over
-direct gRPC after a first-party service API surface is necessary. ADR 0005 names
+direct gRPC after a first-party service API surface is necessary. [ADR 0005](./0005-polyglot-workspace-layout.md) names
 Protocol Buffers as the preferred cross-language contract, with NATS-backed
 messages for internal paths and ConnectRPC for service APIs.
 
@@ -48,7 +48,7 @@ Use Protocol Buffers by default for:
 
 NATS-backed internal messages can use the same Protocol Buffers schema governance
 without becoming ConnectRPC or gRPC services. Choose ConnectRPC or direct gRPC for
-the API surface only after ADR 0003 rules out the internal backbone as the right
+the API surface only after [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) rules out the internal backbone as the right
 boundary.
 
 Schemaless storage does not remove the need for a schema. When a KV store,
@@ -101,9 +101,9 @@ Valid exceptions include:
 
 - MCP, ACP, JSON-RPC, webhook, or third-party API surfaces with protocol-defined
   JSON contracts.
-- Human-edited configuration files, which follow ADR 0007.
-- OpenAPI or REST-like HTTP contracts allowed by ADR 0003.
-- Logs, metrics, traces, and telemetry export paths governed by ADR 0008 or by a
+- Human-edited configuration files, which follow [ADR 0007](./0007-configuration-sources.md).
+- OpenAPI or REST-like HTTP contracts allowed by [ADR 0003](./0003-ai-protocol-transport-taxonomy.md).
+- Logs, metrics, traces, and telemetry export paths governed by [ADR 0008](./0008-opentelemetry-observability.md) or by a
   deployment system.
 - Plain text, Markdown, HTML, or binary file content where the payload format is
   the product data rather than the envelope contract.
@@ -128,7 +128,7 @@ the reason near the boundary that owns the format.
 
 ## References
 
-- [ADR 0003: AI Protocol Transport Taxonomy](/adr/0003-ai-protocol-transport-taxonomy)
-- [ADR 0005: Polyglot Workspace Layout](/adr/0005-polyglot-workspace-layout)
-- [ADR 0007: Configuration Sources](/adr/0007-configuration-sources)
-- [ADR 0008: OpenTelemetry Observability](/adr/0008-opentelemetry-observability)
+- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR 0005: Polyglot Workspace Layout](./0005-polyglot-workspace-layout.md)
+- [ADR 0007: Configuration Sources](./0007-configuration-sources.md)
+- [ADR 0008: OpenTelemetry Observability](./0008-opentelemetry-observability.md)

@@ -106,7 +106,7 @@ reason near the test or package boundary that owns the decision.
 
 ## References
 
-- [ADR 0003: AI Protocol Transport Taxonomy](/adr/0003-ai-protocol-transport-taxonomy)
-- [ADR 0004: Protocol and Transport Layering](/adr/0004-protocol-and-transport-layering)
-- [ADR 0009: Protocol Buffers Wire Contracts](/adr/0009-protocol-buffers-wire-contracts)
+- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
 - [Testcontainers](https://testcontainers.com/)
