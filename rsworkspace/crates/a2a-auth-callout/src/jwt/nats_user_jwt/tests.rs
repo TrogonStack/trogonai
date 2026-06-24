@@ -1,6 +1,6 @@
 use super::*;
 use crate::permissions::IssuedPermissions;
-use crate::signing_key_source::KeyVersion;
+use crate::signing_key_source::{KeyVersion, StaticSigningKeySource};
 use nkeys::KeyPair;
 use serde_json::json;
 
@@ -56,4 +56,54 @@ fn minted_jwt_has_nats_header_and_verifies() {
     let verified = verify_with_material(token.as_str(), &handle.minting_material()).unwrap();
     assert_eq!(verified.caller_id.as_str(), "caller1");
     assert_eq!(verified.aud.as_str(), "tenant-acme");
+}
+
+#[test]
+fn account_name_try_new_rejects_empty() {
+    assert!(matches!(
+        AccountName::try_new("").unwrap_err(),
+        JwtError::Decode(_)
+    ));
+}
+
+#[test]
+fn verify_rejects_empty_handle_list() {
+    let err = verify_nats_user_jwt("a.b.c", &[]).unwrap_err();
+    assert!(matches!(err, JwtError::NoSigningKeyForKid));
+}
+
+#[test]
+fn decode_nats_user_payload_rejects_invalid_segment_count() {
+    let err = decode_nats_user_payload("only-one-part").unwrap_err();
+    assert!(matches!(err, JwtError::Decode(_)));
+}
+
+#[test]
+fn verify_with_source_uses_accepted_handles() {
+    let (material, issuer_seed, _, user) = fixture_material();
+    let caller_id = CallerId::new("caller1").unwrap();
+    let claims = UserJwtClaims {
+        kid: material.version().clone(),
+        sub: ExternalSubject::new("alice").unwrap(),
+        aud: AccountName::new("tenant-acme"),
+        data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
+        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+        caller_id,
+    };
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    let token = mint_nats_user_jwt(
+        &claims,
+        &material,
+        &subject,
+        UNIX_EPOCH + Duration::from_secs(2_000),
+        Duration::from_secs(60),
+    )
+    .unwrap();
+    let source = StaticSigningKeySource::new(
+        &issuer_seed,
+        material.version().clone(),
+    )
+    .unwrap();
+    let verified = verify_nats_user_jwt_with_source(token.as_str(), &source).unwrap();
+    assert_eq!(verified.caller_id.as_str(), "caller1");
 }

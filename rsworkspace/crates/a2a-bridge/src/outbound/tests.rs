@@ -1,5 +1,5 @@
 use super::*;
-use crate::identity::{BridgeUserJwt, CallerHttpsAuth};
+use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
 struct MockPoster {
     last_url: std::sync::Mutex<Option<String>>,
 }
@@ -100,4 +100,52 @@ fn agent_and_method_segments_preserve_opaque_strings() {
     let om = MethodSegment::new("message/send".to_owned());
     assert_eq!(aid.to_string(), "ext-support");
     assert_eq!(om.to_string(), "message/send");
+}
+
+#[tokio::test]
+async fn stub_outbound_forwarder_returns_upstream_error() {
+    let err = StubOutboundForwarder
+        .proxy_jsonrpc_post(
+            AgentRegistrationId::new("agent"),
+            MethodSegment::new("message/send"),
+            Bytes::from_static(b"{}"),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::UpstreamHttps(_)));
+}
+
+#[tokio::test]
+async fn forward_delegates_to_upstream() {
+    let poster = Arc::new(MockPoster::new());
+    let up: MappedHttpsUpstream<MockPoster, UrlOk> = MappedHttpsUpstream::new(poster.clone(), Arc::new(UrlOk));
+    let out = forward(
+        &up,
+        AgentRegistrationId::new("ext"),
+        MethodSegment::new("tasks/get"),
+        Bytes::from_static(br#"{"id":1}"#),
+    )
+    .await
+    .unwrap();
+    assert!(out.starts_with(br#"{"ok""#));
+}
+
+#[tokio::test]
+async fn publish_https_agent_card_registered_uses_bridge_agent_id() -> Result<(), BridgeError> {
+    let captured = Arc::new(std::sync::Mutex::new(None));
+    let reg = MockRegistrar(captured.clone());
+    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+    let agent_id = BridgeAgentId::parse("card-bot").unwrap();
+    let card = br#"{"name":"bridge agent"}"#;
+    publish_https_agent_card_registered(&reg, &prefix, &agent_id, card).await?;
+    let g = captured.lock().unwrap();
+    let (topic, payload) = g.as_ref().unwrap();
+    assert_eq!(topic.as_str(), "a2a.catalog.register.card-bot");
+    assert_eq!(payload.as_slice(), card.as_slice());
+    Ok(())
+}
+
+#[test]
+fn reqwest_default_https_client_builds() {
+    assert!(ReqwestJsonHttpPoster::default_https_client().is_ok());
 }

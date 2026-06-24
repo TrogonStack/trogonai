@@ -25,3 +25,7 @@ impl fmt::Display for UserJwtSubject {
         f.write_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+#[path = "user_jwt_subject/tests.rs"]
+mod tests;

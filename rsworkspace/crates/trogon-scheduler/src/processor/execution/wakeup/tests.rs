@@ -359,6 +359,40 @@ async fn wakeup_subject_must_match_payload_schedule_id() {
     assert!(matches!(error, RRuleWakeupError::SubjectMismatch { .. }));
 }
 
+#[test]
+fn subject_input_display_matches_subject_string() {
+    let subject = RRuleWakeupSubjectInput::new("scheduler.schedules.execution.v1.rrule.orders");
+    assert_eq!(subject.to_string(), "scheduler.schedules.execution.v1.rrule.orders");
+}
+
+#[test]
+fn occurrence_not_pending_maps_to_duplicate_stale() {
+    let id = schedule_id();
+    assert_eq!(
+        wakeup_outcome_from_rejection(RecordScheduleOccurrenceError::OccurrenceNotPending {
+            id: id.clone(),
+            occurrence_at: occurrence_at(),
+            pending_occurrence_at: None,
+        })
+        .unwrap(),
+        RRuleWakeupOutcome::DuplicateStale
+    );
+}
+
+#[tokio::test]
+async fn invalid_payload_is_rejected() {
+    let store = MemoryEventStore::default();
+    let processor = RRuleWakeupProcessor::new(store);
+    let id = schedule_id();
+
+    let error = processor
+        .process(&wakeup_subject(&id), b"not-json")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, RRuleWakeupError::Payload { .. }));
+}
+
 fn v1_event(stream_event: &StreamEvent) -> trogonai_proto::scheduler::schedules::v1::ScheduleEvent {
     match trogonai_proto::scheduler::schedules::v1::ScheduleEvent::decode(EventData::new(
         &stream_event.event.r#type,

@@ -51,3 +51,8 @@ fn init_provider_lifecycle() {
     let provider = init_provider(&resource);
     assert!(provider.is_ok());
 }
+
+#[test]
+fn shutdown_is_noop_when_logger_provider_not_initialized() {
+    assert!(shutdown().is_ok());
+}

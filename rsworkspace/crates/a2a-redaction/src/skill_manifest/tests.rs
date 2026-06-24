@@ -229,3 +229,198 @@ fn semver_version_accepts_prerelease() {
     let version = SkillManifestVersion::new("1.2.3-rc.1").unwrap();
     assert_eq!(version.as_str(), "1.2.3-rc.1");
 }
+
+#[test]
+fn filename_mismatch_errors() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "wrong-name.skill",
+        VALID_MANIFEST,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::FilenameMismatch { .. }));
+}
+
+#[test]
+fn wasm_path_rejects_parent_dir_escape() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "../outside.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::WasmPathEscapesBundle { .. }));
+}
+
+#[test]
+fn wasm_path_rejects_absolute_path() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "/etc/passwd.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::WasmPathEscapesBundle { .. }));
+}
+
+#[test]
+fn empty_applies_to_paths_errors() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "skills/pii_email_mask.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = []
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::EmptyPaths { .. }));
+}
+
+#[test]
+fn one_of_without_methods_errors() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "skills/pii_email_mask.wasm"
+applies_to_method = { kind = "OneOf", methods = [] }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::EmptyMethods { .. }));
+}
+
+#[test]
+fn invalid_category_errors() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "skills/pii_email_mask.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "NotARealCategory"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::InvalidCategory { .. }));
+}
+
+#[test]
+fn any_matcher_with_methods_list_errors() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "skills/pii_email_mask.wasm"
+applies_to_method = { kind = "Any", methods = ["message/send"] }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::InvalidMethod { .. }));
+}
+
+#[test]
+fn resolve_wasm_path_joins_bundle_dir() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(&dir, "pii.email_mask.v1", VALID_MANIFEST);
+    let registry = SkillManifestRegistry::load_from_dir(dir.path()).unwrap();
+    let manifest = registry
+        .lookup(&SkillId::new("pii.email_mask.v1").expect("valid"))
+        .unwrap();
+    let resolved = manifest.resolve_wasm_path(dir.path());
+    assert!(resolved.ends_with("skills/pii_email_mask.wasm"));
+}
+
+#[test]
+fn selection_plan_is_empty_when_paths_do_not_overlap() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(&dir, "pii.email_mask.v1", VALID_MANIFEST);
+    let registry = SkillManifestRegistry::load_from_dir(dir.path()).unwrap();
+    let plan = SkillSelectionPlan::plan(
+        &registry,
+        &A2aMethod::MessageSend,
+        &[JsonPathExpr::new("$.other.field")],
+    );
+    assert!(plan.is_empty());
+}
+
+#[test]
+fn invalid_method_in_one_of_errors() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "skills/pii_email_mask.wasm"
+applies_to_method = { kind = "OneOf", methods = ["not/a/method"] }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    let err = SkillManifestRegistry::load_from_dir(dir.path()).unwrap_err();
+    assert!(matches!(err, SkillManifestError::InvalidMethod { .. }));
+}
+
+#[test]
+fn custom_category_named_prefix_parses() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "custom.skill.v1",
+        r#"
+skill_id = "custom.skill.v1"
+wasm_path = "skills/custom.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Custom:my-tag"
+version = "1.0.0"
+"#,
+    );
+    let registry = SkillManifestRegistry::load_from_dir(dir.path()).unwrap();
+    let manifest = registry
+        .lookup(&SkillId::new("custom.skill.v1").expect("valid"))
+        .unwrap();
+    assert!(matches!(
+        manifest.category(),
+        crate::skill_manifest::SkillCategory::Custom(tag) if tag == "my-tag"
+    ));
+}

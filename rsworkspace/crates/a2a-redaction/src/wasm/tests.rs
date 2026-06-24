@@ -235,3 +235,50 @@ fn register_skill_wasm_refused_when_signing_pubkey_configured() {
         .expect_err("must refuse bypass when signing pubkey configured");
     assert!(matches!(err, RedactionError::Signature(_)));
 }
+
+#[test]
+fn host_exposes_configured_bundles_base_and_signing_pubkey() {
+    let dir = WasmBundlePath::new(std::env::temp_dir());
+    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+    let pubkey = Ed25519PublicKey::from_bytes(*signing_key.verifying_key().as_bytes());
+    let host = WasmRedactorHost::new_with_signing_pubkey(dir.clone(), Some(pubkey)).unwrap();
+    assert_eq!(host.bundles_base().as_path(), dir.as_path());
+    assert_eq!(host.signing_pubkey().unwrap().as_bytes(), pubkey.as_bytes());
+}
+
+#[test]
+fn redact_part_bytes_passthrough_without_registered_module() {
+    let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
+    let payload = br#"{"x":1}"#;
+    let out = host
+        .redact_part_bytes(&SkillId::new("missing").expect("valid"), payload)
+        .unwrap();
+    assert_eq!(out, payload);
+}
+
+#[test]
+fn register_skill_bundle_file_delegates_to_preload() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let skill = "fixture";
+    let manifest = br#"{"json_path":"$.x"}"#;
+    let wasm = fs::read(fixture_path()).expect("read fixture");
+    fs::write(temp.path().join(format!("{skill}.wasm")), &wasm).expect("write wasm");
+    fs::write(temp.path().join(format!("{skill}.manifest.json")), manifest).expect("write manifest");
+
+    let host = WasmRedactorHost::new(WasmBundlePath::new(temp.path())).expect("host");
+    host.register_skill_bundle_file(SkillId::new(skill).expect("valid"))
+        .expect("register via alias");
+    let out = host
+        .redact_part_bytes(&SkillId::new(skill).expect("valid"), br#"{"x":1}"#)
+        .unwrap();
+    assert_eq!(out, br#"{"x":1}"#);
+}
+
+#[test]
+fn register_skill_wasm_rejects_invalid_wasm_bytes() {
+    let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
+    let err = host
+        .register_skill_wasm(SkillId::new("bad").expect("valid"), b"not-wasm")
+        .unwrap_err();
+    assert!(matches!(err, RedactionError::WasmModule(_)));
+}

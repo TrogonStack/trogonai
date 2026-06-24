@@ -91,3 +91,7 @@ impl std::fmt::Debug for AuthCalloutWireCodec {
             .finish()
     }
 }
+
+#[cfg(test)]
+#[path = "wire_codec/tests.rs"]
+mod tests;
