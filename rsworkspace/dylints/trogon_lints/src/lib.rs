@@ -1,5 +1,6 @@
 #![feature(rustc_private)]
 
+extern crate rustc_ast;
 extern crate rustc_hir;
 extern crate rustc_lint;
 extern crate rustc_session;
@@ -8,6 +9,7 @@ extern crate rustc_span;
 mod error_string_comparison;
 mod inline_module_block;
 mod manual_error_impl;
+mod redundant_module_path;
 
 use rustc_hir::{Expr, Item, LetStmt};
 use rustc_lint::{LateContext, LateLintPass, LintStore};
@@ -17,8 +19,14 @@ dylint_linting::dylint_library!();
 #[unsafe(no_mangle)]
 pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore) {
     dylint_linting::init_config(sess);
-    lint_store.register_lints(&[ERROR_STRING_COMPARISON, INLINE_MODULE_BLOCK, MANUAL_ERROR_IMPL]);
+    lint_store.register_lints(&[
+        ERROR_STRING_COMPARISON,
+        INLINE_MODULE_BLOCK,
+        MANUAL_ERROR_IMPL,
+        REDUNDANT_MODULE_PATH,
+    ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
+    lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
 }
 
 rustc_session::declare_lint! {
@@ -134,6 +142,45 @@ rustc_session::declare_lint! {
     "implement `std::error::Error` with the thiserror derive, not by hand",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a `#[path = "..."]` attribute on an external module declaration
+    /// (`mod foo;`) when it points at the very file Rust would resolve to on its
+    /// own.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// For a file-backed module `bar.rs`, `mod foo;` already resolves to
+    /// `bar/foo.rs` (or `bar/foo/mod.rs`); for a directory owner (`mod.rs`,
+    /// `lib.rs`, `main.rs`) it resolves to the sibling `foo.rs`. Spelling that
+    /// default out with `#[path]` is noise that must be hand-maintained and kept
+    /// in sync with the file tree. The common case is `#[cfg(test)] mod tests;`
+    /// whose `tests.rs` already sits in the conventional location. A `#[path]`
+    /// pointing anywhere other than the default is load-bearing and is left
+    /// alone.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// // in bar.rs, next to bar/tests.rs
+    /// #[cfg(test)]
+    /// #[path = "bar/tests.rs"]
+    /// mod tests;
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// // in bar.rs, next to bar/tests.rs
+    /// #[cfg(test)]
+    /// mod tests;
+    /// ```
+    pub REDUNDANT_MODULE_PATH,
+    Deny,
+    "drop `#[path]` when `mod foo;` already resolves to the same file",
+}
+
 #[derive(Default)]
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
@@ -155,6 +202,8 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 }
 
 rustc_session::impl_lint_pass!(TrogonLints => [ERROR_STRING_COMPARISON, INLINE_MODULE_BLOCK, MANUAL_ERROR_IMPL]);
+
+rustc_session::impl_lint_pass!(redundant_module_path::RedundantModulePath => [REDUNDANT_MODULE_PATH]);
 
 #[test]
 fn ui() {

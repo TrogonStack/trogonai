@@ -1,7 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[path = "gen/mod.rs"]
 #[cfg(feature = "schedules")]
 mod r#gen;
 
