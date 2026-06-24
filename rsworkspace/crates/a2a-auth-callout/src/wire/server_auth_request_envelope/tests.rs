@@ -99,10 +99,7 @@ fn decode_from_message_prefers_header_server_xkey() {
     let sealed = header_xkey.seal(token.as_bytes(), &account_xkey).unwrap();
 
     let mut headers = async_nats::HeaderMap::new();
-    headers.insert(
-        super::super::AUTH_REQUEST_XKEY_HEADER,
-        header_xkey.public_key(),
-    );
+    headers.insert(super::super::AUTH_REQUEST_XKEY_HEADER, header_xkey.public_key());
 
     let decoded = ServerAuthRequestEnvelope::decode_from_message(
         sealed,

@@ -29,5 +29,5 @@ mod tests;
 #[cfg(test)]
 pub(crate) fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap()
+    LOCK.lock().unwrap_or_else(|err| err.into_inner())
 }

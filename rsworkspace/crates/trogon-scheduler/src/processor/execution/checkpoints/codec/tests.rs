@@ -303,3 +303,179 @@ fn decode_checkpoint_envelope_keeps_event_id_when_watermark_is_missing_or_invali
         }
     );
 }
+
+#[test]
+fn missing_schedule_id_and_snapshot_fields_are_rejected() {
+    let original = record(
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+        ScheduleStatus::Scheduled,
+        ReconcileOutcome::Published,
+    );
+    let encoded = encode_checkpoint_record(&original).unwrap();
+
+    let mut stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.schedule_id = None;
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+
+    stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.schedule = buffa::MessageField::none();
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+
+    stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.delivery = buffa::MessageField::none();
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+
+    stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.message = buffa::MessageField::none();
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+
+    stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.last_applied_stream_position = None;
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+}
+
+#[test]
+fn invalid_schedule_id_is_rejected() {
+    let original = record(
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+        ScheduleStatus::Scheduled,
+        ReconcileOutcome::Published,
+    );
+    let mut stored =
+        checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encode_checkpoint_record(&original).unwrap()).unwrap();
+    stored.schedule_id = Some(String::new());
+
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+}
+
+#[test]
+fn unspecified_status_and_outcome_are_rejected() {
+    let original = record(
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+        ScheduleStatus::Scheduled,
+        ReconcileOutcome::Published,
+    );
+    let encoded = encode_checkpoint_record(&original).unwrap();
+
+    let mut stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.status = Some(checkpoints_v1::ScheduleCheckpointStatus::Unspecified.into());
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+
+    stored = checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encoded).unwrap();
+    stored.last_outcome = Some(checkpoints_v1::ReconcileOutcome::Unspecified.into());
+    assert!(matches!(
+        decode_checkpoint_record(&stored.encode_to_vec()).unwrap_err(),
+        CheckpointCodecError::Domain { .. }
+    ));
+}
+
+#[test]
+fn unknown_status_and_outcome_encode_as_unspecified() {
+    let original = record(
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+        ScheduleStatus::Unknown,
+        ReconcileOutcome::Unknown,
+    );
+    let stored =
+        checkpoints_v1::ScheduleCheckpoint::decode_from_slice(&encode_checkpoint_record(&original).unwrap()).unwrap();
+
+    assert_eq!(
+        stored.status.as_ref().and_then(|status| status.as_known()),
+        Some(checkpoints_v1::ScheduleCheckpointStatus::Unspecified)
+    );
+    assert_eq!(
+        stored.last_outcome.as_ref().and_then(|outcome| outcome.as_known()),
+        Some(checkpoints_v1::ReconcileOutcome::Unspecified)
+    );
+}
+
+#[test]
+fn codec_errors_cover_json_and_envelope_variants() {
+    let json = CheckpointCodecError::Json {
+        source: serde_json::from_str::<serde_json::Value>("not json").unwrap_err(),
+    };
+    assert_eq!(
+        json.to_string(),
+        format!("checkpoint record JSON is invalid: {}", json.source().unwrap())
+    );
+    assert!(Error::source(&json).is_some());
+
+    let envelope = CheckpointCodecError::Envelope;
+    assert_eq!(envelope.to_string(), "checkpoint envelope metadata is invalid");
+    assert!(Error::source(&envelope).is_none());
+}
+
+#[test]
+fn decode_checkpoint_envelope_tolerates_unrecognized_wire_types() {
+    let bytes = [
+        0x09, 0, 0, 0, 0, 0, 0, 0, 0, //
+        0x18, 0x07, //
+        0x22, 0x07, b'e', b'v', b'e', b'n', b't', b'-', b'7',
+    ];
+    assert_eq!(
+        decode_checkpoint_envelope(&bytes),
+        CorruptCheckpointEnvelope {
+            watermark: Some(StreamPosition::try_new(7).unwrap()),
+            last_applied_event_id: Some("event-7".to_string()),
+        }
+    );
+
+    assert_eq!(
+        decode_checkpoint_envelope(&[0x0e]),
+        CorruptCheckpointEnvelope {
+            watermark: None,
+            last_applied_event_id: None,
+        }
+    );
+}
+
+#[test]
+fn rewrite_helpers_handle_truncated_or_minimal_bytes() {
+    let original = record(
+        Schedule::every(Duration::from_secs(30)).unwrap(),
+        ScheduleStatus::Scheduled,
+        ReconcileOutcome::Published,
+    );
+    let encoded = encode_checkpoint_record(&original).unwrap();
+    let truncated = &encoded[..encoded.len() / 2];
+
+    let rewritten_watermark = rewrite_checkpoint_watermark(truncated, 99);
+    assert_eq!(
+        decode_checkpoint_envelope(&rewritten_watermark).watermark,
+        Some(StreamPosition::try_new(99).unwrap())
+    );
+
+    let appended_watermark = rewrite_checkpoint_watermark(&[], 12);
+    assert_eq!(
+        decode_checkpoint_envelope(&appended_watermark),
+        CorruptCheckpointEnvelope {
+            watermark: Some(StreamPosition::try_new(12).unwrap()),
+            last_applied_event_id: None,
+        }
+    );
+
+    assert!(!corrupt_checkpoint_schedule(truncated).is_empty());
+    assert!(!corrupt_checkpoint_event_id(truncated).is_empty());
+    assert!(!encode_varint(300).is_empty());
+}

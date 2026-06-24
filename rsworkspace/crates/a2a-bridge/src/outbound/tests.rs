@@ -149,3 +149,122 @@ async fn publish_https_agent_card_registered_uses_bridge_agent_id() -> Result<()
 fn reqwest_default_https_client_builds() {
     assert!(ReqwestJsonHttpPoster::default_https_client().is_ok());
 }
+
+#[derive(Clone, Default)]
+struct UrlErr;
+
+#[async_trait]
+impl OutboundUpstreamUrlResolve for UrlErr {
+    async fn downstream_post_root(&self, _: &AgentRegistrationId) -> Result<String, BridgeError> {
+        Err(BridgeError::UpstreamHttps("resolve failed".into()))
+    }
+}
+
+#[derive(Clone, Default)]
+struct PostErr;
+
+#[async_trait]
+impl JsonHttpPost for PostErr {
+    async fn post_application_json(&self, _: &str, _: &[u8]) -> Result<Vec<u8>, BridgeError> {
+        Err(BridgeError::UpstreamHttps("post failed".into()))
+    }
+}
+
+#[derive(Clone, Default)]
+struct FailingRegistrar;
+
+#[async_trait]
+impl CatalogRegistrationPublish for FailingRegistrar {
+    async fn publish_core(&self, _: impl AsRef<str> + Send, _: &[u8]) -> Result<(), BridgeError> {
+        Err(BridgeError::CatalogRegistration("publish failed".into()))
+    }
+}
+
+#[tokio::test]
+async fn mapped_https_upstream_surfaces_resolve_error() {
+    let up: MappedHttpsUpstream<MockPoster, UrlErr> =
+        MappedHttpsUpstream::new(Arc::new(MockPoster::new()), Arc::new(UrlErr));
+    let err = up
+        .proxy_jsonrpc_post(
+            AgentRegistrationId::new("ext"),
+            MethodSegment::new("message/send"),
+            Bytes::from_static(b"{}"),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::UpstreamHttps(_)));
+    assert!(err.to_string().contains("resolve failed"));
+}
+
+#[tokio::test]
+async fn mapped_https_upstream_surfaces_post_error() {
+    let up: MappedHttpsUpstream<PostErr, UrlOk> = MappedHttpsUpstream::new(Arc::new(PostErr), Arc::new(UrlOk));
+    let err = up
+        .proxy_jsonrpc_post(
+            AgentRegistrationId::new("ext"),
+            MethodSegment::new("message/send"),
+            Bytes::from_static(b"{}"),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::UpstreamHttps(_)));
+    assert!(err.to_string().contains("post failed"));
+}
+
+#[tokio::test]
+async fn publish_https_agent_card_to_catalog_surfaces_registrar_error() {
+    let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+    let agent_id = A2aAgentId::new("card-bot").unwrap();
+    let err = publish_https_agent_card_to_catalog(&FailingRegistrar, &prefix, &agent_id, b"{}")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::CatalogRegistration(_)));
+}
+
+#[tokio::test]
+async fn reqwest_poster_returns_success_body() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/jsonrpc"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(r#"{"ok":true}"#, "application/json"))
+        .mount(&server)
+        .await;
+
+    let poster = ReqwestJsonHttpPoster::new(reqwest::Client::builder().build().unwrap());
+    let url = format!("{}/jsonrpc", server.uri());
+    let body = poster.post_application_json(&url, br#"{}"#).await.unwrap();
+    assert_eq!(body, br#"{"ok":true}"#);
+}
+
+#[tokio::test]
+async fn reqwest_poster_surfaces_transport_error() {
+    let poster = ReqwestJsonHttpPoster::new(reqwest::Client::builder().build().unwrap());
+    let err = poster
+        .post_application_json("http://127.0.0.1:1/jsonrpc", b"{}")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BridgeError::UpstreamHttps(_)));
+}
+
+#[tokio::test]
+async fn reqwest_poster_rejects_non_success_status() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(502).set_body_raw("bad gateway", "text/plain"))
+        .mount(&server)
+        .await;
+
+    let poster = ReqwestJsonHttpPoster::new(reqwest::Client::builder().build().unwrap());
+    let err = poster.post_application_json(&server.uri(), b"{}").await.unwrap_err();
+    assert!(matches!(err, BridgeError::UpstreamHttps(_)));
+    assert!(err.to_string().contains("502"));
+    assert!(err.to_string().contains("bad gateway"));
+}
+
+#[test]
+fn agent_and_method_segments_expose_as_str() {
+    let aid = AgentRegistrationId::new("ext-support");
+    let method = MethodSegment::new("message/send");
+    assert_eq!(aid.as_str(), "ext-support");
+    assert_eq!(method.as_str(), "message/send");
+}

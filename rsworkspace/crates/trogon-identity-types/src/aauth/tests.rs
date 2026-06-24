@@ -73,7 +73,10 @@ fn nats_envelope_canonical_base_is_stable() {
 
 #[test]
 fn parses_clarification_and_approval_pending() {
-    assert_eq!(Requirement::parse("requirement=clarification"), Requirement::Clarification);
+    assert_eq!(
+        Requirement::parse("requirement=clarification"),
+        Requirement::Clarification
+    );
     assert_eq!(
         Requirement::parse("requirement=approval-pending"),
         Requirement::ApprovalPending
@@ -90,12 +93,7 @@ fn parses_interaction_without_code_and_unknown_requirements() {
         }
     );
     let raw = "requirement=custom; foo=bar";
-    assert_eq!(
-        Requirement::parse(raw),
-        Requirement::Other {
-            raw: raw.to_string()
-        }
-    );
+    assert_eq!(Requirement::parse(raw), Requirement::Other { raw: raw.to_string() });
 }
 
 #[test]

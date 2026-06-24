@@ -118,5 +118,5 @@ fn debug_includes_user_nkey_and_server_id() {
     let req = decode_request(&server, |_| {});
     let debug = format!("{req:?}");
     assert!(debug.contains("user_nkey"));
-    assert!(debug.contains(&req.server_id()));
+    assert!(debug.contains(req.server_id()));
 }

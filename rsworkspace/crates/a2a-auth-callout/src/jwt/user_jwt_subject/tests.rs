@@ -10,5 +10,5 @@ fn from_user_nkey_round_trips_display_and_nkey_accessor() {
     assert_eq!(subject.as_str(), raw);
     assert_eq!(subject.to_string(), raw);
     assert_eq!(subject.nkey().as_str(), raw);
-    assert_eq!(format!("{subject:?}"), format!("{subject:?}"));
+    assert!(format!("{subject:?}").contains(&raw));
 }

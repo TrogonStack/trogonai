@@ -89,7 +89,10 @@ fn from_bridge_mint_builds_mtls_claims_with_client_cert() {
         }),
     })
     .unwrap();
-    assert_eq!(claims.primary_client_cert().unwrap().as_str(), "-----BEGIN CERT-----\n-----END CERT-----");
+    assert_eq!(
+        claims.primary_client_cert().unwrap().as_str(),
+        "-----BEGIN CERT-----\n-----END CERT-----"
+    );
 }
 
 #[test]

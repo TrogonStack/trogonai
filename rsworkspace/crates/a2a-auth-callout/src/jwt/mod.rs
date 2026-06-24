@@ -53,6 +53,11 @@ impl AccountName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_string_unvalidated(name: String) -> Self {
+        Self(name)
+    }
 }
 
 impl fmt::Display for AccountName {

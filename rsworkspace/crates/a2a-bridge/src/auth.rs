@@ -162,5 +162,4 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
 }
 
 #[cfg(test)]
-#[path = "auth/tests.rs"]
 mod tests;

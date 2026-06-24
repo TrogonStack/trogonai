@@ -12,12 +12,8 @@ fn signed_manifest(skill: &str) -> SignedBundleManifest {
     let manifest_digest = Sha256Digest::hash(br#"{"skill_id":"demo"}"#);
     let wasm_digest = Sha256Digest::hash(b"\0asm");
     let signing_key = SigningKey::from_bytes(&[7u8; 32]);
-    let message = crate::signed_bundle::verify::sign_bundle_digest(
-        SIGNED_BUNDLE_VERSION,
-        &sid,
-        manifest_digest,
-        wasm_digest,
-    );
+    let message =
+        crate::signed_bundle::verify::sign_bundle_digest(SIGNED_BUNDLE_VERSION, &sid, manifest_digest, wasm_digest);
     let signature = Ed25519Signature::from_bytes(signing_key.sign(&message).to_bytes());
     SignedBundleManifest::new(&sid, manifest_digest, wasm_digest, signature)
 }

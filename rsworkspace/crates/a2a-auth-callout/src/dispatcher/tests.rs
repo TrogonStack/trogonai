@@ -207,3 +207,84 @@ async fn dispatch_api_key_rejects_audience_mismatch() {
     });
     assert!(d.dispatch(req).await.is_err());
 }
+
+#[tokio::test]
+async fn dispatch_rejects_request_without_credential_material() {
+    let server = KeyPair::new_account();
+    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
+    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
+    let req = encode_fixture_request(&server, |c| {
+        c.nats.connect_opts.jwt = None;
+        c.nats.connect_opts.pass = None;
+        c.nats.connect_opts.auth_token = None;
+        c.nats.client_tls = None;
+    });
+    let err = d.dispatch(req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(crate::error::CredentialError::InvalidRequest(_))
+    ));
+}
+
+#[tokio::test]
+async fn dispatch_oidc_verifier_unavailable() {
+    let server = KeyPair::new_account();
+    let d = dispatcher_with(None, None, None, &["tenant-acme"]);
+    let req = encode_fixture_request(&server, |_| {});
+    let err = d.dispatch(req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(crate::error::CredentialError::VerifierUnavailable { scheme: "OIDC" })
+    ));
+}
+
+#[tokio::test]
+async fn dispatch_mtls_verifier_unavailable() {
+    use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
+
+    let d = dispatcher_with(None, None, None, &["tenant-acme"]);
+    let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
+        user_nkey: None,
+        user_jwt: None,
+        account: Some("tenant-acme".into()),
+        client_info: Some(BridgeClientInfo {
+            client_cert_pem: Some("-----BEGIN CERT-----\n-----END CERT-----".into()),
+        }),
+        connect_opts: None,
+    })
+    .unwrap();
+    let err = d.dispatch(req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(crate::error::CredentialError::VerifierUnavailable { scheme: "mTLS" })
+    ));
+}
+
+#[tokio::test]
+async fn dispatch_api_key_verifier_unavailable() {
+    let server = KeyPair::new_account();
+    let d = dispatcher_with(None, None, None, &["tenant-acme"]);
+    let req = encode_fixture_request(&server, |c| {
+        c.nats.connect_opts.jwt = None;
+        c.nats.connect_opts.auth_token = Some("k_live_demo".into());
+    });
+    let err = d.dispatch(req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(crate::error::CredentialError::VerifierUnavailable {
+            scheme: "API-key"
+        })
+    ));
+}
+
+#[tokio::test]
+async fn dispatch_oidc_via_opaque_pass() {
+    let server = KeyPair::new_account();
+    let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
+    let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
+    let req = encode_fixture_request(&server, |c| {
+        c.nats.connect_opts.jwt = None;
+        c.nats.connect_opts.pass = Some("opaque-token".into());
+    });
+    assert!(d.dispatch(req).await.is_ok());
+}

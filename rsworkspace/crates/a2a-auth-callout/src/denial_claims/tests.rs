@@ -75,26 +75,17 @@ fn denial_jwt_rejects_wrong_signing_key() {
 
 #[test]
 fn callout_issuer_rejects_empty() {
-    assert_eq!(
-        CalloutIssuer::new("").unwrap_err(),
-        CalloutIssuerError::Empty
-    );
+    assert_eq!(CalloutIssuer::new("").unwrap_err(), CalloutIssuerError::Empty);
 }
 
 #[test]
 fn server_audience_rejects_empty() {
-    assert_eq!(
-        ServerAudience::new("").unwrap_err(),
-        ServerAudienceError::Empty
-    );
+    assert_eq!(ServerAudience::new("").unwrap_err(), ServerAudienceError::Empty);
 }
 
 #[test]
 fn user_nkey_subject_rejects_empty() {
-    assert_eq!(
-        UserNkeySubject::new("").unwrap_err(),
-        UserNkeySubjectError::Empty
-    );
+    assert_eq!(UserNkeySubject::new("").unwrap_err(), UserNkeySubjectError::Empty);
 }
 
 #[test]

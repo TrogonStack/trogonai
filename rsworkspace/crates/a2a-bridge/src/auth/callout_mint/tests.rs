@@ -46,11 +46,8 @@ async fn mint_wire_increments_mint_count() {
     let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
     let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
     let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
-    let client = AuthCalloutJsonMintClient::with_tenant_account(
-        wire.clone(),
-        "a2a.bridge.auth.callout.request",
-        Some(tenant),
-    );
+    let client =
+        AuthCalloutJsonMintClient::with_tenant_account(wire.clone(), "a2a.bridge.auth.callout.request", Some(tenant));
 
     client
         .mint(&CallerHttpsAuth::new("Bearer fixture-token"))

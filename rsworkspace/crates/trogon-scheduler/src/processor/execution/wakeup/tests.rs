@@ -385,10 +385,7 @@ async fn invalid_payload_is_rejected() {
     let processor = RRuleWakeupProcessor::new(store);
     let id = schedule_id();
 
-    let error = processor
-        .process(&wakeup_subject(&id), b"not-json")
-        .await
-        .unwrap_err();
+    let error = processor.process(&wakeup_subject(&id), b"not-json").await.unwrap_err();
 
     assert!(matches!(error, RRuleWakeupError::Payload { .. }));
 }

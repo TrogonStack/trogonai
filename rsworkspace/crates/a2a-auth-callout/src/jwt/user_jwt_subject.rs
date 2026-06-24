@@ -27,5 +27,4 @@ impl fmt::Display for UserJwtSubject {
 }
 
 #[cfg(test)]
-#[path = "user_jwt_subject/tests.rs"]
 mod tests;

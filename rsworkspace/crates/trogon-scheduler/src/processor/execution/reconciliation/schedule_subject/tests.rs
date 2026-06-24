@@ -60,11 +60,15 @@ fn display_matches_as_str() {
 
 #[test]
 fn is_scheduler_internal_matches_execution_event_and_internal_namespaces() {
-    assert!(ScheduleSubject::is_scheduler_internal("scheduler.schedules.execution.v1"));
+    assert!(ScheduleSubject::is_scheduler_internal(
+        "scheduler.schedules.execution.v1"
+    ));
     assert!(ScheduleSubject::is_scheduler_internal(
         "scheduler.schedules.execution.v1.orders.created"
     ));
-    assert!(ScheduleSubject::is_scheduler_internal("scheduler.schedules.events.v1.orders.created"));
+    assert!(ScheduleSubject::is_scheduler_internal(
+        "scheduler.schedules.events.v1.orders.created"
+    ));
     assert!(ScheduleSubject::is_scheduler_internal("trogon.scheduler"));
     assert!(ScheduleSubject::is_scheduler_internal("trogon.scheduler.sentinel"));
 }

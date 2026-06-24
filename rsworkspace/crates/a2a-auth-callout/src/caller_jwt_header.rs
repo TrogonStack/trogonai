@@ -38,3 +38,6 @@ impl fmt::Display for CallerJwtHeaderValue {
         f.write_str("<redacted>")
     }
 }
+
+#[cfg(test)]
+mod tests;

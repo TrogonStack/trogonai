@@ -194,7 +194,10 @@ fn test_memfs_paths_returns_inserted_paths() {
 
     let mut paths = fs.paths();
     paths.sort();
-    assert_eq!(paths, vec![Path::new("/a.txt").to_path_buf(), Path::new("/b.txt").to_path_buf()]);
+    assert_eq!(
+        paths,
+        vec![Path::new("/a.txt").to_path_buf(), Path::new("/b.txt").to_path_buf()]
+    );
 }
 
 #[test]

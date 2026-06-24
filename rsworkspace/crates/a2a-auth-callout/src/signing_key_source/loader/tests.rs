@@ -7,9 +7,29 @@ use crate::error::AuthCalloutError;
 use crate::signing_key_source::env_test_lock;
 use nkeys::KeyPair;
 
+const LOADER_ENV_VARS: &[&str] = &[
+    "AUTH_CALLOUT_SIGNING_KEY_SOURCE",
+    "AUTH_CALLOUT_SIGNING_SECRET",
+    "AUTH_CALLOUT_ISSUER_NKEY_SEED",
+    "AUTH_CALLOUT_SIGNING_KEY_PATH",
+    "AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH",
+];
+
 fn with_env_loader_tests<F: FnOnce()>(f: F) {
     let _guard = env_test_lock();
+    let snapshot: Vec<(&str, Option<String>)> = LOADER_ENV_VARS
+        .iter()
+        .map(|name| (*name, std::env::var(name).ok()))
+        .collect();
     f();
+    for (name, value) in snapshot {
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
 }
 
 #[test]

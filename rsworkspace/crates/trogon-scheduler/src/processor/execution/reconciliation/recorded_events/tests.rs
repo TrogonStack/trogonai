@@ -581,3 +581,49 @@ fn lane_key_falls_back_to_stream_id_for_foreign_events() {
     );
     assert!(matches!(decoded, DecodedScheduleEvent::Foreign));
 }
+
+#[test]
+fn schedule_completed_decodes_into_completed_change() {
+    let event = v1::ScheduleEvent {
+        event: Some(
+            v1::ScheduleCompleted {
+                schedule_id: "orders/done".to_string(),
+                last_occurrence_sequence: Some(1),
+            }
+            .into(),
+        ),
+    };
+    let change = decode_schedule_change(&event).unwrap();
+    assert!(matches!(
+        change,
+        ScheduleChange::Completed {
+            ref schedule_id,
+        } if schedule_id.as_str() == "orders/done"
+    ));
+}
+
+#[test]
+fn lane_route_from_stream_event_routes_undecoded_on_decode_error() {
+    use buffa::MessageName;
+    use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
+    use uuid::Uuid;
+
+    let stream_event = StreamEvent {
+        stream_id: "orders/created".to_string(),
+        event: Event {
+            id: EventId::new(Uuid::from_u128(3)),
+            r#type: v1::ScheduleRemoved::FULL_NAME.to_string(),
+            content: b"\0".to_vec(),
+            headers: Headers::empty(),
+        },
+        stream_position: StreamPosition::try_new(1).expect("position is non-zero"),
+        recorded_at: at_instant(),
+    };
+
+    let (key, decoded) = lane_route_from_stream_event(&stream_event);
+    assert_eq!(
+        key,
+        ScheduleKey::for_stream(&StreamRoutingId::from(stream_event.stream_id.as_str()))
+    );
+    assert!(matches!(decoded, DecodedScheduleEvent::Undecoded));
+}

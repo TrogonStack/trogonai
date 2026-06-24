@@ -27,14 +27,13 @@ fn decode_rejects_invalid_json() {
 
 #[test]
 fn decode_rejects_invalid_schedule_id() {
-    let err = RRuleWakeupPayload::decode(br#"{"schedule_id":"","occurrence_at":"2026-06-15T18:00:00Z"}"#)
-        .unwrap_err();
+    let err = RRuleWakeupPayload::decode(br#"{"schedule_id":"","occurrence_at":"2026-06-15T18:00:00Z"}"#).unwrap_err();
     assert!(matches!(err, RRuleWakeupPayloadDecodeError::ScheduleId { .. }));
 }
 
 #[test]
 fn decode_rejects_invalid_occurrence_at() {
-    let err = RRuleWakeupPayload::decode(br#"{"schedule_id":"orders/rrule","occurrence_at":"not-a-time"}"#)
-        .unwrap_err();
+    let err =
+        RRuleWakeupPayload::decode(br#"{"schedule_id":"orders/rrule","occurrence_at":"not-a-time"}"#).unwrap_err();
     assert!(matches!(err, RRuleWakeupPayloadDecodeError::OccurrenceAt { .. }));
 }

@@ -8,10 +8,10 @@ use super::{
     EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
     SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
 };
-use crate::signing_key_source::env_test_lock;
 use crate::error::AuthCalloutError;
 use crate::jwt::{CallerId, ExternalSubject, SigningKey, UserJwtClaims, UserJwtSubject};
 use crate::permissions::IssuedPermissions;
+use crate::signing_key_source::env_test_lock;
 use crate::{AccountName, SpiceDbPrincipal};
 use nkeys::KeyPair;
 
@@ -170,10 +170,7 @@ fn rotation_mint_verify_round_trip() {
 
 #[test]
 fn key_version_rejects_empty_and_formats() {
-    assert!(matches!(
-        KeyVersion::new("").unwrap_err(),
-        KeyVersionError::Empty
-    ));
+    assert!(matches!(KeyVersion::new("").unwrap_err(), KeyVersionError::Empty));
     let version = KeyVersion::new("v1").unwrap();
     assert_eq!(version.as_str(), "v1");
     assert_eq!(version.to_string(), "v1");
@@ -194,7 +191,7 @@ fn minting_material_exposes_issuer_public_and_debug() {
 fn signing_key_handle_minting_material_roundtrip() {
     let issuer = KeyPair::new_account();
     let version = KeyVersion::new("current").unwrap();
-    let handle = SigningKeyHandle::new(version.clone(), SigningKey::from_seed(&issuer.seed().unwrap()).unwrap());
+    let handle = SigningKeyHandle::new(version.clone(), SigningKey::from_seed(issuer.seed().unwrap()).unwrap());
     let material = handle.minting_material();
     assert_eq!(material.version(), &version);
     assert_eq!(material.issuer_public(), issuer.public_key());

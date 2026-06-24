@@ -35,5 +35,4 @@ pub fn signing_key_source_from_process_env() -> Result<Arc<dyn SigningKeySource>
 }
 
 #[cfg(test)]
-#[path = "loader/tests.rs"]
 mod tests;
